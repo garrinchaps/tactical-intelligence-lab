@@ -1,0 +1,56 @@
+{
+  "split_strategy": "GroupShuffleSplit por match_id (4 partidas distintas - Zero Data Leakage)",
+  "total_samples": 838,
+  "train_samples": 655,
+  "test_samples": 183,
+  "positive_class_rate_pct": 41.77,
+  "xgboost_metrics": {
+    "train_roc_auc": 0.9951,
+    "test_roc_auc": 0.9067,
+    "overfitting_auc_gap": 0.0884,
+    "test_accuracy": 0.847,
+    "test_precision": 0.7826,
+    "test_recall": 0.806,
+    "test_f1_score": 0.7941,
+    "test_brier_score": 0.1206
+  },
+  "logistic_regression_baseline": {
+    "test_roc_auc": 0.839,
+    "test_f1_score": 0.6917,
+    "test_brier_score": 0.1646
+  },
+  "top_feature_importances": [
+    {
+      "feature": "progressive_action_ratio",
+      "importance": 0.169
+    },
+    {
+      "feature": "start_dist_to_goal_m",
+      "importance": 0.1156
+    },
+    {
+      "feature": "corr_corredor_lateral_esquerdo",
+      "importance": 0.099
+    },
+    {
+      "feature": "x_start",
+      "importance": 0.0813
+    },
+    {
+      "feature": "duration_sec",
+      "importance": 0.0648
+    },
+    {
+      "feature": "corr_corredor_central",
+      "importance": 0.0575
+    },
+    {
+      "feature": "num_passes",
+      "importance": 0.0565
+    },
+    {
+      "feature": "direct_speed_m_s",
+      "importance": 0.0546
+    }
+  ]
+}

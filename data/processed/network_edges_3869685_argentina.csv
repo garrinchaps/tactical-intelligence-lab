@@ -1,0 +1,65 @@
+source,target,pass_count,progressive_count,avg_length_m,avg_goal_progression_m,source_x,source_y,target_x,target_y
+Nahuel Molina Lucero,Rodrigo Javier De Paul,13,0,10.395550506574882,2.064389494216569,56.14,71.9,61.48,59.82
+Nicolás Hernán Otamendi,Cristian Gabriel Romero,12,0,20.77964244706665,-4.472399410005243,36.98,23.03,33.43,51.69
+Nicolás Hernán Otamendi,Nicolás Alejandro Tagliafico,11,0,19.186310403807223,4.831304084470427,36.98,23.03,55.92,7.83
+Nicolás Hernán Otamendi,Enzo Fernandez,10,1,9.165376452541448,6.33166804890002,36.98,23.03,55.67,35.52
+Cristian Gabriel Romero,Nicolás Hernán Otamendi,9,0,23.786684271950104,-0.07063234716620967,33.43,51.69,36.98,23.03
+Nicolás Alejandro Tagliafico,Alexis Mac Allister,9,2,12.409128206558119,7.7036995428649675,55.92,7.83,69.1,22.18
+Rodrigo Javier De Paul,Lionel Andrés Messi Cuccittini,9,0,11.126775506537244,4.217129304364763,61.48,59.82,73.81,51.86
+Alexis Mac Allister,Ángel Fabián Di María Hernández,8,1,17.131357051631262,2.9551390778915736,69.1,22.18,80.51,11.6
+Cristian Gabriel Romero,Rodrigo Javier De Paul,8,0,12.351789843453437,9.01373543052348,33.43,51.69,61.48,59.82
+Lionel Andrés Messi Cuccittini,Rodrigo Javier De Paul,7,1,15.538390000882954,0.6888421568821528,73.81,51.86,61.48,59.82
+Nicolás Alejandro Tagliafico,Nicolás Hernán Otamendi,7,0,18.20671017141812,-11.370232467753743,55.92,7.83,36.98,23.03
+Cristian Gabriel Romero,Enzo Fernandez,7,0,15.649336049431536,14.58328059530975,33.43,51.69,55.67,35.52
+Enzo Fernandez,Nicolás Hernán Otamendi,7,0,13.872847743131198,-8.163444389025255,55.67,35.52,36.98,23.03
+Enzo Fernandez,Rodrigo Javier De Paul,7,0,11.733466159287094,1.4606540145048947,55.67,35.52,61.48,59.82
+Rodrigo Javier De Paul,Nicolás Hernán Otamendi,7,0,28.34665722622349,-5.580569791542127,61.48,59.82,36.98,23.03
+Rodrigo Javier De Paul,Cristian Gabriel Romero,7,0,15.952799628527346,-13.097231064801665,61.48,59.82,33.43,51.69
+Nicolás Alejandro Tagliafico,Ángel Fabián Di María Hernández,7,1,10.849171142522948,5.351901430059036,55.92,7.83,80.51,11.6
+Alexis Mac Allister,Enzo Fernandez,6,0,10.529379496229136,-1.210456214322322,69.1,22.18,55.67,35.52
+Enzo Fernandez,Cristian Gabriel Romero,6,0,22.652115652630645,-7.222812029545639,55.67,35.52,33.43,51.69
+Ángel Fabián Di María Hernández,Nicolás Alejandro Tagliafico,5,0,13.519107781012162,-10.193131599979093,80.51,11.6,55.92,7.83
+Lionel Andrés Messi Cuccittini,Ángel Fabián Di María Hernández,5,3,38.44130343555321,7.016880783047702,73.81,51.86,80.51,11.6
+Nahuel Molina Lucero,Lionel Andrés Messi Cuccittini,5,3,16.045964926162927,15.126248832206263,56.14,71.9,73.81,51.86
+Nicolás Hernán Otamendi,Damián Emiliano Martínez,5,0,21.3270699730486,-12.763053435406393,36.98,23.03,12.36,43.05
+Rodrigo Javier De Paul,Nahuel Molina Lucero,5,0,8.166539120464503,-3.7909990107494282,61.48,59.82,56.14,71.9
+Enzo Fernandez,Lionel Andrés Messi Cuccittini,5,0,14.602498093508682,4.9037420479697875,55.67,35.52,73.81,51.86
+Cristian Gabriel Romero,Nahuel Molina Lucero,5,0,16.63771027753112,2.5930159329753706,33.43,51.69,56.14,71.9
+Enzo Fernandez,Nahuel Molina Lucero,5,0,25.603406467598308,0.3542617996216061,55.67,35.52,56.14,71.9
+Enzo Fernandez,Nicolás Alejandro Tagliafico,4,0,13.95936604037213,-3.437021218177621,55.67,35.52,55.92,7.83
+Damián Emiliano Martínez,Nicolás Hernán Otamendi,4,0,21.131159726496506,7.749182217687089,12.36,43.05,36.98,23.03
+Julián Álvarez,Alexis Mac Allister,4,1,15.702043853483088,5.1950367062718685,79.8,40.88,69.1,22.18
+Damián Emiliano Martínez,Cristian Gabriel Romero,4,0,10.887956175744012,2.197531028799017,12.36,43.05,33.43,51.69
+Alexis Mac Allister,Lionel Andrés Messi Cuccittini,4,1,12.453304695909608,5.252165601284231,69.1,22.18,73.81,51.86
+Nicolás Alejandro Tagliafico,Enzo Fernandez,4,0,8.951159789632928,1.857492250509837,55.92,7.83,55.67,35.52
+Nicolás Hernán Otamendi,Ángel Fabián Di María Hernández,4,0,22.590560953951652,5.965063036227157,36.98,23.03,80.51,11.6
+Ángel Fabián Di María Hernández,Lionel Andrés Messi Cuccittini,4,1,18.432449005217606,7.562439698269919,80.51,11.6,73.81,51.86
+Rodrigo Javier De Paul,Enzo Fernandez,4,1,12.501530863524088,4.144248186863761,61.48,59.82,55.67,35.52
+Lionel Andrés Messi Cuccittini,Julián Álvarez,4,2,15.645766049013833,11.572610642930831,73.81,51.86,79.8,40.88
+Lionel Andrés Messi Cuccittini,Nahuel Molina Lucero,4,0,12.812658491958317,-4.469307377941462,73.81,51.86,56.14,71.9
+Ángel Fabián Di María Hernández,Rodrigo Javier De Paul,3,0,23.784357474638522,0.48040626823562294,80.51,11.6,61.48,59.82
+Ángel Fabián Di María Hernández,Nicolás Hernán Otamendi,3,0,19.57998359129647,-10.289636713508658,80.51,11.6,36.98,23.03
+Enzo Fernandez,Alexis Mac Allister,3,0,9.671676910924914,-4.867682395492513,55.67,35.52,69.1,22.18
+Cristian Gabriel Romero,Ángel Fabián Di María Hernández,3,1,40.37113362854049,12.78548194440617,33.43,51.69,80.51,11.6
+Alexis Mac Allister,Nicolás Alejandro Tagliafico,3,1,14.611019127778968,-3.4219111793048183,69.1,22.18,55.92,7.83
+Cristian Gabriel Romero,Damián Emiliano Martínez,3,0,30.760505606524045,-25.550335336845492,33.43,51.69,12.36,43.05
+Julián Álvarez,Enzo Fernandez,3,0,8.361758148102302,-4.68816186621208,79.8,40.88,55.67,35.52
+Lionel Andrés Messi Cuccittini,Alexis Mac Allister,3,2,21.422976073170457,14.527988063892684,73.81,51.86,69.1,22.18
+Ángel Fabián Di María Hernández,Enzo Fernandez,3,0,13.061295525547772,-2.870691629796051,80.51,11.6,55.67,35.52
+Nahuel Molina Lucero,Julián Álvarez,3,2,14.51679601060801,10.98670049855047,56.14,71.9,79.8,40.88
+Ángel Fabián Di María Hernández,Alexis Mac Allister,3,1,13.134294046409247,3.4963345961832952,80.51,11.6,69.1,22.18
+Julián Álvarez,Lionel Andrés Messi Cuccittini,2,0,12.477030470147078,-9.177140041400522,79.8,40.88,73.81,51.86
+Julián Álvarez,Rodrigo Javier De Paul,2,0,17.781078255039645,-0.9159087697714938,79.8,40.88,61.48,59.82
+Julián Álvarez,Ángel Fabián Di María Hernández,2,0,21.481597884996482,-4.368451829619547,79.8,40.88,80.51,11.6
+Enzo Fernandez,Julián Álvarez,2,0,10.922545029914605,8.36771559518039,55.67,35.52,79.8,40.88
+Alexis Mac Allister,Nicolás Hernán Otamendi,2,0,9.040647633814954,-7.686930134389979,69.1,22.18,36.98,23.03
+Cristian Gabriel Romero,Lionel Andrés Messi Cuccittini,2,0,17.457617899358436,9.530698153674534,33.43,51.69,73.81,51.86
+Damián Emiliano Martínez,Nahuel Molina Lucero,2,0,23.114223008241424,13.869377243616652,12.36,43.05,56.14,71.9
+Lionel Andrés Messi Cuccittini,Enzo Fernandez,2,0,10.197881134701376,-10.084695179630177,73.81,51.86,55.67,35.52
+Nicolás Hernán Otamendi,Rodrigo Javier De Paul,2,0,12.50011867944612,7.720186924815163,36.98,23.03,61.48,59.82
+Nahuel Molina Lucero,Enzo Fernandez,2,0,9.341076141285782,1.7471148483298622,56.14,71.9,55.67,35.52
+Nahuel Molina Lucero,Damián Emiliano Martínez,2,0,29.161113434984077,-17.138603440701143,56.14,71.9,12.36,43.05
+Rodrigo Javier De Paul,Alexis Mac Allister,2,0,14.500200358386156,7.801901130534626,61.48,59.82,69.1,22.18
+Rodrigo Javier De Paul,Damián Emiliano Martínez,2,0,39.02669634933466,-21.905619523171183,61.48,59.82,12.36,43.05
+Ángel Fabián Di María Hernández,Julián Álvarez,2,1,9.708121605624967,8.59936361185981,80.51,11.6,79.8,40.88
+Ángel Fabián Di María Hernández,Nahuel Molina Lucero,2,0,55.71700278939484,-11.84554307054229,80.51,11.6,56.14,71.9

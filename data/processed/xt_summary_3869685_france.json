@@ -1,0 +1,33 @@
+{
+  "team_name": "France",
+  "total_xt_generated": 6.983,
+  "top_xt_generators": [
+    {
+      "player_name": "Kylian Mbappé Lottin",
+      "delta_xt": 1.144
+    },
+    {
+      "player_name": "Aurélien Djani Tchouaméni",
+      "delta_xt": 0.726
+    },
+    {
+      "player_name": "Jules Koundé",
+      "delta_xt": 0.65
+    },
+    {
+      "player_name": "Randal Kolo Muani",
+      "delta_xt": 0.528
+    },
+    {
+      "player_name": "Antoine Griezmann",
+      "delta_xt": 0.524
+    }
+  ],
+  "top_line_breaking_passers": {
+    "Jules Koundé": 8,
+    "Hugo Lloris": 7,
+    "Antoine Griezmann": 6,
+    "Kylian Mbappé Lottin": 6,
+    "Aurélien Djani Tchouaméni": 6
+  }
+}

@@ -1,0 +1,47 @@
+[
+  {
+    "problem_title": "Exposição Recorrente no Setor Defensivo Esquerdo (Lateral-Esquerdo)",
+    "phase_of_play": "Organização Defensiva",
+    "team_name": "Argentina",
+    "pitch_zone": "Setor Defensivo Esquerdo (Lateral-Esquerdo)",
+    "frequency_pct": 25.97,
+    "sample_size": 20,
+    "evidence_strength": "FORTE",
+    "tactical_interpretation": "Durante a fase defensiva com bloco de perfil 'Bloco Alto / Pressão Avançada' (PPDA = 2.8), a equipe apresentou abertura recorrente no Setor Defensivo Esquerdo (Lateral-Esquerdo). O adversário canalizou 20 ações progressivas e 0 entradas na grande área por este setor.",
+    "probable_consequence": "Facilidade do adversário em progredir pelo corredor e gerar finalizações cruzadas para a segunda trave.",
+    "recommendation_plan_a": "Recrutar o volante do lado da bola para cobertura preventiva mais rápida, encurtando a distância entre o lateral e o zagueiro.",
+    "recommendation_alternative_b": "Ajustar o bloco para uma basculação mais compacta em linha de 4 ou 5, evitando que o ala/ponta adversário receba com tempo para virar o corpo.",
+    "recommendation_risks": "Exposição temporária do lado oposto do campo caso a basculação lateral seja lenta.",
+    "data_limitations": "Análise baseada em dados de eventos e coordenadas estritas; ausência de tracking contínuo de 22 jogadores impede medir exatamente a distância em metros do enquadramento do corpo."
+  },
+  {
+    "problem_title": "Concentração da Saída de Bola em 'Nicolás Hernán Otamendi'",
+    "phase_of_play": "Organização Ofensiva / Saída de Bola",
+    "team_name": "Argentina",
+    "pitch_zone": "Terço Defensivo / Eixo Central",
+    "frequency_pct": 13.88,
+    "sample_size": 317,
+    "evidence_strength": "FORTE",
+    "tactical_interpretation": "O atleta 'Nicolás Hernán Otamendi' detém a maior Centralidade de Intermediação (0.3444) da rede de passes, funcionando como o pivô obrigatório de conexão entre a defesa e o meio-campo.",
+    "probable_consequence": "Se o adversário encaixar uma marcação pressão individual sobre este jogador, a saída de bola da equipe colapsará.",
+    "recommendation_plan_a": "Establiccer linhas de passe de apoio em diagonal (com o zagueiro e o lateral) para oferecer opção de escape caso o pivô seja encaixotado.",
+    "recommendation_alternative_b": "Utilizar inversões rápidas de bola para o lado oposto antes que a pressão adversária compacte sobre o principal distribuidor.",
+    "recommendation_risks": "Perda de fluidez na circulação central caso os apoios demorem a se aproximar.",
+    "data_limitations": "Rede construída com base nos passes completos até a primeira substituição."
+  },
+  {
+    "problem_title": "Vulnerabilidade Crítica de Perda na Zona 15 (Terço Ofensivo - Corredor Lateral Direito)",
+    "phase_of_play": "Transição Defensiva / Construção",
+    "team_name": "Argentina",
+    "pitch_zone": "Zona 15 (Corredor Lateral Direito)",
+    "frequency_pct": 8.57,
+    "sample_size": 36,
+    "evidence_strength": "FORTE",
+    "tactical_interpretation": "O algoritmo K-Means associado à exposição territorial identificou que a equipe apresenta uma taxa de erro de 8.57% por toque na Terço Ofensivo (Corredor Lateral Direito), com 27.78% das ações sob pressão direta.",
+    "probable_consequence": "Exposição a contra-ataques fulminantes do adversário em zonas de construção vulneráveis.",
+    "recommendation_plan_a": "Exigir jogo mais direto ou passes de segurança quando a equipe estiver sob forte pressão nestas coordenadas.",
+    "recommendation_alternative_b": "Garantir superioridade numérica de apoio (terceiro homem) para oferecer linha de escape rápida.",
+    "recommendation_risks": "Redução momentânea do volume de posse curta no setor.",
+    "data_limitations": "Clusterização baseada em coordenadas (x, y) de perdas registradas na partida."
+  }
+]

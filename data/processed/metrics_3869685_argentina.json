@@ -1,0 +1,146 @@
+{
+  "team_name": "Argentina",
+  "defensive_organization": {
+    "ppda": 2.8,
+    "ppda_numerator_opp_passes": 420,
+    "ppda_denominator_def_actions": 150,
+    "avg_defensive_engagement_height_m": 46.44,
+    "longitudinal_dispersion_m": 28.02,
+    "lateral_dispersion_m": 21.22,
+    "block_profile": "Bloco Alto / Pressão Avançada",
+    "zone_14_entries_conceded": 11,
+    "deep_completions_conceded": 7,
+    "shots_conceded": 14,
+    "xg_conceded": 5.407,
+    "switches_faced": 30,
+    "switches_completed_by_opponent": 20,
+    "switch_conceded_rate_pct": 66.67,
+    "most_vulnerable_defensive_sector": "Setor Defensivo Esquerdo (Lateral-Esquerdo)",
+    "corridor_vulnerability_breakdown": {
+      "Setor Defensivo Direito (Lateral-Direito)": {
+        "progressive_actions_conceded": 18,
+        "share_of_opponent_progression_pct": 23.38,
+        "box_entries_conceded": 0
+      },
+      "Meio-Espaço Defensivo Direito (Entre LD e Zagueiro Dir.)": {
+        "progressive_actions_conceded": 16,
+        "share_of_opponent_progression_pct": 20.78,
+        "box_entries_conceded": 2
+      },
+      "Eixo Central Defensivo (Zagueiros / Volante Central)": {
+        "progressive_actions_conceded": 8,
+        "share_of_opponent_progression_pct": 10.39,
+        "box_entries_conceded": 2
+      },
+      "Meio-Espaço Defensivo Esquerdo (Entre LE e Zagueiro Esq.)": {
+        "progressive_actions_conceded": 15,
+        "share_of_opponent_progression_pct": 19.48,
+        "box_entries_conceded": 1
+      },
+      "Setor Defensivo Esquerdo (Lateral-Esquerdo)": {
+        "progressive_actions_conceded": 20,
+        "share_of_opponent_progression_pct": 25.97,
+        "box_entries_conceded": 0
+      }
+    },
+    "total_opponent_progressive_actions": 77
+  },
+  "offensive_organization": {
+    "total_passes": 693,
+    "overall_pass_completion_pct": 80.81,
+    "buildup_passes_count": 208,
+    "short_buildup_ratio_pct": 82.21,
+    "buildup_completion_pct": 78.37,
+    "buildup_turnovers_in_own_third": 49,
+    "total_progressive_actions": 88,
+    "preferred_attack_corridor": "Corredor Lateral Esquerdo",
+    "corridor_progression_breakdown": {
+      "Corredor Lateral Esquerdo": {
+        "progressive_actions": 25,
+        "share_pct": 28.41,
+        "box_entries_from_corridor": 0
+      },
+      "Meio-Espaço Esquerdo": {
+        "progressive_actions": 16,
+        "share_pct": 18.18,
+        "box_entries_from_corridor": 4
+      },
+      "Corredor Central": {
+        "progressive_actions": 19,
+        "share_pct": 21.59,
+        "box_entries_from_corridor": 1
+      },
+      "Meio-Espaço Direito": {
+        "progressive_actions": 13,
+        "share_pct": 14.77,
+        "box_entries_from_corridor": 3
+      },
+      "Corredor Lateral Direito": {
+        "progressive_actions": 15,
+        "share_pct": 17.05,
+        "box_entries_from_corridor": 0
+      }
+    },
+    "zone_14_entries": 30,
+    "offensive_half_space_actions": 194,
+    "penalty_box_entries": 19,
+    "deep_completions": 5,
+    "through_balls_attempted": 5,
+    "crosses_attempted": 17,
+    "total_shots": 24,
+    "total_xg": 5.892
+  },
+  "offensive_transition": {
+    "total_possessions_analyzed": 117,
+    "overall_direct_speed_m_s": 3.65,
+    "counter_attacks_count": 37,
+    "counter_attack_avg_speed_m_s": 7.3,
+    "counter_attacks_reaching_box_or_shot": 17,
+    "counter_efficiency_pct": 45.95,
+    "top_transition_hub_players": {
+      "Lionel Andrés Messi Cuccittini": 46,
+      "Alexis Mac Allister": 41,
+      "Enzo Fernandez": 32
+    }
+  },
+  "defensive_transition": {
+    "turnovers_in_attacking_half": 76,
+    "counterpress_events_total": 89,
+    "post_loss_5s_press_reaction_count": 40,
+    "post_loss_5s_press_reaction_pct": 52.63,
+    "post_loss_5s_recoveries_count": 17,
+    "post_loss_5s_recovery_pct": 22.37,
+    "opponent_counter_attacks_conceded": 45,
+    "opponent_counters_ending_in_shot": 2
+  },
+  "midfield_control": {
+    "field_tilt_pct": 62.12,
+    "midfield_possession_share_pct": 49.08,
+    "pressured_passes_count": 39,
+    "press_resistance_completion_pct": 56.41,
+    "top_midfield_controllers": {
+      "Enzo Fernandez": 57,
+      "Rodrigo Javier De Paul": 38,
+      "Nicolás Alejandro Tagliafico": 30
+    }
+  },
+  "set_pieces": {
+    "offensive_corners_count": 6,
+    "offensive_corners_first_contact_won": 1,
+    "offensive_corner_target_zones": {
+      "Primeira Trave (Near Post)": 3,
+      "Zona Central / Pequena Área": 2,
+      "Segunda Trave (Far Post)": 1,
+      "Escanteio Curto / Fora da Área": 0
+    },
+    "shots_generated_from_corners": 0,
+    "defensive_corners_faced": 5,
+    "defensive_corner_target_zones_faced": {
+      "Primeira Trave (Near Post)": 2,
+      "Zona Central / Pequena Área": 3,
+      "Segunda Trave (Far Post)": 0,
+      "Escanteio Curto / Fora da Área": 0
+    },
+    "shots_conceded_from_corners": 3
+  }
+}

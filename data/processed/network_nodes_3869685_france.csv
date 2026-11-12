@@ -1,0 +1,12 @@
+player_name,position_name,avg_x,avg_y,std_x,std_y,passes_made,passes_received,progressive_passes_made,betweenness_centrality,pagerank_centrality,clustering_coeff,total_involvement
+Raphaël Varane,Right Center Back,41.25,50.56,14.08,10.99,18,15,1,0.3278,0.1096,0.2824,33
+Dayotchanculle Upamecano,Left Center Back,38.65,28.35,12.14,12.62,14,14,1,0.2778,0.1011,0.203,28
+Jules Koundé,Right Back,49.63,68.62,18.4,9.15,15,13,3,0.2333,0.1163,0.2634,28
+Theo Bernard François Hernández,Left Back,63.02,10.08,22.52,8.88,13,13,2,0.1111,0.1043,0.1995,26
+Adrien Rabiot,Left Defensive Midfield,59.38,26.75,20.16,16.1,12,11,0,0.1111,0.1041,0.2481,23
+Antoine Griezmann,Center Attacking Midfield,66.09,57.79,15.04,11.94,6,9,0,0.0611,0.0858,0.2025,15
+Kylian Mbappé Lottin,Left Wing,82.41,12.32,17.87,10.54,8,8,1,0.0556,0.0755,0.2882,16
+Ousmane Dembélé,Right Wing,66.58,71.07,17.82,6.3,9,12,1,0.05,0.1009,0.2169,21
+Aurélien Djani Tchouaméni,Right Defensive Midfield,50.6,39.34,6.43,14.0,10,10,1,0.0444,0.0974,0.2033,20
+Olivier Giroud,Center Forward,69.28,51.44,15.11,20.44,5,8,0,0.0222,0.0734,0.1511,13
+Hugo Lloris,Goalkeeper,12.13,35.39,5.57,12.98,6,3,4,0.0,0.0315,0.177,9

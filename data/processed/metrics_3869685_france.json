@@ -1,0 +1,146 @@
+{
+  "team_name": "France",
+  "defensive_organization": {
+    "ppda": 2.76,
+    "ppda_numerator_opp_passes": 481,
+    "ppda_denominator_def_actions": 174,
+    "avg_defensive_engagement_height_m": 49.25,
+    "longitudinal_dispersion_m": 28.04,
+    "lateral_dispersion_m": 22.54,
+    "block_profile": "Bloco Alto / Pressão Avançada",
+    "zone_14_entries_conceded": 30,
+    "deep_completions_conceded": 5,
+    "shots_conceded": 24,
+    "xg_conceded": 5.892,
+    "switches_faced": 35,
+    "switches_completed_by_opponent": 20,
+    "switch_conceded_rate_pct": 57.14,
+    "most_vulnerable_defensive_sector": "Setor Defensivo Direito (Lateral-Direito)",
+    "corridor_vulnerability_breakdown": {
+      "Setor Defensivo Direito (Lateral-Direito)": {
+        "progressive_actions_conceded": 25,
+        "share_of_opponent_progression_pct": 28.41,
+        "box_entries_conceded": 0
+      },
+      "Meio-Espaço Defensivo Direito (Entre LD e Zagueiro Dir.)": {
+        "progressive_actions_conceded": 16,
+        "share_of_opponent_progression_pct": 18.18,
+        "box_entries_conceded": 4
+      },
+      "Eixo Central Defensivo (Zagueiros / Volante Central)": {
+        "progressive_actions_conceded": 19,
+        "share_of_opponent_progression_pct": 21.59,
+        "box_entries_conceded": 1
+      },
+      "Meio-Espaço Defensivo Esquerdo (Entre LE e Zagueiro Esq.)": {
+        "progressive_actions_conceded": 13,
+        "share_of_opponent_progression_pct": 14.77,
+        "box_entries_conceded": 3
+      },
+      "Setor Defensivo Esquerdo (Lateral-Esquerdo)": {
+        "progressive_actions_conceded": 15,
+        "share_of_opponent_progression_pct": 17.05,
+        "box_entries_conceded": 0
+      }
+    },
+    "total_opponent_progressive_actions": 88
+  },
+  "offensive_organization": {
+    "total_passes": 570,
+    "overall_pass_completion_pct": 76.14,
+    "buildup_passes_count": 137,
+    "short_buildup_ratio_pct": 69.34,
+    "buildup_completion_pct": 68.61,
+    "buildup_turnovers_in_own_third": 45,
+    "total_progressive_actions": 77,
+    "preferred_attack_corridor": "Corredor Lateral Direito",
+    "corridor_progression_breakdown": {
+      "Corredor Lateral Esquerdo": {
+        "progressive_actions": 18,
+        "share_pct": 23.38,
+        "box_entries_from_corridor": 0
+      },
+      "Meio-Espaço Esquerdo": {
+        "progressive_actions": 16,
+        "share_pct": 20.78,
+        "box_entries_from_corridor": 2
+      },
+      "Corredor Central": {
+        "progressive_actions": 8,
+        "share_pct": 10.39,
+        "box_entries_from_corridor": 2
+      },
+      "Meio-Espaço Direito": {
+        "progressive_actions": 15,
+        "share_pct": 19.48,
+        "box_entries_from_corridor": 1
+      },
+      "Corredor Lateral Direito": {
+        "progressive_actions": 20,
+        "share_pct": 25.97,
+        "box_entries_from_corridor": 0
+      }
+    },
+    "zone_14_entries": 11,
+    "offensive_half_space_actions": 133,
+    "penalty_box_entries": 12,
+    "deep_completions": 7,
+    "through_balls_attempted": 0,
+    "crosses_attempted": 9,
+    "total_shots": 14,
+    "total_xg": 5.407
+  },
+  "offensive_transition": {
+    "total_possessions_analyzed": 137,
+    "overall_direct_speed_m_s": 4.29,
+    "counter_attacks_count": 45,
+    "counter_attack_avg_speed_m_s": 8.98,
+    "counter_attacks_reaching_box_or_shot": 12,
+    "counter_efficiency_pct": 26.67,
+    "top_transition_hub_players": {
+      "Kylian Mbappé Lottin": 29,
+      "Aurélien Djani Tchouaméni": 28,
+      "Hugo Lloris": 21
+    }
+  },
+  "defensive_transition": {
+    "turnovers_in_attacking_half": 80,
+    "counterpress_events_total": 57,
+    "post_loss_5s_press_reaction_count": 45,
+    "post_loss_5s_press_reaction_pct": 56.25,
+    "post_loss_5s_recoveries_count": 14,
+    "post_loss_5s_recovery_pct": 17.5,
+    "opponent_counter_attacks_conceded": 37,
+    "opponent_counters_ending_in_shot": 10
+  },
+  "midfield_control": {
+    "field_tilt_pct": 37.88,
+    "midfield_possession_share_pct": 50.92,
+    "pressured_passes_count": 76,
+    "press_resistance_completion_pct": 69.74,
+    "top_midfield_controllers": {
+      "Aurélien Djani Tchouaméni": 55,
+      "Dayotchanculle Upamecano": 48,
+      "Jules Koundé": 41
+    }
+  },
+  "set_pieces": {
+    "offensive_corners_count": 5,
+    "offensive_corners_first_contact_won": 1,
+    "offensive_corner_target_zones": {
+      "Primeira Trave (Near Post)": 2,
+      "Zona Central / Pequena Área": 3,
+      "Segunda Trave (Far Post)": 0,
+      "Escanteio Curto / Fora da Área": 0
+    },
+    "shots_generated_from_corners": 3,
+    "defensive_corners_faced": 6,
+    "defensive_corner_target_zones_faced": {
+      "Primeira Trave (Near Post)": 3,
+      "Zona Central / Pequena Área": 2,
+      "Segunda Trave (Far Post)": 1,
+      "Escanteio Curto / Fora da Área": 0
+    },
+    "shots_conceded_from_corners": 0
+  }
+}

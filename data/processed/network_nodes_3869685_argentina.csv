@@ -1,0 +1,12 @@
+player_name,position_name,avg_x,avg_y,std_x,std_y,passes_made,passes_received,progressive_passes_made,betweenness_centrality,pagerank_centrality,clustering_coeff,total_involvement
+Nicolás Hernán Otamendi,Left Center Back,36.98,23.03,13.77,7.66,44,41,1,0.3444,0.1203,0.2233,85
+Rodrigo Javier De Paul,Right Center Midfield,61.48,59.82,24.26,14.3,37,42,1,0.1889,0.1234,0.2678,79
+Enzo Fernandez,Center Defensive Midfield,55.67,35.52,17.97,16.48,40,42,1,0.1444,0.1252,0.2129,82
+Lionel Andrés Messi Cuccittini,Right Wing,73.81,51.86,19.66,13.8,27,31,8,0.1111,0.1012,0.2239,58
+Nicolás Alejandro Tagliafico,Left Back,55.92,7.83,21.06,5.58,28,23,4,0.1,0.0758,0.2739,51
+Cristian Gabriel Romero,Right Center Back,33.43,51.69,14.52,9.65,39,31,3,0.0889,0.0947,0.2126,70
+Alexis Mac Allister,Left Center Midfield,69.1,22.18,21.1,13.94,24,26,3,0.0389,0.0866,0.2074,50
+Ángel Fabián Di María Hernández,Left Wing,80.51,11.6,23.25,14.29,25,31,3,0.0111,0.0986,0.196,56
+Nahuel Molina Lucero,Right Back,56.14,71.9,27.09,7.47,28,23,5,0.0,0.0768,0.1879,51
+Julián Álvarez,Center Forward,79.8,40.88,21.65,19.21,13,15,1,0.0,0.0557,0.1716,28
+Damián Emiliano Martínez,Goalkeeper,12.36,43.05,8.73,9.15,12,12,0,0.0,0.0418,0.2045,24

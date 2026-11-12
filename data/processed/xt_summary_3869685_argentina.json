@@ -1,0 +1,33 @@
+{
+  "team_name": "Argentina",
+  "total_xt_generated": 9.082,
+  "top_xt_generators": [
+    {
+      "player_name": "Lionel Andrés Messi Cuccittini",
+      "delta_xt": 2.187
+    },
+    {
+      "player_name": "Alexis Mac Allister",
+      "delta_xt": 0.944
+    },
+    {
+      "player_name": "Rodrigo Javier De Paul",
+      "delta_xt": 0.72
+    },
+    {
+      "player_name": "Marcos Javier Acuña",
+      "delta_xt": 0.716
+    },
+    {
+      "player_name": "Enzo Fernandez",
+      "delta_xt": 0.681
+    }
+  ],
+  "top_line_breaking_passers": {
+    "Lionel Andrés Messi Cuccittini": 17,
+    "Enzo Fernandez": 8,
+    "Rodrigo Javier De Paul": 7,
+    "Alexis Mac Allister": 7,
+    "Nicolás Alejandro Tagliafico": 6
+  }
+}

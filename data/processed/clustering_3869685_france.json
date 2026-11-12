@@ -1,0 +1,146 @@
+{
+  "kmeans_turnovers": {
+    "team_name": "France",
+    "status": "OK",
+    "total_turnovers": 162,
+    "total_team_touches": 2009,
+    "overall_turnover_rate_pct": 8.06,
+    "optimal_k": 5,
+    "silhouette_score": 0.4533,
+    "clusters": [
+      {
+        "cluster_id": 0,
+        "centroid_x": 92.17,
+        "centroid_y": 14.92,
+        "tactical_third": "Terço Ofensivo",
+        "tactical_corridor": "Corredor Lateral Esquerdo",
+        "zone_18": 13,
+        "turnovers_in_cluster": 41,
+        "share_of_total_turnovers_pct": 25.31,
+        "local_radius_touches_denominator": 252,
+        "local_radius_turnovers_numerator": 21,
+        "turnover_rate_per_touch_pct": 8.33,
+        "under_pressure_rate_pct": 31.71
+      },
+      {
+        "cluster_id": 2,
+        "centroid_x": 48.71,
+        "centroid_y": 15.86,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Corredor Lateral Esquerdo",
+        "zone_18": 7,
+        "turnovers_in_cluster": 37,
+        "share_of_total_turnovers_pct": 22.84,
+        "local_radius_touches_denominator": 394,
+        "local_radius_turnovers_numerator": 24,
+        "turnover_rate_per_touch_pct": 6.09,
+        "under_pressure_rate_pct": 24.32
+      },
+      {
+        "cluster_id": 1,
+        "centroid_x": 49.89,
+        "centroid_y": 65.58,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Corredor Lateral Direito",
+        "zone_18": 9,
+        "turnovers_in_cluster": 32,
+        "share_of_total_turnovers_pct": 19.75,
+        "local_radius_touches_denominator": 328,
+        "local_radius_turnovers_numerator": 22,
+        "turnover_rate_per_touch_pct": 6.71,
+        "under_pressure_rate_pct": 31.25
+      },
+      {
+        "cluster_id": 4,
+        "centroid_x": 10.82,
+        "centroid_y": 46.37,
+        "tactical_third": "Terço Defensivo",
+        "tactical_corridor": "Corredor Central",
+        "zone_18": 2,
+        "turnovers_in_cluster": 28,
+        "share_of_total_turnovers_pct": 17.28,
+        "local_radius_touches_denominator": 152,
+        "local_radius_turnovers_numerator": 20,
+        "turnover_rate_per_touch_pct": 13.16,
+        "under_pressure_rate_pct": 14.29
+      },
+      {
+        "cluster_id": 3,
+        "centroid_x": 94.11,
+        "centroid_y": 66.71,
+        "tactical_third": "Terço Ofensivo",
+        "tactical_corridor": "Corredor Lateral Direito",
+        "zone_18": 15,
+        "turnovers_in_cluster": 24,
+        "share_of_total_turnovers_pct": 14.81,
+        "local_radius_touches_denominator": 135,
+        "local_radius_turnovers_numerator": 15,
+        "turnover_rate_per_touch_pct": 11.11,
+        "under_pressure_rate_pct": 20.83
+      }
+    ],
+    "highest_volume_cluster": {
+      "cluster_id": 0,
+      "centroid_x": 92.17,
+      "centroid_y": 14.92,
+      "tactical_third": "Terço Ofensivo",
+      "tactical_corridor": "Corredor Lateral Esquerdo",
+      "zone_18": 13,
+      "turnovers_in_cluster": 41,
+      "share_of_total_turnovers_pct": 25.31,
+      "local_radius_touches_denominator": 252,
+      "local_radius_turnovers_numerator": 21,
+      "turnover_rate_per_touch_pct": 8.33,
+      "under_pressure_rate_pct": 31.71
+    },
+    "highest_risk_exposure_cluster": {
+      "cluster_id": 4,
+      "centroid_x": 10.82,
+      "centroid_y": 46.37,
+      "tactical_third": "Terço Defensivo",
+      "tactical_corridor": "Corredor Central",
+      "zone_18": 2,
+      "turnovers_in_cluster": 28,
+      "share_of_total_turnovers_pct": 17.28,
+      "local_radius_touches_denominator": 152,
+      "local_radius_turnovers_numerator": 20,
+      "turnover_rate_per_touch_pct": 13.16,
+      "under_pressure_rate_pct": 14.29
+    }
+  },
+  "dbscan_recoveries": {
+    "team_name": "France",
+    "total_recoveries": 60,
+    "dense_zones_found": 3,
+    "noise_isolated_recoveries": 15,
+    "pressing_traps": [
+      {
+        "trap_id": 0,
+        "centroid_x": 59.64,
+        "centroid_y": 13.87,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Corredor Lateral Esquerdo",
+        "recoveries_count": 27,
+        "share_of_recoveries_pct": 45.0
+      },
+      {
+        "trap_id": 1,
+        "centroid_x": 29.44,
+        "centroid_y": 54.07,
+        "tactical_third": "Terço Defensivo",
+        "tactical_corridor": "Meio-Espaço Direito",
+        "recoveries_count": 11,
+        "share_of_recoveries_pct": 18.33
+      },
+      {
+        "trap_id": 2,
+        "centroid_x": 79.34,
+        "centroid_y": 65.66,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Corredor Lateral Direito",
+        "recoveries_count": 7,
+        "share_of_recoveries_pct": 11.67
+      }
+    ]
+  }
+}

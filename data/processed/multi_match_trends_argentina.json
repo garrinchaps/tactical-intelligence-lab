@@ -1,0 +1,201 @@
+{
+  "team_name": "Argentina",
+  "matches_analyzed": 3,
+  "status": "OK",
+  "per_match_table": [
+    {
+      "match_id": 3869321,
+      "opponent": "Netherlands",
+      "ppda": 3.63,
+      "def_height_m": 46.09,
+      "most_vulnerable_def_sector": "Eixo Central Defensivo (Zagueiros / Volante Central)",
+      "switch_conceded_rate_pct": 65.22,
+      "switches_completed_by_opp": 15,
+      "xg_conceded": 4.487,
+      "short_buildup_pct": 72.79,
+      "buildup_turnovers": 35,
+      "preferred_attack_corridor": "Corredor Central",
+      "zone_14_entries": 34,
+      "box_entries": 15,
+      "xg_created": 5.857,
+      "direct_speed_m_s": 3.06,
+      "counter_attacks": 37,
+      "gegenpress_5s_pct": 45.45,
+      "opp_counters_conceded": 36,
+      "field_tilt_pct": 55.77,
+      "press_resistance_pct": 76.42
+    },
+    {
+      "match_id": 3869519,
+      "opponent": "Croatia",
+      "ppda": 2.98,
+      "def_height_m": 46.17,
+      "most_vulnerable_def_sector": "Meio-Espaço Defensivo Direito (Entre LD e Zagueiro Dir.)",
+      "switch_conceded_rate_pct": 75.0,
+      "switches_completed_by_opp": 18,
+      "xg_conceded": 0.41,
+      "short_buildup_pct": 70.0,
+      "buildup_turnovers": 28,
+      "preferred_attack_corridor": "Corredor Central",
+      "zone_14_entries": 14,
+      "box_entries": 12,
+      "xg_created": 1.864,
+      "direct_speed_m_s": 3.14,
+      "counter_attacks": 31,
+      "gegenpress_5s_pct": 60.42,
+      "opp_counters_conceded": 21,
+      "field_tilt_pct": 36.13,
+      "press_resistance_pct": 76.74
+    },
+    {
+      "match_id": 3869685,
+      "opponent": "France",
+      "ppda": 2.8,
+      "def_height_m": 46.44,
+      "most_vulnerable_def_sector": "Setor Defensivo Esquerdo (Lateral-Esquerdo)",
+      "switch_conceded_rate_pct": 66.67,
+      "switches_completed_by_opp": 20,
+      "xg_conceded": 5.407,
+      "short_buildup_pct": 82.21,
+      "buildup_turnovers": 49,
+      "preferred_attack_corridor": "Corredor Lateral Esquerdo",
+      "zone_14_entries": 30,
+      "box_entries": 19,
+      "xg_created": 5.892,
+      "direct_speed_m_s": 3.65,
+      "counter_attacks": 37,
+      "gegenpress_5s_pct": 52.63,
+      "opp_counters_conceded": 45,
+      "field_tilt_pct": 62.12,
+      "press_resistance_pct": 56.41
+    }
+  ],
+  "longitudinal_stability_stats": {
+    "ppda": {
+      "mean": 3.14,
+      "std": 0.36,
+      "min": 2.8,
+      "max": 3.63,
+      "coefficient_of_variation": 0.114,
+      "is_structural_constant": true
+    },
+    "def_height_m": {
+      "mean": 46.23,
+      "std": 0.15,
+      "min": 46.09,
+      "max": 46.44,
+      "coefficient_of_variation": 0.003,
+      "is_structural_constant": true
+    },
+    "switch_conceded_rate_pct": {
+      "mean": 68.96,
+      "std": 4.31,
+      "min": 65.22,
+      "max": 75.0,
+      "coefficient_of_variation": 0.062,
+      "is_structural_constant": true
+    },
+    "short_buildup_pct": {
+      "mean": 75.0,
+      "std": 5.22,
+      "min": 70.0,
+      "max": 82.21,
+      "coefficient_of_variation": 0.07,
+      "is_structural_constant": true
+    },
+    "zone_14_entries": {
+      "mean": 26.0,
+      "std": 8.64,
+      "min": 14.0,
+      "max": 34.0,
+      "coefficient_of_variation": 0.332,
+      "is_structural_constant": false
+    },
+    "box_entries": {
+      "mean": 15.33,
+      "std": 2.87,
+      "min": 12.0,
+      "max": 19.0,
+      "coefficient_of_variation": 0.187,
+      "is_structural_constant": true
+    },
+    "xg_created": {
+      "mean": 4.54,
+      "std": 1.89,
+      "min": 1.86,
+      "max": 5.89,
+      "coefficient_of_variation": 0.417,
+      "is_structural_constant": false
+    },
+    "xg_conceded": {
+      "mean": 3.43,
+      "std": 2.17,
+      "min": 0.41,
+      "max": 5.41,
+      "coefficient_of_variation": 0.632,
+      "is_structural_constant": false
+    },
+    "gegenpress_5s_pct": {
+      "mean": 52.83,
+      "std": 6.11,
+      "min": 45.45,
+      "max": 60.42,
+      "coefficient_of_variation": 0.116,
+      "is_structural_constant": true
+    },
+    "field_tilt_pct": {
+      "mean": 51.34,
+      "std": 11.06,
+      "min": 36.13,
+      "max": 62.12,
+      "coefficient_of_variation": 0.215,
+      "is_structural_constant": true
+    },
+    "press_resistance_pct": {
+      "mean": 69.86,
+      "std": 9.51,
+      "min": 56.41,
+      "max": 76.74,
+      "coefficient_of_variation": 0.136,
+      "is_structural_constant": true
+    }
+  },
+  "pattern_diagnostics": [
+    {
+      "pattern_type": "Vulnerabilidade Espacial Defensiva",
+      "sector_or_metric": "Eixo Central Defensivo (Zagueiros / Volante Central)",
+      "matches_observed": 1,
+      "total_matches": 3,
+      "recurrence_rate_pct": 33.33,
+      "classification": "EVENTO ISOLADO",
+      "tactical_explanation": "Em 1 das 3 partidas analisadas (33.3%), o setor que mais cedeu ações progressivas ao adversário foi 'Eixo Central Defensivo (Zagueiros / Volante Central)'."
+    },
+    {
+      "pattern_type": "Vetor Preferencial de Construção Ofensiva",
+      "sector_or_metric": "Corredor Central",
+      "matches_observed": 2,
+      "total_matches": 3,
+      "recurrence_rate_pct": 66.67,
+      "classification": "PADRÃO CRÔNICO RECORRENTE",
+      "tactical_explanation": "Em 2 das 3 partidas (66.7%), a equipe concentrou sua progressão principal pelo 'Corredor Central'."
+    },
+    {
+      "pattern_type": "Defesa de Inversões de Jogo (Switches of Play)",
+      "sector_or_metric": "Média de 68.96% de acerto cedido em inversões",
+      "matches_observed": 3,
+      "total_matches": 3,
+      "recurrence_rate_pct": 100.0,
+      "classification": "PADRÃO CRÔNICO RECORRENTE",
+      "tactical_explanation": "A equipe permitiu alta taxa de sucesso (>=65%) em inversões longas do adversário em 3 de 3 jogos, indicando dificuldade de basculação horizontal do lado oposto."
+    },
+    {
+      "pattern_type": "Risco na Saída de Bola (1º Terço)",
+      "sector_or_metric": "Média de 37.3 turnovers/jogo no terço defensivo",
+      "matches_observed": 3,
+      "total_matches": 3,
+      "recurrence_rate_pct": 100.0,
+      "classification": "PADRÃO CRÔNICO RECORRENTE",
+      "tactical_explanation": "A equipe sofreu 5 ou mais perdas de posse no próprio terço defensivo em 3 de 3 jogos (Saída curta média = 75.0%)."
+    }
+  ]
+}

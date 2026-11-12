@@ -1,0 +1,32 @@
+[
+  {
+    "problem_title": "Exposição Recorrente no Setor Defensivo Direito (Lateral-Direito)",
+    "phase_of_play": "Organização Defensiva",
+    "team_name": "França",
+    "pitch_zone": "Setor Defensivo Direito (Lateral-Direito)",
+    "frequency_pct": 26.06,
+    "sample_size": 43,
+    "evidence_strength": "FORTE",
+    "tactical_interpretation": "Durante a fase defensiva com bloco de perfil 'Bloco Médio Equilibrado' (PPDA = 901.0), a equipe apresentou abertura recorrente no Setor Defensivo Direito (Lateral-Direito). O adversário canalizou 43 ações progressivas e 0 entradas na grande área por este setor.",
+    "probable_consequence": "Facilidade do adversário em progredir pelo corredor e gerar finalizações cruzadas para a segunda trave.",
+    "recommendation_plan_a": "Recrutar o volante do lado da bola para cobertura preventiva mais rápida, encurtando a distância entre o lateral e o zagueiro.",
+    "recommendation_alternative_b": "Ajustar o bloco para uma basculação mais compacta em linha de 4 ou 5, evitando que o ala/ponta adversário receba com tempo para virar o corpo.",
+    "recommendation_risks": "Exposição temporária do lado oposto do campo caso a basculação lateral seja lenta.",
+    "data_limitations": "Análise baseada em dados de eventos e coordenadas estritas; ausência de tracking contínuo de 22 jogadores impede medir exatamente a distância em metros do enquadramento do corpo."
+  },
+  {
+    "problem_title": "Concentração da Saída de Bola em 'N/A'",
+    "phase_of_play": "Organização Ofensiva / Saída de Bola",
+    "team_name": "França",
+    "pitch_zone": "Terço Defensivo / Eixo Central",
+    "frequency_pct": 0.0,
+    "sample_size": 0,
+    "evidence_strength": "MODERADA",
+    "tactical_interpretation": "O atleta 'N/A' detém a maior Centralidade de Intermediação (0.0) da rede de passes, funcionando como o pivô obrigatório de conexão entre a defesa e o meio-campo.",
+    "probable_consequence": "Se o adversário encaixar uma marcação pressão individual sobre este jogador, a saída de bola da equipe colapsará.",
+    "recommendation_plan_a": "Establiccer linhas de passe de apoio em diagonal (com o zagueiro e o lateral) para oferecer opção de escape caso o pivô seja encaixotado.",
+    "recommendation_alternative_b": "Utilizar inversões rápidas de bola para o lado oposto antes que a pressão adversária compacte sobre o principal distribuidor.",
+    "recommendation_risks": "Perda de fluidez na circulação central caso os apoios demorem a se aproximar.",
+    "data_limitations": "Rede construída com base nos passes completos até a primeira substituição."
+  }
+]

@@ -1,0 +1,46 @@
+{
+  "team_name": "Argentina",
+  "analyzed_until_minute": 63.9,
+  "nodes_count": 11,
+  "edges_count": 77,
+  "total_completed_passes_in_network": 317,
+  "network_density": 0.7,
+  "network_reciprocity": 0.8052,
+  "avg_clustering_coefficient": 0.2165,
+  "inferred_positional_structure": "2-6-2 (Em Posse)",
+  "team_weighted_centroid_y": 38.21,
+  "lateral_asymmetry_diagnosis": "Circulação horizontalmente balanceada",
+  "primary_bridge_player_betweenness": "Nicolás Hernán Otamendi",
+  "primary_bridge_score": 0.3444,
+  "primary_gravity_playmaker_pagerank": "Enzo Fernandez",
+  "primary_playmaker_pagerank_score": 0.1252,
+  "highest_volume_distributor": "Nicolás Hernán Otamendi",
+  "max_player_pass_share_pct": 13.88,
+  "top_5_pass_combinations": [
+    {
+      "pair": "Nahuel Molina Lucero -> Rodrigo Javier De Paul",
+      "passes": 13,
+      "progressive_passes": 0
+    },
+    {
+      "pair": "Nicolás Hernán Otamendi -> Cristian Gabriel Romero",
+      "passes": 12,
+      "progressive_passes": 0
+    },
+    {
+      "pair": "Nicolás Hernán Otamendi -> Nicolás Alejandro Tagliafico",
+      "passes": 11,
+      "progressive_passes": 0
+    },
+    {
+      "pair": "Nicolás Hernán Otamendi -> Enzo Fernandez",
+      "passes": 10,
+      "progressive_passes": 1
+    },
+    {
+      "pair": "Cristian Gabriel Romero -> Nicolás Hernán Otamendi",
+      "passes": 9,
+      "progressive_passes": 0
+    }
+  ]
+}

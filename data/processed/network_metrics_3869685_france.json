@@ -1,0 +1,46 @@
+{
+  "team_name": "France",
+  "analyzed_until_minute": 40.5,
+  "nodes_count": 11,
+  "edges_count": 57,
+  "total_completed_passes_in_network": 116,
+  "network_density": 0.5182,
+  "network_reciprocity": 0.6667,
+  "avg_clustering_coefficient": 0.2214,
+  "inferred_positional_structure": "2-7-1 (Em Posse)",
+  "team_weighted_centroid_y": 41.34,
+  "lateral_asymmetry_diagnosis": "Circulação horizontalmente balanceada",
+  "primary_bridge_player_betweenness": "Raphaël Varane",
+  "primary_bridge_score": 0.3278,
+  "primary_gravity_playmaker_pagerank": "Jules Koundé",
+  "primary_playmaker_pagerank_score": 0.1163,
+  "highest_volume_distributor": "Raphaël Varane",
+  "max_player_pass_share_pct": 15.52,
+  "top_5_pass_combinations": [
+    {
+      "pair": "Raphaël Varane -> Dayotchanculle Upamecano",
+      "passes": 7,
+      "progressive_passes": 0
+    },
+    {
+      "pair": "Jules Koundé -> Ousmane Dembélé",
+      "passes": 6,
+      "progressive_passes": 2
+    },
+    {
+      "pair": "Dayotchanculle Upamecano -> Raphaël Varane",
+      "passes": 5,
+      "progressive_passes": 0
+    },
+    {
+      "pair": "Theo Bernard François Hernández -> Kylian Mbappé Lottin",
+      "passes": 5,
+      "progressive_passes": 1
+    },
+    {
+      "pair": "Jules Koundé -> Raphaël Varane",
+      "passes": 5,
+      "progressive_passes": 0
+    }
+  ]
+}

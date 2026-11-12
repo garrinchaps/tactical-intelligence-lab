@@ -1,0 +1,123 @@
+{
+  "kmeans_turnovers": {
+    "team_name": "Argentina",
+    "status": "OK",
+    "total_turnovers": 156,
+    "total_team_touches": 2343,
+    "overall_turnover_rate_pct": 6.66,
+    "optimal_k": 4,
+    "silhouette_score": 0.4263,
+    "clusters": [
+      {
+        "cluster_id": 0,
+        "centroid_x": 30.11,
+        "centroid_y": 58.9,
+        "tactical_third": "Terço Defensivo",
+        "tactical_corridor": "Meio-Espaço Direito",
+        "zone_18": 6,
+        "turnovers_in_cluster": 44,
+        "share_of_total_turnovers_pct": 28.21,
+        "local_radius_touches_denominator": 362,
+        "local_radius_turnovers_numerator": 19,
+        "turnover_rate_per_touch_pct": 5.25,
+        "under_pressure_rate_pct": 15.91
+      },
+      {
+        "cluster_id": 3,
+        "centroid_x": 43.95,
+        "centroid_y": 19.67,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Meio-Espaço Esquerdo",
+        "zone_18": 7,
+        "turnovers_in_cluster": 43,
+        "share_of_total_turnovers_pct": 27.56,
+        "local_radius_touches_denominator": 402,
+        "local_radius_turnovers_numerator": 24,
+        "turnover_rate_per_touch_pct": 5.97,
+        "under_pressure_rate_pct": 27.91
+      },
+      {
+        "cluster_id": 2,
+        "centroid_x": 91.21,
+        "centroid_y": 65.79,
+        "tactical_third": "Terço Ofensivo",
+        "tactical_corridor": "Corredor Lateral Direito",
+        "zone_18": 15,
+        "turnovers_in_cluster": 36,
+        "share_of_total_turnovers_pct": 23.08,
+        "local_radius_touches_denominator": 210,
+        "local_radius_turnovers_numerator": 18,
+        "turnover_rate_per_touch_pct": 8.57,
+        "under_pressure_rate_pct": 27.78
+      },
+      {
+        "cluster_id": 1,
+        "centroid_x": 94.44,
+        "centroid_y": 14.51,
+        "tactical_third": "Terço Ofensivo",
+        "tactical_corridor": "Corredor Lateral Esquerdo",
+        "zone_18": 13,
+        "turnovers_in_cluster": 33,
+        "share_of_total_turnovers_pct": 21.15,
+        "local_radius_touches_denominator": 260,
+        "local_radius_turnovers_numerator": 19,
+        "turnover_rate_per_touch_pct": 7.31,
+        "under_pressure_rate_pct": 21.21
+      }
+    ],
+    "highest_volume_cluster": {
+      "cluster_id": 0,
+      "centroid_x": 30.11,
+      "centroid_y": 58.9,
+      "tactical_third": "Terço Defensivo",
+      "tactical_corridor": "Meio-Espaço Direito",
+      "zone_18": 6,
+      "turnovers_in_cluster": 44,
+      "share_of_total_turnovers_pct": 28.21,
+      "local_radius_touches_denominator": 362,
+      "local_radius_turnovers_numerator": 19,
+      "turnover_rate_per_touch_pct": 5.25,
+      "under_pressure_rate_pct": 15.91
+    },
+    "highest_risk_exposure_cluster": {
+      "cluster_id": 2,
+      "centroid_x": 91.21,
+      "centroid_y": 65.79,
+      "tactical_third": "Terço Ofensivo",
+      "tactical_corridor": "Corredor Lateral Direito",
+      "zone_18": 15,
+      "turnovers_in_cluster": 36,
+      "share_of_total_turnovers_pct": 23.08,
+      "local_radius_touches_denominator": 210,
+      "local_radius_turnovers_numerator": 18,
+      "turnover_rate_per_touch_pct": 8.57,
+      "under_pressure_rate_pct": 27.78
+    }
+  },
+  "dbscan_recoveries": {
+    "team_name": "Argentina",
+    "total_recoveries": 58,
+    "dense_zones_found": 2,
+    "noise_isolated_recoveries": 6,
+    "pressing_traps": [
+      {
+        "trap_id": 1,
+        "centroid_x": 52.09,
+        "centroid_y": 34.29,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Corredor Central",
+        "recoveries_count": 44,
+        "share_of_recoveries_pct": 75.86
+      },
+      {
+        "trap_id": 0,
+        "centroid_x": 69.84,
+        "centroid_y": 60.15,
+        "tactical_third": "Terço Médio",
+        "tactical_corridor": "Meio-Espaço Direito",
+        "recoveries_count": 8,
+        "share_of_recoveries_pct": 13.79
+      }
+    ]
+  }
+}
