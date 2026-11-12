@@ -85,7 +85,17 @@ class EventPreprocessor:
             df[int_col] = (
                 pd.to_numeric(df[int_col], errors="coerce").fillna(0).astype(int)
             )
+        # Converte nomes cartoriais completos para o Nome Comum do futebol
+        from src.ingestion.brazil_and_multi_source import PlayerNameNormalizer
 
+        if "player_name" in df.columns:
+            df["player_name"] = df["player_name"].apply(
+                lambda x: PlayerNameNormalizer.to_common_name(x) if pd.notna(x) else x
+            )
+        if "pass_recipient_name" in df.columns:
+            df["pass_recipient_name"] = df["pass_recipient_name"].apply(
+                lambda x: PlayerNameNormalizer.to_common_name(x) if pd.notna(x) else x
+            )
         df = df.sort_values(["match_id", "period", "index_num"]).reset_index(drop=True)
 
         # 1. Tempo contínuo em segundos
