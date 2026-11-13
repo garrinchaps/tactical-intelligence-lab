@@ -1,0 +1,27 @@
+{
+  "header": {"season": {"year": 2025}, "competitions": [{"date": "2025-11-09T22:00Z", "competitors": [
+    {"homeAway": "home", "score": "1", "team": {"displayName": "Cruzeiro"}},
+    {"homeAway": "away", "score": "1", "team": {"displayName": "Atlético-MG"}}]}]},
+  "gameInfo": {"venue": {"fullName": "Mineirão"}},
+  "boxscore": {"teams": [
+    {"team": {"displayName": "Cruzeiro"}, "statistics": [
+      {"name": "possessionPct", "displayValue": "51.4"}, {"name": "totalShots", "displayValue": "12"},
+      {"name": "shotsOnTarget", "displayValue": "4"}, {"name": "wonCorners", "displayValue": "5"},
+      {"name": "passPct", "displayValue": "0.84"}, {"name": "foulsCommitted", "displayValue": "13"}]},
+    {"team": {"displayName": "Atlético-MG"}, "statistics": [
+      {"name": "possessionPct", "displayValue": "48.6"}, {"name": "totalShots", "displayValue": "10"},
+      {"name": "shotsOnTarget", "displayValue": "3"}, {"name": "wonCorners", "displayValue": "4"},
+      {"name": "passPct", "displayValue": "0.81"}, {"name": "foulsCommitted", "displayValue": "15"}]}]},
+  "rosters": [
+    {"team": {"displayName": "Cruzeiro"}, "formation": "4-3-3", "roster": [
+      {"athlete": {"displayName": "Meia X"}, "jersey": "10", "starter": true, "position": {"abbreviation": "AM"},
+       "stats": [{"name": "totalGoals", "value": 1}, {"name": "shotsOnTarget", "value": 2}]}]},
+    {"team": {"displayName": "Atlético-MG"}, "formation": "4-4-2", "roster": [
+      {"athlete": {"displayName": "Atacante Y"}, "jersey": "9", "starter": true, "position": {"abbreviation": "F"},
+       "stats": [{"name": "totalGoals", "value": 1}]}]}],
+  "keyEvents": [
+    {"type": {"text": "Goal"}, "clock": {"displayValue": "34'"}, "team": {"displayName": "Cruzeiro"},
+     "participants": [{"athlete": {"displayName": "Meia X"}}], "text": "Gol de cabeça"},
+    {"type": {"text": "Goal"}, "clock": {"displayValue": "90'+2'"}, "team": {"displayName": "Atlético-MG"},
+     "participants": [{"athlete": {"displayName": "Atacante Y"}}], "text": "Gol de pênalti"}]
+}

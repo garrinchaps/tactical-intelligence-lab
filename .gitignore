@@ -9,3 +9,6 @@ data/raw/
 # Saídas geradas automaticamente
 data/processed/relatorio_*
 data/processed/reference_baselines.json
+
+# Banco local (cresce com a sincronização; pode passar de 100 MB)
+database/*.db

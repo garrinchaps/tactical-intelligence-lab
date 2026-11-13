@@ -1,0 +1,49 @@
+{
+  "get": "fixtures", "parameters": {"id": "1180001"}, "errors": [], "results": 1,
+  "response": [{
+    "fixture": {"id": 1180001, "referee": "Árbitro Exemplo", "date": "2025-11-09T19:00:00-03:00",
+                "venue": {"name": "Estádio Exemplo"}, "status": {"short": "FT"}},
+    "league": {"id": 71, "name": "Serie A", "country": "Brazil", "season": 2025, "round": "Regular Season - 33"},
+    "teams": {"home": {"id": 127, "name": "Flamengo"}, "away": {"id": 121, "name": "Palmeiras"}},
+    "goals": {"home": 2, "away": 1},
+    "events": [
+      {"time": {"elapsed": 23, "extra": null}, "team": {"name": "Flamengo"}, "player": {"name": "Atacante A"}, "assist": {"name": "Meia B"}, "type": "Goal", "detail": "Normal Goal"},
+      {"time": {"elapsed": 41, "extra": null}, "team": {"name": "Palmeiras"}, "player": {"name": "Volante C"}, "assist": {"name": null}, "type": "Card", "detail": "Yellow Card"},
+      {"time": {"elapsed": 58, "extra": null}, "team": {"name": "Palmeiras"}, "player": {"name": "Centroavante D"}, "assist": {"name": "Lateral E"}, "type": "Goal", "detail": "Normal Goal"},
+      {"time": {"elapsed": 67, "extra": null}, "team": {"name": "Flamengo"}, "player": {"name": "Ponta F"}, "assist": {"name": "Atacante A"}, "type": "subst", "detail": "Substitution 1"},
+      {"time": {"elapsed": 90, "extra": 3}, "team": {"name": "Flamengo"}, "player": {"name": "Ponta F"}, "assist": {"name": null}, "type": "Goal", "detail": "Penalty"}
+    ],
+    "lineups": [
+      {"team": {"name": "Flamengo"}, "formation": "4-2-3-1", "coach": {"name": "Técnico F"},
+       "startXI": [{"player": {"name": "Atacante A", "number": 9, "pos": "F"}}, {"player": {"name": "Meia B", "number": 10, "pos": "M"}}],
+       "substitutes": [{"player": {"name": "Ponta F", "number": 11, "pos": "F"}}]},
+      {"team": {"name": "Palmeiras"}, "formation": "4-4-2", "coach": {"name": "Técnico P"},
+       "startXI": [{"player": {"name": "Volante C", "number": 5, "pos": "M"}}, {"player": {"name": "Centroavante D", "number": 9, "pos": "F"}}, {"player": {"name": "Lateral E", "number": 6, "pos": "D"}}],
+       "substitutes": []}
+    ],
+    "statistics": [
+      {"team": {"name": "Flamengo"}, "statistics": [
+        {"type": "Shots on Goal", "value": 6}, {"type": "Total Shots", "value": 15}, {"type": "Ball Possession", "value": "58%"},
+        {"type": "Total passes", "value": 512}, {"type": "Passes accurate", "value": 448}, {"type": "Passes %", "value": "88%"},
+        {"type": "Corner Kicks", "value": 7}, {"type": "Fouls", "value": 11}, {"type": "Yellow Cards", "value": 1},
+        {"type": "expected_goals", "value": "1.84"}]},
+      {"team": {"name": "Palmeiras"}, "statistics": [
+        {"type": "Shots on Goal", "value": 3}, {"type": "Total Shots", "value": 9}, {"type": "Ball Possession", "value": "42%"},
+        {"type": "Total passes", "value": 371}, {"type": "Passes accurate", "value": 301}, {"type": "Passes %", "value": "81%"},
+        {"type": "Corner Kicks", "value": 3}, {"type": "Fouls", "value": 14}, {"type": "Yellow Cards", "value": 2},
+        {"type": "expected_goals", "value": "0.97"}]}
+    ],
+    "players": [
+      {"team": {"name": "Flamengo"}, "players": [
+        {"player": {"name": "Atacante A"}, "statistics": [{"games": {"minutes": 90, "rating": "8.1", "position": "F"},
+          "shots": {"total": 4, "on": 2}, "goals": {"total": 1, "assists": 1}, "passes": {"total": 31, "key": 3, "accuracy": "26"},
+          "tackles": {"total": 1, "interceptions": 0}, "duels": {"total": 12, "won": 7}, "dribbles": {"attempts": 3, "success": 2},
+          "fouls": {"committed": 1}, "cards": {"yellow": 0, "red": 0}}]}]},
+      {"team": {"name": "Palmeiras"}, "players": [
+        {"player": {"name": "Centroavante D"}, "statistics": [{"games": {"minutes": 90, "rating": "7.2", "position": "F"},
+          "shots": {"total": 3, "on": 1}, "goals": {"total": 1, "assists": 0}, "passes": {"total": 18, "key": 1, "accuracy": "13"},
+          "tackles": {"total": 0, "interceptions": 0}, "duels": {"total": 10, "won": 4}, "dribbles": {"attempts": 1, "success": 0},
+          "fouls": {"committed": 2}, "cards": {"yellow": 0, "red": 0}}]}]}
+    ]
+  }]
+}

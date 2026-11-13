@@ -23,6 +23,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import percentileofscore
 
+from src.data_hub.registry import source_from_internal_id
 from src.ingestion.brazil_and_multi_source import BrasileiraoAndMultiSourceProvider
 from src.metrics.player_evaluator import PlayerTacticalEvaluator
 from src.metrics.tactical_metrics import TacticalMetricsEngine
@@ -134,7 +135,7 @@ class ReferenceBaselineBuilder:
         with sqlite3.connect(str(path)) as conn:
             rows = conn.execute("SELECT DISTINCT match_id FROM events").fetchall()
         ids = sorted(int(r[0]) for r in rows)
-        return [m for m in ids if not BrasileiraoAndMultiSourceProvider.is_simulated_match(m)]
+        return [m for m in ids if source_from_internal_id(m) in ("statsbomb", "wyscout")]
 
     @staticmethod
     def player_rows_from_match(df_events: pd.DataFrame, match_id: int) -> List[Dict[str, Any]]:
@@ -149,6 +150,7 @@ class ReferenceBaselineBuilder:
                     continue
                 row: Dict[str, Any] = {
                     "match_id": int(match_id),
+                    "source": source_from_internal_id(int(match_id)),
                     "team_name": str(team),
                     "player_name": str(p["player_name"]),
                     "position_name": str(p.get("position_name", "")),
@@ -168,7 +170,8 @@ class ReferenceBaselineBuilder:
             summary = TacticalMetricsEngine.generate_full_match_tactical_summary(
                 df_events, df_chains, str(team)
             )
-            row: Dict[str, Any] = {"match_id": int(match_id), "team_name": str(team)}
+            row: Dict[str, Any] = {"match_id": int(match_id), "team_name": str(team),
+                                   "source": source_from_internal_id(int(match_id))}
             row.update(StrengthsWeaknessesEngine.team_metric_values(summary))
             rows.append(row)
         return rows
@@ -179,14 +182,25 @@ class ReferenceBaselineBuilder:
         load_events_fn,
         match_ids: Iterable[int],
         cache_path: Optional[Path] = None,
+        previous: Optional[Dict[str, Any]] = None,
+        max_new: Optional[int] = None,
     ) -> Dict[str, Any]:
-        """`load_events_fn(match_id)` deve devolver o DataFrame bruto de eventos."""
-        player_rows: List[Dict[str, Any]] = []
-        team_rows: List[Dict[str, Any]] = []
-        used: List[int] = []
-        match_ids = [int(m) for m in match_ids]
-        for mid in match_ids:
-            if BrasileiraoAndMultiSourceProvider.is_simulated_match(mid):
+        """
+        `load_events_fn(match_id)` devolve o DataFrame bruto de eventos.
+        Incremental: partidas já processadas em `previous` não são refeitas; no máximo
+        `max_new` partidas novas por chamada (o restante entra nas próximas).
+        """
+        prev = previous or {}
+        player_rows: List[Dict[str, Any]] = list(prev.get("players", []))
+        team_rows: List[Dict[str, Any]] = list(prev.get("teams", []))
+        used: List[int] = list(prev.get("match_ids", []))
+        attempted = set(prev.get("attempted_ids", []))
+        pending = [int(m) for m in match_ids if int(m) not in attempted]
+        if max_new is not None:
+            pending = pending[:max_new]
+        for mid in pending:
+            attempted.add(mid)
+            if source_from_internal_id(mid) not in ("statsbomb", "wyscout"):
                 continue
             try:
                 raw = load_events_fn(int(mid))
@@ -203,17 +217,15 @@ class ReferenceBaselineBuilder:
                 continue
 
         baselines = {
-            "source": "StatsBomb Open Data (partidas reais armazenadas no SQLite local)",
+            "source": "Partidas reais com eventos (StatsBomb Open Data + Wyscout Public Dataset) no SQLite local",
             "match_ids": used,
-            "attempted_ids": sorted(match_ids),
+            "attempted_ids": sorted(attempted),
             "players": player_rows,
             "teams": team_rows,
         }
         if cache_path is not None:
             cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(
-                json.dumps(baselines, ensure_ascii=False, indent=1), encoding="utf-8"
-            )
+            cache_path.write_text(json.dumps(baselines, ensure_ascii=False), encoding="utf-8")
         return baselines
 
     @classmethod
@@ -222,17 +234,19 @@ class ReferenceBaselineBuilder:
         load_events_fn,
         db_path: str = "database/tactical_lab.db",
         cache_path: Optional[Path] = None,
+        max_new: int = 150,
     ) -> Dict[str, Any]:
         cache_path = cache_path or cls.DEFAULT_CACHE
         wanted = cls.available_real_match_ids(db_path)
+        cached: Dict[str, Any] = {}
         if cache_path.exists():
             try:
                 cached = json.loads(cache_path.read_text(encoding="utf-8"))
-                if sorted(cached.get("attempted_ids", [])) == sorted(wanted):
-                    return cached
             except Exception:
-                pass
-        return cls.build(load_events_fn, wanted, cache_path=cache_path)
+                cached = {}
+        if cached and set(wanted) <= set(cached.get("attempted_ids", [])):
+            return cached
+        return cls.build(load_events_fn, wanted, cache_path=cache_path, previous=cached, max_new=max_new)
 
 
 # ------------------------------------------------------------------------ motor
@@ -266,6 +280,21 @@ class StrengthsWeaknessesEngine:
             val = summary.get(section, {}).get(key, None)
             values[key] = None if val is None else round(float(val), 3)
         return values
+
+    @staticmethod
+    def _same_source_pool(rows: List[Dict[str, Any]], exclude_match_id: Optional[int]) -> List[Dict[str, Any]]:
+        """
+        Compara com partidas da mesma família de fonte (StatsBomb com StatsBomb, Wyscout com
+        Wyscout), porque as fontes registram ações defensivas e pressão de forma diferente.
+        Partidas simuladas/enviadas usam a referência StatsBomb.
+        """
+        rows = [r for r in rows if r.get("match_id") != exclude_match_id]
+        if exclude_match_id is None:
+            return rows
+        fam = source_from_internal_id(int(exclude_match_id))
+        fam = fam if fam in ("statsbomb", "wyscout") else "statsbomb"
+        same = [r for r in rows if r.get("source", "statsbomb") == fam]
+        return same if len(same) >= 2 * MIN_GROUP_SAMPLE else rows
 
     @staticmethod
     def _percentile(value: float, reference: List[float], direction: int) -> float:
@@ -324,10 +353,7 @@ class StrengthsWeaknessesEngine:
         group = position_group(p.get("position_name"))
         minutes = float(p.get("estimated_minutes_active", 0) or 0)
 
-        pool = [
-            r for r in baselines.get("players", [])
-            if r.get("match_id") != exclude_match_id
-        ]
+        pool = cls._same_source_pool(baselines.get("players", []), exclude_match_id)
         group_pool = [r for r in pool if r.get("group") == group]
         comparison_scope = GROUP_PLURALS.get(group, "atletas")
         if len(group_pool) < MIN_GROUP_SAMPLE:
@@ -366,10 +392,7 @@ class StrengthsWeaknessesEngine:
             df_events, df_chains, team_name
         )
         values = cls.team_metric_values(summary)
-        pool = [
-            r for r in baselines.get("teams", [])
-            if r.get("match_id") != exclude_match_id
-        ]
+        pool = cls._same_source_pool(baselines.get("teams", []), exclude_match_id)
         result = cls._classify(
             values, pool, [(k, lbl, d) for _s, k, lbl, d in TEAM_METRICS]
         )

@@ -96,7 +96,8 @@ def render_strengths_weaknesses_page(
     st.caption(
         f"Percentil contextual: ≥ {STRENGTH_PERCENTILE:.0f} = ponto forte · ≤ {WEAKNESS_PERCENTILE:.0f} = ponto fraco. "
         "Atletas são comparados com a mesma função (métricas por 90 min); equipes com todas as equipes da base. "
-        "A referência usa apenas partidas reais do StatsBomb Open Data salvas no banco local."
+        "A referência usa partidas reais com eventos já baixadas no banco local (StatsBomb e Wyscout), "
+        "comparando sempre com a mesma fonte. Para ampliar a referência, baixe mais eventos em 🗄️ Base de Dados."
     )
 
     c_mode, c_entity, c_ai = st.columns([0.9, 2.0, 1.1])
@@ -128,7 +129,7 @@ def render_strengths_weaknesses_page(
         return
 
     try:
-        with st.spinner("Carregando base de referência (na primeira vez leva ~20 s)..."):
+        with st.spinner("Atualizando base de referência (até 150 partidas novas por vez)..."):
             match_ids = ReferenceBaselineBuilder.available_real_match_ids()
             baselines = _cached_baselines(load_events_fn, ",".join(map(str, match_ids)))
     except Exception as exc:
