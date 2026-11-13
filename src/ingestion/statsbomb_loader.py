@@ -5,6 +5,7 @@ Responsável por baixar, cachear e estruturar eventos de partidas e metadados.
 
 import json
 import re
+import zlib
 import sqlite3
 import unicodedata
 from pathlib import Path
@@ -440,11 +441,29 @@ class StatsBombDataLoader:
 
         return full_catalog
 
+    @staticmethod
+    def _is_simulated_match_id(match_id: int) -> bool:
+        from src.ingestion.brazil_and_multi_source import (
+            BrasileiraoAndMultiSourceProvider,
+        )
+
+        return BrasileiraoAndMultiSourceProvider.is_simulated_match(match_id)
+
+    @staticmethod
+    def _found_message(description: str, match_id: int, is_simulated: bool) -> str:
+        if is_simulated:
+            return (
+                f"⚠️ Confronto disponível apenas como SIMULAÇÃO {description} "
+                f"(Match ID `{match_id}`). Os eventos são gerados por modelo probabilístico, "
+                "não são dados oficiais."
+            )
+        return f"✅ Partida real encontrada {description} (Match ID `{match_id}`)."
+
     def ingest_match_events(
         self, match_id: int, force_reload: bool = False
     ) -> pd.DataFrame:
         """
-        Carrega eventos do SQLite, da base autêntica do Brasileirão (IDs 880001..)
+        Carrega eventos do SQLite, do gerador SIMULADO do Brasileirão (IDs 880001..)
         ou do repositório oficial StatsBomb Open Data.
         """
         if not force_reload:
@@ -458,7 +477,7 @@ class StatsBombDataLoader:
 
         for br_m in BrasileiraoAndMultiSourceProvider.BRAZIL_MATCH_CATALOG:
             if int(br_m["match_id"]) == int(match_id):
-                df_br = BrasileiraoAndMultiSourceProvider.generate_authentic_match_events(
+                df_br = BrasileiraoAndMultiSourceProvider.generate_simulated_match_events(
                     br_m["home_team_name"],
                     br_m["away_team_name"],
                     int(match_id),
@@ -755,15 +774,18 @@ class StatsBombDataLoader:
                     teams = df_ev["team_name"].dropna().unique().tolist()
                     h_team = teams[0] if len(teams) > 0 else "Home"
                     a_team = teams[1] if len(teams) > 1 else "Away"
+                    is_sim_id = self._is_simulated_match_id(candidate_id)
                     return {
                         "status": "FOUND_REAL",
-                        "is_simulation": False,
+                        "is_simulation": is_sim_id,
                         "match_id": candidate_id,
                         "home_team": h_team,
                         "away_team": a_team,
                         "search_similarity_pct": 100.0,
                         "candidate_matches": [],
-                        "user_message": f"✅ Partida real encontrada por ID exato: **{h_team} vs {a_team}** (Match ID `{candidate_id}`).",
+                        "user_message": self._found_message(
+                            f"por ID exato: **{h_team} vs {a_team}**", candidate_id, is_sim_id
+                        ),
                     }
             except Exception:
                 pass
@@ -825,22 +847,28 @@ class StatsBombDataLoader:
             try:
                 df_ev = self.ingest_match_events(found_id)
                 comp_label = best_rec.get("competition_name", "StatsBomb")
+                is_sim_id = self._is_simulated_match_id(found_id)
                 return {
                     "status": "FOUND_REAL",
-                    "is_simulation": False,
+                    "is_simulation": is_sim_id,
                     "match_id": found_id,
                     "home_team": str(best_rec["home_team_name"]),
                     "away_team": str(best_rec["away_team_name"]),
                     "search_similarity_pct": similarity_score_pct,
                     "candidate_matches": matched_candidates[:12],
-                    "user_message": f"✅ Partida real encontrada ({comp_label}): **{best_rec['home_team_name']} vs {best_rec['away_team_name']}** (Match ID `{found_id}`).",
+                    "user_message": self._found_message(
+                        f"({comp_label}): **{best_rec['home_team_name']} vs {best_rec['away_team_name']}**",
+                        found_id,
+                        is_sim_id,
+                    ),
                 }
             except Exception:
                 pass
 
         sim_home = raw_t1.title() if raw_t1 else "Equipe Mandante"
         sim_away = raw_t2.title() if raw_t2 else "Adversário"
-        sim_id = 900000 + (abs(hash(f"{sim_home}_{sim_away}")) % 89999)
+        # crc32 é estável entre execuções (hash() de str muda a cada processo)
+        sim_id = 900000 + (zlib.crc32(f"{sim_home}_{sim_away}".encode("utf-8")) % 89999)
         return {
             "status": "NOT_FOUND_OFFER_SIMULATION",
             "is_simulation": True,

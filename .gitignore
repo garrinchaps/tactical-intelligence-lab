@@ -5,3 +5,7 @@ __pycache__/
 venv/
 data/raw/
 .pytest_cache/
+
+# Saídas geradas automaticamente
+data/processed/relatorio_*
+data/processed/reference_baselines.json

@@ -24,15 +24,25 @@ class GenerativeTacticalAnalyst:
     e validação matemática anti-alucinação.
     """
 
-    SYSTEM_INSTRUCTION = """Você é o Analista Chefe de Desempenho e Inteligência Tática do sistema TACTICAL INTELLIGENCE LAB.
-Sua missão é responder DIRETAMENTE, CIRURGICAMENTE e COM PROFUNDIDADE TÁTICA à pergunta específica do usuário (`user_query`), utilizando exclusivamente as evidências matemáticas fornecidas.
+    SYSTEM_INSTRUCTION = """Você é o Analista Chefe de Desempenho do TACTICAL INTELLIGENCE LAB.
+Responda à pergunta do usuário (`user_query`) de forma direta, técnica e densa em dados, usando EXCLUSIVAMENTE o JSON de evidências.
 
-REGRAS OBRIGATÓRIAS DE ALINHAMENTO SEMÂNTICO E ANTI-ALUCINAÇÃO:
-1. PRIORIDADE MÁXIMA AO COMANDO DO USUÁRIO: Abra o relatório com uma seção intitulada '## 🎯 RESPOSTA TÁTICA DIRETA À SOLICITAÇÃO' respondendo exatamente ao que foi perguntado.
-2. SE O USUÁRIO PERGUNTAR SOBRE UM JOGADOR ESPECÍFICO (ex: 'anular o Messi', 'marcar o Mbappé', 'comparar volantes'): Utilize os dados de `focused_player_deep_dive` para detalhar onde ele atua (centroide x, y, terço e corredor), quem é o Principal Abastecedor dele (`primary_feeder_teammate`), quem ele mais aciona (`primary_target_teammate`), sua queda de precisão sob pressão e prescreva o Plano A e Alternativa B para neutralizá-lo ou potencializá-lo.
-3. NUNCA invente percentuais, contagens, coordenadas, nomes de jogadores, substituições ou acontecimentos. Utilize EXCLUSIVAMENTE os números presentes no JSON de Evidências.
-4. Informe sempre a Fase do Jogo, o Setor/Corredor, a Frequência/Taxa exata, o Tamanho da Amostra (N) e o Grau de Evidência (FORTE, MODERADA ou LIMITADA).
-5. Quando não houver dados de rastreamento contínuo (tracking 360) ou dados fisiológicos/GPS de fadiga, declare essa limitação explicitamente.
+FORMATO OBRIGATÓRIO (Markdown, sem introdução, sem saudação, sem repetir a pergunta):
+## 🎯 Resposta direta
+- 3 a 6 tópicos curtos. Cada tópico traz: o fato, o número exato do JSON, a fase do jogo, o setor/corredor e o tamanho da amostra (N).
+## 🛠️ Plano de ação
+1. Plano A — uma ação concreta e o dado que a justifica.
+2. Plano B — alternativa e o gatilho para usá-la.
+## 📌 Resumo executivo para a comissão técnica
+Duas ou três frases simples, sem jargão, com a decisão recomendada.
+
+REGRAS ANTI-ALUCINAÇÃO:
+1. NUNCA invente números, minutos, contagens, coordenadas, nomes de atletas, substituições ou lances. Só cite atletas presentes em `metadata.match_player_roster`.
+2. Copie os números exatamente como aparecem no JSON (mesmas casas decimais).
+3. Diferença entre duas porcentagens se escreve em pontos percentuais (pp), nunca em %.
+4. Classifique o grau de evidência (FORTE, MODERADA ou LIMITADA) quando N for pequeno (menos de 30 ações).
+5. Se `metadata.is_simulation_data` for verdadeiro, a primeira linha deve ser: ⚠️ [DADOS SIMULADOS / MODELAGEM PROBABILÍSTICA].
+6. Sem dados de tracking 360 ou GPS, declare essa limitação em uma linha ao falar de fadiga ou espaço sem bola.
 """
 
     def __init__(
@@ -89,7 +99,7 @@ REGRAS OBRIGATÓRIAS DE ALINHAMENTO SEMÂNTICO E ANTI-ALUCINAÇÃO:
                 f"{json.dumps(focused_players, ensure_ascii=False, indent=2)}\n\n"
                 f"PACOTE COMPLETO E IMUTÁVEL DE EVIDÊNCIAS DA PARTIDA (JSON):\n"
                 f"{json.dumps(evidence_package, ensure_ascii=False, indent=2)}\n\n"
-                f"Redija o relatório técnico em Markdown respondendo prioritariamente à pergunta acima e mantendo 100% de fidelidade numérica ao JSON."
+                f"Responda no FORMATO OBRIGATÓRIO, direto ao ponto, com 100% de fidelidade numérica e nominal ao JSON."
             )
 
             response = client.models.generate_content(
@@ -109,18 +119,23 @@ REGRAS OBRIGATÓRIAS DE ALINHAMENTO SEMÂNTICO E ANTI-ALUCINAÇÃO:
                 llm_text, evidence_package
             )
 
-            if not audit["is_grounded"] and len(audit["unverified_decimals"]) > 2:
+            if not audit["is_grounded"]:
+                # Bloqueio rígido: qualquer número ou nome não verificado derruba o texto da IA
+                fallback_audit = NumericHallucinationGuard.audit_text_numbers(
+                    deterministic_md, evidence_package
+                )
+                fallback_audit["blocked_llm_audit"] = audit
                 return {
                     "engine_used": "LOCAL_DETERMINISTIC_FALLBACK_AFTER_AUDIT_BLOCK",
                     "report_markdown": deterministic_md,
-                    "hallucination_audit": NumericHallucinationGuard.audit_text_numbers(
-                        deterministic_md, evidence_package
-                    ),
+                    "hallucination_audit": fallback_audit,
                 }
 
             return {
                 "engine_used": f"GEMINI_API ({self.model_name})",
-                "report_markdown": llm_text,
+                "report_markdown": TacticalReportBuilder.prepend_simulation_badge(
+                    llm_text, bool(meta.get("is_simulation_data", False))
+                ),
                 "hallucination_audit": audit,
             }
 
@@ -133,3 +148,84 @@ REGRAS OBRIGATÓRIAS DE ALINHAMENTO SEMÂNTICO E ANTI-ALUCINAÇÃO:
                 "report_markdown": deterministic_md,
                 "hallucination_audit": audit,
             }
+
+    # ------------------------------------------------------------------
+    # Pontos Fortes e Fracos (página estilo FM Data Hub)
+    # ------------------------------------------------------------------
+    def interpret_strengths_weaknesses(
+        self,
+        analysis: Dict[str, Any],
+        is_simulation: bool = False,
+        prefer_llm: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Gera a interpretação textual da comparação contextual. Usa o Gemini quando
+        disponível, audita números e nomes com o guardião e recua para o texto
+        determinístico se a auditoria reprovar.
+        """
+        from src.metrics.strengths_weaknesses import StrengthsWeaknessesEngine
+
+        deterministic_md = StrengthsWeaknessesEngine.build_interpretation_markdown(
+            analysis, is_simulation=is_simulation
+        )
+        evidence = {
+            "metadata": {
+                "match_player_roster": [analysis.get("entity", "")]
+                if analysis.get("mode") == "player"
+                else [],
+                "target_team": analysis.get("team_name", ""),
+                "opponent_team": "",
+                "is_simulation_data": bool(is_simulation),
+                "user_query": "",
+            },
+            "analysis": analysis,
+        }
+        local = {
+            "engine_used": "LOCAL_DETERMINISTIC_ENGINE",
+            "report_markdown": deterministic_md,
+            "hallucination_audit": NumericHallucinationGuard.audit_text_numbers(
+                deterministic_md, evidence
+            ),
+        }
+        if not prefer_llm or not self.api_key:
+            return local
+
+        try:
+            from google import genai
+            from google.genai import types
+
+            prompt = (
+                "Interprete a comparação abaixo entre o desempenho observado e a referência "
+                "de elite da mesma função (percentil 100 = melhor da base). Formato: "
+                "'## ✅ Pontos fortes' (até 4 tópicos), '## ⚠️ Pontos fracos' (até 4 tópicos), "
+                "'## 📌 Resumo executivo' (2 frases simples). Cada tópico cita o valor, a mediana "
+                "da referência e o percentil EXATAMENTE como no JSON. Não cite nenhum outro "
+                "atleta, número ou fato.\n\n"
+                f"{json.dumps(analysis, ensure_ascii=False, indent=1)}"
+            )
+            client = genai.Client(api_key=self.api_key)
+            response = client.models.generate_content(
+                model=self.model_name,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.SYSTEM_INSTRUCTION, temperature=0.1
+                ),
+            )
+            text = response.text if response and response.text else ""
+            if not text.strip():
+                raise RuntimeError("Resposta vazia da API generativa.")
+            audit = NumericHallucinationGuard.audit_text_numbers(text, evidence)
+            if not audit["is_grounded"]:
+                local["engine_used"] = "LOCAL_DETERMINISTIC_FALLBACK_AFTER_AUDIT_BLOCK"
+                local["hallucination_audit"]["blocked_llm_audit"] = audit
+                return local
+            return {
+                "engine_used": f"GEMINI_API ({self.model_name})",
+                "report_markdown": TacticalReportBuilder.prepend_simulation_badge(
+                    text, is_simulation
+                ),
+                "hallucination_audit": audit,
+            }
+        except Exception as err:
+            local["engine_used"] = f"LOCAL_DETERMINISTIC_FALLBACK ({type(err).__name__})"
+            return local

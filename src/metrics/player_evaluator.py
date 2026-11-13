@@ -257,7 +257,7 @@ class PlayerTacticalEvaluator:
             # Critério 1: Degradação técnica severa após o minuto 60
             if p["accuracy_drop_after_60_pct"] >= 12.0 and p["turnovers_after_60"] >= 2:
                 reasons.append(
-                    f"Queda de {p['accuracy_drop_after_60_pct']}% na precisão de passe após o minuto 60 "
+                    f"Queda de {p['accuracy_drop_after_60_pct']} pp na precisão de passe após o minuto 60 "
                     f"(de {p['pass_acc_0_60_pct']}% para {p['pass_acc_60_plus_pct']}%), acompanhada de "
                     f"{p['turnovers_after_60']} perdas de posse no terço final do jogo."
                 )

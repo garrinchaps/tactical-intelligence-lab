@@ -16,10 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 import pandas as pd
 
-from google import genai
-from google.genai import types
-
-from src.ingestion.brazil_and_multi_source import PlayerNameNormalizer
+from src.ingestion.brazil_and_multi_source import (
+    PlayerNameNormalizer,
+    SIMULATED_DATA_BADGE,
+    SIMULATED_DATA_NOTICE,
+)
 from src.metrics.tactical_metrics import TacticalMetricsEngine
 from src.networks.pass_network import PassingNetworkAnalyzer
 from src.metrics.xt_model import ExpectedThreatModel
@@ -425,75 +426,309 @@ class BenchmarkDiscrepancyEngine:
 
 class NumericHallucinationGuard:
     """
-    Extrai recursivamente todos os números válidos presentes no dicionário de evidências
-    e audita se um relatório textual contém percentuais ou decimais inventados.
+    Auditor de fidelidade factual para textos gerados (IA ou motor local).
+
+    Confere três classes de afirmação contra o pacote de evidências:
+    1. Decimais e percentuais (ex.: 88,89% / +2.153 xT).
+    2. Inteiros: contagens críticas (passes, finalizações, perdas, ações, minutos...)
+       precisam existir nas evidências; inteiros soltos também, exceto constantes
+       metodológicas conhecidas (Zona 14, 5 corredores, minuto 60, 90 minutos...).
+    3. Nomes de atletas: sequências com cara de nome próprio que não pertencem ao
+       elenco da partida (metadata.match_player_roster) nem a uma equipe são sinalizadas.
     """
 
+    # Constantes metodológicas aceitas fora de contexto de contagem
+    STRUCTURAL_CONSTANTS: Set[str] = {
+        "0", "1", "2", "3", "4", "5", "10", "10.5", "10,5", "14", "16", "18",
+        "20", "40", "45", "60", "80", "90", "100", "105", "120",
+    }
+    # Minutos de referência aceitos mesmo em contexto de "minuto"
+    MINUTE_CONSTANTS: Set[str] = {"15", "30", "45", "60", "70", "75", "80", "90", "120"}
+
+    COUNT_NOUNS = (
+        r"passes?|finaliza(?:ç|c)(?:ão|ao|ões|oes)|chutes?|gols?|perdas?|desarmes?|"
+        r"intercepta(?:ç|c)(?:ão|ao|ões|oes)|recupera(?:ç|c)(?:ão|ao|ões|oes)|"
+        r"a(?:ç|c)(?:ão|ao|ões|oes)|jogadas?|cruzamentos?|duelos?|faltas?|escanteios?|"
+        r"avan(?:ç|c)os?|entradas?|invas(?:ão|ao|ões|oes)|bolas?|toques?|dribles?|"
+        r"conduc(?:ç|c)?(?:ão|ao|ões|oes)|condu(?:ç|c)(?:ão|ao|ões|oes)|posses?|"
+        r"cadeias?|eventos?|turnovers?|minutos?|min\b|sequ(?:ê|e)ncias?"
+    )
+
+    NAME_STOPWORDS: Set[str] = {
+        "Plano", "Alternativa", "Fase", "Terço", "Terco", "Corredor", "Zona", "Meio",
+        "Espaço", "Espaco", "Eixo", "Lado", "Grande", "Área", "Area", "Ofensivo",
+        "Defensivo", "Médio", "Medio", "Central", "Esquerdo", "Direito", "Esquerda",
+        "Direita", "Resumo", "Executivo", "Resposta", "Tática", "Tatica", "Direta",
+        "Conclusão", "Conclusao", "Simples", "Decisão", "Decisao", "Final", "Relatório",
+        "Relatorio", "Equipe", "Partida", "Adversário", "Adversario", "Nota", "Dados",
+        "Simulados", "Modelagem", "Probabilística", "Probabilistica", "Expected", "Threat",
+        "Goals", "Rede", "Neural", "Machine", "Learning", "Inteligência", "Inteligencia",
+        "Artificial", "Comissão", "Comissao", "Técnica", "Tecnica", "Organização",
+        "Organizacao", "Transição", "Transicao", "Bola", "Parada", "Pontos", "Fortes",
+        "Fracos", "Grau", "Evidência", "Evidencia", "Forte", "Moderada", "Limitada",
+        "Como", "Quem", "Onde", "Quando", "Perigo", "Real", "Diagnóstico", "Diagnostico",
+        "Linha", "Bloco", "Alto", "Baixo", "Pressão", "Pressao", "Construção",
+        "Construcao", "Saída", "Saida", "Primeiro", "Segundo", "Tempo", "Campo",
+        "Gemini", "Google", "StatsBomb", "Open", "Data", "Tactical", "Intelligence",
+        "Lab", "Laboratory", "Série", "Serie", "Brasileirão", "Brasileirao", "Copa",
+        "Mundo", "Liga", "Campeonato", "Brasileiro", "Recomendação", "Recomendacao",
+        "Substituição", "Substituicao", "Atenção", "Atencao", "Alerta", "Risco",
+    }
+    NAME_PARTICLES: Set[str] = {"de", "da", "do", "dos", "das", "di", "van", "von", "der", "e"}
+
+    # ------------------------------------------------------------------ números
     @classmethod
     def extract_allowed_numbers(cls, data: Any) -> Set[str]:
+        """Todos os números presentes nas evidências, em várias precisões, sem constantes."""
         allowed: Set[str] = set()
+
+        def _add(val: float) -> None:
+            allowed.add(f"{val:.0f}")
+            if float(val).is_integer():
+                allowed.add(str(int(val)))
+            for d in (1, 2, 3, 4):
+                txt = f"{val:.{d}f}"
+                allowed.add(txt)
+                allowed.add(txt.replace(".", ","))
 
         def _walk(obj: Any) -> None:
             if isinstance(obj, dict):
                 for v in obj.values():
                     _walk(v)
-            elif isinstance(obj, list):
+            elif isinstance(obj, (list, tuple)):
                 for item in obj:
                     _walk(item)
-            elif isinstance(obj, (int, float)) and not isinstance(obj, bool):
-                val = float(obj)
-                allowed.add(f"{val:.0f}")
-                allowed.add(f"{val:.1f}")
-                allowed.add(f"{val:.2f}")
-                allowed.add(f"{val:.3f}")
-                allowed.add(f"{val:.4f}")
-                allowed.add(f"{val:.1f}".replace(".", ","))
-                allowed.add(f"{val:.2f}".replace(".", ","))
-                allowed.add(f"{val:.3f}".replace(".", ","))
-                allowed.add(f"{val:.4f}".replace(".", ","))
+            elif isinstance(obj, bool):
+                return
+            elif isinstance(obj, (int, float)):
+                try:
+                    val = float(obj)
+                except (TypeError, ValueError):
+                    return
+                if val != val:  # NaN
+                    return
+                _add(val)
+                _add(abs(val))
+            elif isinstance(obj, str):
+                # números embutidos em textos das evidências (ex.: diagnósticos prontos)
+                for tok in re.findall(r"\d+(?:[.,]\d+)?", obj):
+                    try:
+                        _add(float(tok.replace(",", ".")))
+                    except ValueError:
+                        continue
 
         _walk(data)
-        structural_constants = {
-            "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "10.5", "10,5",
-            "11", "12", "13", "14", "15", "16", "18", "20", "22", "25", "30",
-            "45", "50", "60", "80", "90", "100", "120",
-        }
-        return allowed.union(structural_constants)
+        return allowed
+
+    @staticmethod
+    def _strip_echoed_context(text: str, evidence_bundle: Dict[str, Any]) -> str:
+        """Remove a pergunta do usuário (ecoada no relatório) e linhas de numeração de seção."""
+        meta = evidence_bundle.get("metadata", {}) if isinstance(evidence_bundle, dict) else {}
+        user_q = str(meta.get("user_query", "") or "")
+        if user_q.strip():
+            text = text.replace(user_q, " ")
+        # "## 3. TÍTULO", "1. **Plano A**" -> remove o marcador de lista/seção
+        text = re.sub(
+            r"(?m)^(\s*#+\s*[^\w\s]*\s*)(?:\d{1,2}\s*(?:,|&|e|-)\s*)*\d{1,2}[.)]", r"\1", text
+        )
+        text = re.sub(r"(?m)^\s*\d{1,2}[.)]\s", " ", text)
+        # anos (datas) não são métricas
+        text = re.sub(r"\b(?:19|20)\d{2}-\d{2}-\d{2}\b", " ", text)
+        return text
 
     @classmethod
     def audit_text_numbers(
         cls, text: str, evidence_bundle: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Auditoria completa. Mantém as chaves históricas (`is_grounded`,
+        `verified_decimals_count`, `unverified_decimals`) e acrescenta inteiros e nomes.
+        """
         allowed = cls.extract_allowed_numbers(evidence_bundle)
-        decimal_matches = re.findall(r"\b\d+[.,]\d+\b", text)
+        clean = cls._strip_echoed_context(text or "", evidence_bundle)
 
-        unverified: List[str] = []
-        verified_count = 0
-
-        for num_str in decimal_matches:
-            norm_dot = num_str.replace(",", ".")
+        # 1. Decimais
+        unverified_dec: List[str] = []
+        verified_dec = 0
+        for num_str in re.findall(r"(?<![\w.,])\d+[.,]\d+(?![\w])", clean):
+            norm = num_str.replace(",", ".")
             try:
-                val = float(norm_dot)
-                candidates = {
-                    num_str,
-                    norm_dot,
-                    f"{val:.1f}",
-                    f"{val:.2f}",
-                    f"{val:.3f}",
-                    f"{val:.4f}",
-                }
-                if candidates.intersection(allowed):
-                    verified_count += 1
-                else:
-                    unverified.append(num_str)
+                val = float(norm)
             except ValueError:
                 continue
+            candidates = {num_str, norm} | {f"{val:.{d}f}" for d in (1, 2, 3, 4)}
+            if candidates & (allowed | cls.STRUCTURAL_CONSTANTS):
+                verified_dec += 1
+            else:
+                unverified_dec.append(num_str)
+
+        # 2. Inteiros (sem tocar nas partes de decimais)
+        no_decimals = re.sub(r"\d+[.,]\d+", " ", clean)
+        unverified_int: List[str] = []
+        verified_int = 0
+        count_ctx = re.compile(
+            rf"(?<![\w.,])(\d+)(?![\w.,]\d)\s*(?:%\s*)?(?:\*\*)?\s*(?:[\wÀ-ÿ]+\s+){{0,2}}?(?:{cls.COUNT_NOUNS})",
+            flags=re.IGNORECASE,
+        )
+        minute_ctx = re.compile(
+            r"(?:minuto|min\.?)\s*(\d+)|(?<![\w.,])(\d+)\s*(?:'|’|min\b|minutos?)",
+            flags=re.IGNORECASE,
+        )
+        critical_spans: Set[Tuple[int, int]] = set()
+
+        for m in minute_ctx.finditer(no_decimals):
+            num = m.group(1) or m.group(2)
+            span = m.span(1) if m.group(1) else m.span(2)
+            critical_spans.add(span)
+            if num in allowed or num in cls.MINUTE_CONSTANTS:
+                verified_int += 1
+            else:
+                unverified_int.append(f"{num} (minuto)")
+
+        for m in count_ctx.finditer(no_decimals):
+            span = m.span(1)
+            if span in critical_spans:
+                continue
+            critical_spans.add(span)
+            num = m.group(1)
+            if num in allowed:
+                verified_int += 1
+            else:
+                unverified_int.append(f"{num} (contagem)")
+
+        for m in re.finditer(r"(?<![\w.,#])(\d+)(?![\w.,]\d|\w)", no_decimals):
+            if m.span(1) in critical_spans:
+                continue
+            num = m.group(1)
+            if num in allowed or num in cls.STRUCTURAL_CONSTANTS:
+                verified_int += 1
+            else:
+                unverified_int.append(num)
+
+        # 3. Nomes de atletas
+        unverified_names = cls.audit_player_names(text or "", evidence_bundle)
 
         return {
-            "is_grounded": len(unverified) == 0,
-            "verified_decimals_count": verified_count,
-            "unverified_decimals": unverified,
+            "is_grounded": not (unverified_dec or unverified_int or unverified_names),
+            "verified_decimals_count": verified_dec,
+            "unverified_decimals": unverified_dec,
+            "verified_integers_count": verified_int,
+            "unverified_integers": unverified_int,
+            "unverified_player_names": unverified_names,
         }
+
+    # -------------------------------------------------------------------- nomes
+    @staticmethod
+    def _norm(txt: str) -> str:
+        txt = unicodedata.normalize("NFKD", str(txt))
+        txt = "".join(c for c in txt if not unicodedata.combining(c))
+        return re.sub(r"\s+", " ", txt).strip().lower()
+
+    @classmethod
+    def _collect_strings(cls, data: Any, out: List[str]) -> None:
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if k in ("user_query",):
+                    continue
+                cls._collect_strings(v, out)
+        elif isinstance(data, (list, tuple)):
+            for v in data:
+                cls._collect_strings(v, out)
+        elif isinstance(data, str):
+            out.append(data)
+
+    @classmethod
+    def audit_player_names(
+        cls, text: str, evidence_bundle: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Sinaliza nomes próprios (2 a 4 palavras capitalizadas, ou termo em **negrito**)
+        que não pertencem ao elenco da partida, às equipes ou ao vocabulário das evidências.
+        """
+        meta = evidence_bundle.get("metadata", {}) if isinstance(evidence_bundle, dict) else {}
+        roster = [str(p) for p in meta.get("match_player_roster", []) if p]
+        teams = [str(meta.get("target_team", "")), str(meta.get("opponent_team", ""))]
+
+        known_full = {cls._norm(n) for n in roster + teams if n}
+        known_tokens: Set[str] = set()
+        for n in roster + teams:
+            for tok in re.split(r"[\s\-]+", cls._norm(n)):
+                if len(tok) > 1:
+                    known_tokens.add(tok)
+        # nomes comuns ("Messi" para "Lionel Andrés Messi Cuccittini")
+        try:
+            for n in roster:
+                common = PlayerNameNormalizer.to_common_name(n)
+                if common:
+                    known_full.add(cls._norm(common))
+                    known_tokens.update(t for t in cls._norm(common).split() if len(t) > 1)
+        except Exception:
+            pass
+
+        evidence_strings: List[str] = []
+        cls._collect_strings(evidence_bundle, evidence_strings)
+        vocab = {
+            cls._norm(w)
+            for s_ in evidence_strings
+            for w in re.findall(r"[A-Za-zÀ-ÿ]+", s_)
+        }
+        vocab |= {cls._norm(w) for w in cls.NAME_STOPWORDS}
+        # vocabulário do próprio template de relatório (títulos de seção, termos táticos)
+        try:
+            template_md = TacticalReportBuilder.build_deterministic_markdown_report(
+                evidence_bundle
+            )
+            vocab |= {cls._norm(w) for w in re.findall(r"[A-Za-zÀ-ÿ]+", template_md)}
+        except Exception:
+            pass
+        # palavra que aparece minúscula no próprio texto é palavra comum, não nome
+        vocab |= {
+            cls._norm(w) for w in re.findall(r"\b[a-zà-ÿ][a-zà-ÿ]+\b", text)
+        }
+        vocab -= known_tokens
+        def _is_known(candidate: str) -> bool:
+            c = cls._norm(candidate)
+            if c in known_full:
+                return True
+            toks = [t for t in re.split(r"[\s\-]+", c) if t and t not in cls.NAME_PARTICLES]
+            if not toks:
+                return True
+            if any(c in k or k in c for k in known_full if len(k) > 3):
+                return True
+            specific = [t for t in toks if t not in vocab]
+            # expressão genérica (títulos, termos táticos)
+            if not specific:
+                return True
+            # tokens específicos que pertencem a atletas do elenco
+            return all(t in known_tokens for t in specific)
+
+        cap = r"[A-ZÀ-Ý][a-zà-ÿ'’]+(?:-[A-ZÀ-Ý][a-zà-ÿ'’]+)?"
+        multi = re.compile(rf"\b{cap}(?:\s+(?:(?:de|da|do|dos|das|di|van|von|der)\s+)?{cap}){{1,3}}\b")
+        bold_single = re.compile(rf"\*\*({cap})\*\*")
+
+        flagged: List[str] = []
+        seen: Set[str] = set()
+        for rx in (multi, bold_single):
+            for m in rx.finditer(text):
+                cand = m.group(1) if rx is bold_single else m.group(0)
+                # ignora a primeira palavra de frase quando ela é genérica
+                parts = cand.split()
+                while parts and cls._norm(parts[0]) in vocab:
+                    parts = parts[1:]
+                if rx is multi and len([p for p in parts if p.lower() not in cls.NAME_PARTICLES]) < 2:
+                    continue
+                if not parts:
+                    continue
+                cand = " ".join(parts)
+                key = cls._norm(cand)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if _is_known(cand):
+                    continue
+                # nomes citados pelo próprio usuário que não estão no jogo também são alerta
+                flagged.append(cand)
+        return flagged
 
 
 class TacticalReportBuilder:
@@ -556,7 +791,15 @@ class TacticalReportBuilder:
             if len(unpress_passes) > 0
             else 0.0
         )
+        # Diferença entre duas taxas = pontos percentuais (pp), não variação percentual
         pressure_drop_pct = round(unpress_acc_pct - press_acc_pct, 2)
+        n_press, n_unpress = int(len(press_passes)), int(len(unpress_passes))
+        if n_press >= 30 and abs(pressure_drop_pct) >= 5.0:
+            pressure_grade = "FORTE"
+        elif n_press >= 15 and abs(pressure_drop_pct) >= 5.0:
+            pressure_grade = "MODERADA"
+        else:
+            pressure_grade = "LIMITADA"
 
         team_passes_to_player = df_events[
             (df_events["team_name"] == team_name)
@@ -614,6 +857,10 @@ class TacticalReportBuilder:
             "unpressured_pass_acc_pct": unpress_acc_pct,
             "pressured_pass_acc_pct": press_acc_pct,
             "accuracy_drop_under_pressure_pct": pressure_drop_pct,
+            "accuracy_drop_under_pressure_pp": pressure_drop_pct,
+            "pressured_passes_n": n_press,
+            "unpressured_passes_n": n_unpress,
+            "pressure_evidence_grade": pressure_grade,
             "primary_feeder_teammate": top_feeder,
             "passes_received_from_top_feeder": top_feeder_count,
             "primary_target_teammate": top_target,
@@ -726,6 +973,7 @@ class TacticalReportBuilder:
                 "target_team": target_team,
                 "opponent_team": opponent_name,
                 "is_simulation_data": bool(is_simulation),
+                "match_player_roster": sorted(all_players_in_match),
                 "total_events_analyzed": int(len(df_events)),
                 "team_events_analyzed": int(
                     (df_events["team_name"] == target_team).sum()
@@ -771,11 +1019,16 @@ class TacticalReportBuilder:
         match_id: int = 0,
         classifier: Optional[PossessionDangerClassifier] = None,
         is_simulation: bool = False,
+        prefer_llm: bool = True,
     ) -> str:
         """
-        Une o motor de evidências matemáticas à IA Generativa Gemini 2.5 Flash,
-        validando com o guardião anti-alucinação e fazendo fallback determinístico se necessário.
+        Monta o pacote de evidências e delega ao GenerativeTacticalAnalyst, que chama o
+        Gemini (import sob demanda), audita a resposta com o NumericHallucinationGuard
+        e recua para o relatório determinístico local quando a auditoria reprova
+        ou quando não há chave/internet.
         """
+        from src.intelligence.llm_analyst import GenerativeTacticalAnalyst
+
         evidence = cls.assemble_evidence_package(
             df_events=df_events,
             df_chains=df_chains,
@@ -785,49 +1038,10 @@ class TacticalReportBuilder:
             classifier=classifier,
             is_simulation=is_simulation,
         )
-
-        intencao_detectada = evidence["metadata"]["detected_focus"]
-        confianca = evidence["metadata"]["nlp_confidence_pct"]
-        print(f"🧠 [Rede Neural MLP] Intenção detectada: {intencao_detectada} (Confiança: {confianca}%)")
-
-        api_key = os.getenv("GEMINI_API_KEY")
-        if api_key:
-            try:
-                client = genai.Client(api_key=api_key)
-                prompt = f"""
-                Você é o Analista Tático Chefe do Tactical Intelligence Lab. 
-                O usuário fez o seguinte comando/pergunta: "{user_query}"
-                A nossa rede neural classificou o foco da intenção como: "{intencao_detectada}".
-                
-                Abaixo estão todas as evidências matemáticas, estatísticas e espaciais reais extraídas da partida pelos nossos algoritmos:
-                {evidence}
-                
-                Instruções rígidas:
-                - Redija um relatório tático executivo de alto nível técnico respondendo diretamente ao usuário.
-                - Utilize exclusivamente os números, percentuais e dados contidos no dicionário de evidências.
-                - É terminantemente proibido inventar estatísticas ou números que não constem nas evidências.
-                """
-                
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash',
-                    contents=prompt,
-                    config=types.GenerateContentConfig(temperature=0.2)
-                )
-                
-                report_text = response.text
-                auditoria = NumericHallucinationGuard.audit_text_numbers(report_text, evidence)
-                if auditoria["is_grounded"]:
-                    print("✅ [Guardião Anti-Alucinação] Resposta 100% fundamentada nos dados reais!")
-                else:
-                    print(f"⚠️ [Guardião Anti-Alucinação] Alerta de números não verificados: {auditoria['unverified_decimals']}")
-                
-                return report_text
-
-            except Exception as e:
-                print(f"⚠️ Erro ao chamar a API do Gemini ({e}). Realizando fallback para o gerador determinístico.")
-
-        print("⚙️ [Modo Determinístico] Gerando relatório estruturado padrão via código local.")
-        return cls.build_deterministic_markdown_report(evidence)
+        result = GenerativeTacticalAnalyst().generate_tactical_report(
+            evidence, prefer_llm=prefer_llm
+        )
+        return str(result.get("report_markdown", ""))
 
     @classmethod
     def build_deterministic_markdown_report(
@@ -873,13 +1087,13 @@ class TacticalReportBuilder:
 
         lines: List[str] = []
 
+        if is_sim:
+            lines.append(f"> **{SIMULATED_DATA_BADGE}**  ")
+            lines.append(f"> {SIMULATED_DATA_NOTICE}")
+            lines.append("")
         lines.append(
             f"# RELATÓRIO DE INTELIGÊNCIA TÁTICA E PRESCRIÇÃO ESTRATÉGICA — {team.upper()}"
         )
-        if is_sim:
-            lines.append(
-                "> ⚠️ **Nota de Base de Dados:** Partida processada sob modelo estruturado do confronto para demonstração laboratorial."
-            )
         lines.append(
             f"**Partida ID:** `{meta['match_id']}` | **Equipe Analisada:** {team} | **Adversário:** {opp}  "
         )
@@ -901,11 +1115,11 @@ class TacticalReportBuilder:
                     f"### Plano Tático Baseado nos Dados do Jogo para **{p['player_name']}** ({p['team_name']} — {p['position_name']})\n"
                     f"* **Onde ele joga de verdade em campo:** Sua posição média registrada nos eventos é **`({p['avg_x']}, {p['avg_y']})`**, atuando principalmente no **{p['dominant_third']}** pelo **{p['dominant_corridor']}** (participou de **{p['total_actions']} ações** na partida).\n"
                     f"* **Quem faz a bola chegar nele (Como cortar a origem):** O principal abastecedor dele é **{p['primary_feeder_teammate']}**, que entregou **{p['passes_received_from_top_feeder']} passes completos** para **{p['player_name']}**. Quando **{p['player_name']}** domina, seu alvo favorito de passe é **{p['primary_target_teammate']}** (**{p['passes_sent_to_top_target']} passes**).\n"
-                    f"* **Como ele reage sob marcação apertada:** Livre de pressão, ele acerta **{p['unpressured_pass_acc_pct']}%** dos passes; quando recebe combate direto (`under_pressure`), sua precisão vai para **{p['pressured_pass_acc_pct']}%** (diferença de **{p['accuracy_drop_under_pressure_pct']}%**), tendo cometido **{p['turnovers']} perdas de posse**.\n"
+                    f"* **Como ele reage sob marcação apertada:** Livre de pressão, ele acerta **{p['unpressured_pass_acc_pct']}%** dos passes; quando recebe combate direto (`under_pressure`), sua precisão vai para **{p['pressured_pass_acc_pct']}%** (diferença de **{p['accuracy_drop_under_pressure_pct']} pp**; N = **{p['pressured_passes_n']}** passes sob pressão e **{p['unpressured_passes_n']}** sem pressão — evidência **{p['pressure_evidence_grade']}**), tendo cometido **{p['turnovers']} perdas de posse**.\n"
                     f"* **Perigo real que ele gerou no jogo:** Somou **{p['progressive_actions']} avanços progressivos**, **{p['line_breaking_passes']} passes que quebraram linhas**, **{p['zone_14_entries']} bolas na entrada da área (Zona 14)**, **{p['box_entries']} bolas dentro da área**, **+{p['xt_generated']} xT** e **{p['xg']} xG** ({p['shots']} chutes).\n\n"
                     f"**🛠️ O que fazer na prática (Plano A e Plano B):**\n"
                     f"1. **Plano A (Cortar a Linha de Abastecimento):** Posicionar nosso volante/meia do setor fechando a linha de passe entre **{p['primary_feeder_teammate']}** e **{p['player_name']}** no **{p['dominant_corridor']}**, impedindo que a bola chegue limpa nele.\n"
-                    f"2. **Plano B (Encaixe Curto de Costas):** Assim que **{p['player_name']}** receber no **{p['dominant_third']}**, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para **{p['pressured_pass_acc_pct']}%**), vigiando a infiltração de **{p['primary_target_teammate']}**."
+                    f"2. **Plano B (Encaixe Curto de Costas):** Assim que **{p['player_name']}** receber no **{p['dominant_third']}**, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado ({cls._pressure_clause(p)}), vigiando a infiltração de **{p['primary_target_teammate']}**."
                 )
             final_verdict_text = (
                 f"Para responder à pergunta *\"{user_q}\"*, a decisão tática principal é **isolar {focused_dossiers[0]['player_name']} ({focused_dossiers[0]['team_name']}) bloqueando os passes que vêm de {focused_dossiers[0]['primary_feeder_teammate']} no {focused_dossiers[0]['dominant_corridor']}** e pressioná-lo de costas antes que acione **{focused_dossiers[0]['primary_target_teammate']}**."
@@ -1207,14 +1421,42 @@ class TacticalReportBuilder:
             f"* **Conexões Preferenciais:** Recebeu mais bolas de **{d['primary_feeder_teammate']}** (**{d['passes_received_from_top_feeder']} passes**) e procurou principalmente **{d['primary_target_teammate']}** (**{d['passes_sent_to_top_target']} passes**).\n\n"
             f"## 2. EFICIÊNCIA TÉCNICA, CRIAÇÃO E RESISTÊNCIA À PRESSÃO\n"
             f"* **Passes Totais:** **{d['passes_completed']} certos em {d['passes_attempted']} tentados ({d['pass_accuracy_pct']}%)**.\n"
-            f"* **Comportamento sob Pressão:** Livre de marcação acerta **{d['unpressured_pass_acc_pct']}%**; sob pressão direta acerta **{d['pressured_pass_acc_pct']}%** (variação de **{d['accuracy_drop_under_pressure_pct']}%**).\n"
+            f"* **Comportamento sob Pressão:** Livre de marcação acerta **{d['unpressured_pass_acc_pct']}%**; sob pressão direta acerta **{d['pressured_pass_acc_pct']}%** (diferença de **{d['accuracy_drop_under_pressure_pct']} pp**; N = **{d.get('pressured_passes_n', 0)}** passes sob pressão — evidência **{d.get('pressure_evidence_grade', 'LIMITADA')}**).\n"
             f"* **Rendimento 1º Tempo vs Final do Jogo (>60 min):** Precisão de **{early_acc}%** (0–60 min) vs **{late_acc}%** (pós-60 min).\n"
             f"* **Quebra de Linhas e Ameaça Criada:** **{d['progressive_actions']} avanços progressivos**, **{d['line_breaking_passes']} passes quebra-linhas**, **{d['zone_14_entries']} entradas na Zona 14**, **{d['box_entries']} bolas na grande área**, **+{d['xt_generated']} xT** e **{d['xg']} xG** em **{d['shots']} finalizações**.\n"
             f"* **Defesa e Segurança de Posse:** Recuperou **{d['ball_recoveries']} bolas** e sofreu **{d['turnovers']} perdas de posse (turnovers)**.\n\n"
             f"---\n"
             f"## 🏁 DECISÃO FINAL SOBRE {d['player_name'].upper()}\n"
             f"* **Se for do seu time (Como potencializar):** Fazer a bola chegar limpa nele através de **{d['primary_feeder_teammate']}** no **{d['dominant_corridor']}**, aproximando **{d['primary_target_teammate']}** para tabelar.\n"
-            f"* **Se for adversário (Como anular):** Fechar a linha de passe que sai de **{d['primary_feeder_teammate']}** e dar bote imediato assim que **{d['player_name']}** receber de costas (forçando sua precisão a cair para **{d['pressured_pass_acc_pct']}%**)."
+            f"* **Se for adversário (Como anular):** Fechar a linha de passe que sai de **{d['primary_feeder_teammate']}** e dar bote imediato assim que **{d['player_name']}** receber de costas ({TacticalReportBuilder._pressure_clause(d)})."
+        )
+
+    @staticmethod
+    def _pressure_clause(p: Dict[str, Any]) -> str:
+        """Frase honesta sobre o efeito da pressão, respeitando sinal e tamanho da amostra."""
+        drop = float(p.get("accuracy_drop_under_pressure_pct", 0.0) or 0.0)
+        acc = p.get("pressured_pass_acc_pct", 0.0)
+        grade = p.get("pressure_evidence_grade", "LIMITADA")
+        n = p.get("pressured_passes_n", 0)
+        if drop > 0 and grade != "LIMITADA":
+            return f"onde sua precisão cai para **{acc}%**, queda de **{drop} pp**"
+        if drop > 0:
+            return (
+                f"a precisão sob pressão foi **{acc}%** (queda de **{drop} pp** com N = **{n}**, "
+                "amostra insuficiente: confirmar no vídeo antes de usar como gatilho)"
+            )
+        return (
+            f"atenção: sob pressão ele manteve **{acc}%** de precisão, então o bote sozinho "
+            "não reduz a eficiência dele; priorize cortar o abastecimento"
+        )
+
+    @staticmethod
+    def prepend_simulation_badge(markdown_text: str, is_simulation: bool) -> str:
+        """Coloca o selo de dados simulados no topo de qualquer relatório (idempotente)."""
+        if not is_simulation or SIMULATED_DATA_BADGE in markdown_text[:400]:
+            return markdown_text
+        return (
+            f"> **{SIMULATED_DATA_BADGE}**  \n> {SIMULATED_DATA_NOTICE}\n\n" + markdown_text
         )
 
     @staticmethod
@@ -1240,31 +1482,6 @@ class TacticalReportBuilder:
         body_html = body_html.replace("\n", "<br>\n")
 
         html_doc = f"""<!DOCTYPE html>
-
-        @classmethod
-    def generate_ai_report(
-        cls,
-        df_events: pd.DataFrame,
-        df_chains: pd.DataFrame,
-        target_team: str,
-        user_query: str = "",
-        match_id: int = 0,
-        is_simulation: bool = False,
-        prefer_llm: bool = True,
-    ) -> str:
-        from src.intelligence.llm_analyst import GenerativeTacticalAnalyst
-
-        evidence_pkg = cls.assemble_evidence_package(
-            df_events=df_events,
-            df_chains=df_chains,
-            target_team=target_team,
-            match_id=match_id,
-            user_query=user_query,
-            is_simulation=is_simulation,
-        )
-        analyst = GenerativeTacticalAnalyst()
-        res = analyst.generate_tactical_report(evidence_pkg, prefer_llm=prefer_llm)
-        return str(res.get("report_markdown", ""))
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">

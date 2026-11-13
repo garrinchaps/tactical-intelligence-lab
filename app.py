@@ -16,7 +16,12 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from src.ingestion.statsbomb_loader import StatsBombDataLoader
-from src.ingestion.brazil_and_multi_source import PlayerNameNormalizer
+from src.ingestion.brazil_and_multi_source import (
+    BrasileiraoAndMultiSourceProvider,
+    PlayerNameNormalizer,
+    SIMULATED_DATA_BADGE,
+    SIMULATED_DATA_NOTICE,
+)
 from src.preprocessing.event_cleaner import EventPreprocessor
 from src.metrics.tactical_metrics import TacticalMetricsEngine
 from src.networks.pass_network import PassingNetworkAnalyzer
@@ -33,6 +38,7 @@ from src.reports.report_builder import (
 )
 from src.intelligence.llm_analyst import GenerativeTacticalAnalyst
 from src.visualization.pitch_plots import TacticalVisualizer
+from src.visualization.strengths_page import render_strengths_weaknesses_page
 from src.ingestion.video_homography_demo import PitchHomographyProjector
 
 st.set_page_config(
@@ -277,6 +283,24 @@ def render_sofascore_stat_pill(
 # =============================================================================
 # 2. GERENCIAMENTO DE DADOS E CACHE COM TRATAMENTO DE EXCEÇÕES
 # =============================================================================
+def render_simulation_warning_banner() -> None:
+    """Selo chamativo exibido acima de todas as abas quando a partida é sintética."""
+    st.markdown(
+        f"""
+        <div style="background:#3B1D00; border:2px solid #F59E0B; border-radius:10px;
+                    padding:12px 18px; margin:6px 0 14px 0;">
+            <div style="color:#FBBF24; font-weight:900; font-size:1.05rem; letter-spacing:0.5px;">
+                {SIMULATED_DATA_BADGE}
+            </div>
+            <div style="color:#FDE68A; font-size:0.88rem; margin-top:4px;">
+                {SIMULATED_DATA_NOTICE}
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def get_loader() -> StatsBombDataLoader:
     """Instancia o loader garantindo sincronização imediata com SQLite."""
     return StatsBombDataLoader()
@@ -453,7 +477,12 @@ def main() -> None:
                     if mid_val in seen_m:
                         continue
                     seen_m.add(mid_val)
-                    lbl = f"{c.get('competition_name', 'Liga')} — {c.get('home_team_name', 'Home')} vs {c.get('away_team_name', 'Away')} [ID {mid_val}]"
+                    sim_tag = (
+                        "[SIMULADO] "
+                        if BrasileiraoAndMultiSourceProvider.is_simulated_match(mid_val)
+                        else ""
+                    )
+                    lbl = f"{sim_tag}{c.get('competition_name', 'Liga')} — {c.get('home_team_name', 'Home')} vs {c.get('away_team_name', 'Away')} [ID {mid_val}]"
                     safe_catalog_map[lbl] = str(mid_val)
 
                 chosen_label = st.selectbox(
@@ -527,7 +556,7 @@ def main() -> None:
             candidates = resolution.get("candidate_matches", [])
             if len(candidates) > 1:
                 cand_options = {
-                    f"{c.get('competition_name', 'Liga')} — {c['home_team_name']} vs {c['away_team_name']} [ID {c['match_id']}]": int(
+                    f"{'[SIMULADO] ' if BrasileiraoAndMultiSourceProvider.is_simulated_match(c['match_id']) else ''}{c.get('competition_name', 'Liga')} — {c['home_team_name']} vs {c['away_team_name']} [ID {c['match_id']}]": int(
                         c["match_id"]
                     )
                     for c in candidates
@@ -540,7 +569,10 @@ def main() -> None:
             else:
                 current_match_id = int(resolution["match_id"])
 
-            is_sim_mode = False
+            # Partidas do catálogo do Brasileirão são geradas por modelo probabilístico
+            is_sim_mode = bool(
+                resolution.get("is_simulation", False)
+            ) or BrasileiraoAndMultiSourceProvider.is_simulated_match(current_match_id)
             try:
                 with st.spinner("Processando malha geométrica e cadeias de posse..."):
                     df_events, df_chains = load_and_enrich_real_match(current_match_id)
@@ -583,6 +615,9 @@ def main() -> None:
     all_match_players = (
         df_events["player_name"].dropna().astype(str).unique().tolist()
     )
+
+    if is_sim_mode:
+        render_simulation_warning_banner()
 
     # =========================================================================
     # BARRA LATERAL: SELETOR DE EQUIPE E TELEMETRIA DO SISTEMA
@@ -645,7 +680,7 @@ def main() -> None:
             <div class="metric-label">Telemetria SQLite</div>
             <div style="font-size:0.88rem; color:#E2E8F0; line-height:1.7;">
                 • <b>Match ID:</b> <code>{current_match_id}</code><br>
-                • <b>Modo:</b> <code>{'Simulação Lab' if is_sim_mode else 'Oficial Auditado'}</code><br>
+                • <b>Modo:</b> <code>{'DADOS SIMULADOS' if is_sim_mode else 'StatsBomb Open Data'}</code><br>
                 • <b>Eventos Processados:</b> <code>{len(df_events)}</code><br>
                 • <b>Cadeias de Posse:</b> <code>{len(df_chains)}</code><br>
                 • <b>Atletas Mapeados:</b> <code>{len(all_match_players)}</code>
@@ -655,17 +690,24 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
+    st.sidebar.caption(
+        "Dados de eventos reais: **StatsBomb Open Data** "
+        "([github.com/statsbomb/open-data](https://github.com/statsbomb/open-data)). "
+        "Partidas marcadas como SIMULADAS são geradas por modelo probabilístico."
+    )
+
     # =========================================================================
-    # ESTRUTURAÇÃO DEFINITIVA NAS 6 ABAS PROFISSIONAIS
+    # ESTRUTURA EM 7 PÁGINAS (ABAS) PROFISSIONAIS
     # =========================================================================
     tabs = st.tabs(
         [
-            "📊 1. Match Center & Momento",
-            "🕸️ 2. Data Hub, Grafos & xT",
+            "📊 1. Match Center & Momento Tático",
+            "🕸️ 2. Redes de Passes & xT",
             "🤖 3. Machine Learning & Risco",
-            "📋 4. Elenco, Scout & Substituições",
-            "📈 5. DNA Histórico & Vídeo 2D",
-            "🧠 6. Consultor IA & Exportação",
+            "📋 4. Scout, Elenco & Substituições",
+            "📈 5. DNA Longitudinal & Vídeo 2D",
+            "⚖️ 6. Pontos Fortes e Fracos",
+            "🧠 7. Central de IA & Relatórios",
         ]
     )
 
@@ -674,9 +716,9 @@ def main() -> None:
     # -------------------------------------------------------------------------
     with tabs[0]:
         badge_mode = (
-            "SIMULAÇÃO TÁTICA DE LABORATÓRIO"
+            f"{SIMULATED_DATA_BADGE} • MATCH ID {current_match_id}"
             if is_sim_mode
-            else f"DADOS OFICIAIS AUDITADOS • MATCH ID {current_match_id}"
+            else f"STATSBOMB OPEN DATA • MATCH ID {current_match_id}"
         )
         st.markdown(
             f"""
@@ -1140,8 +1182,11 @@ def main() -> None:
                 )
 
             if gen_player_rep and selected_scout_player:
-                p_md = TacticalReportBuilder.build_dedicated_player_scouting_report(
-                    df_events, selected_scout_player
+                p_md = TacticalReportBuilder.prepend_simulation_badge(
+                    TacticalReportBuilder.build_dedicated_player_scouting_report(
+                        df_events, selected_scout_player
+                    ),
+                    is_sim_mode,
                 )
                 st.markdown(
                     f'<div class="til-card-neon">{p_md}</div>',
@@ -1240,9 +1285,18 @@ def main() -> None:
                         trends = MultiMatchTrendAnalyzer.analyze_team_across_matches(
                             m_map, target_team=canon_team
                         )
-                        hist_md = TacticalReportBuilder.build_multi_match_team_history_report(
-                            trends
+                        hist_has_sim = any(
+                            BrasileiraoAndMultiSourceProvider.is_simulated_match(mid)
+                            for mid in m_map.keys()
                         )
+                        hist_md = TacticalReportBuilder.prepend_simulation_badge(
+                            TacticalReportBuilder.build_multi_match_team_history_report(
+                                trends
+                            ),
+                            hist_has_sim,
+                        )
+                        if hist_has_sim:
+                            render_simulation_warning_banner()
                         st.success(
                             f"✅ Base Histórica Consolidada: **{canon_team}** ({trends['matches_analyzed']} jogos processados)."
                         )
@@ -1308,9 +1362,22 @@ def main() -> None:
             st.warning(f"Aviso no módulo de homografia: {exc}")
 
     # -------------------------------------------------------------------------
-    # ABA 6: DOSSIÊ IA, AUDITORIA & EXPORTAÇÃO (GEMINI + GUARDRAILS)
+    # ABA 6: PONTOS FORTES E FRACOS (ESTILO FOOTBALL MANAGER DATA HUB)
     # -------------------------------------------------------------------------
     with tabs[5]:
+        render_strengths_weaknesses_page(
+            df_events=df_events,
+            df_chains=df_chains,
+            target_team=target_team,
+            current_match_id=current_match_id,
+            is_sim_mode=is_sim_mode,
+            load_events_fn=loader.load_events_from_db,
+        )
+
+    # -------------------------------------------------------------------------
+    # ABA 7: CENTRAL DE IA CONVERSACIONAL & RELATÓRIOS AUDITADOS
+    # -------------------------------------------------------------------------
+    with tabs[6]:
         st.subheader(
             f"🧠 Consultor Tático Inteligente (Rede Neural MLP + Gemini + Guardrail Numérico) — {target_team}"
         )
@@ -1406,12 +1473,21 @@ def main() -> None:
                     <b>Foco Semântico (Rede Neural MLP):</b> <code>{ev_meta['detected_focus']}</code> (Confiança: <b>{ev_meta.get('nlp_confidence_pct', 100.0)}%</b>) &nbsp;|&nbsp;
                     <b>Alvos Identificados:</b> <code>{ev_meta.get('matched_players_in_query') or 'Coletivo/Setorial'}</code> &nbsp;|&nbsp;
                     <b>Motor:</b> <code>{rep_res['engine_used']}</code> &nbsp;|&nbsp;
-                    <b>Guardião Anti-Alucinação:</b> <span style="color:#00FF7F; font-weight:800;">{'APROVADO (100% Grounded)' if audit['is_grounded'] else 'REVISADO'}</span>
-                    ({audit['verified_decimals_count']} métricas decimais auditadas)
+                    <b>Guardião Anti-Alucinação:</b> <span style="color:{'#00FF7F' if audit['is_grounded'] else '#F59E0B'}; font-weight:800;">{'APROVADO' if audit['is_grounded'] else 'COM RESSALVAS'}</span>
+                    ({audit.get('verified_decimals_count', 0)} decimais e {audit.get('verified_integers_count', 0)} inteiros conferidos)
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
+
+            blocked = audit.get("blocked_llm_audit")
+            if blocked:
+                st.warning(
+                    "🛡️ O texto da IA foi BLOQUEADO pelo guardião e substituído pelo relatório "
+                    "determinístico local. Itens não encontrados nos dados: "
+                    f"números {blocked.get('unverified_decimals', []) + blocked.get('unverified_integers', [])} | "
+                    f"nomes {blocked.get('unverified_player_names', [])}"
+                )
 
             dl1, dl2 = st.columns(2)
             dl1.download_button(

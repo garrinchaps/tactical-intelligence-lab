@@ -101,10 +101,23 @@ class PlayerNameNormalizer:
         return f"{words[0]} {words[-1]}"
 
 
+SIMULATED_DATA_BADGE = "⚠️ [DADOS SIMULADOS / MODELAGEM PROBABILÍSTICA]"
+SIMULATED_DATA_NOTICE = (
+    "Os eventos desta partida foram GERADOS por um modelo probabilístico a partir de "
+    "perfis táticos de referência. Não são dados oficiais de eventos ou de rastreamento "
+    "e não representam um jogo que realmente aconteceu."
+)
+
+
 class BrasileiraoAndMultiSourceProvider:
     """
-    Fornece plantéis reais e atualizados de todos os 20 clubes da Série A do Brasileirão,
-    com perfis táticos, matrizes espaciais e gerador de partidas autênticas.
+    Provedor de partidas SIMULADAS do Brasileirão.
+
+    Os elencos usam nomes de referência dos clubes da Série A e os perfis táticos
+    (viés de construção curta, taxa de cruzamentos, duelos aéreos, intensidade de
+    pressão) são parâmetros de modelagem. Os eventos produzidos por
+    `generate_simulated_match_events` são sintéticos (gerados com numpy.random)
+    e devem sempre ser exibidos com o selo SIMULATED_DATA_BADGE.
     """
 
     BRAZIL_SERIE_A_TEAMS: Dict[str, Dict[str, Any]] = {
@@ -626,9 +639,22 @@ class BrasileiraoAndMultiSourceProvider:
         }
 
     @classmethod
-    def generate_authentic_match_events(
+    def is_simulated_match(cls, match_id: Any) -> bool:
+        """True quando o match_id pertence ao catálogo simulado do Brasileirão."""
+        try:
+            mid = int(match_id)
+        except (TypeError, ValueError):
+            return False
+        return any(int(m["match_id"]) == mid for m in cls.BRAZIL_MATCH_CATALOG)
+
+    @classmethod
+    def generate_simulated_match_events(
         cls, home_team: str, away_team: str, match_id: int
     ) -> pd.DataFrame:
+        """
+        Gera uma partida SINTÉTICA (determinística por match_id) a partir dos perfis
+        táticos das duas equipes. Não é dado real: exibir sempre o SIMULATED_DATA_BADGE.
+        """
         rng = np.random.default_rng(abs(int(match_id)) % 999999)
         prof_h = cls.get_team_profile(home_team)
         prof_a = cls.get_team_profile(away_team)

@@ -1,29 +1,4 @@
 <!DOCTYPE html>
-
-        @classmethod
-    def generate_ai_report(
-        cls,
-        df_events: pd.DataFrame,
-        df_chains: pd.DataFrame,
-        target_team: str,
-        user_query: str = "",
-        match_id: int = 0,
-        is_simulation: bool = False,
-        prefer_llm: bool = True,
-    ) -> str:
-        from src.intelligence.llm_analyst import GenerativeTacticalAnalyst
-
-        evidence_pkg = cls.assemble_evidence_package(
-            df_events=df_events,
-            df_chains=df_chains,
-            target_team=target_team,
-            match_id=match_id,
-            user_query=user_query,
-            is_simulation=is_simulation,
-        )
-        analyst = GenerativeTacticalAnalyst()
-        res = analyst.generate_tactical_report(evidence_pkg, prefer_llm=prefer_llm)
-        return str(res.get("report_markdown", ""))
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
@@ -42,63 +17,27 @@
 <h1>RELATÓRIO DE INTELIGÊNCIA TÁTICA E PRESCRIÇÃO ESTRATÉGICA — REAL MADRID</h1><br>
 <strong>Partida ID:</strong> <code>3773497</code> | <strong>Equipe Analisada:</strong> Real Madrid | <strong>Adversário:</strong> Barcelona  <br>
 <strong>Eventos Auditados:</strong> 3991 (1460 de Real Madrid) | <strong>Foco Semântico Detectado:</strong> <code>INDIVIDUAL_AND_COMPARISON</code> (Confiança IA: <strong>90.0%</strong>)  <br>
-<strong>Comando / Pergunta do Analista:</strong> *"como seria possível anular o ataque do real madrid nesse jogo?"*  <br>
+<strong>Comando / Pergunta do Analista:</strong> *"verifique como anular o ataque do barcelona"*  <br>
 ---<br>
-<h2>🎯 RESPOSTA TÁTICA DIRETA: "como seria possível anular o ataque do real madrid nesse jogo?"</h2><br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Sergi Carnicer</strong> (Barcelona — Right Wing Back)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(66.85, 60.28)</code></strong>, atuando principalmente no <strong>Terço Ofensivo</strong> pelo <strong>Corredor Lateral Direito</strong> (participou de <strong>68 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Óscar García</strong>, que entregou <strong>10 passes completos</strong> para <strong>Sergi Carnicer</strong>. Quando <strong>Sergi Carnicer</strong> domina, seu alvo favorito de passe é <strong>Óscar García</strong> (<strong>12 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>95.24%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>100.0%</strong> (diferença de <strong>-4.76%</strong>), tendo cometido <strong>3 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>0 avanços progressivos</strong>, <strong>2 passes que quebraram linhas</strong>, <strong>2 bolas na entrada da área (Zona 14)</strong>, <strong>2 bolas dentro da área</strong>, <strong>+0.225 xT</strong> e <strong>0.0 xG</strong> (0 chutes).<br>
+<h2>🎯 RESPOSTA TÁTICA DIRETA: "verifique como anular o ataque do barcelona"</h2><br>
+<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Vinícius Júnior</strong> (Real Madrid — Left Midfield)</h3><br>
+* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(66.35, 23.33)</code></strong>, atuando principalmente no <strong>Terço Ofensivo</strong> pelo <strong>Corredor Lateral Esquerdo</strong> (participou de <strong>145 ações</strong> na partida).<br>
+* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Ferland Mendy</strong>, que entregou <strong>6 passes completos</strong> para <strong>Vinícius Júnior</strong>. Quando <strong>Vinícius Júnior</strong> domina, seu alvo favorito de passe é <strong>Toni Kroos</strong> (<strong>4 passes</strong>).<br>
+* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>60.0%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>75.0%</strong> (diferença de <strong>-15.0 pp</strong>; N = <strong>4</strong> passes sob pressão e <strong>20</strong> sem pressão — evidência <strong>LIMITADA</strong>), tendo cometido <strong>16 perdas de posse</strong>.<br>
+* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>6 avanços progressivos</strong>, <strong>3 passes que quebraram linhas</strong>, <strong>2 bolas na entrada da área (Zona 14)</strong>, <strong>4 bolas dentro da área</strong>, <strong>+0.919 xT</strong> e <strong>0.0 xG</strong> (0 chutes).<br>
 <br>
 <strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Óscar García</strong> e <strong>Sergi Carnicer</strong> no <strong>Corredor Lateral Direito</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Sergi Carnicer</strong> receber no <strong>Terço Ofensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>100.0%</strong>), vigiando a infiltração de <strong>Óscar García</strong>.<br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>José Fernández</strong> (Real Madrid — Left Center Back)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(34.96, 23.79)</code></strong>, atuando principalmente no <strong>Terço Defensivo</strong> pelo <strong>Corredor Central</strong> (participou de <strong>77 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Ferland Mendy</strong>, que entregou <strong>4 passes completos</strong> para <strong>José Fernández</strong>. Quando <strong>José Fernández</strong> domina, seu alvo favorito de passe é <strong>Thibaut Courtois</strong> (<strong>4 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>70.59%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>100.0%</strong> (diferença de <strong>-29.41%</strong>), tendo cometido <strong>4 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>2 avanços progressivos</strong>, <strong>1 passes que quebraram linhas</strong>, <strong>0 bolas na entrada da área (Zona 14)</strong>, <strong>0 bolas dentro da área</strong>, <strong>+0.097 xT</strong> e <strong>0.0 xG</strong> (0 chutes).<br>
+1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Ferland Mendy</strong> e <strong>Vinícius Júnior</strong> no <strong>Corredor Lateral Esquerdo</strong>, impedindo que a bola chegue limpa nele.<br>
+2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Vinícius Júnior</strong> receber no <strong>Terço Ofensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (atenção: sob pressão ele manteve <strong>75.0%</strong> de precisão, então o bote sozinho não reduz a eficiência dele; priorize cortar o abastecimento), vigiando a infiltração de <strong>Toni Kroos</strong>.<br>
+<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Marcelo Silva</strong> (Real Madrid — Left Midfield)</h3><br>
+* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(80.59, 15.61)</code></strong>, atuando principalmente no <strong>Terço Ofensivo</strong> pelo <strong>Corredor Lateral Esquerdo</strong> (participou de <strong>24 ações</strong> na partida).<br>
+* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Casemiro</strong>, que entregou <strong>1 passes completos</strong> para <strong>Marcelo Silva</strong>. Quando <strong>Marcelo Silva</strong> domina, seu alvo favorito de passe é <strong>Casemiro</strong> (<strong>1 passes</strong>).<br>
+* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>75.0%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>50.0%</strong> (diferença de <strong>25.0 pp</strong>; N = <strong>2</strong> passes sob pressão e <strong>4</strong> sem pressão — evidência <strong>LIMITADA</strong>), tendo cometido <strong>3 perdas de posse</strong>.<br>
+* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>1 avanços progressivos</strong>, <strong>1 passes que quebraram linhas</strong>, <strong>1 bolas na entrada da área (Zona 14)</strong>, <strong>0 bolas dentro da área</strong>, <strong>+0.405 xT</strong> e <strong>0.045 xG</strong> (1 chutes).<br>
 <br>
 <strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Ferland Mendy</strong> e <strong>José Fernández</strong> no <strong>Corredor Central</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>José Fernández</strong> receber no <strong>Terço Defensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>100.0%</strong>), vigiando a infiltração de <strong>Thibaut Courtois</strong>.<br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Ronald da Silva</strong> (Barcelona — Center Back)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(52.79, 39.21)</code></strong>, atuando principalmente no <strong>Terço Médio</strong> pelo <strong>Corredor Central</strong> (participou de <strong>151 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Sergio i</strong>, que entregou <strong>11 passes completos</strong> para <strong>Ronald da Silva</strong>. Quando <strong>Ronald da Silva</strong> domina, seu alvo favorito de passe é <strong>Clément Lenglet</strong> (<strong>16 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>97.92%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>0.0%</strong> (diferença de <strong>97.92%</strong>), tendo cometido <strong>1 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>3 avanços progressivos</strong>, <strong>4 passes que quebraram linhas</strong>, <strong>3 bolas na entrada da área (Zona 14)</strong>, <strong>0 bolas dentro da área</strong>, <strong>+0.363 xT</strong> e <strong>0.0 xG</strong> (0 chutes).<br>
-<br>
-<strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Sergio i</strong> e <strong>Ronald da Silva</strong> no <strong>Corredor Central</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Ronald da Silva</strong> receber no <strong>Terço Médio</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>0.0%</strong>), vigiando a infiltração de <strong>Clément Lenglet</strong>.<br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Luka Modrić</strong> (Real Madrid — Right Center Midfield)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(57.49, 51.29)</code></strong>, atuando principalmente no <strong>Terço Defensivo</strong> pelo <strong>Corredor Lateral Direito</strong> (participou de <strong>167 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Toni Kroos</strong>, que entregou <strong>8 passes completos</strong> para <strong>Luka Modrić</strong>. Quando <strong>Luka Modrić</strong> domina, seu alvo favorito de passe é <strong>Toni Kroos</strong> (<strong>9 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>83.33%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>83.33%</strong> (diferença de <strong>0.0%</strong>), tendo cometido <strong>7 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>7 avanços progressivos</strong>, <strong>8 passes que quebraram linhas</strong>, <strong>2 bolas na entrada da área (Zona 14)</strong>, <strong>2 bolas dentro da área</strong>, <strong>+1.012 xT</strong> e <strong>0.067 xG</strong> (1 chutes).<br>
-<br>
-<strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Toni Kroos</strong> e <strong>Luka Modrić</strong> no <strong>Corredor Lateral Direito</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Luka Modrić</strong> receber no <strong>Terço Defensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>83.33%</strong>), vigiando a infiltração de <strong>Toni Kroos</strong>.<br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Lionel Messi</strong> (Barcelona — Right Wing)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(80.93, 45.07)</code></strong>, atuando principalmente no <strong>Terço Ofensivo</strong> pelo <strong>Corredor Central</strong> (participou de <strong>282 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Sergio i</strong>, que entregou <strong>15 passes completos</strong> para <strong>Lionel Messi</strong>. Quando <strong>Lionel Messi</strong> domina, seu alvo favorito de passe é <strong>Frenkie de Jong</strong> (<strong>11 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>85.19%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>87.5%</strong> (diferença de <strong>-2.31%</strong>), tendo cometido <strong>19 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>22 avanços progressivos</strong>, <strong>18 passes que quebraram linhas</strong>, <strong>8 bolas na entrada da área (Zona 14)</strong>, <strong>8 bolas dentro da área</strong>, <strong>+3.266 xT</strong> e <strong>0.456 xG</strong> (7 chutes).<br>
-<br>
-<strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Sergio i</strong> e <strong>Lionel Messi</strong> no <strong>Corredor Central</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Lionel Messi</strong> receber no <strong>Terço Ofensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>87.5%</strong>), vigiando a infiltração de <strong>Frenkie de Jong</strong>.<br>
-<h3>Plano Tático Baseado nos Dados do Jogo para <strong>Frenkie de Jong</strong> (Barcelona — Left Defensive Midfield)</h3><br>
-* <strong>Onde ele joga de verdade em campo:</strong> Sua posição média registrada nos eventos é <strong><code>(68.99, 48.27)</code></strong>, atuando principalmente no <strong>Terço Médio</strong> pelo <strong>Corredor Central</strong> (participou de <strong>244 ações</strong> na partida).<br>
-* <strong>Quem faz a bola chegar nele (Como cortar a origem):</strong> O principal abastecedor dele é <strong>Óscar García</strong>, que entregou <strong>12 passes completos</strong> para <strong>Frenkie de Jong</strong>. Quando <strong>Frenkie de Jong</strong> domina, seu alvo favorito de passe é <strong>Lionel Messi</strong> (<strong>12 passes</strong>).<br>
-* <strong>Como ele reage sob marcação apertada:</strong> Livre de pressão, ele acerta <strong>89.66%</strong> dos passes; quando recebe combate direto (<code>under_pressure</code>), sua precisão vai para <strong>73.33%</strong> (diferença de <strong>16.33%</strong>), tendo cometido <strong>9 perdas de posse</strong>.<br>
-* <strong>Perigo real que ele gerou no jogo:</strong> Somou <strong>6 avanços progressivos</strong>, <strong>10 passes que quebraram linhas</strong>, <strong>3 bolas na entrada da área (Zona 14)</strong>, <strong>4 bolas dentro da área</strong>, <strong>+0.936 xT</strong> e <strong>0.0 xG</strong> (0 chutes).<br>
-<br>
-<strong>🛠️ O que fazer na prática (Plano A e Plano B):</strong><br>
-1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Óscar García</strong> e <strong>Frenkie de Jong</strong> no <strong>Corredor Central</strong>, impedindo que a bola chegue limpa nele.<br>
-2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Frenkie de Jong</strong> receber no <strong>Terço Médio</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (onde sua precisão cai para <strong>73.33%</strong>), vigiando a infiltração de <strong>Lionel Messi</strong>.<br>
+1. <strong>Plano A (Cortar a Linha de Abastecimento):</strong> Posicionar nosso volante/meia do setor fechando a linha de passe entre <strong>Casemiro</strong> e <strong>Marcelo Silva</strong> no <strong>Corredor Lateral Esquerdo</strong>, impedindo que a bola chegue limpa nele.<br>
+2. <strong>Plano B (Encaixe Curto de Costas):</strong> Assim que <strong>Marcelo Silva</strong> receber no <strong>Terço Ofensivo</strong>, dar bote em menos de 2 segundos para não deixá-lo girar de frente e forçar o passe pressionado (a precisão sob pressão foi <strong>50.0%</strong> (queda de <strong>25.0 pp</strong> com N = <strong>2</strong>, amostra insuficiente: confirmar no vídeo antes de usar como gatilho)), vigiando a infiltração de <strong>Casemiro</strong>.<br>
 ---<br>
 <h2>💡 RESUMO SIMPLES EM LINGUAGEM COMUM (O QUE OS NÚMEROS FORA DO NORMAL MOSTRAM)</h2><br>
 *Abaixo estão as conclusões diretas tiradas exclusivamente dos dados que fugiram do padrão normal de uma partida:*<br>
@@ -165,14 +104,14 @@ A equipe <strong>Real Madrid</strong> estruturou-se em posse num desenho real <s
 <h3>Diagnóstico 3: Vulnerabilidade Crítica de Perda na Zona 14 (Terço Ofensivo - Corredor Central) [Evidência: <code>FORTE</code> | N=48]</h3><br>
 * <strong>Explicação:</strong> O algoritmo K-Means associado à exposição territorial identificou que a equipe apresenta uma taxa de erro de 7.25% por toque na Terço Ofensivo (Corredor Central), com 25.0% das ações sob pressão direta.<br>
 * <strong>Plano A:</strong> Exigir jogo mais direto ou passes de segurança quando a equipe estiver sob forte pressão nestas coordenadas. | <strong>Plano B:</strong> Garantir superioridade numérica de apoio (terceiro homem) para oferecer linha de escape rápida.<br>
-* <strong>Substituição Recomendada — Saída de Toni Kroos (Left Center Midfield)</strong> [Prioridade: <strong>45.0</strong>]: Queda de 26.15% na precisão de passe após o minuto 60 (de 96.15% para 70.0%), acompanhada de 2 perdas de posse no terço final do jogo. -&gt; *Entrada recomendada:* Meio-campista/Volante com alta taxa de retenção sob pressão (Press Resistance &gt; 80%) e capacidade de passe progressivo para estabilizar o controle central.<br>
+* <strong>Substituição Recomendada — Saída de Toni Kroos (Left Center Midfield)</strong> [Prioridade: <strong>45.0</strong>]: Queda de 26.15 pp na precisão de passe após o minuto 60 (de 96.15% para 70.0%), acompanhada de 2 perdas de posse no terço final do jogo. -&gt; *Entrada recomendada:* Meio-campista/Volante com alta taxa de retenção sob pressão (Press Resistance &gt; 80%) e capacidade de passe progressivo para estabilizar o controle central.<br>
 <br>
 ---<br>
 <h2>🏁 12 &amp; 13. RESUMO DO QUE FOI FALADO E DECISÃO FINAL SOBRE A PERGUNTA</h2><br>
 1. <strong>Síntese Geral do Jogo:</strong> O <strong>Real Madrid</strong> atuou em <code>5-5-0 (Em Posse)</code>, tendo <strong>Lucas Iglesias</strong> como pivô da saída de bola, atacando principalmente pelo <strong>Corredor Central</strong> (<strong>1.322 xG</strong> criados) e sofrendo defensivamente no <strong>Eixo Central Defensivo (Zagueiros / Volante Central)</strong> (<strong>1.494 xG</strong> cedidos).<br>
 2. <strong>O Que Fugiu do Padrão Normal (Discrepância Principal):</strong> 🟢 <strong>Marcação Sufocante no Campo de Ataque:</strong> Enquanto a média normal de um jogo é deixar o adversário trocar ~10,5 passes antes de sofrer combate, o <strong>Real Madrid</strong> permitiu apenas <strong>3.11 passes por ação defensiva (PPDA)</strong>, mantendo a linha a <strong>40.13 m</strong>. <strong>Conclusão simples:</strong> O time sufocou a saída de bola do Barcelona desde o tiro de meta.<br>
-3. <strong>DECISÃO FINAL DA COMISSÃO TÉCNICA PARA A SUA PERGUNTA (*"como seria possível anular o ataque do real madrid nesse jogo?"*):</strong><br>
-   &gt; <strong>Para responder à pergunta *"como seria possível anular o ataque do real madrid nesse jogo?"*, a decisão tática principal é </strong>isolar Sergi Carnicer (Barcelona) bloqueando os passes que vêm de Óscar García no Corredor Lateral Direito<strong> e pressioná-lo de costas antes que acione </strong>Óscar García<strong>.</strong><br>
+3. <strong>DECISÃO FINAL DA COMISSÃO TÉCNICA PARA A SUA PERGUNTA (*"verifique como anular o ataque do barcelona"*):</strong><br>
+   &gt; <strong>Para responder à pergunta *"verifique como anular o ataque do barcelona"*, a decisão tática principal é </strong>isolar Vinícius Júnior (Real Madrid) bloqueando os passes que vêm de Ferland Mendy no Corredor Lateral Esquerdo<strong> e pressioná-lo de costas antes que acione </strong>Toni Kroos<strong>.</strong><br>
 4. <strong>Nota de Transparência Científica:</strong> LIMITAÇÃO EXPLÍCITA DE DADOS: Os dados de eventos não contêm telemetria fisiológica (GPS, distância em alta intensidade &gt;25 km/h, frequência cardíaca ou estado clínico do banco). As recomendações baseiam-se exclusivamente na degradação técnica observada nos eventos (0-60 min vs &gt;60 min) e no balanço estrutural da equipe.
 </div>
 </body>
