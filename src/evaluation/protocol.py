@@ -277,6 +277,9 @@ def main() -> None:
         return db.load_events(mid) if db.has_events(mid) else sb.load_events(mid)
 
     data = build_dataset(ids, load, sb.load_360, progress=print)
+    full = Path("data/processed/danger_full.csv.gz")      # a página Rede Neural treina com estes exemplos
+    full.parent.mkdir(parents=True, exist_ok=True)
+    data.to_csv(full, index=False, compression="gzip")
     danger = evaluate_danger(data, k=args.k)
     processed = {mid: ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(load(mid)))
                  for mid in ids}

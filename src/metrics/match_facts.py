@@ -20,8 +20,10 @@ import pandas as pd
 ON_TARGET = {"Goal", "Saved", "Saved To Post", "Saved to Post"}
 BODY_PT = {"Head": "cabeça", "Left Foot": "pé esquerdo", "Right Foot": "pé direito", "Other": "outro"}
 
+ON_BALL = {"Pass", "Carry", "Shot", "Dribble", "Ball Receipt*", "Miscontrol", "Dispossessed", "Clearance",
+           "Interception", "Ball Recovery", "Goal Keeper", "Block", "Duel", "Foul Won", "50/50", "Shield"}
 PLAYER_STAT_LABELS = {
-    "minutos": "Minutos (estimados)", "gols": "Gols", "assistencias": "Assistências", "finalizacoes": "Finalizações",
+    "minutos": "Minutos (estimados)", "toques": "Ações com a bola (toques)", "gols": "Gols", "assistencias": "Assistências", "finalizacoes": "Finalizações",
     "finalizacoes_no_alvo": "Finalizações no alvo", "xg": "xG", "passes": "Passes", "passes_certos": "Passes certos",
     "precisao_passe_pct": "Precisão de passe (%)", "passes_progressivos": "Passes progressivos",
     "quebras_de_linha": "Passes quebra-linhas", "passes_decisivos": "Passes para finalização", "cruzamentos": "Cruzamentos",
@@ -137,6 +139,7 @@ def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -
     card = _col(d, "foul_committed_card_name")
     f = pd.DataFrame({
         "jogador": d["player_name"], "equipe": d["team_name"], "posicao": _col(d, "position_name", ""),
+        "toques": t.isin(ON_BALL).astype(int),
         "passes": is_pass.astype(int), "passes_certos": ok_pass.astype(int),
         "passes_progressivos": (ok_pass & (_col(d, "is_progressive_action", 0) == 1)).astype(int),
         "quebras_de_linha": (ok_pass & (_col(d, "is_line_breaking_pass", 0) == 1)).astype(int),

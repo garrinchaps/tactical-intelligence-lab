@@ -356,3 +356,106 @@ def test_player_match_stats_and_team_stats(final_internal):
     assert (per90(s)["passes"] >= 0).all()
     t = team_match_stats(df, "Argentina")
     assert t["gols"] == 3 and 0 < t["share_passes_pct"] < 100 and t["finalizacoes"] > 0
+
+
+def test_autosync_schedule(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from src.data_hub import autosync
+    from src.data_hub.db import DataHubDB
+
+    db = DataHubDB(db_path=tmp_path / "h.db", schema_path="database/schema.sql")
+    assert set(autosync.due(db)) == set(autosync.QUICK + autosync.DAILY)
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    db.log_sync("espn", now, "OK", 0, 0, "")
+    db.log_sync("statsbomb", now, "OK", 0, 0, "")
+    assert autosync.due(db) == []
+    monkeypatch.setenv("AUTO_SYNC_HOURS", "3")
+    later = datetime.now(timezone.utc) + timedelta(hours=4)
+    assert autosync.due(db, later) == autosync.QUICK
+    assert set(autosync.due(db, later + timedelta(hours=21))) == set(autosync.QUICK + autosync.DAILY)
+    monkeypatch.setenv("AUTO_SYNC", "0")
+    assert autosync.ensure_started(db)["enabled"] is False
+
+
+# ----------------------------------------------------------------- 8. analista v2 e aprendizado ligado às respostas
+def _final_processed(final_internal):
+    from src.metrics.xt_model import ExpectedThreatModel
+    from src.preprocessing.event_cleaner import EventPreprocessor
+
+    return ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(final_internal))
+
+
+def test_player_matching_prefers_full_name():
+    from src.intelligence.query_understanding import QueryUnderstanding as Q, norm
+
+    roster = ["Harry Kane", "Harry Maguire", "Bukayo Saka"]
+    assert Q._match_players(norm("o harry kane jogou esse jogo?"), roster) == ["Harry Kane"]
+    assert Q._match_players(norm("compare saka e kane"), roster) == ["Bukayo Saka", "Harry Kane"]
+
+
+def test_new_question_types():
+    from src.intelligence.query_understanding import QueryUnderstanding as Q
+
+    assert Q.parse("quem foi o jogador que mais tocou na bola na partida?").ranking_metric == "toques"
+    assert Q.parse("de quem foram as assistencias nesse jogo?").ask == "goals"
+    assert Q.parse("qual seria a melhor estratégia para anular o harry kane", ["Harry Kane"]).ask == "plan"
+    assert Q.parse("quem mais criou perigo?").ranking_metric == "perigo_ia"
+
+
+def test_plans_are_grounded(final_internal, tmp_path, monkeypatch):
+    from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+    df = _final_processed(final_internal)
+    a = DynamicTacticalAnalyst(api_key="")
+    meta = {"match_id": FINAL, "data_level": "EVENTS", "home_team_name": "Argentina", "away_team_name": "France"}
+    r = a.answer("qual seria a melhor estratégia para anular o messi?", "Argentina", meta, df, None, prefer_llm=False)
+    md = r["report_markdown"]
+    assert "Como anular Lionel" in md and "Cortar a fonte" in md
+    assert r["hallucination_audit"]["untraceable_count"] == 0
+    r = a.answer("qual tática a frança deveria usar para evitar a derrota?", "Argentina", meta, df, None, prefer_llm=False)
+    assert "Plano para France contra Argentina" in r["report_markdown"]
+    assert r["hallucination_audit"]["untraceable_count"] == 0
+
+
+def test_registry_promotes_only_when_better(tmp_path):
+    from src.machine_learning.model_registry import DangerModelRegistry
+
+    reg = DangerModelRegistry(root=tmp_path / "reg")
+    data = DangerModelRegistry.dataset()
+    data = data[data["match_id"].isin(sorted(data["match_id"].unique())[:24])]
+    r1 = reg.train_round(data, [8], 0.05, 3, 1e-3, 256, seed=1)
+    assert r1["promoted"] and reg.champion_info()["version"] == 1
+    val_rows = len(reg.split(data)[1])
+    r2 = reg.train_round(data, [8], 0.05, 3, 1e-3, 256, seed=2)
+    champ = reg.champion_info()
+    if r2["promoted"]:
+        assert r2["val_logloss"] < r1["val_logloss"] and champ["version"] == 2
+    else:
+        assert champ["version"] == 1 and "não melhorou" in r2["reason"]
+    assert len(reg.split(data)[1]) == val_rows                      # validação congelada
+    assert not set(reg.split(data)[0]["match_id"]) & set(reg.meta["validation_matches"])
+
+
+def test_more_data_lowers_validation_loss(tmp_path):
+    from src.machine_learning.model_registry import DangerModelRegistry
+
+    reg = DangerModelRegistry(root=tmp_path / "reg")
+    lc = reg.learning_curve(DangerModelRegistry.dataset(), fractions=(0.25, 1.0), hidden=(16,), epochs=15, seeds=(1,))
+    assert lc["acoes_de_treino"].iloc[1] > lc["acoes_de_treino"].iloc[0]
+    assert lc["perda_validacao"].iloc[1] < lc["perda_validacao"].iloc[0]
+
+
+def test_champion_is_used_in_danger_answers(final_internal, tmp_path, monkeypatch):
+    import src.machine_learning.model_registry as mr
+    from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+    monkeypatch.setattr(mr, "ROOT", tmp_path / "reg")
+    mr._CHAMP.update(mtime=None, net=None)
+    df = _final_processed(final_internal)
+    r = DynamicTacticalAnalyst(api_key="").answer(
+        "quem mais criou perigo na partida?", "Argentina",
+        {"match_id": FINAL, "data_level": "EVENTS", "home_team_name": "Argentina", "away_team_name": "France"},
+        df, None, prefer_llm=False)
+    assert "Rede neural de perigo v001" in r["report_markdown"]
+    assert r["hallucination_audit"]["untraceable_count"] == 0

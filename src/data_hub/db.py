@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS source_state (
 );
 CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_name, away_team_name);
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
+CREATE INDEX IF NOT EXISTS idx_matches_level_source ON matches(data_level, data_source);
+CREATE INDEX IF NOT EXISTS idx_team_stats_match ON match_team_stats(match_id);
 """
 
 
@@ -130,6 +132,10 @@ class DataHubDB:
     def connect(self) -> Iterator[sqlite3.Connection]:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.execute("PRAGMA foreign_keys = ON;")
+        # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
+        conn.execute("PRAGMA journal_mode = WAL;")
+        conn.execute("PRAGMA synchronous = NORMAL;")
+        conn.execute("PRAGMA cache_size = -20000;")
         try:
             yield conn
             conn.commit()
@@ -267,10 +273,18 @@ class DataHubDB:
             sql += f" LIMIT {int(limit)}"
         with self.connect() as conn:
             df = pd.read_sql_query(sql, conn, params=params)
-        from src.data_hub.gender import gender_of
+        from src.data_hub.gender import gender_series
 
-        df["genero"] = [gender_of(r) for r in df.to_dict("records")] if not df.empty else pd.Series(dtype=str)
+        df["genero"] = gender_series(df)
         return df
+
+    def catalog_version(self) -> str:
+        """Muda sempre que o catálogo muda (usado como chave de cache da interface)."""
+        with self.connect() as conn:
+            n, last, mx = conn.execute("SELECT COUNT(*), MAX(last_synced), MAX(match_id) FROM matches").fetchone()
+            ev = conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM sync_runs ORDER BY id DESC LIMIT 1)").fetchone()[0] \
+                if conn.execute("SELECT name FROM sqlite_master WHERE name='sync_runs'").fetchone() else 0
+        return f"{n}:{last}:{mx}:{ev}"
 
     def has_events(self, match_id: int) -> bool:
         with self.connect() as conn:

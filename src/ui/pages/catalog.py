@@ -26,7 +26,9 @@ def _fmt(n) -> str:
 
 def _overview(reg: ProvenanceRegistry) -> None:
     svc = get_service()
-    cat = svc.db.catalog()
+    from src.ui.context import cached_catalog
+
+    cat = cached_catalog()
     with svc.db.connect() as conn:
         with_events = conn.execute("SELECT COUNT(DISTINCT match_id) FROM events").fetchone()[0]
     by = cat["data_level"].value_counts() if not cat.empty else pd.Series(dtype=int)

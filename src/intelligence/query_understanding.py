@@ -38,16 +38,20 @@ FOOTBALL_TERMS = {
     "artilheiro", "marcou", "marcaram", "fez", "assistencia", "assistencias", "chutou", "chutaram", "passou",
     "driblou", "desarmou", "selecao", "copa", "campeonato", "titular", "titulares", "melhor", "destaque", "craque",
     "decisivo", "virada", "classificou", "eliminou", "final", "semifinal", "jogada", "lance", "lances",
+    "estrategia", "goleada", "perigo", "perigoso", "perigosa", "tocou", "toques", "anular", "parar", "neutralizar", "plano", "jogar",
 }
 # perguntas que pedem um fato ou um ranking de atletas (respondidas com tabela curta, não com visão geral)
 RANKING_METRICS: Tuple[Tuple[str, str], ...] = (
     (r"assist", "assistencias"), (r"passe.*(decisiv|para finaliz|para chute)|criou mais chances", "passes_decisivos"),
+    (r"perig|chance de (gol|finaliza)", "perigo_ia"),
     (r"no alvo|no gol|acert\w* o gol|enquadr", "finalizacoes_no_alvo"), (r"xg", "xg"), (r"xt|ameaca", "xt"),
     (r"chut|finaliz", "finalizacoes"), (r"quebra", "quebras_de_linha"), (r"progress", "passes_progressivos"),
     (r"cruz", "cruzamentos"), (r"dribl", "dribles"), (r"desarm", "desarmes"), (r"intercept", "interceptacoes"),
     (r"recuper|roub", "recuperacoes"), (r"press", "pressoes"), (r"perd\w* (a )?(bola|posse)|errou mais", "perdas_de_posse"),
     (r"falta.*sofr|sofreu.*falta", "faltas_sofridas"), (r"falta", "faltas_cometidas"), (r"cartao|cartoes|amarel", "cartoes_amarelos"),
-    (r"certo|precis|acert\w* passe", "passes_certos"), (r"passe|passou|toque", "passes"), (r"gol", "gols"),
+    (r"certo|precis|acert\w* passe", "passes_certos"),
+    (r"toc\w* (na|a) bola|toques|participou|envolvid|acoes com a bola|mais acion", "toques"),
+    (r"passe|passou", "passes"), (r"gol", "gols"),
 )
 OFF_TOPIC_HINTS = {
     "coxinha", "hamburguer", "pizza", "receita", "comida", "bolo", "cerveja", "filme", "serie", "novela",
@@ -234,8 +238,16 @@ class QueryUnderstanding:
         if re.search(r"os dois times|ambas as equipes|ambos|comparar as equipes", t):
             sc.team_focus = "both"
 
-        # ---- fatos e rankings
-        if re.search(r"quem (fez|marcou|anotou)( o| os)? gol|quem (fez|marcou) (os )?gols|autor(es)? d\w* gol|artilheiro|"
+        # ---- fatos, rankings e planos
+        plan_rx = (r"estrategi|tatica (para|a ser|ideal|melhor)|melhor tatica|como (anular|parar|neutralizar|marcar|"
+                   r"conter|segurar|evitar|vencer|ganhar d|explorar|superar)|o que (o|a|deveria|devia|poderia)\b.*\b(fazer|ter feito|mudar)|"
+                   r"(poderia|deveria|podia|devia) ter (vencido|ganhado|evitado|empatado|jogado)|plano de jogo|para evitar|como (deveria|devia|poderia) jogar|o que fazer|como enfrentar")
+        if re.search(plan_rx, t):
+            sc.ask = "plan"
+        elif re.search(r"(de )?quem (foram|foi|deu|deram|fez|fizeram) (as |a )?assistenc|quais (foram )?as assistenc|"
+                       r"assistenc\w* (da|do|desta|dessa|nessa|nesta|no|na) (partida|jogo)", t) and not re.search(r"\bmais\b", t):
+            sc.ask = "goals"
+        elif re.search(r"quem (fez|marcou|anotou)( o| os)? gol|quem (fez|marcou) (os )?gols|autor(es)? d\w* gol|artilheiro|"
                      r"gols? (da|do|desta|dessa|nessa|nesta) (partida|jogo)|como (foram|sairam|saiu) os gols|quando (foi|foram|sairam) os gols", t):
             sc.ask = "goals"
         elif re.search(r"(quem|qual (jogador|atleta)|que jogador|jogador que|atleta que)\b.*\bmais\b|\bmais .*(jogador|atleta)|"
@@ -274,21 +286,41 @@ class QueryUnderstanding:
 
     @staticmethod
     def _match_players(t: str, roster: List[str]) -> List[str]:
-        found: List[str] = []
+        """
+        Atletas citados. Ordem de força: nome completo > sobrenome > primeiro nome.
+        "harry kane" casa só com Harry Kane (não com Harry Maguire); o primeiro nome sozinho só vale
+        se for único no elenco e nenhum nome mais forte tiver sido encontrado.
+        """
+        common = {"silva", "santos", "junior", "souza", "oliveira", "pereira", "costa", "lima", "jose", "joao"}
+        strong: List[Tuple[int, str]] = []
+        weak: Dict[str, List[str]] = {}
         for name in roster:
             if not isinstance(name, str) or not name.strip():
                 continue
             n = norm(name)
-            parts = [p for p in re.split(r"[\s\-]+", n) if len(p) >= 4]
-            if re.search(rf"\b{re.escape(n)}\b", t):
-                found.append(name)
+            parts = [p for p in re.split(r"[\s\-]+", n) if len(p) >= 3]
+            m = re.search(rf"\b{re.escape(n)}\b", t)
+            if m:
+                strong.append((m.start(), name))
                 continue
-            # sobrenome ou primeiro nome distintivo (evita nomes curtos e comuns)
-            for p in parts[-2:] + parts[:1]:
-                if p in {"silva", "santos", "junior", "souza", "oliveira", "pereira", "costa", "lima"}:
+            hit = None
+            for p in parts[1:]:                          # sobrenomes (qualquer um, ex.: "Di María", "Mbappé")
+                if p in common or len(p) < 4:
                     continue
-                if re.search(rf"\b{re.escape(p)}\b", t):
-                    found.append(name)
+                mm = re.search(rf"\b{re.escape(p)}\b", t)
+                if mm:
+                    hit = mm
                     break
-        # remove duplicatas mantendo a ordem
+            if hit:
+                strong.append((hit.start(), name))
+            elif parts and len(parts[0]) >= 4 and parts[0] not in common:
+                mm = re.search(rf"\b{re.escape(parts[0])}\b", t)
+                if mm:
+                    weak.setdefault(parts[0], []).append(name)
+        found = [n for _, n in sorted(strong)]
+        if not found:
+            found = [names[0] for names in weak.values() if len(names) == 1]
+        else:  # primeiro nome que não pertence a nenhum dos já encontrados e é único
+            taken = {norm(f).split()[0] for f in found}
+            found += [names[0] for first, names in weak.items() if len(names) == 1 and first not in taken]
         return list(dict.fromkeys(found))[:4]

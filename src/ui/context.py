@@ -28,7 +28,7 @@ def get_service() -> MatchDataService:
     return MatchDataService()
 
 
-@st.cache_data(show_spinner=False, max_entries=12)
+@st.cache_data(show_spinner=False, max_entries=12, ttl=1800)
 def load_bundle(match_id: int) -> MatchBundle:
     return get_service().load(int(match_id))
 
@@ -37,6 +37,48 @@ def load_bundle(match_id: int) -> MatchBundle:
 def processed_events(match_id: int, _raw: pd.DataFrame):
     df = ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(_raw))
     return df, EventPreprocessor.build_possession_chains(df)
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _catalog_cached(version: str, where: str, params: tuple) -> pd.DataFrame:
+    return get_service().db.catalog(where, params)
+
+
+def cached_catalog(where: str = "", params: tuple = ()) -> pd.DataFrame:
+    """Catálogo com cache: só é relido do banco quando ele muda (sync, partida nova)."""
+    return _catalog_cached(get_service().db.catalog_version(), where, tuple(params))
+
+
+def filter_by_team(cat: pd.DataFrame, team: str, threshold: float = 0.86) -> pd.DataFrame:
+    """Partidas do catálogo em que `team` jogou (busca aproximada de nome, calculada uma vez por nome distinto)."""
+    from src.data_hub.search import team_score
+
+    if cat is None or cat.empty or not str(team).strip():
+        return cat.iloc[0:0] if cat is not None else pd.DataFrame()
+    names = pd.unique(pd.concat([cat["home_team_name"], cat["away_team_name"]]).dropna())
+    ok = {n for n in names if team_score(team, n) >= threshold}
+    return cat[cat["home_team_name"].isin(ok) | cat["away_team_name"].isin(ok)]
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def match_player_stats(match_id: int, team: Optional[str], _df: pd.DataFrame) -> pd.DataFrame:
+    from src.metrics.match_facts import player_match_stats
+
+    return player_match_stats(_df, team)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def match_team_stats(match_id: int, team: str, _df: pd.DataFrame) -> Dict[str, Any]:
+    from src.metrics.match_facts import team_match_stats
+
+    return team_match_stats(_df, team)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
+def match_goals(match_id: int, _df: pd.DataFrame) -> List[Dict[str, Any]]:
+    from src.metrics.match_facts import goals
+
+    return goals(_df)
 
 
 @st.cache_data(show_spinner=False, max_entries=24)

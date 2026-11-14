@@ -247,8 +247,10 @@ class ScopedEvidenceBuilder:
         passes = ev[ev["type_name"] == "Pass"]
         comp = passes[passes["is_pass_completed"] == 1]
         shots = ev[ev["type_name"] == "Shot"]
-        duels = ev[ev["type_name"].isin(["Duel", "Dribble"])]
-        won = duels[duels.get("duel_outcome_name").isin(["Won", "Success", "Complete", "Success In Play"])]
+        # duelos com resultado registrado: desarmes (Duel/Tackle). Dribles e duelos aéreos são contados à parte,
+        # porque a fonte não informa o resultado do drible e só registra o duelo aéreo perdido.
+        duels = ev[(ev["type_name"] == "Duel") & (ev.get("duel_type_name") == "Tackle")]
+        won = duels[duels.get("duel_outcome_name").isin(["Won", "Success", "Complete", "Success In Play", "Success Out"])]
         team_series = df.loc[df["player_name"] == player, "team_name"].dropna()
         team = team_series.iloc[0] if not team_series.empty else ""
         received = df[(df["pass_recipient_name"] == player) & tm & (df["is_pass_completed"] == 1)]
@@ -266,6 +268,8 @@ class ScopedEvidenceBuilder:
             "xg": _r(shots["shot_statsbomb_xg"].sum(), 2),
             "duelos": int(len(duels)),
             "duelos_ganhos_pct": _pct(len(won), len(duels)),
+            "dribles_tentados": int((ev["type_name"] == "Dribble").sum()),
+            "duelos_aereos_perdidos": int(((ev["type_name"] == "Duel") & (ev.get("duel_type_name") == "Aerial Lost")).sum()),
             "perdas_de_posse": int((ev["is_turnover"] == 1).sum()),
             "recuperacoes": int((ev["is_ball_recovery"] == 1).sum()),
             "quem_mais_o_abastece": received.groupby("player_name").size().sort_values(ascending=False).head(2).to_dict(),
@@ -303,6 +307,8 @@ class ScopedEvidenceBuilder:
 
         metric = sc.ranking_metric or "xt"
         w = df[cls._time_mask(df, sc)]
+        if metric == "perigo_ia":
+            return cls.block_danger_ranking(w, sc, team, opp, top)
         if sc.side or sc.third:
             w = w[cls._zone_mask(cls._own_frame(w, team), sc)]
         scope_team = None
@@ -321,6 +327,36 @@ class ScopedEvidenceBuilder:
                             for r in st.itertuples()],
                 "amostra_N": int(len(w))}
 
+    @staticmethod
+    def _scored(df: pd.DataFrame) -> pd.DataFrame:
+        from src.machine_learning.model_registry import champion_cached, score_actions
+
+        try:
+            return score_actions(df, champion_cached())
+        except Exception:
+            return pd.DataFrame()
+
+    @staticmethod
+    def _model_card() -> Optional[Dict[str, Any]]:
+        from src.machine_learning.model_registry import model_card
+
+        try:
+            return model_card()
+        except Exception:
+            return None
+
+    @classmethod
+    def block_danger_ranking(cls, w: pd.DataFrame, sc: QueryScope, team: str, opp: str, top: int = 5) -> Dict[str, Any]:
+        from src.machine_learning.model_registry import DANGER_THRESHOLD, danger_by_player
+
+        card = cls._model_card()
+        sco = cls._scored(w)
+        scope_team = team if sc.team_named and sc.team_focus in ("target", "opponent") else None
+        return {"metrica": "Perigo criado (rede neural)", "chave": "perigo_ia", "modelo": card,
+                "limiar_pct": int(100 * DANGER_THRESHOLD), "equipes_consideradas": scope_team or f"{team} e {opp}",
+                "lideres_ia": danger_by_player(sco, scope_team, top) if not sco.empty else [],
+                "acoes_avaliadas": int(len(sco)), "amostra_N": int(len(sco))}
+
     @classmethod
     def block_result(cls, df: pd.DataFrame, team: str, opp: str, meta: Dict[str, Any]) -> Dict[str, Any]:
         from src.metrics.match_facts import TEAM_STAT_LABELS, team_match_stats
@@ -334,6 +370,118 @@ class ScopedEvidenceBuilder:
                 "disputa_de_penaltis": shootout(df),
                 "gols": cls.block_goals(df, team, opp, meta)["gols"],
                 "nota": "PPDA estimado: passes adversários na construção ÷ ações defensivas da equipe no campo adversário"}
+
+    # ------------------------------------------------------------- planos
+    @staticmethod
+    def _zone_name(x: float, y: float) -> str:
+        third = "terço defensivo" if x < 40 else ("terço médio" if x < 80 else "terço ofensivo")
+        lane = "esquerda" if y < 30 else ("centro" if y < 50 else "direita")
+        return f"{third} — {lane}"
+
+    @classmethod
+    def _top_zones(cls, d: pd.DataFrame, xc: str = "x", yc: str = "y", n: int = 2) -> List[Dict[str, Any]]:
+        d = d.dropna(subset=[xc, yc])
+        if d.empty:
+            return []
+        z = d.apply(lambda r: cls._zone_name(r[xc], r[yc]), axis=1).value_counts()
+        return [{"zona": k, "acoes": int(v), "pct": _pct(v, len(d))} for k, v in z.head(n).items()]
+
+    @classmethod
+    def block_plan_vs_player(cls, df: pd.DataFrame, sc: QueryScope, player: str) -> Dict[str, Any]:
+        """Como anular um atleta: por onde e de quem ele recebe, onde age, o que gera e quem o marca."""
+        w = df[cls._time_mask(df, sc)]
+        own_team = w.loc[w["player_name"] == player, "team_name"].dropna()
+        if own_team.empty:
+            return {"jogador": player, "jogou": False}
+        team = str(own_team.iloc[0])
+        rival = next((t for t in w["team_name"].dropna().unique() if t != team), "adversário")
+        rec = w[(w["type_name"] == "Pass") & (w.get("pass_recipient_name") == player) & (w["pass_outcome_name"].isna())]
+        acts = w[w["player_name"] == player]
+        feeders = rec["player_name"].value_counts().head(3)
+        shots = acts[acts["type_name"] == "Shot"]
+        drib = acts[acts["type_name"] == "Dribble"]
+        lost = acts[acts.get("is_turnover", 0) == 1] if "is_turnover" in acts else acts.iloc[0:0]
+        fouls_on = w[(w["type_name"] == "Foul Won") & (w["player_name"] == player)]
+        p = cls.block_player(df, sc, player)
+        return {
+            "jogador": player, "jogou": True, "equipe": team, "quem_defende": rival,
+            "passes_recebidos": int(len(rec)),
+            "zonas_onde_recebe": cls._top_zones(rec, "end_x", "end_y"),
+            "quem_mais_o_abastece": {k: int(v) for k, v in feeders.items()},
+            "zonas_onde_age": cls._top_zones(acts),
+            "finalizacoes": int(len(shots)), "xg": _r(pd.to_numeric(shots.get("shot_statsbomb_xg"), errors="coerce").sum()),
+            "dribles": int(len(drib)), "faltas_sofridas": int(len(fouls_on)), "perdas_de_posse": int(len(lost)),
+            "xt_gerado": p.get("xt_gerado"), "passes_progressivos": p.get("passes_progressivos"),
+            "para_quem_mais_passa": p.get("para_quem_mais_passa"),
+            "amostra_N": int(len(acts)),
+            **cls._danger_for_player(w, player),
+        }
+
+    @classmethod
+    def _danger_for_player(cls, w: pd.DataFrame, player: str) -> Dict[str, Any]:
+        from src.machine_learning.model_registry import DANGER_THRESHOLD
+
+        sco = cls._scored(w)
+        card = cls._model_card()
+        if sco.empty or not card:
+            return {}
+        mine = sco[sco["player_name"] == player]
+        hot = mine[mine["p_perigo"] >= DANGER_THRESHOLD]
+        return {"ia": {"modelo": card, "acoes_avaliadas": int(len(mine)), "acoes_perigosas": int(len(hot)),
+                       "limiar_pct": int(100 * DANGER_THRESHOLD),
+                       "zonas_das_acoes_perigosas": cls._top_zones(hot, "x", "y", 2),
+                       "maior_chance_pct": round(100 * float(mine["p_perigo"].max()), 1) if len(mine) else None}}
+
+    @classmethod
+    def block_plan_team(cls, df: pd.DataFrame, sc: QueryScope, team: str, opp: str) -> Dict[str, Any]:
+        """Plano para `team` diante de `opp`: por onde opp criou perigo, quem criou, onde team perdeu a bola."""
+        from src.metrics.match_facts import player_match_stats, team_match_stats
+
+        w = df[cls._time_mask(df, sc)]
+        f = cls._own_frame(w, opp)                  # referencial de quem ataca (opp)
+        o = f[f["team_name"] == opp]
+        entries = o[o.get("is_box_entry", 0) == 1] if "is_box_entry" in o else o.iloc[0:0]
+        shots = o[o["type_name"] == "Shot"]
+        crosses = o[(o["type_name"] == "Pass") & (o.get("is_pass_cross", 0).fillna(0).astype(bool))]
+        ps = player_match_stats(w, opp)
+        creators = ps.sort_values("xt", ascending=False).head(3) if not ps.empty else ps
+        g = cls._own_frame(w, team)
+        own = g[g["team_name"] == team]
+        losses = own[own.get("is_turnover", 0) == 1] if "is_turnover" in own else own.iloc[0:0]
+        own_half_losses = losses[losses["x"] < 60]
+        tr = cls.block_transition(df, sc, team, opp)
+        a, b = team_match_stats(w, team), team_match_stats(w, opp)
+        return {
+            "equipe": team, "adversario": opp,
+            "corredores_das_entradas_na_area_do_adversario": cls._top_zones(entries, "x", "y", 3),
+            "entradas_na_area_do_adversario": int(len(entries)),
+            "finalizacoes_do_adversario": int(len(shots)), "xg_do_adversario": b.get("xg"),
+            "zonas_das_finalizacoes_do_adversario": cls._top_zones(shots, "x", "y", 2),
+            "cruzamentos_do_adversario": int(len(crosses)),
+            "criadores_do_adversario": [{"jogador": r.jogador, "xt": _r(r.xt, 3), "passes": int(r.passes)}
+                                        for r in creators.itertuples()],
+            "perdas_de_posse": int(len(losses)), "perdas_no_proprio_campo": int(len(own_half_losses)),
+            "zonas_das_perdas": cls._top_zones(own_half_losses, "x", "y", 2),
+            "finalizacoes_adversarias_ate_15s_apos_perda": tr.get("finalizacoes_adversarias_em_ate_15s_apos_perda"),
+            "posse_pct": {team: a.get("share_passes_pct"), opp: b.get("share_passes_pct")},
+            "precisao_passe_pct": {team: a.get("precisao_passe_pct"), opp: b.get("precisao_passe_pct")},
+            "ppda": {team: a.get("ppda"), opp: b.get("ppda")},
+            "gols": {team: a.get("gols"), opp: b.get("gols")},
+            "amostra_N": int(len(w)),
+            **cls._danger_for_team(w, opp),
+        }
+
+    @classmethod
+    def _danger_for_team(cls, w: pd.DataFrame, attacker: str) -> Dict[str, Any]:
+        from src.machine_learning.model_registry import DANGER_THRESHOLD, danger_by_player, danger_zones
+
+        sco = cls._scored(w)
+        card = cls._model_card()
+        if sco.empty or not card:
+            return {}
+        return {"ia": {"modelo": card, "limiar_pct": int(100 * DANGER_THRESHOLD),
+                       "zonas_perigosas_do_adversario": danger_zones(sco, attacker),
+                       "mais_perigosos_do_adversario": danger_by_player(sco, attacker, 3)}}
 
     # ------------------------------------------------------- montagem
     @classmethod
@@ -349,6 +497,12 @@ class ScopedEvidenceBuilder:
             blocks["ranking"] = cls.block_ranking(df, sc, team, other)
         elif sc.ask == "result":
             blocks["resultado"] = cls.block_result(df, team, other, meta)
+        elif sc.ask == "plan":
+            if sc.players:
+                for p in sc.players[:2]:
+                    blocks[f"plano_jogador::{p}"] = cls.block_plan_vs_player(df, sc, p)
+            else:
+                blocks["plano_equipe"] = cls.block_plan_team(df, sc, team, other)
         if sc.ask:
             return cls._wrap(df, sc, team, other, meta, blocks)
         m = set(sc.metrics)

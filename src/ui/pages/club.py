@@ -22,12 +22,12 @@ def render(ctx: MatchContext) -> None:
     n = int(b.number_input("Jogos", min_value=2, max_value=20, value=6))
     c.write("")
     run = c.button("Analisar histórico", type="primary", use_container_width=True)
-    cat = svc.db.catalog("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')")
+    from src.ui.context import cached_catalog, filter_by_team
+
+    cat = cached_catalog("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')")
     found = pd.DataFrame()
     if team_q.strip() and not cat.empty:
-        cat = cat.copy()
-        cat["s"] = cat.apply(lambda r: max(team_score(team_q, r["home_team_name"]), team_score(team_q, r["away_team_name"])), axis=1)
-        found = cat[cat["s"] >= 0.86].sort_values("match_date", ascending=False)
+        found = filter_by_team(cat, team_q).sort_values("match_date", ascending=False)
         st.caption(f"{len(found)} partidas com eventos para '{team_q}'. As {min(n, len(found))} mais recentes serão usadas.")
     if not run:
         empty_state("Escolha a equipe e clique em “Analisar histórico”.", icon="📈")

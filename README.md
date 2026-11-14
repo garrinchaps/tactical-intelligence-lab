@@ -41,10 +41,15 @@ python -m src.data_hub.sync --only fdcouk --seasons 30   # histórico completo d
 
 `--prefetch-events N` baixa os eventos das N partidas mais recentes que ainda não estão no banco. Isso alimenta a base de referência de *Pontos Fortes e Fracos*. A mesma sincronização tem um botão na página **🗄️ Catálogo & Dados**.
 
-**Agendar todos os dias às 6h (Windows, PowerShell na pasta do projeto):**
-```powershell
-schtasks /Create /SC DAILY /ST 06:00 /TN "TacticalLabSync" /TR "cmd /c cd /d %CD% && venv\Scripts\python.exe -m src.data_hub.sync --days 3 --prefetch-events 20"
-```
+**Atualização automática (jogos novos entram sozinhos)**
+
+- **App aberto:** a cada 3 h (`AUTO_SYNC_HOURS` no `.env`) o app busca em segundo plano os jogos encerrados
+  dos últimos dias em todas as fontes habilitadas e já baixa o boxscore (estatísticas, escalações, gols, cartões).
+  Os catálogos StatsBomb/Wyscout são conferidos uma vez por dia. A barra lateral mostra quando será a próxima.
+- **App fechado:** rode uma vez `.\scripts\agendar_atualizacao.ps1` (cria duas tarefas no Agendador do Windows:
+  a cada 3 h e todo dia às 6h; log em `data\sync_log.txt`).
+- Jogos de amanhã (ex.: Real Madrid x Barcelona) aparecem depois de encerrados, com placar e boxscore. Coordenadas
+  de cada lance (redes de passes, xT) só existem para partidas publicadas pela StatsBomb/Wyscout.
 
 ### Busca universal
 

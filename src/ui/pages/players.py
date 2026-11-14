@@ -102,7 +102,9 @@ def _stats_table(ctx: MatchContext) -> None:
     a, b = st.columns([1.4, 1])
     who = a.radio("Atletas de", [ctx.target_team, ctx.opponent, "Ambas as equipes"], horizontal=True, key="ps_team")
     mode = b.radio("Valores", ["Totais", "Por 90 minutos"], horizontal=True, key="ps_mode")
-    s = player_match_stats(ctx.df, None if who == "Ambas as equipes" else who)
+    from src.ui.context import match_player_stats
+
+    s = match_player_stats(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
     if s.empty:
         empty_state("Sem atletas com eventos.")
         return

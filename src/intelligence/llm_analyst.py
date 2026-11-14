@@ -105,15 +105,13 @@ REGRAS ANTI-ALUCINAÇÃO:
             from src.guard.metrics import GuardMetricsLog
             from src.guard.policy import GuardPolicy
 
-            def generate(extra):
-                response = client.models.generate_content(
-                    model=self.model_name,
-                    contents=user_prompt if not extra else f"{extra}\n\n{user_prompt}",
-                    config=types.GenerateContentConfig(system_instruction=self.SYSTEM_INSTRUCTION, temperature=0.1),
-                )
-                text = response.text if response and response.text else ""
-                if not text.strip():
-                    raise RuntimeError("Resposta vazia da API generativa.")
+            from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+            gem = DynamicTacticalAnalyst(api_key=self.api_key, model_name=self.model_name)
+
+            def generate(extra):   # mesma descoberta de modelo do Analista IA (evita 404 por nome de modelo)
+                text = gem._llm(self.SYSTEM_INSTRUCTION, user_prompt if not extra else f"{extra}\n\n{user_prompt}")
+                self.model_name = gem.model_name
                 return text
 
             pol = GuardPolicy(NumericHallucinationGuard.audit_text_numbers, GuardMetricsLog()).run(
@@ -194,17 +192,11 @@ REGRAS ANTI-ALUCINAÇÃO:
                 "atleta, número ou fato.\n\n"
                 f"{json.dumps(analysis, ensure_ascii=False, indent=1)}"
             )
-            client = genai.Client(api_key=self.api_key)
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_INSTRUCTION, temperature=0.1
-                ),
-            )
-            text = response.text if response and response.text else ""
-            if not text.strip():
-                raise RuntimeError("Resposta vazia da API generativa.")
+            from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+            gem = DynamicTacticalAnalyst(api_key=self.api_key, model_name=self.model_name)
+            text = gem._llm(self.SYSTEM_INSTRUCTION, prompt)
+            self.model_name = gem.model_name
             audit = NumericHallucinationGuard.audit_text_numbers(text, evidence)
             if not audit["is_grounded"]:
                 local["engine_used"] = "LOCAL_DETERMINISTIC_FALLBACK_AFTER_AUDIT_BLOCK"
@@ -218,5 +210,8 @@ REGRAS ANTI-ALUCINAÇÃO:
                 "hallucination_audit": audit,
             }
         except Exception as err:
-            local["engine_used"] = f"LOCAL_DETERMINISTIC_FALLBACK ({type(err).__name__})"
+            from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+            local["engine_used"] = "REDATOR LOCAL (Gemini indisponível)"
+            local["llm_error"] = DynamicTacticalAnalyst.explain_error(err)
             return local

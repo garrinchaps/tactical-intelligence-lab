@@ -52,7 +52,9 @@ def render_events(ctx: MatchContext) -> None:
     m = ctx.bundle.meta or {}
     from src.metrics.match_facts import goal_line, goals, shootout
 
-    gl = goals(df)
+    from src.ui.context import match_goals
+
+    gl = match_goals(ctx.match_id, df)
     gt, go_ = sum(g["equipe"] == team for g in gl), sum(g["equipe"] == opp for g in gl)
     ctx.prov("placar", "Placar", f"{gt}-{go_}", "gols + gols contra nos eventos (sem disputa de pênaltis); "
              "assistência = último passe certo para o autor na mesma posse", raw=True)

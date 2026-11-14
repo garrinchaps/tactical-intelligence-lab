@@ -95,16 +95,26 @@ def build_match_rows(df: pd.DataFrame, freeze: Optional[Dict[str, np.ndarray]] =
     dens = np.zeros(len(act))
     src = np.array(["proxy"] * len(act), dtype=object)
     opp_ev = d[d["x"].notna()][["team_name", "x", "y", "t"]]
+    # eventos de cada equipe ordenados no tempo: a janela de ±5 s vira uma busca binária (rápido em partidas inteiras)
+    by_team = {tm: g.sort_values("t") for tm, g in opp_ev.groupby("team_name")}
+    arrays = {tm: (g["t"].to_numpy(float), 120.0 - g["x"].to_numpy(float), 80.0 - g["y"].to_numpy(float))
+              for tm, g in by_team.items()}
+    teams_all = list(arrays)
     for k, r in enumerate(act.itertuples(index=False)):
         pts = freeze.get(str(r.event_id)) if freeze else None
         if pts is not None:
             dens[k] = int((np.hypot(pts[:, 0] - r.x, pts[:, 1] - r.y) <= RADIUS_YD).sum()) if len(pts) else 0
             src[k] = "statsbomb_360"
-        else:
-            o = opp_ev[(opp_ev["team_name"] != r.team_name) & (np.abs(opp_ev["t"] - r.t) <= 5)]
-            # adversário registra no próprio referencial: espelha para o referencial de quem tem a bola
-            ox, oy = 120.0 - o["x"].to_numpy(float), 80.0 - o["y"].to_numpy(float)
-            dens[k] = int((np.hypot(ox - r.x, oy - r.y) <= RADIUS_YD).sum())
+            continue
+        cnt = 0
+        for tm in teams_all:
+            if tm == r.team_name:
+                continue
+            tt, ox, oy = arrays[tm]
+            lo, hi = np.searchsorted(tt, r.t - 5, "left"), np.searchsorted(tt, r.t + 5, "right")
+            if hi > lo:   # adversário registra no próprio referencial: espelhado para o de quem tem a bola
+                cnt += int((np.hypot(ox[lo:hi] - r.x, oy[lo:hi] - r.y) <= RADIUS_YD).sum())
+        dens[k] = cnt
     act["opp_density_5m"] = dens
     act["density_source"] = src
     for col, vals in _zone_onehot(x, y).items():

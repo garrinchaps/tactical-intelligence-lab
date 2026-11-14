@@ -118,6 +118,12 @@ def main() -> None:
     st.session_state.setdefault("chat_history", [])
     nav = st.navigation(PAGES, position="sidebar")
     render_match_picker(get_service())
+    try:
+        from src.data_hub import autosync
+
+        st.sidebar.caption(autosync.status_text(autosync.ensure_started(get_service().db)))
+    except Exception as exc:  # a atualização automática nunca impede o app de abrir
+        st.sidebar.caption(f"Atualização automática indisponível: {exc}")
     nav.run()
 
 

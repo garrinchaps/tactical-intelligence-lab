@@ -61,23 +61,39 @@ def render(ctx=None) -> None:
         return
     layers = [len(FEATURES)] + hidden + [1]
 
-    train_now = st.button("▶ Treinar a rede ao vivo", type="primary")
-    if train_now:
-        gss = GroupShuffleSplit(n_splits=1, test_size=0.25, random_state=7)
-        tr, va = next(gss.split(data, groups=data["match_id"]))
-        X, y = data[FEATURES].to_numpy(float), data["target"].to_numpy(int)
-        net = NeuralNetwork(layers, learning_rate=lr, l2=l2, seed=42, feature_names=FEATURES)
-        with st.spinner("Treinando (forward → perda → backpropagation → atualização)..."):
-            net.fit(X[tr], y[tr], epochs=epochs, batch_size=batch, X_val=X[va], y_val=y[va])
-        auc = float(roc_auc_score(y[va], net.predict_proba(X[va])))
-        st.session_state["nn_live"] = {"net": net, "auc": auc, "n_tr": len(tr), "n_va": len(va),
-                                       "m_va": int(data.iloc[va]["match_id"].nunique())}
+    from src.machine_learning.model_registry import DangerModelRegistry, champion_cached, db_rows
+
+    reg = DangerModelRegistry()
+    champion_cached()                                    # garante a v001 na primeira execução
+    use_db = st.toggle("Incluir partidas do banco com tracking 360 (o conjunto cresce com a sincronização)", value=True)
+    c1, c2 = st.columns([1, 1])
+    train_now = c1.button("▶ Treinar nova versão (desafiante)", type="primary", use_container_width=True)
+    search_now = c2.button("🎲 Busca automática de hiperparâmetros (3 tentativas)", use_container_width=True)
+    if train_now or search_now:
+        with st.spinner("Montando o conjunto de treino (amostra + protocolo + banco)..."):
+            from src.ui.context import get_service
+
+            full = DangerModelRegistry.dataset((lambda: db_rows(get_service().db, max_new=15)) if use_db else None)
+        with st.spinner("Treinando (forward → perda → backpropagation → atualização) e comparando com o campeão..."):
+            if train_now:
+                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch)]
+            else:
+                rounds = reg.auto_search(full, trials=3, epochs=epochs)
+        last = rounds[-1]
+        st.session_state["nn_live"] = {"net": last["net"], "auc": last["val_auc"], "rounds": rounds,
+                                       "n_tr": last["n_samples_train"], "m_tr": last["n_matches_train"]}
     live = st.session_state.get("nn_live")
-    net = live["net"] if live else (NeuralNetwork.load(SAVED) if SAVED.exists() else None)
+    if live:
+        for r in live["rounds"]:
+            (st.success if r["promoted"] else st.info)(
+                f"v{r['version']:03d} {'PROMOVIDA — agora é ela que o Analista IA usa' if r['promoted'] else 'rejeitada'}: "
+                f"{r['reason']}. Treino: {r['n_matches_train']} partidas, {r['n_samples_train']} ações.")
+    net = live["net"] if live else reg.champion()
     if net is None:
-        empty_state("Clique em “Treinar a rede ao vivo”.", icon="▶")
+        empty_state("Clique em “Treinar nova versão”.", icon="▶")
         return
-    origin = ("treino ao vivo nesta sessão" if live else f"pesos salvos em {SAVED} (treino no dataset completo da Copa 2022)")
+    ci = reg.champion_info() or {}
+    origin = ("desafiante treinado nesta sessão" if live else f"campeão v{ci.get('version', 0):03d} (o modelo que o Analista IA usa)")
     prov = None
     if ctx is not None:
         prov = ctx.prov("nn", "Rede neural", net.summary()["arquitetura"], f"rede NumPy — {origin}", tier="DERIVED")
@@ -97,10 +113,9 @@ def render(ctx=None) -> None:
     with k[3]:
         kpi("perda final (treino)", f"{net.history['train_loss'][-1]:.4f}", prov)
     with k[4]:
-        kpi("AUC na validação", f"{live['auc']:.3f}" if live else "—", prov)
-    if live:
-        st.caption(f"Validação separada por partida: {live['n_tr']} ações de treino, {live['n_va']} de validação "
-                   f"({live['m_va']} partidas que não entraram no treino).")
+        kpi("AUC na validação fixa", f"{(live['auc'] if live else ci.get('val_auc', 0)):.3f}", prov)
+    st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas separadas na primeira rodada e nunca usadas "
+               "no treino — todas as versões são medidas nas mesmas ações.")
     l, r = st.columns([1, 1.3])
     l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), use_container_width=True)
     with r:
@@ -126,5 +141,61 @@ def render(ctx=None) -> None:
                              .sort_values("peso", key=np.abs, ascending=False))
         else:
             st.caption("Neurônio de saída: não tem filhos.")
+    _versions_and_usage(ctx, reg, live)
     if ctx is not None:
         provenance_panel(ctx.registry)
+
+
+def _versions_and_usage(ctx, reg, live) -> None:
+    """Histórico de versões, curva de aprendizado e como o campeão entra nas respostas do Analista IA."""
+    from src.machine_learning.model_registry import DangerModelRegistry, danger_by_player, model_card, score_actions
+
+    st.markdown("### 📈 Histórico de versões (todas medidas na mesma validação fixa)")
+    v = reg.versions()
+    if not v.empty:
+        v["versão"] = v["version"].map(lambda x: f"v{x:03d}")
+        st.plotly_chart(charts.lines(v, "versão", ["val_logloss"], "Perda na validação fixa por versão (menor = melhor)",
+                                     "log-loss"), use_container_width=True)
+        comparison_table(v[["versão", "created", "origin", "hidden", "learning_rate", "epochs", "l2", "n_matches_train",
+                            "n_samples_train", "val_auc", "val_logloss", "promoted", "reason"]].rename(columns={
+            "created": "criada", "origin": "origem", "hidden": "ocultas", "learning_rate": "η", "n_matches_train": "partidas",
+            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda", "promoted": "promovida", "reason": "decisão"}),
+            "Uma versão só vira campeã se reduzir a perda na validação fixa. Treinar de novo nos mesmos dados raramente "
+            "melhora; o que ensina a rede é ter mais partidas (veja a curva abaixo) ou hiperparâmetros melhores.")
+    with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
+        if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
+            with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):
+                st.session_state["lc"] = reg.learning_curve(DangerModelRegistry.dataset())
+        lc = st.session_state.get("lc")
+        if lc is not None:
+            st.plotly_chart(charts.lines(lc, "acoes_de_treino", ["perda_validacao"],
+                                         "Perda na validação fixa × quantidade de ações de treino", "log-loss"),
+                            use_container_width=True)
+            comparison_table(lc, "Mesma arquitetura, mesma validação: a perda cai à medida que entram mais partidas.")
+
+    st.markdown("### 🔗 Como este treino muda as respostas do Analista IA")
+    card = model_card()
+    if card:
+        note(f"Modelo em uso: {card['versao']}", f"{card['arquitetura']}, {card['partidas_de_treino']} partidas de treino, "
+             f"AUC {card['auc_validacao']} na validação fixa. O Analista usa este modelo em: “quem mais criou perigo?”, "
+             "nos planos “como anular o jogador X?” e “qual tática a equipe Y deveria usar?” (onde a rede vê perigo) — "
+             "e cada resposta cita a versão usada.")
+    if ctx is None or not getattr(ctx, "has_events", False):
+        st.caption("Abra uma partida com eventos para ver a comparação campeão × desafiante numa pergunta real.")
+        return
+    champ = reg.champion()
+    challenger = live["net"] if live else None
+    st.markdown(f"**Pergunta:** “Quem mais criou perigo em {ctx.target_team} x {ctx.opponent}?”")
+    cols = st.columns(2 if challenger is not None else 1)
+    for col, (label, net) in zip(cols, [("Campeão (usado pelo Analista)", champ)] +
+                                 ([("Desafiante desta sessão", challenger)] if challenger is not None else [])):
+        with col:
+            st.markdown(f"**{label}**")
+            sc = score_actions(ctx.df, net)
+            top = pd.DataFrame(danger_by_player(sc, None, 5)) if not sc.empty else pd.DataFrame()
+            if top.empty:
+                st.caption("Nenhuma ação acima do limiar.")
+            else:
+                comparison_table(top.rename(columns={"acoes_perigosas": "ações perigosas", "maior_chance_pct": "maior chance (%)"}))
+    if challenger is not None:
+        st.caption("Se o desafiante for promovido, a coluna da direita passa a ser a resposta do Analista IA.")

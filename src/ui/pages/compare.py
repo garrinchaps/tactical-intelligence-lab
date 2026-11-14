@@ -38,12 +38,13 @@ def _label(r) -> str:
 
 def _team_matches(team: str, gender: str) -> pd.DataFrame:
     """Partidas com eventos (StatsBomb/Wyscout) em que a equipe jogou, do mesmo gênero."""
-    cat = get_service().db.catalog("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')")
+    from src.ui.context import cached_catalog, filter_by_team
+
+    cat = cached_catalog("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')")
     if cat.empty:
         return cat
     cat = cat[cat["genero"] == gender] if "genero" in cat.columns else cat
-    s = cat.apply(lambda r: max(team_score(team, r["home_team_name"]), team_score(team, r["away_team_name"])), axis=1)
-    found = cat[s >= 0.86].sort_values("match_date", ascending=False).head(80).copy()
+    found = filter_by_team(cat, team).sort_values("match_date", ascending=False).head(80).copy()
     if found.empty:
         return found
     ids = ",".join(str(int(m)) for m in found["match_id"])
@@ -85,9 +86,11 @@ def _canonical_team(df: pd.DataFrame, name: str) -> str:
 # ------------------------------------------------------- 1. duas equipes
 def _two_teams(ctx: MatchContext) -> None:
     a, b, df = ctx.target_team, ctx.opponent, ctx.df
-    sa, sb = team_match_stats(df, a), team_match_stats(df, b)
+    from src.ui.context import match_goals, match_player_stats, match_team_stats
+
+    sa, sb = match_team_stats(ctx.match_id, a, df), match_team_stats(ctx.match_id, b, df)
     prov = ctx.prov("cmp_teams", f"{a} x {b}", "indicadores", "contagens dos eventos da partida (PPDA estimado)")
-    gl = goals(df)
+    gl = match_goals(ctx.match_id, df)
     k = st.columns(2)
     for col, t in zip(k, (a, b)):
         with col:
@@ -103,7 +106,7 @@ def _two_teams(ctx: MatchContext) -> None:
     with r:
         comparison_table(rows, "PPDA menor = pressão mais intensa. Posse = proporção dos passes da partida.")
     st.markdown("#### Destaques de cada equipe")
-    pl = player_match_stats(df)
+    pl = match_player_stats(ctx.match_id, None, df)
     cols = st.columns(2)
     for col, t in zip(cols, (a, b)):
         with col:
@@ -154,7 +157,9 @@ def _team_over_time(ctx: MatchContext) -> None:
             continue
         t = _canonical_team(df, team)
         opp = next((x for x in df["team_name"].dropna().unique() if x != t), "?")
-        s = team_match_stats(df, t)
+        from src.ui.context import match_team_stats
+
+        s = match_team_stats(options[c], t, df)
         rows.append({"partida": f"{c.split(' · ')[0]} x {opp}", **{TEAM_STAT_LABELS[k]: s.get(k) for k in TEAM_KEYS}})
     if len(rows) < 2:
         empty_state("Menos de duas partidas puderam ser carregadas.", icon="⚠️")
@@ -176,7 +181,9 @@ def _team_over_time(ctx: MatchContext) -> None:
 
 # ------------------------------------------------------- 3. jogador x jogador
 def _player_pool(ctx: MatchContext, label: str, key: str, default_idx: int):
-    pl = player_match_stats(ctx.df)
+    from src.ui.context import match_player_stats
+
+    pl = match_player_stats(ctx.match_id, None, ctx.df)
     names = [f"{r.jogador} — {r.equipe}" for r in pl.itertuples()]
     if not names:
         return None, None
@@ -191,7 +198,9 @@ def _player_totals(name: str, team: str, match_ids: List[int], data: Dict[int, p
         df = data.get(mid)
         if df is None:
             continue
-        s = player_match_stats(df)
+        from src.ui.context import match_player_stats
+
+        s = match_player_stats(mid, None, df)
         r = s[s["jogador"] == name]
         if not r.empty:
             opp = next((x for x in df["team_name"].dropna().unique() if x != r.iloc[0]["equipe"]), "?")

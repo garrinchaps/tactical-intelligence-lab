@@ -17,3 +17,9 @@ database/*.db
 data/processed/empirical_pool.csv.gz
 data/processed/sim_uncertainty/
 models/trained/danger_xgb.joblib
+
+# versões da rede neural treinadas localmente (recriadas na primeira execução)
+models/registry/
+data/processed/danger_rows_db.csv.gz
+data/processed/danger_full.csv.gz
+data/sync_log.txt

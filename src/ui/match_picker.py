@@ -85,7 +85,9 @@ def render_match_picker(service: MatchDataService) -> None:
                     st.rerun()
 
     with tab_catalog:
-        cat = by_gender(service.db.catalog())
+        from src.ui.context import cached_catalog
+
+        cat = by_gender(cached_catalog())
         if cat.empty:
             st.info("Catálogo vazio. Sincronize a base na página 🗄️ Catálogo & Dados.")
         else:

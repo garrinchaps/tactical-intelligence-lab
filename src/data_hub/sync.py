@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import traceback
+from datetime import date, timedelta
 from typing import Callable, Dict, List, Optional
 
 from dotenv import load_dotenv
@@ -28,6 +29,7 @@ from src.data_hub.db import DataHubDB, utc_now
 from src.data_hub.service import MatchDataService
 
 ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "api_football", "football_data", "espn"]
+QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
 
 
 def run_sync(
@@ -37,6 +39,7 @@ def run_sync(
     service: Optional[MatchDataService] = None,
     progress: Optional[Callable[[str], None]] = None,
     seasons_back: int = 2,
+    prefetch_boxscores: int = 0,
 ) -> Dict[str, Dict]:
     load_dotenv()
     svc = service or MatchDataService()
@@ -89,7 +92,38 @@ def run_sync(
                 say(f"  ✖ eventos {mid}: {exc}")
         results["prefetch_events"] = {"status": "OK", "downloaded": ok}
         say(f"• eventos baixados: {ok}")
+    if prefetch_boxscores > 0:
+        results["prefetch_boxscores"] = {"status": "OK", **prefetch_recent_boxscores(svc, days_back, prefetch_boxscores, say)}
     return results
+
+
+def prefetch_recent_boxscores(svc: MatchDataService, days_back: int = 3, limit: int = 40,
+                              say: Optional[Callable[[str], None]] = None) -> Dict[str, int]:
+    """
+    Baixa já o boxscore (estatísticas, escalações, gols e cartões) dos jogos recentes que entraram no catálogo,
+    para que abram na hora. ESPN primeiro (sem cota); API-Football limitada a 10 por rodada (cota de 100/dia).
+    """
+    say = say or (lambda m: None)
+    since = (date.today() - timedelta(days=days_back + 1)).isoformat()
+    cat = svc.db.catalog(
+        "data_source IN ('espn','api_football') AND data_level = 'RESULT' AND match_date >= ? "
+        "AND match_id NOT IN (SELECT DISTINCT match_id FROM match_team_stats)", (since,), limit=limit * 2)
+    ok = err = api_used = 0
+    for r in cat.to_dict("records"):
+        if ok >= limit:
+            break
+        src = r["data_source"]
+        if src == "espn" and not svc.espn.enabled or src == "api_football" and (not svc.api_football.enabled or api_used >= 10):
+            continue
+        try:
+            (svc.espn.ingest_event if src == "espn" else svc.api_football.ingest_fixture)(int(r["match_id"]))
+            ok += 1
+            api_used += src == "api_football"
+        except Exception as exc:
+            err += 1
+            say(f"  ✖ boxscore {r['home_team_name']} x {r['away_team_name']}: {exc}")
+    say(f"• boxscores baixados: {ok}")
+    return {"downloaded": ok, "errors": err}
 
 
 def main() -> None:
@@ -100,8 +134,16 @@ def main() -> None:
                     help="baixa eventos de N partidas ainda sem eventos locais")
     ap.add_argument("--seasons", type=int, default=2,
                     help="football-data.co.uk: quantas temporadas anteriores à atual baixar (ex.: 30 = desde os anos 90)")
+    ap.add_argument("--prefetch-boxscores", type=int, default=20,
+                    help="baixa o boxscore de até N jogos recentes recém-catalogados (ESPN / API-Football)")
+    ap.add_argument("--rapido", action="store_true",
+                    help="só jogos recentes: football-data.co.uk (temporada atual), API-Football, football-data.org e ESPN")
     args = ap.parse_args()
-    run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons)
+    if args.rapido:
+        run_sync(args.only or QUICK_SOURCES, args.days, 0, seasons_back=0, prefetch_boxscores=args.prefetch_boxscores)
+    else:
+        run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons,
+                 prefetch_boxscores=args.prefetch_boxscores)
 
 
 if __name__ == "__main__":

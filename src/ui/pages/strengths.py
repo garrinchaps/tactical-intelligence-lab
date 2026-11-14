@@ -11,7 +11,9 @@ from src.visualization.strengths_page import render_strengths_weaknesses_page
 
 @st.cache_data(show_spinner=False, ttl=3600)
 def _competition_of() -> dict:
-    cat = get_service().db.catalog("data_level = 'EVENTS'")
+    from src.ui.context import cached_catalog
+
+    cat = cached_catalog("data_level = 'EVENTS'")
     if cat.empty:
         return {}
     return {int(r.match_id): f"{r.competition_name} {r.season_name}" for r in cat.itertuples()}
