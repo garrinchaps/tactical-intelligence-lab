@@ -102,41 +102,32 @@ REGRAS ANTI-ALUCINAÇÃO:
                 f"Responda no FORMATO OBRIGATÓRIO, direto ao ponto, com 100% de fidelidade numérica e nominal ao JSON."
             )
 
-            response = client.models.generate_content(
-                model=self.model_name,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=self.SYSTEM_INSTRUCTION,
-                    temperature=0.1,
-                ),
-            )
+            from src.guard.metrics import GuardMetricsLog
+            from src.guard.policy import GuardPolicy
 
-            llm_text = response.text if response and response.text else ""
-            if not llm_text.strip():
-                raise RuntimeError("Resposta vazia da API generativa.")
-
-            audit = NumericHallucinationGuard.audit_text_numbers(
-                llm_text, evidence_package
-            )
-
-            if not audit["is_grounded"]:
-                # Bloqueio rígido: qualquer número ou nome não verificado derruba o texto da IA
-                fallback_audit = NumericHallucinationGuard.audit_text_numbers(
-                    deterministic_md, evidence_package
+            def generate(extra):
+                response = client.models.generate_content(
+                    model=self.model_name,
+                    contents=user_prompt if not extra else f"{extra}\n\n{user_prompt}",
+                    config=types.GenerateContentConfig(system_instruction=self.SYSTEM_INSTRUCTION, temperature=0.1),
                 )
-                fallback_audit["blocked_llm_audit"] = audit
-                return {
-                    "engine_used": "LOCAL_DETERMINISTIC_FALLBACK_AFTER_AUDIT_BLOCK",
-                    "report_markdown": deterministic_md,
-                    "hallucination_audit": fallback_audit,
-                }
+                text = response.text if response and response.text else ""
+                if not text.strip():
+                    raise RuntimeError("Resposta vazia da API generativa.")
+                return text
 
+            pol = GuardPolicy(NumericHallucinationGuard.audit_text_numbers, GuardMetricsLog()).run(
+                generate, evidence_package, fallback_text=deterministic_md, engine=f"GEMINI_API ({self.model_name})")
+            if pol.outcome == "DEGRADADO":
+                return {"engine_used": "RESPOSTA DEGRADADA (motor local após 2 bloqueios)", "report_markdown": pol.text,
+                        "hallucination_audit": pol.audit, "guard_outcome": pol.outcome,
+                        "guard_metrics": pol.metrics.as_dict()}
             return {
-                "engine_used": f"GEMINI_API ({self.model_name})",
+                "engine_used": f"GEMINI_API ({self.model_name})" + (" — regenerado com contexto restrito"
+                                                                    if pol.outcome == "APROVADO_REGENERADO" else ""),
                 "report_markdown": TacticalReportBuilder.prepend_simulation_badge(
-                    llm_text, bool(meta.get("is_simulation_data", False))
-                ),
-                "hallucination_audit": audit,
+                    pol.text, bool(meta.get("is_simulation_data", False))),
+                "hallucination_audit": pol.audit, "guard_outcome": pol.outcome, "guard_metrics": pol.metrics.as_dict(),
             }
 
         except Exception as err:

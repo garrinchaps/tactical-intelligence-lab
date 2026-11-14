@@ -1,0 +1,9 @@
+# Exemplo: copie para config/competitions.local.yaml e edite.
+competicoes:
+  - id: arquivo-brasileirao-2025
+    nome: Brasileirão Série A
+    temporada: "2025"
+    fonte: arquivo_usuario
+    nivel_dado: RESULT
+    licenca: Arquivos de scout fornecidos pelo usuário (ScoutFileParser)
+    times: [Atlético-MG, Cruzeiro, Flamengo, Palmeiras]

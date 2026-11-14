@@ -83,9 +83,9 @@ class ScopedEvidenceBuilder:
             "recorte": sc.describe(),
             "eventos_no_recorte": int(len(w)),
             "gols_no_recorte": [
-                {"minuto": int(r.minute), "equipe": r.team_name, "jogador": r.player_name}
+                {"minuto": int(r.minute) + 1, "equipe": r.team_name, "jogador": r.player_name}
                 for r in goals.itertuples()
-            ] + [{"minuto": int(r.minute), "equipe": opp if r.team_name == team else team, "jogador": f"gol contra de {r.player_name}"}
+            ] + [{"minuto": int(r.minute) + 1, "equipe": opp if r.team_name == team else team, "jogador": f"gol contra de {r.player_name}"}
                  for r in own_goals.itertuples()],
             "share_de_passes_pct": {team: _pct(team_passes, len(passes)), opp: _pct(len(passes) - team_passes, len(passes))},
         }
@@ -280,10 +280,60 @@ class ScopedEvidenceBuilder:
         f3 = p[p["x"] >= 80]
         return {
             "share_passes_pct": _pct((p["team_name"] == team).sum(), len(p)),
+            "share_passes_pct_adversario": _pct((p["team_name"] == opp).sum(), len(p)),
             "field_tilt_pct": _pct((f3["team_name"] == team).sum(), len(f3)),
+            "field_tilt_pct_adversario": _pct((f3["team_name"] == opp).sum(), len(f3)),
             "passes": {team: int((p["team_name"] == team).sum()), opp: int((p["team_name"] == opp).sum())},
             "amostra_N": int(len(p)),
         }
+
+    # ------------------------------------------------- fatos e rankings
+    @classmethod
+    def block_goals(cls, df: pd.DataFrame, team: str, opp: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        from src.metrics.match_facts import goals, shootout
+
+        g = goals(df)
+        return {"placar": {team: sum(1 for x in g if x["equipe"] == team), opp: sum(1 for x in g if x["equipe"] == opp)},
+                "gols": g, "disputa_de_penaltis": shootout(df),
+                "nota": "assistência = último passe certo da equipe para o autor do gol na mesma posse"}
+
+    @classmethod
+    def block_ranking(cls, df: pd.DataFrame, sc: QueryScope, team: str, opp: str, top: int = 5) -> Dict[str, Any]:
+        from src.metrics.match_facts import PLAYER_STAT_LABELS, player_match_stats
+
+        metric = sc.ranking_metric or "xt"
+        w = df[cls._time_mask(df, sc)]
+        if sc.side or sc.third:
+            w = w[cls._zone_mask(cls._own_frame(w, team), sc)]
+        scope_team = None
+        if sc.team_named and sc.team_focus in ("target", "opponent"):
+            scope_team = team
+        st = player_match_stats(w, scope_team)
+        if st.empty:
+            return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0}
+        st = st[st[metric].fillna(0) > 0].sort_values([metric, "minutos"], ascending=[False, True]).head(top)
+        extra = {"finalizacoes_no_alvo": "finalizacoes", "passes_certos": "passes", "gols": "finalizacoes",
+                 "assistencias": "passes_decisivos"}.get(metric)
+        return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "chave": metric,
+                "equipes_consideradas": scope_team or f"{team} e {opp}",
+                "lideres": [{"jogador": r.jogador, "equipe": r.equipe, "valor": _r(getattr(r, metric), 3),
+                             **({"secundaria": PLAYER_STAT_LABELS[extra], "valor_secundario": _r(getattr(r, extra), 3)} if extra else {})}
+                            for r in st.itertuples()],
+                "amostra_N": int(len(w))}
+
+    @classmethod
+    def block_result(cls, df: pd.DataFrame, team: str, opp: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        from src.metrics.match_facts import TEAM_STAT_LABELS, team_match_stats
+
+        a, b = team_match_stats(df, team), team_match_stats(df, opp)
+        keys = ["gols", "xg", "finalizacoes", "finalizacoes_no_alvo", "share_passes_pct", "field_tilt_pct", "ppda",
+                "entradas_na_area", "passes_progressivos", "recuperacoes", "perdas_de_posse"]
+        from src.metrics.match_facts import shootout
+
+        return {"comparativo": {TEAM_STAT_LABELS[k]: {team: a.get(k), opp: b.get(k)} for k in keys},
+                "disputa_de_penaltis": shootout(df),
+                "gols": cls.block_goals(df, team, opp, meta)["gols"],
+                "nota": "PPDA estimado: passes adversários na construção ÷ ações defensivas da equipe no campo adversário"}
 
     # ------------------------------------------------------- montagem
     @classmethod
@@ -293,6 +343,14 @@ class ScopedEvidenceBuilder:
         team, other = (opp, target_team) if sc.team_focus == "opponent" else (target_team, opp)
 
         blocks: Dict[str, Any] = {"contexto": cls.block_context(df, sc, team, other)}
+        if sc.ask == "goals":
+            blocks["gols"] = cls.block_goals(df, team, other, meta)
+        elif sc.ask == "ranking":
+            blocks["ranking"] = cls.block_ranking(df, sc, team, other)
+        elif sc.ask == "result":
+            blocks["resultado"] = cls.block_result(df, team, other, meta)
+        if sc.ask:
+            return cls._wrap(df, sc, team, other, meta, blocks)
         m = set(sc.metrics)
         phase = sc.phase
         if sc.players:
@@ -314,7 +372,10 @@ class ScopedEvidenceBuilder:
             blocks["posse"] = cls.block_possession(df, sc, team, other)
             blocks["ataque_no_recorte"] = cls.block_attack(df, sc, team)
             blocks["ataque_adversario"] = cls.block_attack(df, sc, other)
+        return cls._wrap(df, sc, team, other, meta, blocks)
 
+    @staticmethod
+    def _wrap(df, sc, team, other, meta, blocks) -> Dict[str, Any]:
         roster = sorted(df["player_name"].dropna().astype(str).unique().tolist())
         return {
             "metadata": {

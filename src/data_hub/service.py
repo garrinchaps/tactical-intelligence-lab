@@ -17,6 +17,7 @@ from src.data_hub.registry import (
 from src.data_hub.search import UniversalMatchFinder
 from src.data_hub.sources.api_football import ApiFootballProvider
 from src.data_hub.sources.espn import EspnProvider
+from src.data_hub.sources.fdcouk import FootballDataCoUkProvider
 from src.data_hub.sources.football_data import FootballDataProvider
 from src.data_hub.sources.statsbomb import StatsBombProvider
 from src.data_hub.sources.wyscout import WyscoutProvider
@@ -61,6 +62,7 @@ class MatchDataService:
         self.api_football = ApiFootballProvider(self.db)
         self.football_data = FootballDataProvider(self.db)
         self.espn = EspnProvider(self.db)
+        self.fdcouk = FootballDataCoUkProvider(self.db)
         self.finder = UniversalMatchFinder(self.db, providers={
             "api_football": self.api_football, "espn": self.espn, "football_data": self.football_data,
         })
@@ -73,6 +75,7 @@ class MatchDataService:
                              "quota_left": self.api_football.client.quota_left() if self.api_football.enabled else None},
             "football_data": {"enabled": self.football_data.enabled},
             "espn": {"enabled": self.espn.enabled},
+            "fdcouk": {"enabled": True, "note": "sem chave"},
         }
 
     def load(self, match_id: int) -> MatchBundle:

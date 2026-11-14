@@ -71,6 +71,8 @@ class SourceInfo:
     license_note: str
     url: str
     needs_key: Optional[str] = None
+    connector: str = ""
+    raw_tier: str = "OFFICIAL"   # tier dos valores ingeridos diretamente da fonte
 
 
 # Faixas de ID internas (StatsBomb mantém o ID original, < 10 milhões)
@@ -79,31 +81,40 @@ SOURCES: Dict[str, SourceInfo] = {
         "statsbomb", "StatsBomb Open Data", DataLevel.EVENTS, 0, True,
         "Uso livre com crédito à StatsBomb e uso do logo (Media Pack).",
         "https://github.com/statsbomb/open-data",
+        connector="StatsBombConnector", raw_tier="OFFICIAL",
     ),
     "wyscout": SourceInfo(
         "wyscout", "Wyscout Public Dataset (Pappalardo et al., 2019)", DataLevel.EVENTS,
         10_000_000, True,
         "CC BY 4.0 — citar Pappalardo et al., Scientific Data 6:236 (2019).",
         "https://github.com/koenvo/wyscout-soccer-match-event-dataset",
+        connector="WyscoutConnector", raw_tier="OFFICIAL",
     ),
     "api_football": SourceInfo(
         "api_football", "API-Football (api-sports.io)", DataLevel.BOXSCORE,
         100_000_000, True,
         "API oficial com chave. Plano gratuito: 100 requisições/dia; temporada atual pode exigir plano pago.",
-        "https://www.api-football.com", needs_key="API_FOOTBALL_KEY",
+        "https://www.api-football.com", needs_key="API_FOOTBALL_KEY", connector="APIConnector[api-football]", raw_tier="OFFICIAL",
     ),
     "football_data": SourceInfo(
         "football_data", "football-data.org", DataLevel.RESULT,
         300_000_000, True,
         "API oficial com token gratuito (12 competições, 10 chamadas/min).",
-        "https://www.football-data.org", needs_key="FOOTBALL_DATA_TOKEN",
+        "https://www.football-data.org", needs_key="FOOTBALL_DATA_TOKEN", connector="APIConnector[football-data]", raw_tier="OFFICIAL",
     ),
     "espn": SourceInfo(
         "espn", "ESPN (feed JSON público, não oficial)", DataLevel.BOXSCORE,
         500_000_000, False,
         "Endpoint público sem documentação oficial. Desativado por padrão; uso pessoal/acadêmico, "
         "com baixa frequência. Verifique os termos de uso da ESPN antes de ativar.",
-        "https://www.espn.com.br/futebol/", needs_key="ENABLE_ESPN_PUBLIC_FEED",
+        "https://www.espn.com.br/futebol/", needs_key="ENABLE_ESPN_PUBLIC_FEED", connector="APIConnector[espn-público]", raw_tier="DERIVED",
+    ),
+    "fdcouk": SourceInfo(
+        "fdcouk", "football-data.co.uk (CSVs públicos)", DataLevel.BOXSCORE,
+        2_000_000_000, True,
+        "Arquivos gratuitos para download; citar football-data.co.uk. Ligas principais: placar e estatísticas "
+        "de equipe; ligas extras (inclui Brasileirão): placar.",
+        "https://www.football-data.co.uk", connector="CSVConnector[football-data.co.uk]", raw_tier="OFFICIAL",
     ),
 }
 
@@ -122,7 +133,7 @@ def source_from_internal_id(match_id: int) -> str:
             return "simulated"
     if mid == UPLOAD_ID:
         return "upload"
-    for key in ("espn", "football_data", "api_football", "wyscout"):
+    for key in ("fdcouk", "espn", "football_data", "api_football", "wyscout"):
         off = SOURCES[key].id_offset
         if mid >= off:
             return key
@@ -134,6 +145,23 @@ def to_source_id(match_id: int) -> int:
     if src in SOURCES:
         return int(match_id) - SOURCES[src].id_offset
     return int(match_id)
+
+
+EXTRA_PROVENANCE = {
+    "simulated": ("Gerador interno de partidas simuladas", "BrasileiraoProfileGenerator",
+                  "Gerado pelo laboratório (sem restrição)", "SIMULATED"),
+    "upload": ("Arquivo enviado pelo usuário", "UploadConnector", "Responsabilidade do usuário", "OFFICIAL"),
+}
+
+
+def provenance_base(source: str) -> Dict[str, str]:
+    """Fonte, conector, licença e tier padrão de uma fonte interna (para o ProvenanceRegistry)."""
+    if source in SOURCES:
+        s = SOURCES[source]
+        return {"source": s.label, "connector": s.connector or s.key, "license": s.license_note,
+                "raw_tier": s.raw_tier}
+    label, conn, lic, tier = EXTRA_PROVENANCE.get(source, (source, source, "não informada", "DERIVED"))
+    return {"source": label, "connector": conn, "license": lic, "raw_tier": tier}
 
 
 def badge_for(level: Optional[str]) -> str:

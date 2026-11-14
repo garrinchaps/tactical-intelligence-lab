@@ -83,6 +83,78 @@ class LocalScopedWriter:
         summary: List[str] = []
 
         for key, b in blocks.items():
+            if key == "gols":
+                from src.metrics.match_facts import goal_line
+
+                pl = b["placar"]
+                (t1, g1), (t2, g2) = list(pl.items())
+                if not b["gols"]:
+                    out.append(f"**Placar:** {t1} {g1} x {g2} {t2}. Não houve gols no tempo de jogo.")
+                else:
+                    out.append(f"**Placar:** {t1} {g1} x {g2} {t2}.")
+                    for tm in (t1, t2):
+                        lines = [goal_line(g) for g in b["gols"] if g["equipe"] == tm]
+                        if lines:
+                            out.append(f"**Gols de {tm}:** " + "; ".join(lines) + ".")
+                pen = b.get("disputa_de_penaltis")
+                if pen:
+                    out.append("**Disputa de pênaltis:** " + " x ".join(f"{k} {v}" for k, v in pen.items()) + ".")
+                scorers: Dict[str, int] = {}
+                for g in b["gols"]:
+                    if not g["gol_contra"]:
+                        scorers[g["jogador"]] = scorers.get(g["jogador"], 0) + 1
+                if scorers:
+                    best = max(scorers.items(), key=lambda kv: kv[1])
+                    summary.append(f"{best[0]} marcou {_pl(best[1], 'gol', 'gols')}" if best[1] > 1 else
+                                   f"{len(b['gols'])} gols de {len(scorers)} autores diferentes")
+                continue
+            if key == "ranking":
+                lid = b["lideres"]
+                if not lid:
+                    out.append(f"Nenhum atleta registrou {b['metrica'].lower()} no recorte.")
+                    continue
+                head = f"**{b['metrica']} — {b['equipes_consideradas']}" + (f", {sc.describe()}" if sc.has_cut else "") + ":**"
+                rows = "\n".join(f"{i}. {r['jogador']} ({r['equipe']}): {_fmt(r['valor'])}"
+                                  + (f" · {r['secundaria'].lower()}: {_fmt(r['valor_secundario'])}" if r.get("secundaria") else "")
+                                  for i, r in enumerate(lid, 1))
+                out.append(head + "\n" + rows)
+                lab = b["metrica"] if b["metrica"].startswith("x") else b["metrica"].lower()
+                summary.append(f"{lid[0]['jogador']} liderou em {lab} ({_fmt(lid[0]['valor'])})")
+                continue
+            if key == "resultado":
+                from src.metrics.match_facts import goal_line
+
+                comp = b["comparativo"]
+                g = comp["Gols"]
+                win = max(g, key=g.get) if len(set(g.values())) > 1 else None
+                pen = b.get("disputa_de_penaltis")
+                by_pen = False
+                if win is None and pen and len(set(pen.values())) > 1:
+                    win, by_pen = max(pen, key=pen.get), True
+                lose = next((k for k in g if k != win), None) if win else None
+                out.append(f"**Placar:** " + " x ".join(f"{k} {v}" for k, v in g.items()) + "."
+                           + (" Nos pênaltis: " + " x ".join(f"{k} {v}" for k, v in pen.items()) + "." if pen else ""))
+                if b["gols"]:
+                    out.append("**Gols:** " + "; ".join(f"{goal_line(x)} — {x['equipe']}" for x in b["gols"]) + ".")
+                rows = "\n".join(f"| {lab} | " + " | ".join(_fmt(v) for v in vals.values()) + " |" for lab, vals in comp.items())
+                teams_h = list(g.keys())
+                out.append(f"| Indicador | {teams_h[0]} | {teams_h[1]} |\n|---|---|---|\n{rows}")
+                if win:
+                    edges = [lab for lab, vals in comp.items() if lab not in ("Gols", "PPDA (estimado)", "Perdas de posse")
+                             and vals.get(win) is not None and vals.get(lose) is not None and vals[win] > vals[lose]]
+                    p = comp.get("PPDA (estimado)", {})
+                    if p.get(win) is not None and p.get(lose) is not None and p[win] < p[lose]:
+                        edges.append("pressão mais intensa (PPDA menor)")
+                    if by_pen:
+                        out.append(f"Empate no tempo de jogo; {win} venceu na disputa de pênaltis.")
+                    out.append(f"**Onde {win} foi superior{' durante o jogo' if by_pen else ''}:** " + (", ".join(e if e.startswith("x") else e.lower() for e in edges[:6]) + "." if edges else
+                               "os números de volume ficaram equilibrados ou a favor do rival; a vitória veio da eficiência nas finalizações."))
+                    verb = "venceu nos pênaltis" if by_pen else "venceu"
+                    summary.append(f"{win} {verb}, com vantagem em {len(edges)} dos indicadores comparados" if edges
+                                   else f"{win} {verb} sendo mais eficiente nas finalizações")
+                else:
+                    summary.append("o jogo terminou empatado no tempo de jogo")
+                continue
             if key == "contexto":
                 gols = b.get("gols_no_recorte") or []
                 if gols and (sc.minute_from is not None or sc.period):
@@ -146,7 +218,12 @@ class LocalScopedWriter:
                     f"{t}: {v['escanteios']} escanteios, {v['finalizacoes_de_bola_parada']} finalizações (xG {_fmt(v['xg_bola_parada'])})"
                     for t, v in b.items()) + ".")
             elif key == "posse":
-                out.append(f"**Controle:** {_fmt(b['share_passes_pct'])}% dos passes e field tilt de {_fmt(b['field_tilt_pct'])}% para {team}.")
+                a_, o_ = b.get("share_passes_pct"), b.get("share_passes_pct_adversario")
+                leader = team if (a_ or 0) >= (o_ or 0) else opp
+                out.append(f"**Posse (proporção dos passes):** {team} {_fmt(a_)}% x {_fmt(o_)}% {opp}. "
+                           f"**Field tilt** (passes no terço final): {team} {_fmt(b['field_tilt_pct'])}% x "
+                           f"{_fmt(b.get('field_tilt_pct_adversario'))}% {opp}.")
+                summary.append(f"{leader} teve mais a bola")
             elif key.startswith("jogador::"):
                 feed = ", ".join(f"{k} ({v})" for k, v in (b.get("quem_mais_o_abastece") or {}).items())
                 tgt = ", ".join(f"{k} ({v})" for k, v in (b.get("para_quem_mais_passa") or {}).items())
@@ -221,19 +298,50 @@ class DynamicTacticalAnalyst:
         self.api_key = raw.strip() if raw and "coloque_sua_chave" not in raw.lower() and len(raw.strip()) > 15 else None
         self.model_name = model_name
 
+    FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+
+    @staticmethod
+    def explain_error(err: Exception) -> str:
+        """Traduz o erro da API do Gemini em uma causa que o usuário consegue resolver."""
+        msg = str(err)
+        low = msg.lower()
+        if "api_key_invalid" in low or "api key not valid" in low or "invalid api key" in low:
+            return "chave do Gemini inválida: gere outra em aistudio.google.com e atualize GEMINI_API_KEY no .env"
+        if "permission_denied" in low or " 403" in f" {low}":
+            return "a chave não tem permissão para a API Gemini (ative a Generative Language API no projeto da chave)"
+        if "resource_exhausted" in low or " 429" in f" {low}" or "quota" in low:
+            return "cota gratuita do Gemini esgotada no momento: tente de novo mais tarde"
+        if "not_found" in low or " 404" in f" {low}":
+            return "modelo do Gemini indisponível para esta chave (defina GEMINI_MODEL no .env)"
+        if "location" in low and "not supported" in low:
+            return "a API Gemini não está disponível na região desta conta"
+        return f"{type(err).__name__}: {msg[:160]}"
+
     def _llm(self, system: str, prompt: str) -> str:
         from google import genai
         from google.genai import types
 
         client = genai.Client(api_key=self.api_key)
-        resp = client.models.generate_content(
-            model=self.model_name, contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=system, temperature=0.3),
-        )
-        text = resp.text if resp and resp.text else ""
-        if not text.strip():
-            raise RuntimeError("Resposta vazia da API generativa.")
-        return text
+        first = os.getenv("GEMINI_MODEL", "").strip() or self.model_name
+        models = list(dict.fromkeys([first, *self.FALLBACK_MODELS]))
+        last: Optional[Exception] = None
+        for model in models:
+            try:
+                resp = client.models.generate_content(
+                    model=model, contents=prompt,
+                    config=types.GenerateContentConfig(system_instruction=system, temperature=0.3),
+                )
+            except Exception as exc:  # só troca de modelo quando o problema é o modelo
+                last = exc
+                if "not_found" in str(exc).lower() or "404" in str(exc):
+                    continue
+                raise
+            text = resp.text if resp and resp.text else ""
+            if not text.strip():
+                raise RuntimeError("Resposta vazia da API generativa.")
+            self.model_name = model
+            return text
+        raise last or RuntimeError("nenhum modelo do Gemini respondeu")
 
     def answer(
         self,
@@ -307,22 +415,30 @@ class DynamicTacticalAnalyst:
             return result
 
         try:
+            from src.guard.metrics import GuardMetricsLog
+            from src.guard.policy import GuardPolicy
+
             ctx = ""
             if history:
                 ctx = "Conversa anterior (para entender referências):\n" + "\n".join(
                     f"- Usuário: {h['q']}" for h in history[-3:]) + "\n\n"
             prompt = (f"{ctx}PERGUNTA: {query}\nRECORTE INTERPRETADO: {sc.describe()}\n\n"
                       f"EVIDÊNCIAS (JSON):\n{json.dumps(evidence, ensure_ascii=False, indent=1, default=str)}")
-            text = self._llm(DYNAMIC_SYSTEM, prompt)
-            audit = NumericHallucinationGuard.audit_text_numbers(text, evidence)
-            if not audit["is_grounded"]:
-                local_audit["blocked_llm_audit"] = audit
-                result["engine_used"] = "LOCAL_SCOPED_FALLBACK_AFTER_AUDIT_BLOCK"
-                return result
-            return {"engine_used": f"GEMINI_API ({self.model_name})",
-                    "report_markdown": TacticalReportBuilder.prepend_simulation_badge(
-                        text, bool(evidence["metadata"].get("is_simulation_data"))),
-                    "hallucination_audit": audit, "scope": sc.to_dict(), "evidence": evidence}
+
+            def generate(extra: Optional[str]) -> str:
+                return self._llm(DYNAMIC_SYSTEM, prompt if not extra else f"{extra}\n\n{prompt}")
+
+            pol = GuardPolicy(NumericHallucinationGuard.audit_text_numbers, GuardMetricsLog()).run(
+                generate, evidence, fallback_text=local_md, engine=f"GEMINI_API ({self.model_name})")
+            engine = {"APROVADO_1A": f"GEMINI_API ({self.model_name})",
+                      "APROVADO_REGENERADO": f"GEMINI_API ({self.model_name}) — regenerado com contexto restrito",
+                      "DEGRADADO": "RESPOSTA DEGRADADA (redator local após 2 bloqueios)"}[pol.outcome]
+            text = pol.text if pol.outcome == "DEGRADADO" else TacticalReportBuilder.prepend_simulation_badge(
+                pol.text, bool(evidence["metadata"].get("is_simulation_data")))
+            return {"engine_used": engine, "report_markdown": text, "hallucination_audit": pol.audit,
+                    "guard_outcome": pol.outcome, "guard_metrics": pol.metrics.as_dict(),
+                    "scope": sc.to_dict(), "evidence": evidence}
         except Exception as err:
-            result["engine_used"] = f"LOCAL_SCOPED_FALLBACK ({type(err).__name__})"
+            result["engine_used"] = "REDATOR LOCAL (Gemini indisponível)"
+            result["llm_error"] = self.explain_error(err)
             return result

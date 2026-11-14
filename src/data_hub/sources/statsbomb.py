@@ -91,7 +91,12 @@ class StatsBombProvider:
     def load_events(self, match_id: int) -> pd.DataFrame:
         from src.ingestion.statsbomb_loader import StatsBombDataLoader
 
-        raw = self.client.get_json(f"{BASE}/events/{int(match_id)}.json", max_age_s=None)
+        from src.connectors.statsbomb_connector import load_demo_events
+
+        # partidas do pacote de demonstração (data/demo/) abrem sem rede; as demais vêm do StatsBomb
+        raw = load_demo_events(int(match_id))
+        if raw is None:
+            raw = self.client.get_json(f"{BASE}/events/{int(match_id)}.json", max_age_s=None)
         df = StatsBombDataLoader._parse_raw_events(None, raw, int(match_id))  # parser não usa estado
         if not df.empty:
             if self.db.get_match(match_id) is None:
@@ -103,3 +108,10 @@ class StatsBombProvider:
                 }])
             self.db.save_events(match_id, df)
         return df
+
+    def load_360(self, match_id: int):
+        """Freeze frames do StatsBomb 360 (posição dos atletas visíveis em cada evento); None se não houver."""
+        try:
+            return self.client.get_json(f"{BASE}/three-sixty/{int(match_id)}.json", max_age_s=None)
+        except Exception:
+            return None

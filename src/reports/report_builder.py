@@ -541,80 +541,71 @@ class NumericHallucinationGuard:
         cls, text: str, evidence_bundle: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Auditoria completa. Mantém as chaves históricas (`is_grounded`,
-        `verified_decimals_count`, `unverified_decimals`) e acrescenta inteiros e nomes.
+        Auditoria v2 (src/guard): cada número do texto é extraído com normalização BR/US e
+        classificado como EXATO, DERIVADO (recalculável a partir de dois fatos relacionados),
+        CONSTANTE (metodológica) ou NÃO RASTREÁVEL. Contagens ("8 passes") e minutos exigem
+        EXATO/DERIVADO — constante não basta. Nomes de atletas fora do elenco também reprovam.
+        Mantém as chaves históricas (is_grounded, unverified_decimals, unverified_integers...).
         """
-        allowed = cls.extract_allowed_numbers(evidence_bundle)
+        from src.guard.classifier import CONSTANTE, DERIVADO, EXATO, NAO_RASTREAVEL, NumberClassifier
+        from src.guard.extractor import NumericExtractor
+        from src.guard.ground_truth import GroundTruthSet
+
         clean = cls._strip_echoed_context(text or "", evidence_bundle)
+        gt = GroundTruthSet.from_evidence(evidence_bundle)
+        constants = {float(c.replace(",", ".")) for c in cls.STRUCTURAL_CONSTANTS}
+        clf = NumberClassifier(gt, constants=constants)
+        count_rx = re.compile(rf"^\s*(?:%\s*)?(?:\*\*)?\s*(?:[\wÀ-ÿ]+\s+){{0,2}}?(?:{cls.COUNT_NOUNS})", re.IGNORECASE)
+        minute_before = re.compile(r"(?:minuto|min\.?)\s*$", re.IGNORECASE)
 
-        # 1. Decimais
+        rows: List[Dict[str, Any]] = []
         unverified_dec: List[str] = []
-        verified_dec = 0
-        for num_str in re.findall(r"(?<![\w.,])\d+[.,]\d+(?![\w])", clean):
-            norm = num_str.replace(",", ".")
-            try:
-                val = float(norm)
-            except ValueError:
-                continue
-            candidates = {num_str, norm} | {f"{val:.{d}f}" for d in (1, 2, 3, 4)}
-            if candidates & (allowed | cls.STRUCTURAL_CONSTANTS):
-                verified_dec += 1
-            else:
-                unverified_dec.append(num_str)
-
-        # 2. Inteiros (sem tocar nas partes de decimais)
-        no_decimals = re.sub(r"\d+[.,]\d+", " ", clean)
         unverified_int: List[str] = []
-        verified_int = 0
-        count_ctx = re.compile(
-            rf"(?<![\w.,])(\d+)(?![\w.,]\d)\s*(?:%\s*)?(?:\*\*)?\s*(?:[\wÀ-ÿ]+\s+){{0,2}}?(?:{cls.COUNT_NOUNS})",
-            flags=re.IGNORECASE,
-        )
-        minute_ctx = re.compile(
-            r"(?:minuto|min\.?)\s*(\d+)|(?<![\w.,])(\d+)\s*(?:'|’|min\b|minutos?)",
-            flags=re.IGNORECASE,
-        )
-        critical_spans: Set[Tuple[int, int]] = set()
-
-        for m in minute_ctx.finditer(no_decimals):
-            num = m.group(1) or m.group(2)
-            span = m.span(1) if m.group(1) else m.span(2)
-            critical_spans.add(span)
-            if num in allowed or num in cls.MINUTE_CONSTANTS:
-                verified_int += 1
+        n_exact = n_derived = n_const = 0
+        for m in NumericExtractor.extract(clean):
+            c = clf.classify(m)
+            after = clean[m.end:m.end + 40]
+            before = clean[max(0, m.start - 10):m.start]
+            ctx = ""
+            if minute_before.search(before) or m.unit in ("'", "’", "min", "minuto", "minutos"):
+                ctx = "minuto"
+            elif m.is_integer and count_rx.match(after):
+                ctx = "contagem"
+            label = c.label
+            if label == CONSTANTE:
+                if ctx == "contagem" or (ctx == "minuto" and m.value not in
+                                         {float(x) for x in cls.MINUTE_CONSTANTS}):
+                    label = NAO_RASTREAVEL
+            rows.append({"numero": m.raw, "classe": label, "explicacao": c.explanation if label == c.label else
+                         "constante metodológica não vale como contagem/minuto", "contexto": ctx})
+            if label == NAO_RASTREAVEL:
+                if m.is_integer:
+                    unverified_int.append(f"{m.raw} ({ctx})" if ctx else m.raw)
+                else:
+                    unverified_dec.append(m.raw)
+            elif label == EXATO:
+                n_exact += 1
+            elif label == DERIVADO:
+                n_derived += 1
             else:
-                unverified_int.append(f"{num} (minuto)")
+                n_const += 1
 
-        for m in count_ctx.finditer(no_decimals):
-            span = m.span(1)
-            if span in critical_spans:
-                continue
-            critical_spans.add(span)
-            num = m.group(1)
-            if num in allowed:
-                verified_int += 1
-            else:
-                unverified_int.append(f"{num} (contagem)")
-
-        for m in re.finditer(r"(?<![\w.,#])(\d+)(?![\w.,]\d|\w)", no_decimals):
-            if m.span(1) in critical_spans:
-                continue
-            num = m.group(1)
-            if num in allowed or num in cls.STRUCTURAL_CONSTANTS:
-                verified_int += 1
-            else:
-                unverified_int.append(num)
-
-        # 3. Nomes de atletas
         unverified_names = cls.audit_player_names(text or "", evidence_bundle)
-
+        n_untr = len(unverified_dec) + len(unverified_int)
         return {
             "is_grounded": not (unverified_dec or unverified_int or unverified_names),
-            "verified_decimals_count": verified_dec,
+            "verified_decimals_count": sum(1 for r in rows if r["classe"] != NAO_RASTREAVEL and not r["numero"].isdigit()),
             "unverified_decimals": unverified_dec,
-            "verified_integers_count": verified_int,
+            "verified_integers_count": sum(1 for r in rows if r["classe"] != NAO_RASTREAVEL and r["numero"].isdigit()),
             "unverified_integers": unverified_int,
             "unverified_player_names": unverified_names,
+            "classificacao": rows,
+            "numbers_total": len(rows),
+            "exact_count": n_exact,
+            "derived_count": n_derived,
+            "constant_count": n_const,
+            "untraceable_count": n_untr,
+            "untraceable_rate": round(n_untr / len(rows), 4) if rows else 0.0,
         }
 
     # -------------------------------------------------------------------- nomes

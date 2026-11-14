@@ -1,0 +1,2208 @@
+# =============================================================================
+# CATÁLOGO DE COMPETIÇÕES — Tactical Intelligence Lab
+# Gerado a partir dos catálogos oficiais das fontes. NÃO edite este arquivo para
+# adicionar competições: crie config/competitions.local.yaml no mesmo formato
+# (ele é lido depois deste e pode acrescentar ou sobrescrever entradas pelo 'id').
+#
+# Campos: id (único), nome, temporada, fonte (statsbomb | wyscout | api_football |
+# football_data | espn | arquivo_usuario), nivel_dado (EVENTS | BOXSCORE | RESULT |
+# SIMULATED), licenca, times (lista; vazia = definida pela fonte), partidas (opcional),
+# pais_regiao e genero (opcionais).
+# =============================================================================
+competicoes:
+- id: statsbomb-9-27
+  nome: 1. Bundesliga
+  temporada: 2015/2016
+  pais_regiao: Germany
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 34
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Augsburg
+  - Bayer Leverkusen
+  - Bayern Munich
+  - Borussia Dortmund
+  - Borussia Mönchengladbach
+  - Darmstadt 98
+  - Eintracht Frankfurt
+  - FC Köln
+  - FSV Mainz 05
+  - Hamburger SV
+  - Hannover 96
+  - Hertha Berlin
+  - Hoffenheim
+  - Ingolstadt
+  - Schalke 04
+  - VfB Stuttgart
+  - Werder Bremen
+  - Wolfsburg
+- id: statsbomb-9-281
+  nome: 1. Bundesliga
+  temporada: 2023/2024
+  pais_regiao: Germany
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 34
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Augsburg
+  - Bayer Leverkusen
+  - Bayern Munich
+  - Bochum
+  - Borussia Dortmund
+  - Borussia Mönchengladbach
+  - Darmstadt 98
+  - Eintracht Frankfurt
+  - FC Heidenheim
+  - FC Köln
+  - FSV Mainz 05
+  - Freiburg
+  - Hoffenheim
+  - RB Leipzig
+  - Union Berlin
+  - VfB Stuttgart
+  - Werder Bremen
+  - Wolfsburg
+- id: statsbomb-1267-107
+  nome: African Cup of Nations
+  temporada: '2023'
+  pais_regiao: Africa
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 52
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Algeria
+  - Angola
+  - Burkina Faso
+  - Cameroon
+  - Cape Verde Islands
+  - Congo DR
+  - Côte d'Ivoire
+  - Egypt
+  - Equatorial Guinea
+  - Gambia
+  - Ghana
+  - Guinea
+  - Guinea-Bissau
+  - Mali
+  - Mauritania
+  - Morocco
+  - Mozambique
+  - Namibia
+  - Nigeria
+  - Senegal
+  - South Africa
+  - Tanzania
+  - Tunisia
+  - Zambia
+- id: statsbomb-16-276
+  nome: Champions League
+  temporada: 1970/1971
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Ajax
+  - Panathinaikos
+- id: statsbomb-16-71
+  nome: Champions League
+  temporada: 1971/1972
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Ajax
+  - Inter Milan
+- id: statsbomb-16-277
+  nome: Champions League
+  temporada: 1972/1973
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Ajax
+  - Juventus
+- id: statsbomb-16-76
+  nome: Champions League
+  temporada: 1999/2000
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Fiorentina
+  - Manchester United
+- id: statsbomb-16-44
+  nome: Champions League
+  temporada: 2003/2004
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AS Monaco
+  - FC Porto
+- id: statsbomb-16-37
+  nome: Champions League
+  temporada: 2004/2005
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AC Milan
+  - Liverpool
+- id: statsbomb-16-39
+  nome: Champions League
+  temporada: 2006/2007
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AC Milan
+  - Liverpool
+- id: statsbomb-16-41
+  nome: Champions League
+  temporada: 2008/2009
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Manchester United
+- id: statsbomb-16-21
+  nome: Champions League
+  temporada: 2009/2010
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bayern Munich
+  - Inter Milan
+- id: statsbomb-16-22
+  nome: Champions League
+  temporada: 2010/2011
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Manchester United
+- id: statsbomb-16-23
+  nome: Champions League
+  temporada: 2011/2012
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bayern Munich
+  - Chelsea
+- id: statsbomb-16-24
+  nome: Champions League
+  temporada: 2012/2013
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bayern Munich
+  - Borussia Dortmund
+- id: statsbomb-16-25
+  nome: Champions League
+  temporada: 2013/2014
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Atlético Madrid
+  - Real Madrid
+- id: statsbomb-16-26
+  nome: Champions League
+  temporada: 2014/2015
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Juventus
+- id: statsbomb-16-27
+  nome: Champions League
+  temporada: 2015/2016
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Atlético Madrid
+  - Real Madrid
+- id: statsbomb-16-2
+  nome: Champions League
+  temporada: 2016/2017
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Juventus
+  - Real Madrid
+- id: statsbomb-16-1
+  nome: Champions League
+  temporada: 2017/2018
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Liverpool
+  - Real Madrid
+- id: statsbomb-16-4
+  nome: Champions League
+  temporada: 2018/2019
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Liverpool
+  - Tottenham Hotspur
+- id: statsbomb-223-282
+  nome: Copa America
+  temporada: '2024'
+  pais_regiao: South America
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 32
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Bolivia
+  - Brazil
+  - Canada
+  - Chile
+  - Colombia
+  - Costa Rica
+  - Ecuador
+  - Jamaica
+  - Mexico
+  - Panama
+  - Paraguay
+  - Peru
+  - United States
+  - Uruguay
+  - Venezuela
+- id: statsbomb-87-279
+  nome: Copa del Rey
+  temporada: 1977/1978
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Las Palmas
+- id: statsbomb-87-268
+  nome: Copa del Rey
+  temporada: 1982/1983
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Real Madrid
+- id: statsbomb-87-84
+  nome: Copa del Rey
+  temporada: 1983/1984
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Barcelona
+- id: statsbomb-37-4
+  nome: FA Women's Super League
+  temporada: 2018/2019
+  pais_regiao: England
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 107
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Arsenal WFC
+  - Birmingham City WFC
+  - Brighton & Hove Albion WFC
+  - Bristol City WFC
+  - Chelsea FCW
+  - Everton LFC
+  - Liverpool WFC
+  - Manchester City WFC
+  - Reading WFC
+  - West Ham United LFC
+  - Yeovil Town LFC
+- id: statsbomb-37-42
+  nome: FA Women's Super League
+  temporada: 2019/2020
+  pais_regiao: England
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 87
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Arsenal WFC
+  - Birmingham City WFC
+  - Brighton & Hove Albion WFC
+  - Bristol City WFC
+  - Chelsea FCW
+  - Everton LFC
+  - Liverpool WFC
+  - Manchester City WFC
+  - Manchester United W
+  - Reading WFC
+  - Tottenham Hotspur Women
+  - West Ham United LFC
+- id: statsbomb-37-90
+  nome: FA Women's Super League
+  temporada: 2020/2021
+  pais_regiao: England
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 131
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Arsenal WFC
+  - Aston Villa W
+  - Birmingham City WFC
+  - Brighton & Hove Albion WFC
+  - Bristol City WFC
+  - Chelsea FCW
+  - Everton LFC
+  - Manchester City WFC
+  - Manchester United W
+  - Reading WFC
+  - Tottenham Hotspur Women
+  - West Ham United LFC
+- id: statsbomb-37-281
+  nome: FA Women's Super League
+  temporada: 2023/2024
+  pais_regiao: England
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 132
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Arsenal WFC
+  - Aston Villa W
+  - Brighton & Hove Albion WFC
+  - Bristol City WFC
+  - Chelsea FCW
+  - Everton LFC
+  - Leicester City WFC
+  - Liverpool WFC
+  - Manchester City WFC
+  - Manchester United W
+  - Tottenham Hotspur Women
+  - West Ham United LFC
+- id: statsbomb-1470-274
+  nome: FIFA U20 World Cup
+  temporada: '1979'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina U20
+  - Soviet Union U20
+- id: statsbomb-43-269
+  nome: FIFA World Cup
+  temporada: '1958'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 2
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Brazil
+  - France
+  - Sweden
+- id: statsbomb-43-270
+  nome: FIFA World Cup
+  temporada: '1962'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Brazil
+  - Mexico
+- id: statsbomb-43-272
+  nome: FIFA World Cup
+  temporada: '1970'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 6
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Brazil
+  - Czechoslovakia
+  - England
+  - Italy
+  - Peru
+  - Romania
+  - Uruguay
+- id: statsbomb-43-51
+  nome: FIFA World Cup
+  temporada: '1974'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 6
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Brazil
+  - German DR
+  - Germany
+  - Netherlands
+  - Sweden
+- id: statsbomb-43-54
+  nome: FIFA World Cup
+  temporada: '1986'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 3
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Belgium
+  - England
+  - Germany
+- id: statsbomb-43-55
+  nome: FIFA World Cup
+  temporada: '1990'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Brazil
+- id: statsbomb-43-3
+  nome: FIFA World Cup
+  temporada: '2018'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 64
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Australia
+  - Belgium
+  - Brazil
+  - Colombia
+  - Costa Rica
+  - Croatia
+  - Denmark
+  - Egypt
+  - England
+  - France
+  - Germany
+  - Iceland
+  - Iran
+  - Japan
+  - Mexico
+  - Morocco
+  - Nigeria
+  - Panama
+  - Peru
+  - Poland
+  - Portugal
+  - Russia
+  - Saudi Arabia
+  - Senegal
+  - Serbia
+  - South Korea
+  - Spain
+  - Sweden
+  - Switzerland
+  - Tunisia
+  - Uruguay
+- id: statsbomb-43-106
+  nome: FIFA World Cup
+  temporada: '2022'
+  pais_regiao: International
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 64
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina
+  - Australia
+  - Belgium
+  - Brazil
+  - Cameroon
+  - Canada
+  - Costa Rica
+  - Croatia
+  - Denmark
+  - Ecuador
+  - England
+  - France
+  - Germany
+  - Ghana
+  - Iran
+  - Japan
+  - Mexico
+  - Morocco
+  - Netherlands
+  - Poland
+  - Portugal
+  - Qatar
+  - Saudi Arabia
+  - Senegal
+  - Serbia
+  - South Korea
+  - Spain
+  - Switzerland
+  - Tunisia
+  - United States
+  - Uruguay
+  - Wales
+- id: statsbomb-135-281
+  nome: Frauen Bundesliga
+  temporada: 2023/2024
+  pais_regiao: Germany
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 132
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bayern München W
+  - Duisburg WFC
+  - Eintracht Frankfurt W
+  - Hoffenheim W
+  - Köln
+  - Nürnberg W
+  - RB Leipzig W
+  - SC Freiburg
+  - SGS Essen 19/68
+  - SV Werder Bremen
+  - TSV Bayer 04 Leverkusen
+  - VfL Wolfsburg WFC
+- id: statsbomb-1238-108
+  nome: Indian Super league
+  temporada: 2021/2022
+  pais_regiao: India
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 115
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bengaluru
+  - Chennaiyin
+  - East Bengal
+  - Goa
+  - Jamshedpur
+  - Kerala Blasters
+  - Mohun Bagan Super Giant
+  - Mumbai City
+  - NorthEast United
+  - Odisha
+  - SC Delhi
+- id: statsbomb-11-278
+  nome: La Liga
+  temporada: 1973/1974
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Barcelona
+  - Real Madrid
+- id: statsbomb-11-37
+  nome: La Liga
+  temporada: 2004/2005
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 7
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Albacete
+  - Barcelona
+  - Espanyol
+  - Getafe
+  - Levante UD
+  - Málaga
+  - Osasuna
+- id: statsbomb-11-38
+  nome: La Liga
+  temporada: 2005/2006
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 17
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Cádiz
+  - Deportivo Alavés
+  - Espanyol
+  - Getafe
+  - Mallorca
+  - Málaga
+  - Osasuna
+  - Racing Santander
+  - Real Betis
+  - Real Madrid
+  - Real Zaragoza
+  - Sevilla
+  - Villarreal
+- id: statsbomb-11-39
+  nome: La Liga
+  temporada: 2006/2007
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 26
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Espanyol
+  - Getafe
+  - Gimnàstic Tarragona
+  - Levante UD
+  - Mallorca
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Racing Santander
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Zaragoza
+  - Recreativo Huelva
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-40
+  nome: La Liga
+  temporada: 2007/2008
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 27
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Espanyol
+  - Getafe
+  - Levante UD
+  - Mallorca
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Racing Santander
+  - Real Betis
+  - Real Madrid
+  - Real Murcia CF
+  - Real Valladolid
+  - Real Zaragoza
+  - Recreativo Huelva
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-41
+  nome: La Liga
+  temporada: 2008/2009
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 31
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - CD Numancia de Soria
+  - Espanyol
+  - Getafe
+  - Málaga
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Racing Santander
+  - Real Betis
+  - Real Madrid
+  - Real Valladolid
+  - Recreativo Huelva
+  - Sevilla
+  - Sporting Gijón
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-21
+  nome: La Liga
+  temporada: 2009/2010
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 35
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Espanyol
+  - Getafe
+  - Mallorca
+  - Málaga
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Racing Santander
+  - Real Madrid
+  - Real Valladolid
+  - Real Zaragoza
+  - Sevilla
+  - Sporting Gijón
+  - Tenerife
+  - Valencia
+  - Villarreal
+  - Xerez
+- id: statsbomb-11-22
+  nome: La Liga
+  temporada: 2010/2011
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 33
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Espanyol
+  - Getafe
+  - Hércules
+  - Levante UD
+  - Mallorca
+  - Málaga
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Racing Santander
+  - Real Madrid
+  - Real Sociedad
+  - Real Zaragoza
+  - Sevilla
+  - Sporting Gijón
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-23
+  nome: La Liga
+  temporada: 2011/2012
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 37
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Espanyol
+  - Getafe
+  - Granada
+  - Levante UD
+  - Mallorca
+  - Málaga
+  - Osasuna
+  - Racing Santander
+  - Rayo Vallecano
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Zaragoza
+  - Sevilla
+  - Sporting Gijón
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-24
+  nome: La Liga
+  temporada: 2012/2013
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 32
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Espanyol
+  - Getafe
+  - Granada
+  - Levante UD
+  - Mallorca
+  - Málaga
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Rayo Vallecano
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Valladolid
+  - Real Zaragoza
+  - Sevilla
+  - Valencia
+- id: statsbomb-11-25
+  nome: La Liga
+  temporada: 2013/2014
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 31
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Elche
+  - Espanyol
+  - Getafe
+  - Granada
+  - Levante UD
+  - Málaga
+  - Osasuna
+  - Rayo Vallecano
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Valladolid
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-26
+  nome: La Liga
+  temporada: 2014/2015
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 38
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Almería
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Córdoba CF
+  - Eibar
+  - Elche
+  - Espanyol
+  - Getafe
+  - Granada
+  - Levante UD
+  - Málaga
+  - RC Deportivo La Coruña
+  - Rayo Vallecano
+  - Real Madrid
+  - Real Sociedad
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-27
+  nome: La Liga
+  temporada: 2015/2016
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Eibar
+  - Espanyol
+  - Getafe
+  - Granada
+  - Las Palmas
+  - Levante UD
+  - Málaga
+  - RC Deportivo La Coruña
+  - Rayo Vallecano
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Sevilla
+  - Sporting Gijón
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-2
+  nome: La Liga
+  temporada: 2016/2017
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 34
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Deportivo Alavés
+  - Eibar
+  - Espanyol
+  - Granada
+  - Las Palmas
+  - Leganés
+  - Málaga
+  - Osasuna
+  - RC Deportivo La Coruña
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Sevilla
+  - Sporting Gijón
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-1
+  nome: La Liga
+  temporada: 2017/2018
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 36
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Deportivo Alavés
+  - Eibar
+  - Espanyol
+  - Getafe
+  - Girona
+  - Las Palmas
+  - Leganés
+  - Levante UD
+  - Málaga
+  - RC Deportivo La Coruña
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-4
+  nome: La Liga
+  temporada: 2018/2019
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 34
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Deportivo Alavés
+  - Eibar
+  - Espanyol
+  - Getafe
+  - Girona
+  - Huesca
+  - Leganés
+  - Levante UD
+  - Rayo Vallecano
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Valladolid
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-42
+  nome: La Liga
+  temporada: 2019/2020
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 33
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Deportivo Alavés
+  - Eibar
+  - Espanyol
+  - Getafe
+  - Granada
+  - Leganés
+  - Levante UD
+  - Mallorca
+  - Osasuna
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Valladolid
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-11-90
+  nome: La Liga
+  temporada: 2020/2021
+  pais_regiao: Spain
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 35
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta Vigo
+  - Cádiz
+  - Deportivo Alavés
+  - Elche
+  - Getafe
+  - Granada
+  - Huesca
+  - Levante UD
+  - Osasuna
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Real Valladolid
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: statsbomb-182-281
+  nome: Liga F
+  temporada: 2023/2024
+  pais_regiao: Spain
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 240
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Athletic Club Bilbao
+  - Atletico Madrid W
+  - Barcelona WFC
+  - CD Sporting de Huelva
+  - Costa Adeje Tenerife
+  - FC Levante Badalona
+  - Granada W
+  - Levante UD Femenino
+  - Madrid CFF
+  - Real Betis Balompié
+  - Real Madrid CF W
+  - Real Sociedad de Fútbol
+  - SD Eibar
+  - Sevilla FC
+  - Valencia CF
+  - Villarreal
+- id: statsbomb-81-275
+  nome: Liga Profesional
+  temporada: '1981'
+  pais_regiao: Argentina
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Boca Juniors
+  - River Plate
+- id: statsbomb-81-48
+  nome: Liga Profesional
+  temporada: 1997/1998
+  pais_regiao: Argentina
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Boca Juniors
+  - River Plate
+- id: statsbomb-7-27
+  nome: Ligue 1
+  temporada: 2015/2016
+  pais_regiao: France
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 377
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AS Monaco
+  - Angers
+  - Bastia
+  - Bordeaux
+  - Gazélec Ajaccio
+  - Guingamp
+  - Lille
+  - Lorient
+  - Lyon
+  - Montpellier
+  - Nantes
+  - OGC Nice
+  - Olympique de Marseille
+  - Paris Saint-Germain
+  - Rennes
+  - Saint-Étienne
+  - Stade Malherbe Caen
+  - Stade de Reims
+  - Toulouse
+  - Troyes
+- id: statsbomb-7-108
+  nome: Ligue 1
+  temporada: 2021/2022
+  pais_regiao: France
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 26
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AS Monaco
+  - Bordeaux
+  - Clermont Foot
+  - Lens
+  - Lille
+  - Lorient
+  - Lyon
+  - Metz
+  - Montpellier
+  - Nantes
+  - OGC Nice
+  - Olympique de Marseille
+  - Paris Saint-Germain
+  - Rennes
+  - Saint-Étienne
+  - Stade de Reims
+  - Strasbourg
+  - Troyes
+- id: statsbomb-7-235
+  nome: Ligue 1
+  temporada: 2022/2023
+  pais_regiao: France
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 32
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AC Ajaccio
+  - AS Monaco
+  - Angers
+  - Auxerre
+  - Clermont Foot
+  - Lens
+  - Lille
+  - Lorient
+  - Lyon
+  - Montpellier
+  - Nantes
+  - OGC Nice
+  - Olympique de Marseille
+  - Paris Saint-Germain
+  - Rennes
+  - Stade Brestois
+  - Stade de Reims
+  - Strasbourg
+  - Toulouse
+  - Troyes
+- id: statsbomb-44-107
+  nome: Major League Soccer
+  temporada: '2023'
+  pais_regiao: United States of America
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 6
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Charlotte
+  - Cincinnati
+  - Inter Miami
+  - LAFC
+  - Nashville SC
+  - New York Red Bulls
+  - Toronto FC
+- id: statsbomb-49-3
+  nome: NWSL
+  temporada: '2018'
+  pais_regiao: United States of America
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 36
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Chicago Red Stars
+  - Houston Dash
+  - NJ/NY Gotham FC
+  - North Carolina Courage
+  - Orlando Pride
+  - Portland Thorns
+  - Seattle Reign
+  - Utah Royals
+  - Washington Spirit
+- id: statsbomb-49-107
+  nome: NWSL
+  temporada: '2023'
+  pais_regiao: United States of America
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 137
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Angel City
+  - Chicago Red Stars
+  - Houston Dash
+  - KC Current
+  - NJ/NY Gotham FC
+  - North Carolina Courage
+  - Orlando Pride
+  - Portland Thorns
+  - Racing Louisville FC
+  - San Diego Wave
+  - Seattle Reign
+  - Washington Spirit
+- id: statsbomb-116-68
+  nome: North American League
+  temporada: '1977'
+  pais_regiao: North and Central America
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - NY Cosmos
+  - Seattle Sounders
+- id: statsbomb-2-44
+  nome: Premier League
+  temporada: 2003/2004
+  pais_regiao: England
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 38
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Arsenal
+  - Aston Villa
+  - Birmingham City
+  - Blackburn Rovers
+  - Bolton Wanderers
+  - Charlton Athletic
+  - Chelsea
+  - Everton
+  - Fulham
+  - Leeds United
+  - Leicester City
+  - Liverpool
+  - Manchester City
+  - Manchester United
+  - Middlesbrough
+  - Newcastle United
+  - Portsmouth
+  - Southampton
+  - Tottenham Hotspur
+  - Wolverhampton Wanderers
+- id: statsbomb-2-27
+  nome: Premier League
+  temporada: 2015/2016
+  pais_regiao: England
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AFC Bournemouth
+  - Arsenal
+  - Aston Villa
+  - Chelsea
+  - Crystal Palace
+  - Everton
+  - Leicester City
+  - Liverpool
+  - Manchester City
+  - Manchester United
+  - Newcastle United
+  - Norwich City
+  - Southampton
+  - Stoke City
+  - Sunderland
+  - Swansea City
+  - Tottenham Hotspur
+  - Watford
+  - West Bromwich Albion
+  - West Ham United
+- id: statsbomb-12-86
+  nome: Serie A
+  temporada: 1986/1987
+  pais_regiao: Italy
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 1
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Juventus
+  - Napoli
+- id: statsbomb-12-27
+  nome: Serie A
+  temporada: 2015/2016
+  pais_regiao: Italy
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AC Milan
+  - AS Roma
+  - Atalanta
+  - Bologna
+  - Carpi
+  - Chievo
+  - Empoli
+  - Fiorentina
+  - Frosinone
+  - Genoa
+  - Hellas Verona
+  - Inter Milan
+  - Juventus
+  - Lazio
+  - Napoli
+  - Palermo
+  - Sampdoria
+  - Sassuolo
+  - Torino
+  - Udinese
+- id: statsbomb-131-281
+  nome: Serie A Women
+  temporada: 2023/2024
+  pais_regiao: Italy
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 130
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - AC Milan W
+  - AS Roma W
+  - Como W
+  - FC Internazionale Milano W
+  - Fiorentina W
+  - Juventus W
+  - Napoli W
+  - Pomigliano
+  - Sampdoria W
+  - Sassuolo W
+- id: statsbomb-55-43
+  nome: UEFA Euro
+  temporada: '2020'
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 51
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Austria
+  - Belgium
+  - Croatia
+  - Czech Republic
+  - Denmark
+  - England
+  - Finland
+  - France
+  - Germany
+  - Hungary
+  - Italy
+  - Netherlands
+  - North Macedonia
+  - Poland
+  - Portugal
+  - Russia
+  - Scotland
+  - Slovakia
+  - Spain
+  - Sweden
+  - Switzerland
+  - Turkey
+  - Ukraine
+  - Wales
+- id: statsbomb-55-282
+  nome: UEFA Euro
+  temporada: '2024'
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 51
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Albania
+  - Austria
+  - Belgium
+  - Croatia
+  - Czech Republic
+  - Denmark
+  - England
+  - France
+  - Georgia
+  - Germany
+  - Hungary
+  - Italy
+  - Netherlands
+  - Poland
+  - Portugal
+  - Romania
+  - Scotland
+  - Serbia
+  - Slovakia
+  - Slovenia
+  - Spain
+  - Switzerland
+  - Turkey
+  - Ukraine
+- id: statsbomb-35-75
+  nome: UEFA Europa League
+  temporada: 1988/1989
+  pais_regiao: Europe
+  genero: masculino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 3
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Bayern Munich
+  - Juventus W
+  - Napoli
+  - VfB Stuttgart
+- id: statsbomb-53-106
+  nome: UEFA Women's Euro
+  temporada: '2022'
+  pais_regiao: Europe
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 31
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Austria Women's
+  - Belgium Women's
+  - Denmark Women's
+  - England Women's
+  - France Women's
+  - Germany Women's
+  - Iceland Women's
+  - Italy Women's
+  - Netherlands Women's
+  - Northern Ireland W
+  - Norway Women's
+  - Portugal Women's
+  - Spain Women's
+  - Sweden Women's
+  - Switzerland Women's
+  - WNT Finland
+- id: statsbomb-53-315
+  nome: UEFA Women's Euro
+  temporada: '2025'
+  pais_regiao: Europe
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 31
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Belgium Women's
+  - Denmark Women's
+  - England Women's
+  - France Women's
+  - Germany Women's
+  - Iceland Women's
+  - Italy Women's
+  - Netherlands Women's
+  - Norway Women's
+  - Poland Women's
+  - Portugal Women's
+  - Spain Women's
+  - Sweden Women's
+  - Switzerland Women's
+  - WNT Finland
+  - Wales W
+- id: statsbomb-72-30
+  nome: Women's World Cup
+  temporada: '2019'
+  pais_regiao: International
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 52
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina Women's
+  - Australia Women's
+  - Brazil Women's
+  - Cameroon W
+  - Canada Women's
+  - Chile Women's
+  - China PR Women's
+  - England Women's
+  - France Women's
+  - Germany Women's
+  - Italy Women's
+  - Jamaica Women's
+  - Japan Women's
+  - Korea Republic Women's
+  - Netherlands Women's
+  - New Zealand Women's
+  - Nigeria Women's
+  - Norway Women's
+  - Scotland W
+  - South Africa Women's
+  - Spain Women's
+  - Sweden Women's
+  - Thailand W
+  - United States Women's
+- id: statsbomb-72-107
+  nome: Women's World Cup
+  temporada: '2023'
+  pais_regiao: International
+  genero: feminino
+  fonte: statsbomb
+  nivel_dado: EVENTS
+  partidas: 64
+  licenca: StatsBomb Open Data — uso livre com crédito à StatsBomb e logo (Media Pack)
+  times:
+  - Argentina Women's
+  - Australia Women's
+  - Brazil Women's
+  - Canada Women's
+  - China PR Women's
+  - Colombia Women's
+  - Costa Rica Women's
+  - Denmark Women's
+  - England Women's
+  - France Women's
+  - Germany Women's
+  - Haiti Women's
+  - Italy Women's
+  - Jamaica Women's
+  - Japan Women's
+  - Korea Republic Women's
+  - Morocco Women's
+  - Netherlands Women's
+  - New Zealand Women's
+  - Nigeria Women's
+  - Norway Women's
+  - Panama Women's
+  - Philippines Women's
+  - Portugal Women's
+  - Republic of Ireland Women's
+  - South Africa Women's
+  - Spain Women's
+  - Sweden Women's
+  - Switzerland Women's
+  - United States Women's
+  - Vietnam Women's
+  - Zambia W
+- id: wyscout-9004
+  nome: 1. Bundesliga
+  temporada: 2017/2018
+  pais_regiao: Germany
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 306
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Augsburg
+  - Bayer Leverkusen
+  - Bayern München
+  - Borussia Dortmund
+  - Borussia M'gladbach
+  - Eintracht Frankfurt
+  - Freiburg
+  - Hamburger SV
+  - Hannover 96
+  - Hertha BSC
+  - Hoffenheim
+  - Köln
+  - Mainz 05
+  - RB Leipzig
+  - Schalke 04
+  - Stuttgart
+  - Werder Bremen
+  - Wolfsburg
+- id: wyscout-9006
+  nome: FIFA World Cup
+  temporada: '2018'
+  pais_regiao: International
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 64
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Argentina
+  - Australia
+  - Belgium
+  - Brazil
+  - Colombia
+  - Costa Rica
+  - Croatia
+  - Denmark
+  - Egypt
+  - England
+  - France
+  - Germany
+  - Iceland
+  - Iran
+  - Japan
+  - Korea Republic
+  - Mexico
+  - Morocco
+  - Nigeria
+  - Panama
+  - Peru
+  - Poland
+  - Portugal
+  - Russia
+  - Saudi Arabia
+  - Senegal
+  - Serbia
+  - Spain
+  - Sweden
+  - Switzerland
+  - Tunisia
+  - Uruguay
+- id: wyscout-9002
+  nome: La Liga
+  temporada: 2017/2018
+  pais_regiao: Spain
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Athletic Club
+  - Atlético Madrid
+  - Barcelona
+  - Celta de Vigo
+  - Deportivo Alavés
+  - Deportivo La Coruña
+  - Eibar
+  - Espanyol
+  - Getafe
+  - Girona
+  - Las Palmas
+  - Leganés
+  - Levante
+  - Málaga
+  - Real Betis
+  - Real Madrid
+  - Real Sociedad
+  - Sevilla
+  - Valencia
+  - Villarreal
+- id: wyscout-9005
+  nome: Ligue 1
+  temporada: 2017/2018
+  pais_regiao: France
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Amiens SC
+  - Angers SCO
+  - Bordeaux
+  - Caen
+  - Dijon
+  - Guingamp
+  - Lille
+  - Metz
+  - Monaco
+  - Montpellier
+  - Nantes
+  - Nice
+  - Olympique Lyonnais
+  - Olympique Marseille
+  - PSG
+  - Rennes
+  - Saint-Étienne
+  - Strasbourg
+  - Toulouse
+  - Troyes
+- id: wyscout-9001
+  nome: Premier League
+  temporada: 2017/2018
+  pais_regiao: England
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - AFC Bournemouth
+  - Arsenal
+  - Brighton & Hove Albion
+  - Burnley
+  - Chelsea
+  - Crystal Palace
+  - Everton
+  - Huddersfield Town
+  - Leicester City
+  - Liverpool
+  - Manchester City
+  - Manchester United
+  - Newcastle United
+  - Southampton
+  - Stoke City
+  - Swansea City
+  - Tottenham Hotspur
+  - Watford
+  - West Bromwich Albion
+  - West Ham United
+- id: wyscout-9003
+  nome: Serie A
+  temporada: 2017/2018
+  pais_regiao: Italy
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 380
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Atalanta
+  - Benevento
+  - Bologna
+  - Cagliari
+  - Chievo
+  - Crotone
+  - Fiorentina
+  - Genoa
+  - Hellas Verona
+  - Internazionale
+  - Juventus
+  - Lazio
+  - Milan
+  - Napoli
+  - Roma
+  - SPAL
+  - Sampdoria
+  - Sassuolo
+  - Torino
+  - Udinese
+- id: wyscout-9007
+  nome: UEFA Euro
+  temporada: '2016'
+  pais_regiao: Europe
+  genero: masculino
+  fonte: wyscout
+  nivel_dado: EVENTS
+  partidas: 51
+  licenca: Wyscout Public Dataset — CC BY 4.0 (Pappalardo et al., 2019)
+  times:
+  - Albania
+  - Austria
+  - Belgium
+  - Croatia
+  - Czech Republic
+  - England
+  - France
+  - Germany
+  - Hungary
+  - Iceland
+  - Italy
+  - Northern Ireland
+  - Poland
+  - Portugal
+  - Republic of Ireland
+  - Romania
+  - Russia
+  - Slovakia
+  - Spain
+  - Sweden
+  - Switzerland
+  - Turkey
+  - Ukraine
+  - Wales
+- id: api_football-71
+  nome: Brasileirão Série A
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-72
+  nome: Brasileirão Série B
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-73
+  nome: Copa do Brasil
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-13
+  nome: CONMEBOL Libertadores
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-11
+  nome: CONMEBOL Sul-Americana
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-39
+  nome: Premier League
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-140
+  nome: La Liga
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-135
+  nome: Serie A
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-78
+  nome: Bundesliga
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-61
+  nome: Ligue 1
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-2
+  nome: UEFA Champions League
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-3
+  nome: UEFA Europa League
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: api_football-1
+  nome: Copa do Mundo
+  temporada: atual e anteriores (conforme plano)
+  pais_regiao: ''
+  genero: masculino
+  fonte: api_football
+  nivel_dado: BOXSCORE
+  partidas: null
+  licenca: API-Football — termos do provedor; requer API_FOOTBALL_KEY
+  times: []
+- id: football_data-BSA
+  nome: Campeonato Brasileiro Série A
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-PL
+  nome: Premier League
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-PD
+  nome: La Liga
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-SA
+  nome: Serie A
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-BL1
+  nome: Bundesliga
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-FL1
+  nome: Ligue 1
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-DED
+  nome: Eredivisie
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-PPL
+  nome: Primeira Liga
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-ELC
+  nome: Championship
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-CL
+  nome: UEFA Champions League
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-EC
+  nome: UEFA Euro
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []
+- id: football_data-WC
+  nome: FIFA World Cup
+  temporada: atual
+  pais_regiao: ''
+  genero: masculino
+  fonte: football_data
+  nivel_dado: RESULT
+  partidas: null
+  licenca: football-data.org — termos do provedor; requer FOOTBALL_DATA_TOKEN
+  times: []

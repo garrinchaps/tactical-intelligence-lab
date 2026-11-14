@@ -34,7 +34,21 @@ FOOTBALL_TERMS = {
     "drible", "saida", "construcao", "progressao", "profundidade", "amplitude", "placar", "resultado",
     "vitoria", "derrota", "empate", "cartao", "cartoes", "falta", "faltas", "penalti", "impedimento",
     "aerea", "aereo", "cabeceio", "estatistica", "estatisticas", "numeros", "dados", "scout", "futebol",
+    "ganhar", "ganhou", "ganhar", "venceu", "vencer", "perdeu", "perder", "empatou", "jogou", "jogaram", "jogadores",
+    "artilheiro", "marcou", "marcaram", "fez", "assistencia", "assistencias", "chutou", "chutaram", "passou",
+    "driblou", "desarmou", "selecao", "copa", "campeonato", "titular", "titulares", "melhor", "destaque", "craque",
+    "decisivo", "virada", "classificou", "eliminou", "final", "semifinal", "jogada", "lance", "lances",
 }
+# perguntas que pedem um fato ou um ranking de atletas (respondidas com tabela curta, não com visão geral)
+RANKING_METRICS: Tuple[Tuple[str, str], ...] = (
+    (r"assist", "assistencias"), (r"passe.*(decisiv|para finaliz|para chute)|criou mais chances", "passes_decisivos"),
+    (r"no alvo|no gol|acert\w* o gol|enquadr", "finalizacoes_no_alvo"), (r"xg", "xg"), (r"xt|ameaca", "xt"),
+    (r"chut|finaliz", "finalizacoes"), (r"quebra", "quebras_de_linha"), (r"progress", "passes_progressivos"),
+    (r"cruz", "cruzamentos"), (r"dribl", "dribles"), (r"desarm", "desarmes"), (r"intercept", "interceptacoes"),
+    (r"recuper|roub", "recuperacoes"), (r"press", "pressoes"), (r"perd\w* (a )?(bola|posse)|errou mais", "perdas_de_posse"),
+    (r"falta.*sofr|sofreu.*falta", "faltas_sofridas"), (r"falta", "faltas_cometidas"), (r"cartao|cartoes|amarel", "cartoes_amarelos"),
+    (r"certo|precis|acert\w* passe", "passes_certos"), (r"passe|passou|toque", "passes"), (r"gol", "gols"),
+)
 OFF_TOPIC_HINTS = {
     "coxinha", "hamburguer", "pizza", "receita", "comida", "bolo", "cerveja", "filme", "serie", "novela",
     "musica", "namorada", "namorado", "clima", "tempo amanha", "chover", "politica", "eleicao", "bitcoin",
@@ -83,6 +97,9 @@ class QueryScope:
     metrics: List[str] = field(default_factory=list)
     needs_spatial: bool = False
     descriptors: List[str] = field(default_factory=list)
+    ask: Optional[str] = None           # goals | ranking | result | None
+    ranking_metric: Optional[str] = None
+    team_named: bool = False            # a pergunta cita uma das equipes pelo nome
 
     @property
     def in_scope(self) -> bool:
@@ -113,8 +130,14 @@ class QueryUnderstanding:
         # ---- atletas citados (nome completo, sobrenome ou nome comum)
         sc.players = cls._match_players(t, match_players or [])
 
-        # ---- escopo
+        # ---- escopo (tolera erros de digitação: "partifda" ≈ "partida") e conta equipes citadas
         football_hits = len(words & FOOTBALL_TERMS) + (2 if sc.players else 0)
+        if teams:
+            football_hits += 2 * sum(cls._team_position(t, tm) is not None for tm in teams if tm)
+        if football_hits == 0:
+            import difflib
+
+            football_hits = sum(1 for w in words if len(w) >= 5 and difflib.get_close_matches(w, FOOTBALL_TERMS, n=1, cutoff=0.8))
         off_hits = sum(1 for h in OFF_TOPIC_HINTS if h in t)
         if not t:
             sc.category = "help"
@@ -200,6 +223,7 @@ class QueryUnderstanding:
             sc.team_focus = "opponent"
         if teams and len(teams) == 2:
             pos = [cls._team_position(t, tm) for tm in teams]
+            sc.team_named = any(p is not None for p in pos)
             if pos[1] is not None and pos[0] is None:
                 sc.team_focus = "opponent"
             elif pos[0] is not None and pos[1] is not None:
@@ -210,11 +234,27 @@ class QueryUnderstanding:
         if re.search(r"os dois times|ambas as equipes|ambos|comparar as equipes", t):
             sc.team_focus = "both"
 
+        # ---- fatos e rankings
+        if re.search(r"quem (fez|marcou|anotou)( o| os)? gol|quem (fez|marcou) (os )?gols|autor(es)? d\w* gol|artilheiro|"
+                     r"gols? (da|do|desta|dessa|nessa|nesta) (partida|jogo)|como (foram|sairam|saiu) os gols|quando (foi|foram|sairam) os gols", t):
+            sc.ask = "goals"
+        elif re.search(r"(quem|qual (jogador|atleta)|que jogador|jogador que|atleta que)\b.*\bmais\b|\bmais .*(jogador|atleta)|"
+                       r"(melhor|destaque|craque|principal) (jogador|atleta|em campo|da partida|do jogo)|ranking", t):
+            sc.ask = "ranking"
+            sc.ranking_metric = next((m for rx, m in RANKING_METRICS if re.search(rx, t)), None)
+            if re.search(r"melhor|destaque|craque|principal", t) and sc.ranking_metric is None:
+                sc.ranking_metric = "xt"
+            if sc.ranking_metric is None and re.search(r"posse|dominou|controlou", t):
+                sc.ask = None           # "quem teve mais posse" é sobre as equipes, não um ranking de atletas
+        elif re.search(r"(ganh|venc|perd|empat)\w*.*(partida|jogo|confronto)|por que (ganh|venc|perd)|como (ganh|venc)|"
+                       r"o que .* fez para|motivo d\w* (vitoria|derrota)|resultado", t):
+            sc.ask = "result"
+
         # ---- métricas
         for key, kws in METRIC_KEYWORDS.items():
             if any(k in t for k in kws):
                 sc.metrics.append(key)
-        if sc.players:
+        if sc.players and sc.ask != "ranking":
             sc.category = "player" if sc.category != "full_report" else sc.category
             sc.descriptors.insert(0, " / ".join(sc.players))
 

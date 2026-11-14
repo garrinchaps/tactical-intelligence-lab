@@ -32,8 +32,25 @@ from src.preprocessing.event_cleaner import EventPreprocessor
 
 STRENGTH_PERCENTILE = 70.0
 WEAKNESS_PERCENTILE = 30.0
-MIN_PLAYER_MINUTES = 30
-MIN_GROUP_SAMPLE = 8
+ELITE_PERCENTILE = 90.0
+ALERT_PERCENTILE = 10.0
+MIN_PLAYER_MINUTES = 45      # mínimo de minutos para entrar na referência e para ser avaliado com grau FORTE
+MIN_GROUP_SAMPLE = 20        # abaixo disso: "amostra insuficiente" em vez de percentil
+
+
+def percentile_tier(p: Optional[float]) -> str:
+    """Faixa visual do percentil: elite / forte / mediana / fraco / alerta de vulnerabilidade."""
+    if p is None:
+        return "amostra insuficiente"
+    if p >= ELITE_PERCENTILE:
+        return "elite"
+    if p >= STRENGTH_PERCENTILE:
+        return "forte"
+    if p > WEAKNESS_PERCENTILE:
+        return "mediana"
+    if p > ALERT_PERCENTILE:
+        return "fraco"
+    return "alerta de vulnerabilidade"
 
 # --------------------------------------------------------------------------- funções
 POSITION_GROUPS: Dict[str, str] = {
@@ -308,30 +325,30 @@ class StrengthsWeaknessesEngine:
         reference_rows: List[Dict[str, Any]],
         metric_defs: List[Tuple[str, str, int]],
     ) -> Dict[str, List[Dict[str, Any]]]:
-        strengths, weaknesses, neutral = [], [], []
+        strengths, weaknesses, neutral, insufficient = [], [], [], []
         for key, label, direction in metric_defs:
             val = values.get(key)
-            ref = [r[key] for r in reference_rows if r.get(key) is not None]
-            if val is None or len(ref) < MIN_GROUP_SAMPLE:
+            if val is None:
                 continue
-            item = {
-                "metric": key,
-                "label": label,
-                "value": round(float(val), 2),
-                "reference_median": round(float(np.median(ref)), 2),
-                "reference_n": len(ref),
-                "percentile": cls._percentile(float(val), ref, direction),
-                "higher_is_better": direction > 0,
-            }
-            if item["percentile"] >= STRENGTH_PERCENTILE:
+            ref = [r[key] for r in reference_rows if r.get(key) is not None]
+            item = {"metric": key, "label": label, "value": round(float(val), 2), "reference_n": len(ref),
+                    "higher_is_better": direction > 0}
+            if len(ref) < MIN_GROUP_SAMPLE:
+                item.update(percentile=None, reference_median=round(float(np.median(ref)), 2) if ref else None,
+                            tier="amostra insuficiente")
+                insufficient.append(item)
+                continue
+            pct = cls._percentile(float(val), ref, direction)
+            item.update(percentile=pct, reference_median=round(float(np.median(ref)), 2), tier=percentile_tier(pct))
+            if pct >= STRENGTH_PERCENTILE:
                 strengths.append(item)
-            elif item["percentile"] <= WEAKNESS_PERCENTILE:
+            elif pct <= WEAKNESS_PERCENTILE:
                 weaknesses.append(item)
             else:
                 neutral.append(item)
         strengths.sort(key=lambda d: -d["percentile"])
         weaknesses.sort(key=lambda d: d["percentile"])
-        return {"strengths": strengths, "weaknesses": weaknesses, "neutral": neutral}
+        return {"strengths": strengths, "weaknesses": weaknesses, "neutral": neutral, "insufficient": insufficient}
 
     @classmethod
     def analyze_player(
@@ -340,6 +357,7 @@ class StrengthsWeaknessesEngine:
         player_name: str,
         baselines: Dict[str, Any],
         exclude_match_id: Optional[int] = None,
+        competition_of: Optional[Dict[int, str]] = None,
     ) -> Dict[str, Any]:
         team_series = df_events.loc[df_events["player_name"] == player_name, "team_name"].dropna()
         if team_series.empty:
@@ -353,18 +371,24 @@ class StrengthsWeaknessesEngine:
         group = position_group(p.get("position_name"))
         minutes = float(p.get("estimated_minutes_active", 0) or 0)
 
-        pool = cls._same_source_pool(baselines.get("players", []), exclude_match_id)
+        pool = [r for r in cls._same_source_pool(baselines.get("players", []), exclude_match_id)
+                if r.get("minutes", 0) >= MIN_PLAYER_MINUTES]
         group_pool = [r for r in pool if r.get("group") == group]
+        league_scope = "mesma família de fonte"
+        if competition_of and exclude_match_id is not None and int(exclude_match_id) in competition_of:
+            comp = competition_of[int(exclude_match_id)]
+            same_league = [r for r in group_pool if competition_of.get(int(r["match_id"])) == comp]
+            if len(same_league) >= MIN_GROUP_SAMPLE:
+                group_pool, league_scope = same_league, f"mesma competição ({comp})"
         comparison_scope = GROUP_PLURALS.get(group, "atletas")
-        if len(group_pool) < MIN_GROUP_SAMPLE:
-            group_pool = [r for r in pool if r.get("group") not in ("Goleiro",)]
-            comparison_scope = "atletas de linha (amostra da função insuficiente)"
 
         values = cls.player_metric_values(p)
         result = cls._classify(
             values, group_pool, [(k, lbl, d) for k, lbl, d, _ in PLAYER_METRICS]
         )
         grade = "FORTE" if minutes >= 60 else ("MODERADA" if minutes >= MIN_PLAYER_MINUTES else "LIMITADA")
+        if minutes < MIN_PLAYER_MINUTES:
+            grade = "LIMITADA"
         return {
             "mode": "player",
             "entity": player_name,
@@ -372,6 +396,9 @@ class StrengthsWeaknessesEngine:
             "position_name": str(p.get("position_name", "")),
             "group": group,
             "comparison_scope": comparison_scope,
+            "league_scope": league_scope,
+            "min_minutes": MIN_PLAYER_MINUTES,
+            "min_group_sample": MIN_GROUP_SAMPLE,
             "minutes": round(minutes, 1),
             "reference_players_n": len(group_pool),
             "reference_matches_n": len({r["match_id"] for r in group_pool}),
@@ -402,6 +429,8 @@ class StrengthsWeaknessesEngine:
             "team_name": team_name,
             "group": "Equipe",
             "comparison_scope": "equipes",
+            "league_scope": "mesma família de fonte",
+            "min_group_sample": MIN_GROUP_SAMPLE,
             "reference_teams_n": len(pool),
             "reference_matches_n": len({r["match_id"] for r in pool}),
             "evidence_grade": "MODERADA" if len(pool) >= 20 else "LIMITADA",
@@ -413,7 +442,7 @@ class StrengthsWeaknessesEngine:
     def _fmt_item(d: Dict[str, Any]) -> str:
         return (
             f"**{d['label']}**: {d['value']} (mediana da referência {d['reference_median']}, "
-            f"percentil {d['percentile']})"
+            f"percentil {d['percentile']}, n = {d['reference_n']}, faixa {d['tier']})"
         )
 
     @classmethod
@@ -441,6 +470,9 @@ class StrengthsWeaknessesEngine:
             lines.append(
                 "> ⚠️ A partida analisada é SIMULADA; a comparação com a base real serve só como demonstração."
             )
+        if analysis.get("insufficient"):
+            lines.append("\n**Amostra insuficiente** (n < " + str(analysis.get("min_group_sample", MIN_GROUP_SAMPLE))
+                         + "): " + ", ".join(f"{d['label']} (n = {d['reference_n']})" for d in analysis["insufficient"]) + ".")
 
         st_, wk = analysis["strengths"], analysis["weaknesses"]
         lines.append("\n### ✅ Onde está acima do padrão")

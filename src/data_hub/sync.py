@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from src.data_hub.db import DataHubDB, utc_now
 from src.data_hub.service import MatchDataService
 
-ALL_SOURCES = ["statsbomb", "wyscout", "api_football", "football_data", "espn"]
+ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "api_football", "football_data", "espn"]
 
 
 def run_sync(
@@ -36,6 +36,7 @@ def run_sync(
     prefetch_events: int = 0,
     service: Optional[MatchDataService] = None,
     progress: Optional[Callable[[str], None]] = None,
+    seasons_back: int = 2,
 ) -> Dict[str, Dict]:
     load_dotenv()
     svc = service or MatchDataService()
@@ -49,6 +50,7 @@ def run_sync(
         "api_football": lambda: svc.api_football.sync_recent(days_back=days_back),
         "football_data": lambda: svc.football_data.sync_recent(days_back=max(days_back, 3)),
         "espn": lambda: svc.espn.sync_recent(days_back=days_back),
+        "fdcouk": lambda: svc.fdcouk.sync(seasons_back=seasons_back, progress=say),
     }
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
                "espn": svc.espn.enabled}
@@ -96,8 +98,10 @@ def main() -> None:
     ap.add_argument("--days", type=int, default=3, help="dias para trás nas fontes de jogos recentes")
     ap.add_argument("--prefetch-events", type=int, default=0,
                     help="baixa eventos de N partidas ainda sem eventos locais")
+    ap.add_argument("--seasons", type=int, default=2,
+                    help="football-data.co.uk: quantas temporadas anteriores à atual baixar (ex.: 30 = desde os anos 90)")
     args = ap.parse_args()
-    run_sync(args.only, args.days, args.prefetch_events)
+    run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons)
 
 
 if __name__ == "__main__":

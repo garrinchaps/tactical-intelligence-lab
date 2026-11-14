@@ -145,6 +145,8 @@ class DataHubDB:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
             conn.executescript(DATA_HUB_DDL)
+        self._seed_demo_catalog()
+        with self.connect() as conn:
             # Classifica linhas antigas que ainda não têm fonte/nível
             rows = conn.execute(
                 "SELECT match_id FROM matches WHERE data_source IS NULL OR data_level IS NULL"
@@ -164,6 +166,21 @@ class DataHubDB:
                     "UPDATE matches SET data_source = ?, data_level = ?, source_match_id = ? WHERE match_id = ?",
                     (src, level, str(to_source_id(int(mid))), int(mid)),
                 )
+
+    def _seed_demo_catalog(self) -> None:
+        """Garante no catálogo as partidas do pacote de demonstração offline (data/demo/)."""
+        demo = Path("data/demo/statsbomb_demo_matches.json")
+        if not demo.exists():
+            return
+        try:
+            from src.data_hub.sources.statsbomb import StatsBombProvider
+
+            raw = json.loads(demo.read_text(encoding="utf-8"))
+            recs = [r for r in StatsBombProvider.parse_matches(raw, {}) if self.get_match(r["match_id"]) is None]
+            if recs:
+                self.upsert_matches(recs)
+        except Exception:
+            pass
 
     # --------------------------------------------------------------- catálogo
     def upsert_matches(self, records: Iterable[Dict[str, Any]]) -> Dict[str, int]:
@@ -249,7 +266,11 @@ class DataHubDB:
         if limit:
             sql += f" LIMIT {int(limit)}"
         with self.connect() as conn:
-            return pd.read_sql_query(sql, conn, params=params)
+            df = pd.read_sql_query(sql, conn, params=params)
+        from src.data_hub.gender import gender_of
+
+        df["genero"] = [gender_of(r) for r in df.to_dict("records")] if not df.empty else pd.Series(dtype=str)
+        return df
 
     def has_events(self, match_id: int) -> bool:
         with self.connect() as conn:

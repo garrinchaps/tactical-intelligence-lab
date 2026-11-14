@@ -649,13 +649,13 @@ class BrasileiraoAndMultiSourceProvider:
 
     @classmethod
     def generate_simulated_match_events(
-        cls, home_team: str, away_team: str, match_id: int
+        cls, home_team: str, away_team: str, match_id: int, seed: Optional[int] = None
     ) -> pd.DataFrame:
         """
         Gera uma partida SINTÉTICA (determinística por match_id) a partir dos perfis
         táticos das duas equipes. Não é dado real: exibir sempre o SIMULATED_DATA_BADGE.
         """
-        rng = np.random.default_rng(abs(int(match_id)) % 999999)
+        rng = np.random.default_rng(abs(int(match_id)) % 999999 if seed is None else int(seed))
         prof_h = cls.get_team_profile(home_team)
         prof_a = cls.get_team_profile(away_team)
 
@@ -1001,4 +1001,68 @@ class BrasileiraoAndMultiSourceProvider:
 
                 poss_id += 1
 
-        return pd.DataFrame(events)
+        return cls._add_defensive_layer(pd.DataFrame(events), profiles, rng)
+
+    # Taxa empírica de referência (StatsBomb, Copa 2022, 20 partidas, definição de PPDA do laboratório):
+    # 0,316 ação defensiva da equipe sem bola por passe adversário na construção (x ≤ 72),
+    # das quais ~69% são pressões. Escalada pela intensidade de pressão do perfil (0,6 = média).
+    EMPIRICAL_DEF_ACTIONS_PER_PASS = 0.316
+    EMPIRICAL_PRESSURE_SHARE = 0.69
+
+    @classmethod
+    def _add_defensive_layer(cls, df: pd.DataFrame, profiles: Dict[str, Any], rng) -> pd.DataFrame:
+        """Acrescenta as ações da equipe sem bola (pressões, desarmes e recuperações ao fim da posse)."""
+        if df.empty:
+            return df
+        teams = list(profiles.keys())
+        extra: List[Dict[str, Any]] = []
+        template = df.iloc[0].to_dict()
+
+        def make(row: Dict[str, Any], team: str, etype: str, x: float, y: float, order: float, **kw) -> Dict[str, Any]:
+            d_prof = profiles[team]
+            p_idx = int(rng.integers(1, 9))
+            name, pos, _, _ = d_prof["roster"][p_idx]
+            ev = {k: None for k in template}
+            ev.update({"match_id": row["match_id"], "period": row["period"], "timestamp": row["timestamp"],
+                       "minute": row["minute"], "second": row["second"], "possession": row["possession"],
+                       "possession_team_id": row["possession_team_id"], "possession_team_name": row["possession_team_name"],
+                       "team_id": 1 if team == teams[0] else 2, "team_name": team, "player_id": p_idx + 1,
+                       "player_name": name, "position_name": pos, "type_name": etype, "play_pattern_name": "Regular Play",
+                       "under_pressure": 0, "counterpress": 0, "x": round(float(np.clip(x, 0.5, 119.5)), 2),
+                       "y": round(float(np.clip(y, 0.5, 79.5)), 2), "end_x": np.nan, "end_y": np.nan,
+                       "is_pass_Switch": 0, "is_pass_cross": 0, "is_pass_through_ball": 0, "ball_recovery_failure": 0,
+                       "tactics_formation": 433, "_order": order})
+            ev.update(kw)
+            return ev
+
+        df = df.copy()
+        df["_order"] = np.arange(len(df), dtype=float)
+        for i, row in df.iterrows():
+            if row["type_name"] != "Pass" or row["x"] is None or float(row["x"]) > 72.0:
+                continue
+            defender = next(t for t in teams if t != row["team_name"])
+            rate = cls.EMPIRICAL_DEF_ACTIONS_PER_PASS * float(profiles[defender]["press_intensity"]) / 0.6
+            if rng.random() < min(rate, 0.9):
+                mx = 120.0 - float(row["x"]) + rng.normal(0, 3.0)
+                my = 80.0 - float(row["y"]) + rng.normal(0, 3.0)
+                if rng.random() < cls.EMPIRICAL_PRESSURE_SHARE:
+                    extra.append(make(row, defender, "Pressure", mx, my, row["_order"] + 0.5))
+                else:
+                    won = bool(rng.random() < 0.45)
+                    extra.append(make(row, defender, "Duel", mx, my, row["_order"] + 0.5, duel_type_name="Tackle",
+                                      duel_outcome_name="Won" if won else "Lost"))
+        # recuperação ao fim de cada posse que não terminou em finalização
+        for _, grp in df.groupby(["period", "possession"]):
+            last = grp.iloc[-1]
+            if last["type_name"] == "Shot":
+                continue
+            defender = next(t for t in teams if t != last["possession_team_name"])
+            ex = last["end_x"] if pd.notna(last.get("end_x")) else last["x"]
+            ey = last["end_y"] if pd.notna(last.get("end_y")) else last["y"]
+            extra.append(make(last.to_dict(), defender, "Ball Recovery", 120.0 - float(ex), 80.0 - float(ey),
+                              last["_order"] + 0.9))
+        out = pd.concat([df, pd.DataFrame(extra)], ignore_index=True).sort_values("_order", kind="stable")
+        out = out.drop(columns=["_order"]).reset_index(drop=True)
+        out["index_num"] = np.arange(1, len(out) + 1)
+        out["event_id"] = [f"br_{int(out['match_id'].iloc[0])}_{i}" for i in out["index_num"]]
+        return out

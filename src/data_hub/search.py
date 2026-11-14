@@ -30,7 +30,7 @@ from src.data_hub.registry import DataLevel
 LEVEL_RANK = {DataLevel.EVENTS: 3, DataLevel.BOXSCORE: 2, DataLevel.RESULT: 1,
               DataLevel.SIMULATED: 0, DataLevel.UPLOAD: 0}
 # a mesma partida pode existir em duas fontes: fica a mais rica
-SOURCE_RANK = {"statsbomb": 5, "wyscout": 4, "api_football": 3, "espn": 2, "football_data": 1,
+SOURCE_RANK = {"statsbomb": 5, "wyscout": 4, "api_football": 3, "espn": 2, "fdcouk": 1.5, "football_data": 1,
                "simulated": 0, "upload": 0}
 MATCH_THRESHOLD = 0.86
 
@@ -309,7 +309,7 @@ class UniversalMatchFinder:
                         "suggestions": pd.DataFrame(), "notes": []}
             return {"status": "NOT_FOUND", "query": q, "candidates": pd.DataFrame(),
                     "suggestions": pd.DataFrame(), "notes": [
-                f"Nenhuma partida com ID {q.match_id} no catálogo. Sincronize a base (página Base de Dados)."]}
+                f"Nenhuma partida com ID {q.match_id} no catálogo. Sincronize a base (página Catálogo & Dados)."]}
 
         if len(q.teams) == 1 and len(q.teams[0].split()) >= 2:
             q.teams = self._split_two_teams(q.teams[0]) or q.teams

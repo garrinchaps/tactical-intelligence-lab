@@ -39,6 +39,17 @@ def _select(service: MatchDataService, match_id: int) -> None:
 def render_match_picker(service: MatchDataService) -> None:
     st.sidebar.markdown("## ⚽ Tactical Intelligence Lab")
     st.sidebar.caption("Escolha a partida e a equipe em foco.")
+    from src.data_hub.gender import LABELS, gender_of
+
+    genero = st.sidebar.radio("Futebol", ["masculino", "feminino", "todos"], horizontal=True, key="genero",
+                              format_func=lambda g: LABELS[g],
+                              help="Separa as competições masculinas e femininas na busca e no catálogo.")
+
+    def by_gender(df: pd.DataFrame) -> pd.DataFrame:
+        if df is None or df.empty or genero == "todos":
+            return df
+        g = df["genero"] if "genero" in df.columns else pd.Series([gender_of(r) for r in df.to_dict("records")], index=df.index)
+        return df[g == genero]
 
     tab_search, tab_catalog, tab_upload = st.sidebar.tabs(["🔎 Buscar", "📚 Catálogo", "📁 Arquivo"])
 
@@ -61,6 +72,11 @@ def render_match_picker(service: MatchDataService) -> None:
             for n in res.get("notes", []):
                 st.caption(f"ℹ️ {n}")
             cands = res["candidates"] if not res["candidates"].empty else res.get("suggestions", pd.DataFrame())
+            all_n = 0 if cands is None else len(cands)
+            cands = by_gender(cands)
+            if all_n and (cands is None or cands.empty):
+                st.caption(f"ℹ️ {all_n} resultado(s) no futebol {'feminino' if genero == 'masculino' else 'masculino'}: "
+                           "troque o filtro “Futebol” acima para vê-los.")
             if cands is not None and not cands.empty:
                 options = {match_label(r): int(r["match_id"]) for _, r in cands.iterrows()}
                 choice = st.radio("Resultados", list(options.keys()), key="search_choice")
@@ -69,9 +85,9 @@ def render_match_picker(service: MatchDataService) -> None:
                     st.rerun()
 
     with tab_catalog:
-        cat = service.db.catalog()
+        cat = by_gender(service.db.catalog())
         if cat.empty:
-            st.info("Catálogo vazio. Sincronize a base na seção 🗄️ Base de Dados.")
+            st.info("Catálogo vazio. Sincronize a base na página 🗄️ Catálogo & Dados.")
         else:
             src_opts = ["Todas"] + sorted(cat["data_source"].dropna().unique().tolist())
             src = st.selectbox("Fonte", src_opts, format_func=lambda s: SOURCES[s].label if s in SOURCES else s)

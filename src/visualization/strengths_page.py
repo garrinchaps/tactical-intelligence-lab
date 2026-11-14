@@ -1,27 +1,27 @@
 """
-Página 6 do app: Pontos Fortes e Fracos (estilo Football Manager Data Hub).
+Página 7 — Pontos Fortes e Fracos (percentil contextual).
 
-Separada do app.py para manter o arquivo principal enxuto. Recebe os dados já
-carregados pela sessão e desenha: seletor atleta/equipe, cartões de contexto,
-tabela lado a lado (acima x abaixo da média), radar de percentis e a
-interpretação textual auditada.
+Cada métrica mostra valor, mediana da referência, percentil, faixa (elite ≥ P90, forte ≥ P70, normal,
+fraco ≤ P30, alerta ≤ P10) e o tamanho da amostra de referência (n). Com n < MIN_GROUP_SAMPLE a métrica
+não recebe percentil: aparece como "amostra insuficiente" — e o radar só desenha o que tem amostra.
 """
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 from src.intelligence.llm_analyst import GenerativeTacticalAnalyst
-from src.metrics.strengths_weaknesses import (
-    STRENGTH_PERCENTILE,
-    WEAKNESS_PERCENTILE,
-    ReferenceBaselineBuilder,
-    StrengthsWeaknessesEngine,
-)
+from src.metrics.strengths_weaknesses import (ALERT_PERCENTILE, ELITE_PERCENTILE, MIN_GROUP_SAMPLE, MIN_PLAYER_MINUTES,
+                                              STRENGTH_PERCENTILE, WEAKNESS_PERCENTILE, ReferenceBaselineBuilder,
+                                              StrengthsWeaknessesEngine)
+from src.ui.components import comparison_table, empty_state, error_state, kpi, note, provenance_panel
+from src.ui.theme import PALETTE, PLOTLY_LAYOUT
+
+TIER_ORDER = ["elite", "forte", "normal", "fraco", "alerta", "amostra insuficiente"]
 
 
 @st.cache_data(show_spinner=False)
@@ -29,164 +29,112 @@ def _cached_baselines(_load_events_fn: Callable, cache_key: str) -> Dict[str, An
     return ReferenceBaselineBuilder.load_or_build(_load_events_fn)
 
 
-def _items_to_df(items: List[Dict[str, Any]]) -> pd.DataFrame:
+def _items_df(items: List[Dict[str, Any]]) -> pd.DataFrame:
     if not items:
-        return pd.DataFrame(columns=["Métrica", "Valor", "Mediana ref.", "Percentil"])
-    return pd.DataFrame(
-        [
-            {
-                "Métrica": d["label"],
-                "Valor": d["value"],
-                "Mediana ref.": d["reference_median"],
-                "Percentil": d["percentile"],
-            }
-            for d in items
-        ]
-    )
+        return pd.DataFrame(columns=["Métrica", "Valor", "Mediana ref.", "Percentil", "Faixa", "n ref."])
+    return pd.DataFrame([{"Métrica": d["label"], "Valor": d["value"], "Mediana ref.": d.get("reference_median"),
+                          "Percentil": d.get("percentile"), "Faixa": d.get("tier"), "n ref.": d.get("reference_n")}
+                         for d in items])
 
 
-def _radar(analysis: Dict[str, Any]) -> go.Figure:
+def radar(analysis: Dict[str, Any]) -> go.Figure:
+    """Radar de percentis — só com métricas que têm n ≥ mínimo; o n entra no rótulo de cada eixo."""
     items = analysis["strengths"] + analysis["neutral"] + analysis["weaknesses"]
-    labels = [d["label"] for d in items]
+    labels = [f"{d['label']} (n={d['reference_n']})" for d in items]
     values = [d["percentile"] for d in items]
     fig = go.Figure()
-    if labels:
-        fig.add_trace(
-            go.Scatterpolar(
-                r=values + values[:1],
-                theta=labels + labels[:1],
-                fill="toself",
-                name=analysis["entity"],
-                line=dict(color="#00FF7F", width=2),
-                fillcolor="rgba(0,255,127,0.18)",
-            )
-        )
-        fig.add_trace(
-            go.Scatterpolar(
-                r=[50] * (len(labels) + 1),
-                theta=labels + labels[:1],
-                name="Mediana da referência (P50)",
-                line=dict(color="#94A3B8", dash="dot", width=1),
-            )
-        )
-    fig.update_layout(
-        polar=dict(
-            bgcolor="#0F172A",
-            radialaxis=dict(range=[0, 100], tickvals=[30, 50, 70, 100], color="#94A3B8"),
-            angularaxis=dict(color="#E2E8F0"),
-        ),
-        paper_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#E2E8F0"),
-        legend=dict(orientation="h", y=-0.12),
-        margin=dict(l=40, r=40, t=30, b=30),
-        height=470,
-    )
+    if len(labels) >= 3:
+        fig.add_trace(go.Scatterpolar(r=values + values[:1], theta=labels + labels[:1], fill="toself",
+                                      name=analysis["entity"], line=dict(color=PALETTE["primary"], width=2),
+                                      fillcolor="rgba(34,197,94,0.18)"))
+        fig.add_trace(go.Scatterpolar(r=[50] * (len(labels) + 1), theta=labels + labels[:1], name="P50 da referência",
+                                      line=dict(color=PALETTE["muted"], dash="dot", width=1)))
+    n_ins = len(analysis.get("insufficient", []))
+    title = "Percentil contextual" + (f" · {n_ins} métrica(s) fora do radar por amostra insuficiente" if n_ins else "")
+    fig.update_layout(**PLOTLY_LAYOUT, title=title, height=480,
+                      polar=dict(bgcolor=PALETTE["surface"],
+                                 radialaxis=dict(range=[0, 100], tickvals=[10, 30, 50, 70, 90], color=PALETTE["muted"]),
+                                 angularaxis=dict(color=PALETTE["text"])))
+    if len(labels) < 3:
+        fig.add_annotation(text="amostra insuficiente para o radar (menos de 3 métricas com n ≥ "
+                                f"{MIN_GROUP_SAMPLE})", showarrow=False, font=dict(color=PALETTE["warning"]))
     return fig
 
 
-def render_strengths_weaknesses_page(
-    df_events: pd.DataFrame,
-    df_chains: pd.DataFrame,
-    target_team: str,
-    current_match_id: int,
-    is_sim_mode: bool,
-    load_events_fn: Callable,
-) -> None:
-    st.subheader("⚖️ Pontos Fortes e Fracos — Comparativo Contextual (estilo FM Data Hub)")
-    st.caption(
-        f"Percentil contextual: ≥ {STRENGTH_PERCENTILE:.0f} = ponto forte · ≤ {WEAKNESS_PERCENTILE:.0f} = ponto fraco. "
-        "Atletas são comparados com a mesma função (métricas por 90 min); equipes com todas as equipes da base. "
-        "A referência usa partidas reais com eventos já baixadas no banco local (StatsBomb e Wyscout), "
-        "comparando sempre com a mesma fonte. Para ampliar a referência, baixe mais eventos em 🗄️ Base de Dados."
-    )
-
-    c_mode, c_entity, c_ai = st.columns([0.9, 2.0, 1.1])
-    with c_mode:
-        mode = st.radio("Analisar:", ["Atleta", "Equipe"], horizontal=True)
-    with c_entity:
-        if mode == "Atleta":
-            players = (
-                df_events.loc[df_events["team_name"].notna(), ["player_name", "team_name"]]
-                .dropna()
-                .drop_duplicates()
-            )
-            options = [f"{r.player_name} — {r.team_name}" for r in players.itertuples()]
-            default_idx = next(
-                (i for i, o in enumerate(options) if o.endswith(f"— {target_team}")), 0
-            )
-            chosen = st.selectbox("Atleta:", options, index=default_idx) if options else None
-            entity = chosen.split(" — ")[0] if chosen else None
-        else:
-            teams = df_events["team_name"].dropna().unique().tolist()
-            entity = st.selectbox(
-                "Equipe:", teams, index=teams.index(target_team) if target_team in teams else 0
-            )
-    with c_ai:
-        use_llm = st.checkbox("Interpretação com Gemini (auditada)", value=False)
-
+def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_of: Optional[Dict[int, str]] = None) -> None:
+    df_events, target_team = ctx.df, ctx.target_team
+    note("Como ler", f"Percentil contra a mesma função (atletas, por 90 min, mínimo {MIN_PLAYER_MINUTES} min) ou contra todas "
+         f"as equipes da referência. Faixas: elite ≥ P{ELITE_PERCENTILE:.0f} · forte ≥ P{STRENGTH_PERCENTILE:.0f} · "
+         f"fraco ≤ P{WEAKNESS_PERCENTILE:.0f} · alerta ≤ P{ALERT_PERCENTILE:.0f}. Com menos de {MIN_GROUP_SAMPLE} "
+         "referências a métrica não recebe percentil (amostra insuficiente). A referência usa partidas com eventos do "
+         "banco local, sempre da mesma família de fonte (StatsBomb com StatsBomb, Wyscout com Wyscout).")
+    a, b, c = st.columns([0.9, 2.0, 1.1])
+    mode = a.radio("Analisar", ["Atleta", "Equipe"], horizontal=True)
+    if mode == "Atleta":
+        pl = df_events.loc[df_events["team_name"].notna(), ["player_name", "team_name"]].dropna().drop_duplicates()
+        options = [f"{r.player_name} — {r.team_name}" for r in pl.itertuples()]
+        idx = next((i for i, o in enumerate(options) if o.endswith(f"— {target_team}")), 0)
+        chosen = b.selectbox("Atleta", options, index=idx) if options else None
+        entity = chosen.split(" — ")[0] if chosen else None
+    else:
+        teams = df_events["team_name"].dropna().unique().tolist()
+        entity = b.selectbox("Equipe", teams, index=teams.index(target_team) if target_team in teams else 0)
+    use_llm = c.checkbox("Interpretação com Gemini (auditada pelo guard)", value=False)
     if not entity:
-        st.info("Nenhum atleta disponível nesta partida.")
+        empty_state("Nenhum atleta disponível nesta partida.")
         return
-
     try:
-        with st.spinner("Atualizando base de referência (até 150 partidas novas por vez)..."):
-            match_ids = ReferenceBaselineBuilder.available_real_match_ids()
-            baselines = _cached_baselines(load_events_fn, ",".join(map(str, match_ids)))
+        with st.spinner("Montando a base de referência..."):
+            ids = ReferenceBaselineBuilder.available_real_match_ids()
+            baselines = _cached_baselines(load_events_fn, ",".join(map(str, ids)))
     except Exception as exc:
-        st.warning(f"Não foi possível montar a base de referência: {exc}")
+        error_state("Não foi possível montar a base de referência", exc)
         return
-
     if not baselines.get("match_ids"):
-        st.warning(
-            "A base de referência está vazia: carregue algumas partidas reais do StatsBomb "
-            "(aba Match Center) para que elas sejam salvas no banco local."
-        )
+        empty_state("Base de referência vazia", "Abra ou sincronize partidas com eventos para formar a referência.", "📚",
+                    "Na página Catálogo & Dados, sincronize a Copa 2022 (StatsBomb).")
         return
-
     try:
         if mode == "Atleta":
-            analysis = StrengthsWeaknessesEngine.analyze_player(
-                df_events, entity, baselines, exclude_match_id=int(current_match_id)
-            )
+            an = StrengthsWeaknessesEngine.analyze_player(df_events, entity, baselines, exclude_match_id=int(ctx.match_id),
+                                                         competition_of=competition_of)
         else:
-            analysis = StrengthsWeaknessesEngine.analyze_team(
-                df_events, df_chains, entity, baselines, exclude_match_id=int(current_match_id)
-            )
+            an = StrengthsWeaknessesEngine.analyze_team(df_events, ctx.chains, entity, baselines,
+                                                       exclude_match_id=int(ctx.match_id))
     except Exception as exc:
-        st.warning(f"Não foi possível comparar '{entity}': {exc}")
+        error_state(f"Não foi possível comparar '{entity}'", exc)
         return
 
-    # Cartões de contexto
-    k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Grupo comparado", analysis["comparison_scope"].capitalize())
-    k2.metric(
-        "Amostra de referência",
-        analysis.get("reference_players_n", analysis.get("reference_teams_n", 0)),
-    )
-    k3.metric("Partidas na referência", analysis["reference_matches_n"])
-    k4.metric("Grau de evidência", analysis["evidence_grade"])
+    n_ref = an.get("reference_players_n", an.get("reference_teams_n", 0))
+    prov = ctx.prov(f"sw_{entity}", f"Percentis de {entity}", n_ref,
+                    f"percentil contextual contra {an['comparison_scope']} ({an['league_scope']}), n = {n_ref}")
+    k = st.columns(4)
+    with k[0]:
+        kpi("grupo comparado", an["comparison_scope"].capitalize(), prov)
+    with k[1]:
+        kpi("n da referência", n_ref, prov)
+    with k[2]:
+        kpi("partidas na referência", an["reference_matches_n"], prov)
+    with k[3]:
+        kpi("grau de evidência" + (f" · {an['minutes']} min" if "minutes" in an else ""), an["evidence_grade"], prov)
+    if an["evidence_grade"] == "LIMITADA":
+        note("Evidência limitada", "Pouco tempo em campo ou referência pequena: trate os percentis como indicativos.", "warn")
 
-    col_s, col_w = st.columns(2)
-    with col_s:
-        st.markdown("#### 🟢 Pontos Fortes (acima da média)")
-        st.dataframe(_items_to_df(analysis["strengths"]), use_container_width=True, hide_index=True)
-    with col_w:
-        st.markdown("#### 🔴 Pontos Fracos (abaixo da média)")
-        st.dataframe(_items_to_df(analysis["weaknesses"]), use_container_width=True, hide_index=True)
-
-    col_r, col_t = st.columns([1.1, 1.0])
-    with col_r:
-        st.plotly_chart(_radar(analysis), use_container_width=True)
-    with col_t:
+    s, w = st.columns(2)
+    with s:
+        st.markdown("#### 🟢 Pontos fortes")
+        comparison_table(_items_df(an["strengths"]))
+    with w:
+        st.markdown("#### 🔴 Pontos fracos")
+        comparison_table(_items_df(an["weaknesses"]))
+    r, t = st.columns([1.1, 1.0])
+    r.plotly_chart(radar(an), use_container_width=True)
+    with t:
         st.markdown("#### 🧠 Interpretação")
-        res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(
-            analysis, is_simulation=is_sim_mode, prefer_llm=use_llm
-        )
-        st.caption(f"Motor: {res['engine_used']}")
-        blocked = res["hallucination_audit"].get("blocked_llm_audit")
-        if blocked:
-            st.warning("🛡️ O texto da IA foi bloqueado pelo guardião e substituído pelo texto local.")
+        res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)
+        st.caption(f"Motor: {res['engine_used']}" + (f" · guard: {res['guard_outcome']}" if res.get("guard_outcome") else ""))
         st.markdown(res["report_markdown"])
-
-    with st.expander("Métricas dentro da faixa normal (percentil 30–70)"):
-        st.dataframe(_items_to_df(analysis["neutral"]), use_container_width=True, hide_index=True)
+    with st.expander(f"Faixa normal ({len(an['neutral'])}) e amostra insuficiente ({len(an.get('insufficient', []))})"):
+        comparison_table(_items_df(an["neutral"]), "Entre P30 e P70.")
+        comparison_table(_items_df(an.get("insufficient", [])), f"n < {MIN_GROUP_SAMPLE}: sem percentil.")
+    provenance_panel(ctx.registry)

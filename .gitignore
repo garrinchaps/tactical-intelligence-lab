@@ -12,3 +12,8 @@ data/processed/reference_baselines.json
 
 # Banco local (cresce com a sincronização; pode passar de 100 MB)
 database/*.db
+
+# Gerados localmente (recriados sob demanda)
+data/processed/empirical_pool.csv.gz
+data/processed/sim_uncertainty/
+models/trained/danger_xgb.joblib
