@@ -76,6 +76,20 @@ def empty_state(title: str, message: str = "", icon: str = "🗂️", hint: str 
                 + "</div>", unsafe_allow_html=True)
 
 
+def source_label(source: Optional[str]) -> str:
+    from src.data_hub.registry import SOURCES
+
+    info = SOURCES.get(str(source or ""))
+    return info.label if info else (str(source) if source else "desconhecida")
+
+
+def source_gap(what: str, source: Optional[str], hint: str = "", icon: str = "📄", level: Optional[str] = None) -> None:
+    """Estado vazio padronizado: 'Sem <o quê> da fonte <X> para esta partida'."""
+    lv = f" Nível desta partida: {BADGES.get(level, level)}." if level else ""
+    empty_state(f"Sem {what} da fonte {source_label(source)} para esta partida",
+                f"A fonte não publica esse dado para este jogo.{lv}", icon, hint)
+
+
 def error_state(title: str, exc: Exception, hint: str = "") -> None:
     empty_state(title, f"{type(exc).__name__}: {exc}", icon="⚠️", hint=hint, error=True)
 
@@ -125,9 +139,10 @@ def scoreboard(home: str, away: str, score: str, meta_text: str = "", home_goals
         goals_row = (f'<div class="grow"><div class="gcol">{col(home_goals, "right")}</div><div class="gsep"></div>'
                      f'<div class="gcol">{col(away_goals, "left")}</div></div>')
     from src.ui.crests import crest_img
+    from src.ui.names import pt
 
-    st.markdown(f'<div class="til-score"><div class="row"><div class="team" style="text-align:right">{_esc(home)} {crest_img(home, "md")}</div>'
-                f'<div class="box">{_esc(score)}</div><div class="team" style="text-align:left">{crest_img(away, "md")} {_esc(away)}</div></div>'
+    st.markdown(f'<div class="til-score"><div class="row"><div class="team" style="text-align:right">{_esc(pt(home))} {crest_img(home, "md")}</div>'
+                f'<div class="box">{_esc(score)}</div><div class="team" style="text-align:left">{crest_img(away, "md")} {_esc(pt(away))}</div></div>'
                 f'{goals_row}' + (f'<div class="pen">{_esc(extra_line)}</div>' if extra_line else "")
                 + f'<div class="meta">{_esc(meta_text)}</div></div>', unsafe_allow_html=True)
 
@@ -136,8 +151,27 @@ def note(title: str, body: str, kind: str = "") -> None:
     st.markdown(f'<div class="til-note {kind}"><div class="h">{_esc(title)}</div>{_esc(body)}</div>', unsafe_allow_html=True)
 
 
+def zebra(df: pd.DataFrame):
+    """Tabela estilo FM: linhas alternadas #0D1117/#161B22; notas > 7.5 em azul e < 6.0 em vermelho."""
+    try:
+        sty = df.style.apply(lambda r: [f"background-color: {'#0D1117' if r.name % 2 == 0 else '#161B22'}"] * len(r)
+                             if isinstance(r.name, int) else [""] * len(r), axis=1)
+        rating = [c for c in df.columns if str(c).lower() in ("nota", "rating", "avaliação")]
+        if rating:
+            def col(v):
+                try:
+                    v = float(v)
+                except (TypeError, ValueError):
+                    return ""
+                return "color:#3B82F6;font-weight:700" if v > 7.5 else ("color:#EF4444;font-weight:700" if v < 6.0 else "")
+            sty = sty.map(col, subset=rating) if hasattr(sty, "map") else sty.applymap(col, subset=rating)
+        return sty
+    except Exception:
+        return df
+
+
 def comparison_table(df: pd.DataFrame, caption: str = "") -> None:
-    st.dataframe(df, use_container_width=True, hide_index=True)
+    st.dataframe(zebra(df.reset_index(drop=True)), use_container_width=True, hide_index=True)
     if caption:
         st.caption(caption)
 
@@ -174,9 +208,11 @@ def match_strip(meta: dict, level_badge: str = "") -> None:
     """Faixa compacta da partida aberta (escudos, placar, competição, nível do dado)."""
     from src.ui.crests import crest_img
 
+    from src.ui.names import pt
+
     h, a = meta.get("home_team_name", ""), meta.get("away_team_name", "")
-    st.markdown(f'<div class="til-strip"><div class="tm">{crest_img(h)} {_esc(h)}</div><div class="sc">{_score_of(meta)}</div>'
-                f'<div class="tm">{_esc(a)} {crest_img(a)}</div><div class="meta">{_esc(meta.get("competition_name", ""))} '
+    st.markdown(f'<div class="til-strip"><div class="tm">{crest_img(h)} {_esc(pt(h))}</div><div class="sc">{_score_of(meta)}</div>'
+                f'<div class="tm">{_esc(pt(a))} {crest_img(a)}</div><div class="meta">{_esc(meta.get("competition_name", ""))} '
                 f'{_esc(meta.get("season_name", ""))}<br>{_esc(meta.get("match_date", ""))} · {_esc(level_badge)}</div></div>',
                 unsafe_allow_html=True)
 
@@ -184,9 +220,11 @@ def match_strip(meta: dict, level_badge: str = "") -> None:
 def result_card_html(m: dict, level_badge: str = "") -> str:
     from src.ui.crests import crest_img
 
+    from src.ui.names import pt
+
     h, a = m.get("home_team_name", ""), m.get("away_team_name", "")
-    return (f'<div class="til-result"><div class="tm r">{_esc(h)} {crest_img(h)}</div><div class="sc">{_score_of(m)}</div>'
-            f'<div class="tm">{crest_img(a)} {_esc(a)}</div><div class="meta">{_esc(m.get("competition_name", ""))}<br>'
+    return (f'<div class="til-result"><div class="tm r">{_esc(pt(h))} {crest_img(h)}</div><div class="sc">{_score_of(m)}</div>'
+            f'<div class="tm">{crest_img(a)} {_esc(pt(a))}</div><div class="meta">{_esc(m.get("competition_name", ""))}<br>'
             f'{_esc(m.get("match_date", ""))} · {_esc(level_badge)}</div></div>')
 
 

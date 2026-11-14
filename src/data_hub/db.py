@@ -152,6 +152,10 @@ class DataHubDB:
                     conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
             conn.executescript(DATA_HUB_DDL)
         self._seed_demo_catalog()
+        try:
+            self._fix_levels()
+        except Exception:
+            pass
         with self.connect() as conn:
             # Classifica linhas antigas que ainda não têm fonte/nível
             rows = conn.execute(
@@ -172,6 +176,28 @@ class DataHubDB:
                     "UPDATE matches SET data_source = ?, data_level = ?, source_match_id = ? WHERE match_id = ?",
                     (src, level, str(to_source_id(int(mid))), int(mid)),
                 )
+
+    def _fix_levels(self) -> None:
+        """BOXSCORE só quando há estatísticas de equipe; placar + gols/escalações = RESULT (corrige bases antigas)."""
+        with self.connect() as conn:
+            if (conn.execute("PRAGMA user_version").fetchone() or [0])[0] >= 26:
+                return
+            for old, new in (("shots_on_goal", "shots_on_target"), ("corner_kicks", "corners")):
+                conn.execute("UPDATE OR IGNORE match_team_stats SET stat_key = ? WHERE stat_key = ?", (new, old))
+            conn.execute(
+                """UPDATE matches SET data_level = 'RESULT'
+                   WHERE data_level = 'BOXSCORE' AND data_source IN ('openfootball', 'intl')
+                     AND NOT EXISTS (SELECT 1 FROM match_team_stats s WHERE s.match_id = matches.match_id)""")
+            conn.execute("PRAGMA user_version = 26")
+
+    def reconcile_levels(self) -> int:
+        """Rebaixa para RESULT partidas marcadas BOXSCORE sem nenhuma estatística de equipe (roda após cada sync)."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                """UPDATE matches SET data_level = 'RESULT'
+                   WHERE data_level = 'BOXSCORE'
+                     AND NOT EXISTS (SELECT 1 FROM match_team_stats s WHERE s.match_id = matches.match_id)""")
+            return cur.rowcount or 0
 
     def _seed_demo_catalog(self) -> None:
         """Garante no catálogo as partidas do pacote de demonstração offline (data/demo/)."""
@@ -195,6 +221,14 @@ class DataHubDB:
                 DataLevel.SIMULATED: 0, DataLevel.UPLOAD: 0}
         added = updated = 0
         now = utc_now()
+        from src.data_hub.quality import validate_matches
+
+        records, rejected, _ = validate_matches(list(records))   # placar negativo, equipe vazia, data impossível
+        if rejected:
+            from src.data_hub.net import log as _log
+
+            for b in rejected[:50]:
+                _log(str(b.get("fonte") or "catalogo"), f"partida {b['match_id']} rejeitada: {b['motivo']}")
         with self.connect() as conn:
             for r in records:
                 mid = int(r["match_id"])
@@ -249,7 +283,7 @@ class DataHubDB:
                         values,
                     )
                     added += 1
-        return {"added": added, "updated": updated}
+        return {"added": added, "updated": updated, "rejected": len(rejected)}
 
     def set_level(self, match_id: int, level: str) -> None:
         with self.connect() as conn:
@@ -279,12 +313,19 @@ class DataHubDB:
         return df
 
     def catalog_version(self) -> str:
-        """Muda sempre que o catálogo muda (usado como chave de cache da interface)."""
+        """
+        Chave de cache da interface: muda SÓ quando o catálogo muda de verdade (partidas novas ou nível de dado
+        promovido). Antes incluía o relógio e, a cada 10 min, o app relia o catálogo inteiro do banco.
+        """
         with self.connect() as conn:
-            n, last, mx = conn.execute("SELECT COUNT(*), MAX(last_synced), MAX(match_id) FROM matches").fetchone()
-            ev = conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM sync_runs ORDER BY id DESC LIMIT 1)").fetchone()[0] \
-                if conn.execute("SELECT name FROM sqlite_master WHERE name='sync_runs'").fetchone() else 0
-        return f"{n}:{last}:{mx}:{ev}"
+            n, rich = conn.execute(
+                "SELECT COUNT(*), SUM(CASE WHEN data_level IN ('EVENTS','BOXSCORE') THEN 1 ELSE 0 END) FROM matches"
+            ).fetchone()
+        return f"{n}:{rich or 0}"
+
+    def level_counts(self) -> Dict[str, int]:
+        with self.connect() as conn:
+            return {str(k): int(v) for k, v in conn.execute("SELECT data_level, COUNT(*) FROM matches GROUP BY 1")}
 
     def has_events(self, match_id: int) -> bool:
         with self.connect() as conn:
@@ -334,7 +375,9 @@ class DataHubDB:
                     (mid, p["team_name"], p["player_name"], p.get("shirt_number"), p.get("position"),
                      int(p.get("is_starter", 1)), p.get("formation"), p.get("coach")),
                 )
-            for e in box.get("timeline", []):
+            from src.data_hub.quality import clean_timeline
+
+            for e in clean_timeline(box.get("timeline", [])):
                 conn.execute(
                     """INSERT INTO match_timeline (match_id, minute, extra_minute, team_name, player_name,
                        related_player, event_type, detail) VALUES (?,?,?,?,?,?,?,?)""",

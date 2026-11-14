@@ -1,4 +1,4 @@
-"""🛡️ Clubes — pesquisa de clubes e seleções: perfil, forma recente, números da temporada, elenco e jogos."""
+"""🛡️ Tela do time — perfil, campanha, TODOS os jogos com dados (paginados), elenco e xG. Aberta pela busca única."""
 
 from __future__ import annotations
 
@@ -20,20 +20,44 @@ def _team_names(version: str) -> List[str]:
     return sorted(pd.unique(pd.concat([c["home_team_name"], c["away_team_name"]]).dropna()))
 
 
-def team_matches(name: str) -> pd.DataFrame:
+def same_team_names(name: str) -> List[str]:
+    """Variações do mesmo time entre as fontes ('Man United', 'Manchester United', 'Manchester United FC')."""
+    from src.data_hub.search import fast_scores
+    from src.data_lake.ids import team_core
+    from src.ui.context import get_service
+    from src.ui.pages.search_all import team_table
+
+    t = team_table(get_service().db.catalog_version(), False)
+    if t.empty:
+        return [name]
+    core = team_core(name)
+    same = set(t.loc[t["core"] == core, "nome"])
+    sc = fast_scores(name, t["nome"].tolist())
+    same |= {n for n, v in sc.items() if v >= 0.92}
+    return sorted(same | {name})
+
+
+def team_matches(name, include_score_only: bool = False) -> pd.DataFrame:
+    """Jogos do time (uma linha por partida, versão mais rica). `name` pode ser um nome ou a lista de variações."""
     from src.ui.context import cached_catalog
+    from src.ui.pages.search_all import one_per_game
 
-    c = cached_catalog()
-    m = c[(c["home_team_name"] == name) | (c["away_team_name"] == name)]
+    names = [name] if isinstance(name, str) else list(name)
+    c = cached_catalog(include_score_only=include_score_only)
+    m = c[c["home_team_name"].isin(names) | c["away_team_name"].isin(names)]
     m = m[m["home_score"].notna() & m["away_score"].notna()]
-    return m.sort_values("match_date", ascending=False).drop_duplicates(["match_date", "home_team_name", "away_team_name"])
+    if m.empty:
+        return m
+    return one_per_game(m).sort_values("match_date", ascending=False)
 
 
-def record(name: str, m: pd.DataFrame) -> dict:
+def record(name, m: pd.DataFrame) -> dict:
     if m.empty:
         return {}
-    gf = (m["home_score"].where(m["home_team_name"] == name, m["away_score"])).astype(float)
-    ga = (m["away_score"].where(m["home_team_name"] == name, m["home_score"])).astype(float)
+    names = [name] if isinstance(name, str) else list(name)
+    home = m["home_team_name"].isin(names)
+    gf = (m["home_score"].where(home, m["away_score"])).astype(float)
+    ga = (m["away_score"].where(home, m["home_score"])).astype(float)
     res = ["V" if f > a else ("E" if f == a else "D") for f, a in zip(gf, ga)]
     return {"jogos": len(m), "V": res.count("V"), "E": res.count("E"), "D": res.count("D"), "gp": int(gf.sum()), "gc": int(ga.sum()),
             "forma": list(reversed(res[:5])), "aprov": round(100 * (3 * res.count("V") + res.count("E")) / (3 * len(res)), 1)}
@@ -57,51 +81,92 @@ def _lake_team(name: str):
         return None, None, pd.DataFrame()
 
 
-def render(_ctx=None) -> None:
-    from src.ui.context import filter_by_team, get_service
+PAGE = 25
 
-    hero("Clubes", "Pesquise clubes e seleções", "Forma recente, números da temporada, valor do elenco e todos os jogos "
-         "disponíveis em todas as fontes.")
-    q = st.text_input("Clube ou seleção", key="club_q", placeholder="ex.: Flamengo, Bayer Leverkusen, Argentina, Liverpool")
-    if not q.strip():
-        empty_state("Digite o nome de um clube ou seleção", icon="🛡️")
+
+def upcoming(names) -> pd.DataFrame:
+    """Próximos jogos do time (lake 'agenda', alimentado pelo open-matchday)."""
+    try:
+        from datetime import date
+
+        from src.data_hub.service import _same
+        from src.data_lake.ids import team_core
+        from src.data_lake.lake import Lake
+
+        lake = Lake(sqlite_path=None)
+        if not lake.exists("agenda"):
+            return pd.DataFrame()
+        ag = lake.read("agenda")
+        cores = {team_core(n) for n in names}
+        hit = ag[[any(_same(team_core(h), c) or _same(team_core(a), c) for c in cores)
+                  for h, a in zip(ag["mandante"], ag["visitante"])]]
+        hit = hit[hit["data"].astype(str) >= date.today().isoformat()].sort_values(["data", "hora"])
+        return hit[["data", "hora", "mandante", "visitante", "competicao"]].rename(columns={"competicao": "competição"})
+    except Exception:
+        return pd.DataFrame()
+
+
+def render(_ctx=None) -> None:
+    from src.ui import nav
+    from src.ui.names import pt
+
+    nav.back_button(key="team_back")
+    name = nav.param("name")
+    if not name:
+        empty_state("Nenhum time escolhido", "Use a busca no topo e clique no time.", "🛡️")
         return
-    names = _team_names(get_service().db.catalog_version())
-    cand = filter_by_team(pd.DataFrame({"home_team_name": names, "away_team_name": names}), q, 0.86)["home_team_name"].tolist()
-    if not cand:
-        empty_state("Clube não encontrado no catálogo", "Confira a grafia ou sincronize mais fontes.", "🔎")
-        return
-    counts = {n: len(team_matches(n)) for n in cand[:30]}
-    cand = sorted(counts, key=lambda n: -counts[n])
-    name = st.selectbox("Resultado", cand, format_func=lambda n: f"{n} · {counts[n]} jogos") if len(cand) > 1 else cand[0]
-    m = team_matches(name)
-    r = record(name, m)
+    names = same_team_names(name)
+    m = team_matches(names)                                    # jogos com dados para análise
+    allm = team_matches(names, include_score_only=True)        # campanha usa todos os resultados
+    r = record(names, allm)
     lake, key, ids = _lake_team(name)
-    fontes = sorted(ids["fonte"].unique()) if not ids.empty else sorted(m["data_source"].unique())
-    st.markdown(f'<div class="til-profile">{crest_img(name, "lg")}<div><div class="n">{name}</div>'
-                f'<div class="d">{len(m)} jogos com placar · fontes: {", ".join(fontes)}</div>'
-                f'{form_html(r.get("forma", []))}</div></div>', unsafe_allow_html=True)
+    fontes = sorted(ids["fonte"].unique()) if not ids.empty else sorted(m["data_source"].unique()) if not m.empty else []
+    st.markdown(f'<div class="til-profile">{crest_img(name, "lg")}<div><div class="n">{pt(name)}</div>'
+                f'<div class="d">{len(m)} jogos com dados para análise · {len(allm)} resultados no total'
+                + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
+                unsafe_allow_html=True)
     k = st.columns(5)
-    k[0].metric("Jogos", r.get("jogos", 0))
+    k[0].metric("Jogos (todos)", r.get("jogos", 0))
     k[1].metric("V / E / D", f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}")
     k[2].metric("Gols pró / contra", f"{r.get('gp', 0)} / {r.get('gc', 0)}")
     k[3].metric("Aproveitamento", f"{r.get('aprov', 0)}%")
-    k[4].metric("Com eventos (✅)", int((m["data_level"] == "EVENTS").sum()) if not m.empty else 0)
-    st.caption("Todos os jogos com placar do catálogo (todas as competições e fontes, sem duplicar o mesmo jogo).")
+    k[4].metric("Com todos os lances (✅)", int((m["data_level"] == "EVENTS").sum()) if not m.empty else 0)
 
+    nxt = upcoming(names)
+    if not nxt.empty:
+        st.markdown("##### 📅 Próximos jogos")
+        st.caption("Agenda do open-matchday (horário de início em CET-1, como a fonte publica).")
+        comparison_table(nxt.head(5))
     t1, t2, t3 = st.tabs(["🗓️ Jogos", "💶 Elenco e valores", "📈 Temporada (xG)"])
     with t1:
-        seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)
-        sea = st.selectbox("Temporada", seasons, key="club_season")
-        mm = m if sea == "todas" else m[m["season_name"].astype(str) == sea]
-        for i, row in enumerate(mm.head(30).to_dict("records")):
-            a, b = st.columns([8, 1.2])
-            a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
-            if b.button("Abrir", key=f"club_open_{row['match_id']}_{i}", use_container_width=True):
-                st.session_state["match_id"] = int(row["match_id"])
-                st.session_state["team_focus"] = name
-                st.session_state["games_section"] = "📊 Resumo"
-                st.session_state["goto"] = "jogos"
+        if m.empty:
+            empty_state("Nenhum jogo deste time com estatísticas ou lances", "Só existem resultados (placar) dele nas "
+                        "fontes abertas.", "🗓️", "Bastidores › Dados: ligue 'mostrar jogos só com placar' para vê-los.")
+        else:
+            f1, f2 = st.columns(2)
+            seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)
+            sea = f1.selectbox("Temporada", seasons, key=f"team_season_{name}")
+            comps = ["todas"] + m["competition_name"].dropna().value_counts().index.tolist()
+            cmp_ = f2.selectbox("Competição", comps, key=f"team_comp_{name}")
+            mm = m if sea == "todas" else m[m["season_name"].astype(str) == sea]
+            mm = mm if cmp_ == "todas" else mm[mm["competition_name"] == cmp_]
+            if cmp_ != "todas":
+                nav.link(f"🏆 Abrir {cmp_}", "competicao", key=f"team_open_comp_{name}", name=cmp_,
+                         season=None if sea == "todas" else sea)
+            pk = f"team_page_{name}_{sea}_{cmp_}"
+            shown = int(st.session_state.get(pk, PAGE))
+            st.caption(f"{len(mm)} jogo(s) · mostrando {min(shown, len(mm))}")
+            for i, row in enumerate(mm.head(shown).to_dict("records")):
+                a, b = st.columns([8, 1.3])
+                a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
+                b.write("")
+                if b.button("Analisar →", key=f"team_open_{row['match_id']}_{i}", use_container_width=True, type="primary"):
+                    st.session_state["team_focus"] = next((n for n in names if n in (row["home_team_name"],
+                                                                                      row["away_team_name"])), None)
+                    nav.open_view("jogo", match_id=int(row["match_id"]))
+            if shown < len(mm) and st.button(f"Mostrar mais {min(PAGE, len(mm) - shown)}", key=f"more_{pk}",
+                                             use_container_width=True):
+                st.session_state[pk] = shown + PAGE
                 st.rerun()
     with t2:
         if lake is None or ids.empty or not lake.exists("tm_clubes"):

@@ -22,14 +22,9 @@ CACHE = Path("data/raw/open_sources")
 
 
 def load_config(path: Path = CONFIG) -> List[Dict[str, Any]]:
-    try:
-        import yaml  # type: ignore
+    from src.connectors.mini_yaml import safe_load   # leitor próprio; o projeto não usa PyYAML
 
-        doc = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except ImportError:
-        from src.connectors.mini_yaml import safe_load
-
-        doc = safe_load(path.read_text(encoding="utf-8"))
+    doc = safe_load(path.read_text(encoding="utf-8"))
     items = (doc or {}).get("fontes") or []
     for i, f in enumerate(items):
         for k in ("id", "url", "formato", "licenca"):
@@ -63,9 +58,9 @@ class OpenSourcesIngestor:
         if self._fetch:
             status, body, etag = self._fetch(src["url"], headers)
         else:
-            import requests
+            from src.data_hub import net
 
-            r = requests.get(src["url"], headers=headers, timeout=120)
+            r = net.get(src["url"], headers=headers, source="open_sources")
             status, body, etag = r.status_code, r.content, r.headers.get("ETag")
         if status == 304 and f.exists():
             f.touch()
@@ -115,7 +110,7 @@ class OpenSourcesIngestor:
 
 
 def international_to_catalog(res: pd.DataFrame, goals: Optional[pd.DataFrame], db) -> int:
-    """Jogos de seleções → catálogo (RESULT; BOXSCORE quando há autores dos gols)."""
+    """Jogos de seleções → catálogo (RESULT; autores dos gols vão para a linha do tempo)."""
     from src.data_hub.registry import DataLevel, to_internal_id
 
     def sid(r) -> int:
@@ -139,9 +134,6 @@ def international_to_catalog(res: pd.DataFrame, goals: Optional[pd.DataFrame], d
             det = "Own Goal" if str(g.get("own_goal")).upper() == "TRUE" else ("Penalty" if str(g.get("penalty")).upper() == "TRUE" else "Normal Goal")
             boxes.setdefault(mid, []).append({"minute": int(float(g["minute"])), "extra_minute": None, "team_name": g["team"],
                                               "player_name": g["scorer"], "related_player": None, "event_type": "Goal", "detail": det})
-    for r in recs:
-        if r["match_id"] in boxes:
-            r["data_level"] = DataLevel.BOXSCORE
     db.upsert_matches(recs)
     for mid, tl in boxes.items():
         db.save_boxscore(mid, {"team_stats": [], "lineups": [], "timeline": tl})

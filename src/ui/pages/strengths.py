@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.ui.components import empty_state, page_header
+from src.ui.components import empty_state, page_header, source_gap
 from src.ui.context import MatchContext, get_service
 from src.visualization.strengths_page import render_strengths_weaknesses_page
 
@@ -20,8 +20,9 @@ def _competition_of() -> dict:
 
 
 def render(ctx: MatchContext) -> None:
-    page_header("⚖️ Pontos Fortes e Fracos", "Percentil contextual contra a mesma função ou contra outras equipes, com n visível.", ctx)
+    page_header("⚖️ Pontos Fortes e Fracos", "O que funcionou e o que precisa melhorar, comparado com jogos reais da base.", ctx)
     if not ctx.has_events:
-        empty_state("Esta partida não tem eventos", "", "⚖️", "Escolha uma partida ✅ (eventos oficiais ou simulados).")
+        source_gap("eventos (necessários para os percentis)", ctx.bundle.source,
+                   "Escolha uma partida ✅ (eventos oficiais ou simulados).", "⚖️", ctx.bundle.level)
         return
     render_strengths_weaknesses_page(ctx, get_service().db.load_events, competition_of=_competition_of())

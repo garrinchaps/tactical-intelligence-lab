@@ -35,11 +35,25 @@ O **Data Hub** (`src/data_hub/`) junta várias fontes num único catálogo SQLit
 ### Sincronização e atualização automática
 
 ```bash
+python -m src.data_hub.sync --tudo               # BASE COMPLETA: todas as fontes, histórico inteiro (vários GB, horas)
 python -m src.data_hub.sync                      # todas as fontes habilitadas
 python -m src.data_hub.sync --only statsbomb wyscout
 python -m src.data_hub.sync --days 7 --prefetch-events 50
-python -m src.data_hub.sync --only fdcouk --seasons 30   # histórico completo do football-data.co.uk
+python -m src.data_hub.sync --only fdcouk --seasons 33   # football-data.co.uk inteiro (22 divisões, desde 1993/94)
+python -m src.data_hub.sync --only understat lake --seasons 12   # xG de todas as temporadas desde 2014/15
+python -m src.data_hub.sync --only espn_historico --desde 2018   # Brasileirão A/B, Copa do Brasil, Libertadores, Sul-Americana
+python -m src.data_hub.sync --only brasileirao open_matchday   # Brasileirão 2003→ com estatísticas · temporada atual + agenda
+python -m src.data_hub.sync --only openplay    # eventos com coordenadas e xG (baixa sozinho a release de dados)
+python -m src.data_hub.sync --only cbf         # súmulas da CBF Série A–D e Copa do Brasil (baixa sozinho, sem git)
 ```
+
+Bases da comunidade (detalhes, licenças e formatos em `docs/FONTES_COMUNIDADE.md`): `brasileirao` (Adão Duque,
+estatísticas por clube, gols e cartões por minuto), `open_matchday` (temporada atual em dezenas de competições,
+placar do intervalo, minutos dos gols, agenda), `cbf` (súmulas oficiais 2013–2025) e `openplay` (eventos com
+coordenadas e xG; o repositório declara CC BY 4.0, mas os eventos vêm de WhoScored/Opta).
+
+`espn_historico` é uma carga pesada (milhares de jogos, 1 requisição a cada 2 s) e só roda quando pedida; pode
+ser interrompida com Ctrl+C e retomada depois sem baixar de novo o que já veio.
 
 `--prefetch-events N` baixa os eventos das N partidas mais recentes que ainda não estão no banco. Isso alimenta a base de referência de *Pontos Fortes e Fracos*. A mesma sincronização tem um botão na página **🗄️ Catálogo & Dados**.
 
@@ -85,15 +99,18 @@ validação com analistas humanos em [`docs/VALIDACAO_QUALITATIVA.md`](docs/VALI
 
 ## 🖥️ Interface
 
-Tema escuro (preto, branco, detalhes vermelho/azul), navegação em pílulas no topo, busca global e faixa da partida
-aberta com escudos/bandeiras. Funciona offline com as partidas de `data/demo/`.
+Tema escuro estilo Football Manager, navegação em pílulas no topo e uma única caixa de busca. Por padrão só aparecem
+jogos com dados para análise (✅ todos os lances ou 📊 estatísticas); jogos só com placar podem ser ligados em
+Bastidores › Dados. Funciona offline com as partidas de `data/demo/`.
 
 | Página | Conteúdo |
 |---|---|
 | 💬 Assistente | chat único: a pergunta pode citar o jogo (“Argentina x França 2022: quem mais criou perigo?”) — o jogo é encontrado e aberto; respostas conferidas pelo guard |
-| 🏟️ Jogos | pesquisa em todas as fontes + análise da partida: resumo, redes & xT, jogadores, fortes e fracos, duas equipes |
-| 🛡️ Clubes | perfil, forma (V/E/D), jogos, elenco e valores (Transfermarkt), xG por temporada (Understat) |
-| 👤 Jogadores | perfil, valor de mercado e histórico, temporada (Understat), todos os jogos com eventos |
+| 🔎 Buscar | **uma caixa** no topo para jogo, time, jogador ou competição; clique abre a tela do item |
+| 🏟️ Jogo (tela de foco) | só a partida + "← Voltar": resumo, redes & xT, jogadores, fortes e fracos, duas equipes |
+| 🛡️ Time (tela de foco) | perfil, campanha, **todos** os jogos com dados (paginados, filtros de temporada/competição), elenco, xG |
+| 👤 Jogador (tela de foco) | perfil, valor de mercado, temporada (Understat), todos os jogos com lances |
+| 🏆 Competição (tela de foco) | temporadas, jogos com dados e classificação calculada dos placares |
 | 🆚 Comparar | jogador × jogador (várias partidas, totais e por 90), jogo × jogo, clube × clube (forma, confronto direto, valor), equipe × ela mesma, duas equipes |
 | ⚙️ Bastidores | **Como a IA aprende** (explicação para leigos, simulador de jogada, treino, versões), ML & avaliação, analista técnico (guard), dados & fontes, laboratório |
 

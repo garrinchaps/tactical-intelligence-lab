@@ -25,10 +25,11 @@ from typing import Any, Callable, Dict, List, Optional
 import pandas as pd
 
 BASE = "https://understat.com"
+FIRST_SEASON = 2014           # o Understat cobre de 2014/15 em diante
 LEAGUES = {"EPL": "Premier League", "La_liga": "La Liga", "Bundesliga": "Bundesliga", "Serie_A": "Serie A",
            "Ligue_1": "Ligue 1", "RFPL": "Russian Premier League"}
 CACHE = Path("data/raw/understat")
-LICENSE = "Understat.com — dados públicos do site; uso acadêmico com crédito à fonte"
+LICENSE = "Understat.com — dados públicos do site; uso academico com crédito à fonte"
 RESULT_PT = {"Goal": "gol", "SavedShot": "defendido", "MissedShots": "para fora", "BlockedShot": "bloqueado",
              "ShotOnPost": "na trave", "OwnGoal": "gol contra"}
 
@@ -55,7 +56,7 @@ class UnderstatProvider:
         self._last = 0.0
 
     def _get(self, path: str, max_age_s: Optional[float]) -> str:
-        import requests
+        from src.data_hub import net
 
         self.cache.mkdir(parents=True, exist_ok=True)
         f = self.cache / (re.sub(r"[^A-Za-z0-9_]+", "_", path.strip("/")) + ".txt")
@@ -64,8 +65,8 @@ class UnderstatProvider:
         wait = self.min_interval_s - (time.time() - self._last)
         if wait > 0:
             time.sleep(wait)
-        r = requests.get(f"{BASE}{path}", timeout=30, headers={
-            "User-Agent": "Mozilla/5.0 (TacticalIntelligenceLab; uso acadêmico)", "X-Requested-With": "XMLHttpRequest"})
+        r = net.get(f"{BASE}{path}", source="understat", headers={
+            "User-Agent": "Mozilla/5.0 (TacticalIntelligenceLab; uso academico)", "X-Requested-With": "XMLHttpRequest"})
         self._last = time.time()
         r.raise_for_status()
         f.write_text(r.text, encoding="utf-8")

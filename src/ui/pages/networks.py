@@ -9,15 +9,15 @@ from src.ingestion.brazil_and_multi_source import PlayerNameNormalizer
 from src.metrics.xt_model import ExpectedThreatModel
 from src.networks.pass_network import PassingNetworkAnalyzer
 from src.ui import charts
-from src.ui.components import comparison_table, empty_state, error_state, metric_card, page_header, provenance_panel
+from src.ui.components import comparison_table, empty_state, error_state, metric_card, page_header, provenance_panel, source_gap
 from src.ui.context import MatchContext
 
 
 def render(ctx: MatchContext) -> None:
     page_header("🕸️ Redes de Passes & xT", "Quem conecta a equipe, por onde a bola progride e quanto de ameaça cada ação gera.", ctx)
     if not ctx.has_events:
-        empty_state("Precisa de eventos com coordenadas", "Esta partida só tem boxscore.", "🕸️",
-                    "Escolha uma partida ✅ (StatsBomb ou Wyscout) na barra lateral.")
+        source_gap("eventos com coordenadas", ctx.bundle.source,
+                   "Escolha uma partida ✅ (StatsBomb ou Wyscout) no topo.", "🕸️", ctx.bundle.level)
         return
     team, df = ctx.target_team, ctx.df
     a, b = st.columns([2, 1])

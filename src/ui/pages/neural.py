@@ -251,12 +251,18 @@ def _versions_and_usage(ctx, reg, live) -> None:
         v["versão"] = v["version"].map(lambda x: f"v{x:03d}")
         st.plotly_chart(charts.lines(v, "versão", ["val_logloss"], "Perda na validação fixa por versão (menor = melhor)",
                                      "log-loss"), use_container_width=True)
+        for c in ("cv_logloss_std", "test_gain", "gain_ci_low", "gain_ci_high"):
+            if c not in v:
+                v[c] = None                                   # versões antigas, antes da validação agrupada
         comparison_table(v[["versão", "created", "origin", "hidden", "learning_rate", "epochs", "l2", "n_matches_train",
-                            "n_samples_train", "val_auc", "val_logloss", "promoted", "reason"]].rename(columns={
+                            "n_samples_train", "val_auc", "val_logloss", "cv_logloss_std", "test_gain", "gain_ci_low",
+                            "promoted", "reason"]].rename(columns={
             "created": "criada", "origin": "origem", "hidden": "ocultas", "learning_rate": "η", "n_matches_train": "partidas",
-            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda", "promoted": "promovida", "reason": "decisão"}),
-            "Uma versão só vira campeã se reduzir a perda na validação fixa. Treinar de novo nos mesmos dados raramente "
-            "melhora; o que ensina a rede é ter mais partidas (veja a curva abaixo) ou hiperparâmetros melhores.")
+            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (teste)", "cv_logloss_std": "σ dobras/sementes",
+            "test_gain": "ganho", "gain_ci_low": "IC95% inferior", "promoted": "promovida", "reason": "decisão"}),
+            "Promoção rigorosa: validação GroupKFold por partida (5 dobras × 2 sementes) mede a variação σ; a nova versão "
+            "só vira campeã se, no teste isolado (partidas que nunca treinam), o ganho de perda sobre o campeão for maior "
+            "que σ e o IC 95% do bootstrap por partida ficar acima de zero. Todas as tentativas ficam registradas.")
     with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
         if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
             with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):

@@ -22,12 +22,14 @@ class DataLevel:
     UPLOAD = "UPLOAD"          # arquivo enviado pelo usuário
 
     ALL = (EVENTS, BOXSCORE, RESULT, SIMULATED, UPLOAD)
+    # o que serve para análise: eventos ou estatísticas (só placar fica fora da interface por padrão)
+    ANALYZABLE = (EVENTS, BOXSCORE, SIMULATED, UPLOAD)
 
 
 BADGES: Dict[str, str] = {
     DataLevel.EVENTS: "✅ [DADOS OFICIAIS REAIS — EVENTOS]",
-    DataLevel.BOXSCORE: "📊 [DADOS REAIS — BOXSCORE]",
-    DataLevel.RESULT: "📄 [DADOS REAIS — SOMENTE PLACAR]",
+    DataLevel.BOXSCORE: "📊 [DADOS REAIS — ESTATÍSTICAS DA PARTIDA]",
+    DataLevel.RESULT: "📄 [DADOS REAIS — SÓ PLACAR E GOLS]",
     DataLevel.SIMULATED: "⚠️ [DADOS SIMULADOS / MODELAGEM PROBABILÍSTICA]",
     DataLevel.UPLOAD: "📁 [DADOS ENVIADOS PELO USUÁRIO]",
 }
@@ -43,7 +45,8 @@ LEVEL_DESCRIPTIONS: Dict[str, str] = {
         "então redes de passes, xT e mapas espaciais ficam indisponíveis."
     ),
     DataLevel.RESULT: (
-        "Somente placar e informações da partida. Sem estatísticas detalhadas na fonte."
+        "Placar e, quando a fonte traz, autores dos gols, cartões e escalações. Nenhuma base local tem "
+        "estatísticas de equipe (chutes, posse, escanteios) para este jogo."
     ),
     DataLevel.SIMULATED: (
         "Eventos GERADOS por modelo probabilístico a partir de perfis táticos. "
@@ -117,16 +120,49 @@ SOURCES: Dict[str, SourceInfo] = {
         "https://www.football-data.co.uk", connector="CSVConnector[football-data.co.uk]", raw_tier="OFFICIAL",
     ),
     "openfootball": SourceInfo(
-        "openfootball", "openfootball / football.json (CC0)", DataLevel.BOXSCORE,
+        "openfootball", "openfootball / football.json (CC0)", DataLevel.RESULT,
         3_000_000_000, True,
         "Domínio público (CC0 1.0). Resultados de dezenas de ligas; arquivos completos trazem gols, escalações, "
         "cartões, público e árbitro.",
         "https://github.com/openfootball/football.json", connector="OpenFootballProvider", raw_tier="OFFICIAL",
     ),
     "intl": SourceInfo(
-        "intl", "Resultados de seleções desde 1872 (martj42/international_results, CC0)", DataLevel.BOXSCORE,
+        "intl", "Resultados de seleções desde 1872 (martj42/international_results, CC0)", DataLevel.RESULT,
         4_000_000_000, True, "Domínio público (CC0 1.0). Placar, torneio, local e autores dos gols.",
         "https://github.com/martj42/international_results", connector="OpenSourcesIngestor", raw_tier="OFFICIAL",
+    ),
+    "understat": SourceInfo(
+        "understat", "Understat (xG por jogo e por finalização)", DataLevel.BOXSCORE,
+        6_000_000_000, False,
+        "Dados públicos do site understat.com; uso pessoal/acadêmico com crédito à fonte. Cobre Premier League, "
+        "La Liga, Bundesliga, Serie A, Ligue 1 e Russian Premier League desde 2014/15.",
+        "https://understat.com", connector="UnderstatProvider", raw_tier="DERIVED",
+    ),
+    "brasileirao": SourceInfo(
+        "brasileirao", "Brasileirão Série A 2003→ (Brasileirao_Dataset, Adão Duque)", DataLevel.BOXSCORE,
+        7_000_000_000, False,
+        "Dataset comunitário (GPL-2 segundo o Kaggle do autor): partidas, estatísticas por clube, gols e cartões "
+        "por atleta/minuto. Uso pessoal/acadêmico com crédito.",
+        "https://github.com/adaoduque/Brasileirao_Dataset", connector="BrasileiraoDatasetProvider", raw_tier="OFFICIAL",
+    ),
+    "open_matchday": SourceInfo(
+        "open_matchday", "open-matchday (temporada atual, dezenas de competições)", DataLevel.RESULT,
+        8_000_000_000, False,
+        "Compilação diária de OpenLigaDB, fixturedownload, ESPN e football-data.co.uk; informativo, não comercial.",
+        "https://github.com/oladeeayo/open-matchday", connector="OpenMatchdayProvider", raw_tier="DERIVED",
+    ),
+    "cbf": SourceInfo(
+        "cbf", "Súmulas da CBF 2013–2025 (BrazilianFootball/Data)", DataLevel.RESULT,
+        9_000_000_000, True,
+        "MIT. Súmulas eletrônicas oficiais: Série A–D e Copa do Brasil (gols, cartões, árbitro, estádio).",
+        "https://github.com/BrazilianFootball/Data", connector="CbfSumulasProvider", raw_tier="OFFICIAL",
+    ),
+    "openplay": SourceInfo(
+        "openplay", "OpenPlay (eventos com coordenadas e xG)", DataLevel.EVENTS,
+        11_000_000_000, False,
+        "CC BY 4.0 declarada (Noah Bair / OpenPlay); eventos de origem WhoScored/Opta, sujeitos a pedido de retirada "
+        "pelos donos. Uso pessoal/acadêmico com atribuição.",
+        "https://github.com/nlbair/openplay", connector="OpenPlayProvider", raw_tier="DERIVED",
     ),
 }
 
@@ -145,7 +181,8 @@ def source_from_internal_id(match_id: int) -> str:
             return "simulated"
     if mid == UPLOAD_ID:
         return "upload"
-    for key in ("intl", "openfootball", "fdcouk", "espn", "football_data", "api_football", "wyscout"):
+    for key in ("openplay", "cbf", "open_matchday", "brasileirao", "understat", "intl", "openfootball", "fdcouk", "espn",
+                "football_data", "api_football", "wyscout"):
         off = SOURCES[key].id_offset
         if mid >= off:
             return key

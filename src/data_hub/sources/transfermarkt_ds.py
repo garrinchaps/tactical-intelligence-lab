@@ -31,19 +31,19 @@ class TransfermarktDatasets:
         self.base = base
 
     def _download(self, name: str, max_age_s: float = 24 * 3600) -> Path:
-        import requests
+        from src.data_hub import net
 
         self.cache.mkdir(parents=True, exist_ok=True)
         f = self.cache / f"{name}.csv.gz"
         meta = self.cache / f"{name}.meta.json"
         if f.exists() and time.time() - f.stat().st_mtime < max_age_s:
             return f
-        headers = {"User-Agent": "TacticalIntelligenceLab/1.0 (uso acadêmico)"}
+        headers = {"User-Agent": "TacticalIntelligenceLab/1.0 (uso academico)"}
         if meta.exists():
             m = json.loads(meta.read_text())
             if m.get("etag"):
                 headers["If-None-Match"] = m["etag"]
-        r = requests.get(f"{self.base}/{name}.csv.gz", headers=headers, timeout=120)
+        r = net.get(f"{self.base}/{name}.csv.gz", headers=headers, source="transfermarkt")
         if r.status_code == 304 and f.exists():
             f.touch()
             return f

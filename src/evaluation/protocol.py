@@ -291,4 +291,10 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    try:  # lê o .env (OPENPLAY_PATH, CBF_SUMULAS_PATH, caminho do banco...) também quando rodado direto
+        from dotenv import load_dotenv
+
+        load_dotenv()
+    except ImportError:
+        pass
     main()

@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import requests
+from src.data_hub import net
 
 from src.intelligence.nlp_neural_router import TacticalNLPInterpreter
 
@@ -259,14 +259,14 @@ class StatsBombDataLoader:
 
         url = f"{self.BASE_URL}/{relative_endpoint}"
         try:
-            response = requests.get(url, timeout=25)
+            response = net.get(url, source="statsbomb", retries=2, backoff=0.5)
             if response.status_code == 404:
                 raise FileNotFoundError(
                     f"Recurso não encontrado (HTTP 404) no StatsBomb Open Data: {relative_endpoint}"
                 )
             response.raise_for_status()
             data = response.json()
-        except requests.exceptions.RequestException as exc:
+        except net.NetError as exc:
             raise FileNotFoundError(
                 f"Partida ou catálogo indisponível no repositório público ({relative_endpoint}): {exc}"
             ) from exc

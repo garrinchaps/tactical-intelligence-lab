@@ -172,34 +172,63 @@ def team_score(token: str, candidate: str) -> float:
     return best
 
 
+def fast_scores(token: str, names) -> Dict[str, float]:
+    """team_score para muitos nomes de uma vez: descarta cedo quem não pode passar do limite (quick_ratio)."""
+    variants = [v for v in team_variants(token) if v]
+    out: Dict[str, float] = {}
+    for n in names:
+        c = norm(n)
+        best = 0.0
+        for v in variants:
+            if v == c:
+                best = 1.0
+                break
+            if v in c or c in v:
+                if re.search(rf"\b{re.escape(v)}\b", c) or re.search(rf"\b{re.escape(c)}\b", v):
+                    best = max(best, 0.92)
+                    continue
+            sm = SequenceMatcher(None, v, c)
+            if sm.real_quick_ratio() >= MATCH_THRESHOLD and sm.quick_ratio() >= MATCH_THRESHOLD:
+                best = max(best, sm.ratio())
+        out[n] = best
+    return out
+
+
 class UniversalMatchFinder:
     def __init__(self, db: DataHubDB, providers: Optional[Dict[str, Any]] = None):
         self.db = db
         self.providers = providers or {}
 
     # ------------------------------------------------------------- local
+    only_analyzable: bool = True     # esconde jogos só com placar (ajustável em Bastidores › Dados)
+    only_real: bool = True           # esconde simulações e uploads (alternável ao lado da busca)
+
     def search_local(self, q: ParsedQuery, limit: int = 15) -> pd.DataFrame:
         where, params = [], []
+        if self.only_analyzable:
+            where.append("data_level IN ('EVENTS', 'BOXSCORE', 'SIMULATED', 'UPLOAD')")
+        if self.only_real:
+            where.append("data_level NOT IN ('SIMULATED', 'UPLOAD')")
         if q.date_from and q.date_to:
             where.append("match_date BETWEEN ? AND ?")
             params += [q.date_from.isoformat(), q.date_to.isoformat()]
         elif q.year:
             where.append("(substr(match_date,1,4) = ? OR season_name LIKE ?)")
             params += [str(q.year), f"%{q.year}%"]
-        cat = self.db.catalog(" AND ".join(where), tuple(params))
+        cat = self._catalog(" AND ".join(where), tuple(params))
         if cat.empty or not q.teams:
             return cat.head(limit) if not q.teams else cat.iloc[0:0]
-
-        def score_row(r) -> float:
-            h, a = r["home_team_name"], r["away_team_name"]
-            if len(q.teams) == 1:
-                return max(team_score(q.teams[0], h), team_score(q.teams[0], a))
-            s1 = min(team_score(q.teams[0], h), team_score(q.teams[1], a))
-            s2 = min(team_score(q.teams[0], a), team_score(q.teams[1], h))
-            return max(s1, s2)
-
-        cat = cat.copy()
-        cat["score"] = cat.apply(score_row, axis=1)
+        # semelhança calculada UMA vez por nome distinto (milhares), e não por linha (centenas de milhares)
+        names = pd.unique(pd.concat([cat["home_team_name"], cat["away_team_name"]]).dropna())
+        maps = [fast_scores(t, names) for t in q.teams[:2]]
+        h, a = cat["home_team_name"], cat["away_team_name"]
+        if len(maps) == 1:
+            score = pd.concat([h.map(maps[0]), a.map(maps[0])], axis=1).max(axis=1)
+        else:
+            s1 = pd.concat([h.map(maps[0]), a.map(maps[1])], axis=1).min(axis=1)
+            s2 = pd.concat([a.map(maps[0]), h.map(maps[1])], axis=1).min(axis=1)
+            score = pd.concat([s1, s2], axis=1).max(axis=1)
+        cat = cat.assign(score=score.fillna(0))
         cat = cat[cat["score"] >= MATCH_THRESHOLD]
         if cat.empty:
             return cat
@@ -207,12 +236,34 @@ class UniversalMatchFinder:
         cat["source_rank"] = cat["data_source"].map(SOURCE_RANK).fillna(0)
         cat = cat.sort_values(["score", "match_date", "level_rank", "source_rank"],
                               ascending=[False, False, False, False])
-        # deduplica a mesma partida vinda de fontes diferentes (mesma data + mesmos times)
-        cat["_pair"] = cat.apply(lambda r: "|".join(sorted([norm(r["home_team_name"]), norm(r["away_team_name"])])), axis=1)
-        alt = cat.groupby(["match_date", "_pair"])["data_source"].apply(lambda x: ", ".join(x.tolist()[1:]))
-        cat = cat.drop_duplicates(["match_date", "_pair"], keep="first").copy()
-        cat["also_in"] = cat.apply(lambda r: alt.get((r["match_date"], r["_pair"]), ""), axis=1)
+        # deduplica a mesma partida vinda de fontes diferentes (mesma data + mesmos times) — só entre os melhores
+        cat = cat.head(max(limit * 40, 200)).copy()
+        nm = {n: norm(n) for n in pd.unique(pd.concat([cat["home_team_name"], cat["away_team_name"]]))}
+        hn, an = cat["home_team_name"].map(nm), cat["away_team_name"].map(nm)
+        cat["_pair"] = [f"{x}|{y}" if x <= y else f"{y}|{x}" for x, y in zip(hn, an)]
+        key = cat["match_date"].astype(str) + "#" + cat["_pair"]
+        first = ~key.duplicated(keep="first")
+        alt: Dict[str, List[str]] = {}
+        for k, src, f in zip(key, cat["data_source"], first):
+            if not f:
+                alt.setdefault(k, []).append(str(src))
+        cat = cat[first].copy()
+        cat["also_in"] = [", ".join(alt.get(k, [])) for k in key[first]]
         return cat.drop(columns=["_pair"]).head(limit)
+
+    def _catalog(self, where: str, params: tuple) -> pd.DataFrame:
+        """Catálogo com memória: relido só quando o banco muda (a busca roda a cada tecla/clique)."""
+        try:
+            ver = self.db.catalog_version()
+        except Exception:
+            ver = None
+        key = (ver, where, params)
+        cache = getattr(self, "_cat_cache", None)
+        if cache is not None and cache[0] == key:
+            return cache[1]
+        df = self.db.catalog(where, params)
+        self._cat_cache = (key, df)
+        return df
 
     # ------------------------------------------------------------ remota
     def search_remote(self, q: ParsedQuery) -> Tuple[int, List[str]]:

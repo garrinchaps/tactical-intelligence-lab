@@ -15,13 +15,9 @@ from typing import Any, Dict, Iterable, List, Optional
 
 import pandas as pd
 
-try:  # PyYAML é opcional: sem ele (ex.: Python sem pacote pronto), usa o leitor embutido
-    import yaml as _yaml
-
-    _load_yaml, _YAMLError = _yaml.safe_load, _yaml.YAMLError
-except ImportError:  # pragma: no cover - depende do ambiente
-    from src.connectors.mini_yaml import MiniYAMLError as _YAMLError
-    from src.connectors.mini_yaml import safe_load as _load_yaml
+# Leitor YAML próprio (biblioteca padrão): o projeto não usa PyYAML.
+from src.connectors.mini_yaml import MiniYAMLError as _YAMLError
+from src.connectors.mini_yaml import safe_load as _load_yaml
 
 BASE_FILE = Path("config/competitions.yaml")
 LOCAL_FILE = Path("config/competitions.local.yaml")

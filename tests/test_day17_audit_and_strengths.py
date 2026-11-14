@@ -83,10 +83,15 @@ def test_guard_catches_invented_integers_and_players(simulated_match):
     roster = evidence["metadata"]["match_player_roster"]
     assert "Matheus Pereira" in roster
 
-    fake_count = "O Matheus Pereira cometeu 977 perdas de posse."
+    import json as _json
+    import re as _re
+
+    present = set(_re.findall(r"\d+", _json.dumps(evidence, default=str)))
+    fake = next(str(n) for n in range(977, 10_000) if str(n) not in present)   # nº garantidamente ausente
+    fake_count = f"O Matheus Pereira cometeu {fake} perdas de posse."
     audit = NumericHallucinationGuard.audit_text_numbers(fake_count, evidence)
     assert audit["is_grounded"] is False
-    assert any(x.startswith("977") for x in audit["unverified_integers"])
+    assert any(x.startswith(fake) for x in audit["unverified_integers"])
 
     fake_player = "A saída passa por Cristiano Ronaldo e por **Neymar** no corredor esquerdo."
     audit = NumericHallucinationGuard.audit_text_numbers(fake_player, evidence)
@@ -166,7 +171,7 @@ def test_strengths_and_weaknesses_engine(simulated_match):
     assert turn and turn[0]["higher_is_better"] is False
 
     md = StrengthsWeaknessesEngine.build_interpretation_markdown(analysis, is_simulation=True)
-    assert "Resumo executivo" in md
+    assert "### 📌 Resumo" in md
     evidence = {
         "metadata": {"match_player_roster": ["Matheus Pereira"], "target_team": "Cruzeiro",
                      "opponent_team": ""},

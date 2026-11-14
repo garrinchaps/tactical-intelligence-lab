@@ -25,26 +25,45 @@ EXAMPLES = [
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
-def _index(version: str):
+def _index(version: str, only_analyzable: bool = True, only_real: bool = True):
     from src.intelligence.match_locator import build_index
     from src.ui.context import cached_catalog
 
-    return build_index(cached_catalog())
+    return build_index(cached_catalog(include_score_only=not only_analyzable))
 
 
 def _meta_line(res) -> str:
-    a = res.get("hallucination_audit") or {}
-    return (f"{res.get('engine_used')} · {a.get('numbers_total', 0)} números conferidos "
-            f"({a.get('untraceable_count', 0)} sem origem)")
+    n = res.get("number_tags") or {}
+    tot = n.get("exato", 0) + n.get("derivado", 0)
+    eng = "Gemini" if str(res.get("engine_used", "")).upper().startswith("GEMINI") else "analista local"
+    hidden = f" · {n['ocultadas']} trecho(s) cortado(s) por falta de origem" if n.get("ocultadas") else ""
+    return f"✔ {tot} números conferidos com os dados da partida · redigido pelo {eng}{hidden}"
+
+
+def _audit_panel(h) -> None:
+    rows = h.get("audit") or []
+    if not rows and not h.get("llm_error"):
+        return
+    with st.expander("🔎 Conferência dos números", expanded=False):
+        if rows:
+            import pandas as pd
+
+            st.caption("EXATO = o número está nos dados · DERIVADO = calculado a partir deles. "
+                       "Frases com número sem origem nos dados são cortadas antes de aparecer.")
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        if h.get("llm_error"):
+            st.caption(f"Gemini indisponível nesta resposta: {h['llm_error']}")
 
 
 def _answer(question: str, current_context, use_llm: bool):
     from src.intelligence.match_locator import locate
-    from src.ui.context import cached_catalog, get_service
+    from src.ui.context import analyzable_only, cached_catalog, get_service
 
     loc = None
     try:
-        loc = locate(question, cached_catalog(), _index(get_service().db.catalog_version()))
+        from src.ui.context import only_real
+
+        loc = locate(question, cached_catalog(), _index(get_service().db.catalog_version(), analyzable_only(), only_real()))
     except Exception:
         loc = None
     previous = int(st.session_state.get("match_id", 0))
@@ -53,7 +72,13 @@ def _answer(question: str, current_context, use_llm: bool):
         from src.ui.context import load_bundle
 
         opened = None
-        for mid in [loc.match_id] + [int(x) for x in loc.candidates["match_id"].tolist() if int(x) != loc.match_id]:
+        import time as _time
+
+        t0 = _time.time()
+        others = [int(x) for x in loc.candidates["match_id"].tolist() if int(x) != loc.match_id][:2]
+        for mid in [loc.match_id] + others:              # no máx. 3 tentativas e ~40 s no total
+            if _time.time() - t0 > 40:
+                break
             try:                                         # outra fonte do mesmo jogo, se a primeira não abrir
                 load_bundle(int(mid))
                 opened = int(mid)
@@ -74,14 +99,51 @@ def _answer(question: str, current_context, use_llm: bool):
     hist = [h for h in st.session_state.get("chat_history", []) if h.get("match_id") == ctx.match_id]
     res = DynamicTacticalAnalyst().answer(question, ctx.target_team, meta, df_events=ctx.df, df_chains=ctx.chains,
                                           boxscore=ctx.bundle.boxscore, prefer_llm=use_llm, history=hist)
+    from src.guard.present import present
+
+    present(res)                                        # confere os números; trechos sem origem saem do texto
     res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
     return res, loc, switched
+
+
+WELCOME = [
+    ("🎯", "Cite o jogo na pergunta", "“Flamengo x Palmeiras 2025: quem finalizou mais?” — o jogo é localizado sozinho."),
+    ("📊", "Só números conferidos", "Cada número é checado contra os dados do jogo; frase com número sem origem é cortada."),
+    ("🧠", "Modelo campeão", "As respostas de perigo usam sempre a melhor versão treinada da rede neural."),
+]
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _level_counts(version: str):
+    from src.ui.context import get_service
+
+    return get_service().db.level_counts()
+
+
+def _db_status() -> None:
+    """Faixa com o tamanho real da base (cacheada pelo catálogo)."""
+    try:
+        from src.ui.context import get_service
+
+        lv = _level_counts(get_service().db.catalog_version())
+        ev, bx = int(lv.get("EVENTS", 0)), int(lv.get("BOXSCORE", 0))
+    except Exception:
+        return
+    fmt = lambda n: f"{n / 1000:.0f} mil" if n >= 10_000 else f"{n:,}".replace(",", ".")
+    kpis = [(fmt(ev + bx), "jogos analisáveis"), (fmt(ev), "com todos os lances e coordenadas"),
+            (fmt(bx), "com estatísticas da partida"), ("3 h", "atualização automática")]
+    cells = "".join(f'<div style="flex:1;min-width:140px"><div style="font-family:Space Grotesk,sans-serif;font-size:1.5rem;'
+                    f'font-weight:700;color:#22D3EE">{v}</div><div style="color:#94A3B8;font-size:.8rem">{l}</div></div>'
+                    for v, l in kpis)
+    st.markdown(f'<div class="fm-card fm-card-blue" style="display:flex;gap:1rem;flex-wrap:wrap">{cells}</div>',
+                unsafe_allow_html=True)
 
 
 def render(current_context, match_bar) -> None:
     hero("Assistente tático", "Pergunte qualquer coisa sobre futebol",
          "Cite o jogo na própria pergunta (times e ano) ou use a partida aberta no topo. Cada número da resposta é "
          "conferido contra os dados antes de aparecer.")
+    _db_status()
     match_bar()
     analyst = DynamicTacticalAnalyst()
     with st.expander("Opções do assistente"):
@@ -91,6 +153,10 @@ def render(current_context, match_bar) -> None:
     history = st.session_state.setdefault("chat_history", [])
     clicked = None
     if not history:
+        w = st.columns(3)
+        for col, (ic, t, d) in zip(w, WELCOME):
+            col.markdown(f'<div class="til-card fm-card"><div class="h">{ic} {t}</div><div style="color:#94A3B8;font-size:.88rem">{d}</div></div>',
+                         unsafe_allow_html=True)
         st.markdown("##### Experimente")
         cols = st.columns(3)
         for i, e in enumerate(EXAMPLES):
@@ -106,8 +172,7 @@ def render(current_context, match_bar) -> None:
                 st.caption(h["note"])
             st.markdown(h["a"])
             st.caption(h["meta"])
-            if h.get("llm_error"):
-                st.caption(f"⚠️ Gemini indisponível: {h['llm_error']}")
+            _audit_panel(h)
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked
     if not question:
@@ -128,5 +193,6 @@ def render(current_context, match_bar) -> None:
         if len(loc.candidates) > 1:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
-                    "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error")})
+                    "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
+                    "audit": (res.get("number_tags") or {}).get("linhas", [])})
     st.rerun()

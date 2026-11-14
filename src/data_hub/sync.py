@@ -26,10 +26,20 @@ from typing import Callable, Dict, List, Optional
 from dotenv import load_dotenv
 
 from src.data_hub.db import DataHubDB, utc_now
+from src.data_hub.http import QuotaExceeded
+from src.data_hub.net import log as net_log, redact
 from src.data_hub.service import MatchDataService
 
-ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "api_football", "football_data", "espn",
-               "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "open_sources", "lake"]
+ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", "open_matchday", "api_football",
+               "football_data", "espn", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti",
+               "open_sources", "lake"]
+# cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
+HEAVY_SOURCES = ["espn_historico", "openplay", "cbf"]
+# --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
+# bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
+EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
+              "openplay", "cbf", "espn", "espn_historico", "api_football", "football_data", "api_futebol",
+              "basedosdados", "transfermarkt", "understat", "simonetti", "lake"]   # openplay/cbf: precisam dos arquivos baixados na sua máquina
 LAKE_SOURCES = ["transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]   # alimentam data/lake
 QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
 
@@ -42,6 +52,8 @@ def run_sync(
     progress: Optional[Callable[[str], None]] = None,
     seasons_back: int = 2,
     prefetch_boxscores: int = 0,
+    espn_leagues: Optional[List[str]] = None,
+    since_year: int = 2018,
 ) -> Dict[str, Dict]:
     load_dotenv()
     svc = service or MatchDataService()
@@ -55,6 +67,11 @@ def run_sync(
         "api_football": lambda: svc.api_football.sync_recent(days_back=days_back),
         "football_data": lambda: svc.football_data.sync_recent(days_back=max(days_back, 3)),
         "espn": lambda: svc.espn.sync_recent(days_back=days_back),
+        "espn_historico": lambda: svc.espn.backfill(espn_leagues, since_year=since_year, progress=say),
+        "brasileirao": lambda: _community("brasileirao", svc, say),
+        "open_matchday": lambda: _community("open_matchday", svc, say),
+        "cbf": lambda: _community("cbf", svc, say),
+        "openplay": lambda: _community("openplay", svc, say),
         "fdcouk": lambda: svc.fdcouk.sync(seasons_back=seasons_back, progress=say),
         "transfermarkt": lambda: _lake_job("transfermarkt", svc, say, seasons_back),
         "understat": lambda: _lake_job("understat", svc, say, seasons_back),
@@ -69,7 +86,7 @@ def run_sync(
     from src.data_hub.sources.basedosdados import BaseDosDadosProvider
 
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
-               "espn": svc.espn.enabled, "api_futebol": ApiFutebolProvider().enabled,
+               "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 
     for src in sources or ALL_SOURCES:
@@ -83,13 +100,20 @@ def run_sync(
         say(f"• {src}: sincronizando...")
         try:
             res = jobs[src]()
-            db.log_sync(src, started, "OK", res.get("added", 0), res.get("updated", 0), str(res))
-            results[src] = {"status": "OK", **res}
-            say(f"  ✔ {src}: {res.get('added', 0)} novas, {res.get('updated', 0)} atualizadas")
+            status = "COTA" if res.get("cota_atingida") else "OK"
+            db.log_sync(src, started, status, res.get("added", 0), res.get("updated", 0), redact(str(res)))
+            results[src] = {"status": status, **res}
+            say(f"  ✔ {src}: {res.get('added', 0)} novas, {res.get('updated', 0)} atualizadas"
+                + (" · cota diária atingida, parou com segurança" if status == "COTA" else ""))
+        except QuotaExceeded as exc:
+            db.log_sync(src, started, "COTA", 0, 0, redact(exc))
+            results[src] = {"status": "COTA", "message": redact(exc)}
+            say(f"  ⏸ {src}: {redact(exc)}")
         except Exception as exc:
-            db.log_sync(src, started, "ERRO", 0, 0, f"{exc}\n{traceback.format_exc()[-800:]}")
-            results[src] = {"status": "ERRO", "message": str(exc)}
-            say(f"  ✖ {src}: {exc}")
+            db.log_sync(src, started, "ERRO", 0, 0, redact(f"{exc}\n{traceback.format_exc()[-800:]}"))
+            results[src] = {"status": "ERRO", "message": redact(exc)}
+            say(f"  ✖ {src}: {redact(exc)}")
+        net_log(src, f"{results[src].get('status')}: {redact(results[src])[:300]}")
 
     if prefetch_events > 0:
         cat = db.catalog(
@@ -108,7 +132,39 @@ def run_sync(
         say(f"• eventos baixados: {ok}")
     if prefetch_boxscores > 0:
         results["prefetch_boxscores"] = {"status": "OK", **prefetch_recent_boxscores(svc, days_back, prefetch_boxscores, say)}
+    try:                                                 # nível honesto: BOXSCORE só com estatísticas
+        n = db.reconcile_levels()
+        if n:
+            say(f"• {n} partida(s) sem estatísticas reclassificadas como SÓ PLACAR")
+    except Exception as exc:  # pragma: no cover
+        say(f"  ✖ reclassificação: {exc}")
+    try:                                                 # a cobertura acompanha cada sincronização
+        from src.data_hub.coverage import write_report
+
+        say(f"• cobertura atualizada em {write_report(str(db.db_path))}")
+    except Exception as exc:  # pragma: no cover - relatório nunca derruba a sincronização
+        say(f"  ✖ cobertura: {exc}")
     return results
+
+
+def _community(name: str, svc: MatchDataService, say: Callable[[str], None]) -> Dict[str, int]:
+    """Bases montadas pela comunidade (Brasileirão, open-matchday, súmulas da CBF, OpenPlay)."""
+    if name == "brasileirao":
+        from src.data_hub.sources.brasileirao_dataset import BrasileiraoDatasetProvider
+
+        return BrasileiraoDatasetProvider(svc.db).sync(progress=say)
+    if name == "open_matchday":
+        from src.data_hub.sources.open_matchday import OpenMatchdayProvider
+        from src.data_lake.lake import Lake
+
+        return OpenMatchdayProvider(svc.db).sync(Lake(sqlite_path=svc.db.db_path), progress=say)
+    if name == "cbf":
+        from src.data_hub.sources.cbf_sumulas import CbfSumulasProvider
+
+        return CbfSumulasProvider(svc.db).sync(progress=say)
+    from src.data_hub.sources.openplay import OpenPlayProvider
+
+    return OpenPlayProvider(svc.db).sync(progress=say)
 
 
 def _lake_job(name: str, svc: MatchDataService, say: Callable[[str], None], seasons_back: int) -> Dict[str, int]:
@@ -123,11 +179,20 @@ def _lake_job(name: str, svc: MatchDataService, say: Callable[[str], None], seas
     if name == "understat":
         from src.data_hub.sources.understat import UnderstatProvider
 
-        return UnderstatProvider().sync(lake, seasons_back=min(seasons_back, 10), progress=say)
+        from src.data_hub.sources.understat import FIRST_SEASON, season_start
+
+        res = UnderstatProvider().sync(lake, seasons_back=min(seasons_back, season_start() - FIRST_SEASON), progress=say)
+        try:                                     # xG por jogo vira estatística das partidas do catálogo
+            from src.data_lake.understat_link import understat_into_catalog
+
+            res.update(understat_into_catalog(svc.db, lake, progress=say))
+        except Exception as exc:
+            say(f"  understat → catálogo: {exc}")
+        return res
     if name == "api_futebol":
         from src.data_hub.sources.api_futebol import ApiFutebolProvider
 
-        return ApiFutebolProvider().sync(lake, progress=say)
+        return ApiFutebolProvider(db=svc.db).sync(lake, progress=say)
     if name == "open_sources":
         from src.data_hub.sources.open_sources import OpenSourcesIngestor
 
@@ -185,7 +250,15 @@ def prefetch_recent_boxscores(svc: MatchDataService, days_back: int = 3, limit: 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Sincroniza a base do Tactical Intelligence Lab.")
-    ap.add_argument("--only", nargs="*", choices=ALL_SOURCES, help="fontes a sincronizar (padrão: todas)")
+    ap.add_argument("--only", nargs="*", choices=ALL_SOURCES + HEAVY_SOURCES,
+                    help="fontes a sincronizar (padrão: todas, menos as cargas pesadas como espn_historico)")
+    ap.add_argument("--ligas", nargs="*", default=None,
+                    help="espn_historico: ligas ESPN (padrão: bra.1 bra.2 bra.copa_do_brazil conmebol.libertadores "
+                         "conmebol.sudamericana)")
+    ap.add_argument("--desde", type=int, default=2018, help="espn_historico: ano inicial (padrão 2018)")
+    ap.add_argument("--tudo", action="store_true",
+                    help="monta a base completa: todas as fontes, histórico inteiro (fdcouk desde 1993, Understat desde "
+                         "2014, ESPN desde --desde), OpenPlay e súmulas da CBF baixados automaticamente")
     ap.add_argument("--days", type=int, default=3, help="dias para trás nas fontes de jogos recentes")
     ap.add_argument("--prefetch-events", type=int, default=0,
                     help="baixa eventos de N partidas ainda sem eventos locais")
@@ -196,11 +269,17 @@ def main() -> None:
     ap.add_argument("--rapido", action="store_true",
                     help="só jogos recentes: football-data.co.uk (temporada atual), API-Football, football-data.org e ESPN")
     args = ap.parse_args()
+    if args.tudo:
+        print("Base completa: isto baixa vários GB e pode levar horas. Pode interromper com Ctrl+C e rodar de novo —\n"
+              "o que já veio fica em cache e não é baixado outra vez.", flush=True)
+        run_sync(args.only or EVERYTHING, max(args.days, 7), args.prefetch_events, seasons_back=max(args.seasons, 33),
+                 prefetch_boxscores=max(args.prefetch_boxscores, 50), espn_leagues=args.ligas, since_year=args.desde)
+        return
     if args.rapido:
         run_sync(args.only or QUICK_SOURCES, args.days, 0, seasons_back=0, prefetch_boxscores=args.prefetch_boxscores)
     else:
         run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons,
-                 prefetch_boxscores=args.prefetch_boxscores)
+                 prefetch_boxscores=args.prefetch_boxscores, espn_leagues=args.ligas, since_year=args.desde)
 
 
 if __name__ == "__main__":

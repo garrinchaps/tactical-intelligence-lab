@@ -82,6 +82,9 @@ SOURCE_COLS = ["statsbomb", "wyscout", "api_football", "football_data", "espn", 
                "transfermarkt", "api_futebol", "basedosdados", "simonetti"]
 
 
+REVIEW_BELOW = 0.95   # ligações abaixo disto ficam marcadas para revisão manual
+
+
 def resolve_teams(records: Iterable[Dict[str, object]], threshold: float = 0.92) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     records: dicts com fonte, id_fonte (pode ser vazio), nome, pais (opcional).
@@ -114,7 +117,11 @@ def resolve_teams(records: Iterable[Dict[str, object]], threshold: float = 0.92)
                 if SequenceMatcher(None, a, b).ratio() >= threshold:
                     parent[find(b)] = find(a)
     rows["team_key"] = rows["core"].map(lambda c: slug(find(c)))
-    ids = rows[["team_key", "fonte", "id_fonte", "nome", "pais"]].drop_duplicates().reset_index(drop=True)
+    # confiança da ligação: 1.0 = mesmo núcleo de nome; fusão aproximada = semelhança com o núcleo do grupo
+    rows["confianca"] = [1.0 if find(c) == c else round(SequenceMatcher(None, c, find(c)).ratio(), 3) for c in rows["core"]]
+    rows["revisar"] = rows["confianca"] < REVIEW_BELOW
+    ids = rows[["team_key", "fonte", "id_fonte", "nome", "pais", "confianca", "revisar"]].drop_duplicates(
+        ["team_key", "fonte", "id_fonte", "nome", "pais"]).reset_index(drop=True)
     ids["id_fonte"] = ids["id_fonte"].astype(str).replace({"nan": "", "None": ""})
 
     def canonical_name(g: pd.DataFrame) -> str:
@@ -127,7 +134,8 @@ def resolve_teams(records: Iterable[Dict[str, object]], threshold: float = 0.92)
     dims = []
     for key, g in ids.groupby("team_key"):
         d = {"team_key": key, "nome": canonical_name(g), "pais": next((p for p in g["pais"] if p), ""),
-             "nomes_alternativos": " | ".join(sorted(set(map(str, g["nome"])))), "n_fontes": int(g["fonte"].nunique())}
+             "nomes_alternativos": " | ".join(sorted(set(map(str, g["nome"])))), "n_fontes": int(g["fonte"].nunique()),
+             "confianca_min": float(g["confianca"].min())}
         for src in SOURCE_COLS:
             v = g.loc[(g["fonte"] == src) & (g["id_fonte"] != ""), "id_fonte"]
             d[f"{src}_id"] = ";".join(sorted(set(map(str, v)))) if not v.empty else ""
@@ -174,18 +182,23 @@ def resolve_players(records: Iterable[Dict[str, object]]) -> Tuple[pd.DataFrame,
             short.setdefault(t, []).append((toks[0], toks[-1], k))
 
     def adopt(r):
+        """(chave, confiança): 1.0 nome+nascimento · 0.9 nome+clube · 0.8 nome longo↔curto no clube · 0.6 só nome."""
         if str(r.nascimento)[:4].isdigit():
-            return r.player_key
+            return r.player_key, 1.0
         k = index.get((r.core, r.team_key))
         if k:
-            return k
+            return k, 0.9
         toks = r.core.split()
         for first, last, key in short.get(r.team_key, []):     # nome longo contém primeiro e último do curto
             if first in toks and last in toks:
-                return key
-        return r.player_key
-    rows["player_key"] = [adopt(r) for r in rows.itertuples()]
-    ids = rows[["player_key", "fonte", "id_fonte", "nome", "team_key", "nascimento"]].drop_duplicates().reset_index(drop=True)
+                return key, 0.8
+        return r.player_key, (0.9 if r.team_key else 0.6)
+    adopted = [adopt(r) for r in rows.itertuples()]
+    rows["player_key"] = [k for k, _ in adopted]
+    rows["confianca"] = [c for _, c in adopted]
+    rows["revisar"] = rows["confianca"] < REVIEW_BELOW
+    ids = rows[["player_key", "fonte", "id_fonte", "nome", "team_key", "nascimento", "confianca", "revisar"]].drop_duplicates(
+        ["player_key", "fonte", "id_fonte", "nome", "team_key", "nascimento"]).reset_index(drop=True)
     ids["id_fonte"] = ids["id_fonte"].astype(str).replace({"nan": "", "None": ""})
     dims = []
     for key, g in ids.groupby("player_key"):
@@ -193,7 +206,8 @@ def resolve_players(records: Iterable[Dict[str, object]]) -> Tuple[pd.DataFrame,
         d = {"player_key": key, "nome": str(tm.iloc[0] if not tm.empty else min(g["nome"], key=len)),
              "nome_completo": str(max(g["nome"], key=len)),
              "nascimento": next((str(x)[:10] for x in g["nascimento"] if str(x)[:4].isdigit()), ""),
-             "team_key": next((t for t in g["team_key"] if t), ""), "n_fontes": int(g["fonte"].nunique())}
+             "team_key": next((t for t in g["team_key"] if t), ""), "n_fontes": int(g["fonte"].nunique()),
+             "confianca_min": float(g["confianca"].min())}
         for src in SOURCE_COLS:
             v = g.loc[(g["fonte"] == src) & (g["id_fonte"] != ""), "id_fonte"]
             d[f"{src}_id"] = ";".join(sorted(set(map(str, v)))) if not v.empty else ""

@@ -20,8 +20,8 @@ from typing import Any, Dict, List, Optional
 _lock = threading.Lock()
 _state: Dict[str, Any] = {"running": False, "last_finished": None, "last_attempt": None, "last_log": [], "last_error": None}
 RETRY_MINUTES = 30   # se a última tentativa falhou (ex.: sem internet), espera antes de tentar de novo
-QUICK = ["fdcouk", "api_football", "football_data", "espn"]
-DAILY = ["statsbomb", "wyscout", "openfootball", "open_sources", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]
+QUICK = ["fdcouk", "open_matchday", "api_football", "football_data", "espn"]
+DAILY = ["statsbomb", "wyscout", "openfootball", "brasileirao", "open_sources", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]
 
 
 def enabled() -> bool:

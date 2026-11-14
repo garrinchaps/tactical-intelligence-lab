@@ -28,7 +28,7 @@ def _overview(reg: ProvenanceRegistry) -> None:
     svc = get_service()
     from src.ui.context import cached_catalog
 
-    cat = cached_catalog()
+    cat = cached_catalog(include_score_only=True)       # aqui a base inteira, inclusive só placar
     with svc.db.connect() as conn:
         with_events = conn.execute("SELECT COUNT(DISTINCT match_id) FROM events").fetchone()[0]
     by = cat["data_level"].value_counts() if not cat.empty else pd.Series(dtype=int)
@@ -263,6 +263,11 @@ def _unified(reg: ProvenanceRegistry) -> None:
 
 def render(_ctx=None) -> None:
     page_header("🗄️ Catálogo & Dados", "O que existe na base, de onde vem, em que formato entra e como adicionar mais.")
+    # a chave do widget some quando a página não é desenhada; o valor fica guardado em outra chave
+    st.session_state.setdefault("w_show_score_only", bool(st.session_state.get("_show_score_only", False)))
+    st.toggle("Mostrar também jogos só com placar na busca e no Assistente", key="w_show_score_only",
+              on_change=lambda: st.session_state.__setitem__("_show_score_only", st.session_state["w_show_score_only"]),
+              help="Desligado (padrão): o app só mostra jogos com eventos ou estatísticas — os únicos que dão análise.")
     reg = ProvenanceRegistry()
     t1, t5, t2, t3, t4 = st.tabs(["📦 Base & sincronização", "🧩 Base unificada", "📚 Catálogo YAML", "🧬 Schema canônico",
                                   "📁 Arquivos de scout"])

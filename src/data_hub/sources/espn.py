@@ -164,6 +164,53 @@ class EspnProvider:
         self.db.save_boxscore(record["match_id"], box)
         return record
 
+    def backfill(self, leagues: Optional[List[str]] = None, since_year: int = 2018, until: Optional[date] = None,
+                 max_summaries: Optional[int] = None, progress=None) -> Dict[str, int]:
+        """
+        Histórico com estatísticas: percorre mês a mês o placar de cada liga e baixa o resumo (estatísticas de
+        equipe, escalações, lances) de cada jogo que ainda não tem números. Respeitoso: 1 requisição a cada 2 s,
+        meses passados ficam em cache e não são baixados de novo. Pode ser interrompido e retomado.
+        """
+        say = progress or (lambda m: None)
+        tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "meses": 0}
+        until = until or date.today()
+        leagues = leagues or ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana"]
+        fails = 0
+        for lg in leagues:
+            y, m = since_year, 1
+            while date(y, m, 1) <= until:
+                first = date(y, m, 1)
+                last = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+                try:
+                    recs = self.scoreboard(lg, first, min(last, until))
+                    fails = 0
+                except Exception as exc:
+                    tot["errors"] += 1
+                    fails += 1
+                    say(f"  espn {lg} {first:%Y-%m}: {exc}")
+                    if fails >= 5:
+                        say("  espn: 5 falhas seguidas — parando para não insistir; rode de novo mais tarde.")
+                        return tot
+                    recs = []
+                tot["meses"] += 1
+                if recs:
+                    r = self.db.upsert_matches(recs)
+                    tot["added"] += r["added"]
+                    tot["updated"] += r["updated"]
+                    todo = [x for x in recs if not self.db.has_boxscore(int(x["match_id"]))]
+                    for x in todo:
+                        if max_summaries is not None and tot["resumos"] >= max_summaries:
+                            return tot
+                        try:
+                            self.ingest_event(int(x["match_id"]))
+                            tot["resumos"] += 1
+                        except Exception as exc:
+                            tot["errors"] += 1
+                            say(f"  espn resumo {x['home_team_name']} x {x['away_team_name']}: {exc}")
+                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: {len(recs)} jogos, {len(todo)} resumos novos")
+                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        return tot
+
     def sync_recent(self, days_back: int = 3, leagues: Optional[List[str]] = None) -> Dict[str, int]:
         totals = {"added": 0, "updated": 0, "errors": 0}
         today = date.today()

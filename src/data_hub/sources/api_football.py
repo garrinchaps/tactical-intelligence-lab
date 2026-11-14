@@ -18,7 +18,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.data_hub.boxscore import API_FOOTBALL_MAP, stat_row
 from src.data_hub.db import DataHubDB
-from src.data_hub.http import PoliteHttpClient, SourceUnavailable
+from src.data_hub import net
+from src.data_hub.http import PoliteHttpClient, QuotaExceeded, SourceUnavailable
 from src.data_hub.registry import DataLevel, to_internal_id
 
 BASE = "https://v3.football.api-sports.io"
@@ -191,6 +192,10 @@ class ApiFootballProvider:
                 res = self._get("fixtures", {"league": lid, "season": season_for(lid, today),
                                              "from": (today - timedelta(days=days_back)).isoformat(),
                                              "to": today.isoformat()}, max_age_s=3 * 3600)
+            except QuotaExceeded as exc:                 # para com elegância e registra o motivo
+                net.log("api_football", f"sincronização interrompida: {exc}")
+                totals["cota_atingida"] = 1
+                break
             except Exception:
                 totals["errors"] += 1
                 continue
@@ -246,12 +251,18 @@ def sync_tables(provider: "ApiFootballProvider", lake, days_ahead: int = 7, prog
         season = season_for(lid, today)
         try:
             tabs.append(standings_frame(provider._get("standings", {"league": lid, "season": season}, 12 * 3600), name))
+        except QuotaExceeded as exc:
+            say(f"  api-football: {exc} — parando aqui.")
+            break
         except Exception as exc:
             say(f"  api-football {name}: classificação indisponível ({exc})")
         try:
             fxs.append(fixtures_frame(provider._get("fixtures", {"league": lid, "season": season, "from": today.isoformat(),
                                                                   "to": (today + timedelta(days=days_ahead)).isoformat()},
                                                     12 * 3600), name))
+        except QuotaExceeded as exc:
+            say(f"  api-football: {exc} — parando aqui.")
+            break
         except Exception as exc:
             say(f"  api-football {name}: calendário indisponível ({exc})")
     prov = dict(source="API-Football", connector="APIConnector[api-football]", license="API oficial com chave")

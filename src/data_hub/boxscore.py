@@ -20,6 +20,8 @@ STAT_LABELS: Dict[str, Tuple[str, bool]] = {
     "shots_blocked": ("Finalizações bloqueadas", True),
     "shots_inside_box": ("Finalizações dentro da área", True),
     "shots_outside_box": ("Finalizações de fora da área", True),
+    "big_chances": ("Grandes chances", True),
+    "key_passes": ("Passes para finalização", True),
     "passes_total": ("Passes", True),
     "passes_accurate": ("Passes certos", True),
     "pass_accuracy_pct": ("Precisão de passe (%)", True),
@@ -28,6 +30,8 @@ STAT_LABELS: Dict[str, Tuple[str, bool]] = {
     "long_balls_total": ("Bolas longas", True),
     "long_balls_accurate": ("Bolas longas certas", True),
     "corners": ("Escanteios", True),
+    "dribbles_completed": ("Dribles certos", True),
+    "aerials_won": ("Duelos aéreos ganhos", True),
     "offsides": ("Impedimentos", False),
     "fouls": ("Faltas cometidas", False),
     "yellow_cards": ("Cartões amarelos", False),
@@ -38,7 +42,11 @@ STAT_LABELS: Dict[str, Tuple[str, bool]] = {
     "interceptions": ("Interceptações", True),
     "clearances": ("Cortes", True),
     "goals_prevented": ("Gols evitados (goleiro)", True),
+    "ht_goals": ("Gols no 1º tempo", True),
 }
+
+# chaves antigas gravadas por versões anteriores → chave padrão
+LEGACY_KEYS = {"shots_on_goal": "shots_on_target", "corner_kicks": "corners"}
 
 API_FOOTBALL_MAP = {
     "Ball Possession": "possession_pct", "Total Shots": "shots_total", "Shots on Goal": "shots_on_target",

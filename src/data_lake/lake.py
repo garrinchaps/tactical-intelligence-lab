@@ -25,6 +25,28 @@ HAS_PARQUET = importlib.util.find_spec("pyarrow") is not None
 HAS_DUCKDB = importlib.util.find_spec("duckdb") is not None
 
 
+def parquet_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Coluna de texto com tipos misturados (ex.: "inscritos" com números e nomes no JSON do Simonetti) não grava em
+    parquet. Nessas colunas tudo vira texto; listas e dicionários viram JSON. Valores numéricos puros não mudam.
+    """
+    import json as _j
+
+    out = df
+    for c in df.columns:
+        if df[c].dtype != object:
+            continue
+        vals = df[c].dropna()
+        kinds = {type(v) for v in vals}
+        if len(kinds) <= 1 and not (kinds & {list, dict}):
+            continue
+        if out is df:
+            out = df.copy()
+        out[c] = df[c].map(lambda v: None if v is None or (isinstance(v, float) and pd.isna(v)) else
+                           _j.dumps(v, ensure_ascii=False, default=str) if isinstance(v, (list, dict)) else str(v))
+    return out
+
+
 class Lake:
     def __init__(self, root: Path | str = ROOT, sqlite_path: Optional[Path | str] = "database/tactical_lab.db"):
         self.root = Path(root)
@@ -54,6 +76,7 @@ class Lake:
             df["ingestao_utc"] = utc_now_iso()
         if HAS_PARQUET:
             out = self.root / f"{name}.parquet"
+            df = parquet_safe(df)
             df.to_parquet(out, index=False)
             (self.root / f"{name}.csv.gz").unlink(missing_ok=True)
         else:
@@ -117,11 +140,13 @@ class Lake:
             with duckdb.connect(str(self.root / "til.duckdb")) as con:
                 fn = "read_parquet" if path.suffix == ".parquet" else "read_csv_auto"
                 con.execute(f"CREATE OR REPLACE VIEW {name} AS SELECT * FROM {fn}('{path.as_posix()}')")
+                # mesmo nome do espelho SQLite: `SELECT ... FROM lake_<nome>` funciona nos dois motores
+                con.execute(f"CREATE OR REPLACE VIEW lake_{name} AS SELECT * FROM {name}")
         except Exception:
             pass
 
     def sql(self, query: str) -> pd.DataFrame:
-        """Consulta SQL: DuckDB sobre os arquivos quando instalado; senão o espelho SQLite (tabelas lake_<nome>)."""
+        """Consulta SQL portátil: use `lake_<nome>` (DuckDB sobre os arquivos, se instalado; senão o espelho SQLite)."""
         if HAS_DUCKDB:
             import duckdb
 

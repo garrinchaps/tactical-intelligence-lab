@@ -439,11 +439,45 @@ class StrengthsWeaknessesEngine:
 
     # ------------------------------------------------------------- interpretação
     @staticmethod
-    def _fmt_item(d: Dict[str, Any]) -> str:
-        return (
-            f"**{d['label']}**: {d['value']} (mediana da referência {d['reference_median']}, "
-            f"percentil {d['percentile']}, n = {d['reference_n']}, faixa {d['tier']})"
-        )
+    def rank_phrase(d: Dict[str, Any]) -> str:
+        """Percentil só quando conta: 'entre os 5% melhores da base' (≥ P90) ou 'entre os 10% piores' (≤ P10)."""
+        import math
+
+        p = d.get("percentile")
+        if p is None:
+            return ""
+        if p >= 90:
+            return f"entre os {max(1, math.ceil(100 - p))}% melhores da base"
+        if p <= 10:
+            return f"entre os {max(1, math.ceil(p))}% piores da base"
+        return ""
+
+    @staticmethod
+    def compare_words(value: Any, median: Any) -> str:
+        """Comparação com o jogo típico em palavras ('o dobro', 'bem abaixo')."""
+        try:
+            v, m = float(value), float(median)
+        except (TypeError, ValueError):
+            return ""
+        if m <= 0:
+            return "acima do normal" if v > 0 else ""
+        r = v / m
+        for lim, txt in ((4, "quatro vezes ou mais"), (3, "o triplo"), (2, "o dobro"), (1.3, "bem acima"), (1.0001, "acima")):
+            if r >= lim:
+                return txt
+        for lim, txt in ((0.5, "menos da metade"), (0.75, "bem abaixo"), (0.9999, "abaixo")):
+            if r <= lim:
+                return txt
+        return "na média"
+
+    @classmethod
+    def _fmt_item(cls, d: Dict[str, Any]) -> str:
+        cw = cls.compare_words(d["value"], d.get("reference_median"))
+        rk = cls.rank_phrase(d)
+        typ = f"o jogo típico da base tem {d['reference_median']}"
+        body = f"{cw} do normal ({typ})" if cw in ("bem acima", "acima", "bem abaixo", "abaixo") else \
+            (f"{cw} do jogo típico ({d['reference_median']})" if cw else typ)
+        return f"**{d['label']}: {d['value']}** — {body}" + (f"; {rk}" if rk else "") + "."
 
     @classmethod
     def build_interpretation_markdown(
@@ -454,16 +488,15 @@ class StrengthsWeaknessesEngine:
         entity = analysis["entity"]
         if analysis["mode"] == "player":
             head = (
-                f"**{entity}** ({analysis['position_name']}, {analysis['team_name']}) foi comparado com "
-                f"**{analysis['reference_players_n']}** {analysis['comparison_scope']} em "
-                f"**{analysis['reference_matches_n']}** partidas reais da base, com "
-                f"**{analysis['minutes']}** minutos em campo (evidência **{analysis['evidence_grade']}**)."
+                f"**{entity}** ({analysis['position_name']}, {analysis['team_name']}) jogou "
+                f"{int(analysis['minutes']) if float(analysis['minutes']).is_integer() else analysis['minutes']} minutos. "
+                f"Abaixo, o que se destacou em relação a {analysis['reference_players_n']} {analysis['comparison_scope']} "
+                f"de {analysis['reference_matches_n']} jogos reais da base."
             )
         else:
             head = (
-                f"**{entity}** foi comparada com **{analysis['reference_teams_n']}** atuações de equipes em "
-                f"**{analysis['reference_matches_n']}** partidas reais da base "
-                f"(evidência **{analysis['evidence_grade']}**)."
+                f"Como **{entity}** jogou, comparado com {analysis['reference_teams_n']} atuações de equipes em "
+                f"{analysis['reference_matches_n']} jogos reais da base:"
             )
         lines.append(head)
         if is_simulation:
@@ -471,35 +504,31 @@ class StrengthsWeaknessesEngine:
                 "> ⚠️ A partida analisada é SIMULADA; a comparação com a base real serve só como demonstração."
             )
         if analysis.get("insufficient"):
-            lines.append("\n**Amostra insuficiente** (n < " + str(analysis.get("min_group_sample", MIN_GROUP_SAMPLE))
-                         + "): " + ", ".join(f"{d['label']} (n = {d['reference_n']})" for d in analysis["insufficient"]) + ".")
+            lines.append("\n_Sem base de comparação suficiente para: " + ", ".join(d["label"] for d in analysis["insufficient"])
+                         + "._")
 
         st_, wk = analysis["strengths"], analysis["weaknesses"]
-        lines.append("\n### ✅ Onde está acima do padrão")
-        lines.extend([f"- {cls._fmt_item(d)}" for d in st_[:5]] or ["- Nenhuma métrica acima do percentil 70."])
-        lines.append("\n### ⚠️ Onde está abaixo do padrão")
-        lines.extend([f"- {cls._fmt_item(d)}" for d in wk[:5]] or ["- Nenhuma métrica abaixo do percentil 30."])
+        lines.append("\n### ✅ O que funcionou")
+        lines.extend([f"- {cls._fmt_item(d)}" for d in st_[:5]] or ["- Nada muito acima do normal neste jogo."])
+        lines.append("\n### ⚠️ O que precisa melhorar")
+        lines.extend([f"- {cls._fmt_item(d)}" for d in wk[:5]] or ["- Nada muito abaixo do normal neste jogo."])
 
-        lines.append("\n### 📌 Resumo executivo")
+        lines.append("\n### 📌 Resumo")
         if st_ and wk:
             lines.append(
-                f"Ponto mais forte: {_lower_first(st_[0]['label'])} (percentil {st_[0]['percentile']}). "
-                f"Principal ponto de atenção: {_lower_first(wk[0]['label'])} (percentil {wk[0]['percentile']})."
+                f"O ponto forte foi {_lower_first(st_[0]['label'])} ({st_[0]['value']}); o que mais preocupa é "
+                f"{_lower_first(wk[0]['label'])} ({wk[0]['value']})."
             )
         elif st_:
             lines.append(
-                f"Perfil sem fraquezas marcantes; destaque para {_lower_first(st_[0]['label'])} "
-                f"(percentil {st_[0]['percentile']})."
+                f"Atuação sem fragilidades marcantes, com destaque para {_lower_first(st_[0]['label'])} ({st_[0]['value']})."
             )
         elif wk:
             lines.append(
-                f"Nenhum destaque acima do padrão; corrigir primeiro {_lower_first(wk[0]['label'])} "
-                f"(percentil {wk[0]['percentile']})."
+                f"Nada se destacou para cima; o primeiro ajuste é {_lower_first(wk[0]['label'])} ({wk[0]['value']})."
             )
         else:
-            lines.append("Desempenho dentro da faixa normal da referência em todas as métricas comparáveis.")
-        lines.append(
-            "\n*Percentil = posição em relação à referência (100 = melhor da base). "
-            "Fonte da referência: StatsBomb Open Data.*"
-        )
+            lines.append("Atuação dentro do normal em tudo o que dá para comparar.")
+        if analysis.get("evidence_grade") == "LIMITADA":
+            lines.append("\n_Pouco tempo em campo ou base pequena: leia como indicação._")
         return "\n".join(lines)

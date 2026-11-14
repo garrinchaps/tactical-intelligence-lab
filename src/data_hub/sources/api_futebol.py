@@ -14,6 +14,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import pandas as pd
 
+from src.data_hub.http import QuotaExceeded
+
 BASE = "https://api.api-futebol.com.br/v1"
 CACHE = Path("data/raw/api_futebol")
 LICENSE = "API-Futebol — dados sob os termos do plano contratado"
@@ -31,23 +33,33 @@ def _d(s: Any) -> str:
 class ApiFutebolProvider:
     source = "api_futebol"
 
-    def __init__(self, api_key: Optional[str] = None, min_interval_s: float = 1.0):
+    def __init__(self, api_key: Optional[str] = None, min_interval_s: float = 1.0, db=None,
+                 daily_quota: Optional[int] = None):
         self.key = (api_key if api_key is not None else os.getenv("API_FUTEBOL_KEY", "")).strip()
         self.min_interval_s = min_interval_s
         self._last = 0.0
+        self.db = db                                     # com db, conta as requisições do dia (cota)
+        self.daily_quota = daily_quota if daily_quota is not None else int(os.getenv("API_FUTEBOL_DAILY_QUOTA", "100"))
 
     @property
     def enabled(self) -> bool:
         return bool(self.key) and "coloque" not in self.key.lower()
 
     def _get(self, path: str) -> Any:
-        import requests
+        from src.data_hub import net
+        from src.data_hub.http import QuotaExceeded
 
+        if self.db is not None and self.daily_quota:
+            if self.db.api_usage_today("api_futebol") >= self.daily_quota:
+                raise QuotaExceeded(f"Cota diária de {self.daily_quota} requisições da API-Futebol atingida; "
+                                    "sincronização interrompida até amanhã.")
         wait = self.min_interval_s - (time.time() - self._last)
         if wait > 0:
             time.sleep(wait)
-        r = requests.get(f"{BASE}{path}", headers={"Authorization": f"Bearer {self.key}"}, timeout=30)
+        r = net.get(f"{BASE}{path}", headers={"Authorization": f"Bearer {self.key}"}, source="api_futebol")
         self._last = time.time()
+        if self.db is not None:
+            self.db.register_api_call("api_futebol")
         r.raise_for_status()
         return r.json()
 
@@ -102,10 +114,18 @@ class ApiFutebolProvider:
             temporada = str((c.get("edicao_atual") or {}).get("temporada", ""))
             try:
                 tabs.append(self.standings_frame(self._get(f"/campeonatos/{cid}/tabela"), nome, temporada))
+            except QuotaExceeded as exc:
+                say(f"  api-futebol: {exc}")
+                tot["cota_atingida"] = True
+                break
             except Exception as exc:
                 say(f"  api-futebol {nome}: tabela indisponível ({exc})")
             try:
                 parts.append(self.matches_frame(self._get(f"/campeonatos/{cid}/partidas"), nome))
+            except QuotaExceeded as exc:
+                say(f"  api-futebol: {exc}")
+                tot["cota_atingida"] = True
+                break
             except Exception as exc:
                 say(f"  api-futebol {nome}: partidas indisponíveis ({exc})")
         if tabs:

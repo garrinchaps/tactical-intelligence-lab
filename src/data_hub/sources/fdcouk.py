@@ -33,7 +33,12 @@ MAIN_LEAGUES = {
     "F1": ("Ligue 1", "France"), "F2": ("Ligue 2", "France"), "N1": ("Eredivisie", "Netherlands"),
     "B1": ("Jupiler Pro League", "Belgium"), "P1": ("Primeira Liga", "Portugal"), "T1": ("Süper Lig", "Turkey"),
     "G1": ("Super League Greece", "Greece"),
+    # divisões inferiores que também publicam chutes, escanteios, faltas e cartões
+    "E2": ("League One", "England"), "E3": ("League Two", "England"), "EC": ("National League", "England"),
+    "SC1": ("Scottish Championship", "Scotland"), "SC2": ("Scottish League One", "Scotland"),
+    "SC3": ("Scottish League Two", "Scotland"),
 }
+FIRST_SEASON = 1993            # o site tem arquivos desde 1993/94 (estatísticas de jogo a partir de ~2000)
 EXTRA_LEAGUES = {
     "BRA": "Brazil", "ARG": "Argentina", "USA": "USA", "MEX": "Mexico", "JPN": "Japan", "CHN": "China",
     "AUT": "Austria", "DNK": "Denmark", "FIN": "Finland", "IRL": "Ireland", "NOR": "Norway", "POL": "Poland",
@@ -43,8 +48,8 @@ EXTRA_LEAGUES = {
 EXTRA_NAMES = {("BRA", "Serie A"): "Campeonato Brasileiro Série A", ("ARG", "Liga Profesional"): "Liga Profesional",
                ("USA", "MLS"): "Major League Soccer", ("MEX", "Liga MX"): "Liga MX"}
 STATS = (  # coluna mandante, coluna visitante, chave, rótulo (mesmos rótulos do restante do Data Hub)
-    ("HS", "AS", "shots_total", "Finalizações"), ("HST", "AST", "shots_on_goal", "Finalizações no gol"),
-    ("HC", "AC", "corner_kicks", "Escanteios"), ("HF", "AF", "fouls", "Faltas cometidas"),
+    ("HS", "AS", "shots_total", "Finalizações"), ("HST", "AST", "shots_on_target", "Finalizações no gol"),
+    ("HC", "AC", "corners", "Escanteios"), ("HF", "AF", "fouls", "Faltas cometidas"),
     ("HY", "AY", "yellow_cards", "Cartões amarelos"), ("HR", "AR", "red_cards", "Cartões vermelhos"),
     ("HTHG", "HTAG", "ht_goals", "Gols no 1º tempo"),
 )
@@ -88,7 +93,7 @@ class FootballDataCoUkProvider:
 
     # ------------------------------------------------------------- download
     def _get_csv(self, url: str, max_age_s: Optional[float]) -> pd.DataFrame:
-        import requests
+        from src.data_hub import net
 
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         path = self.cache_dir / (url.rsplit("/", 2)[-2] + "_" + url.rsplit("/", 1)[-1])
@@ -98,7 +103,7 @@ class FootballDataCoUkProvider:
             wait = self.min_interval_s - (time.time() - self._last)
             if wait > 0:
                 time.sleep(wait)
-            r = requests.get(url, timeout=30, headers={"User-Agent": "TacticalIntelligenceLab/1.0 (uso acadêmico)"})
+            r = net.get(url, headers={"User-Agent": "TacticalIntelligenceLab/1.0 (uso academico)"}, source="fdcouk")
             self._last = time.time()
             if r.status_code == 404:
                 return pd.DataFrame()
@@ -163,7 +168,7 @@ class FootballDataCoUkProvider:
         tot = {"added": 0, "updated": 0, "errors": 0, "files": 0}
         cur = current_season_start()
         for div in leagues or MAIN_LEAGUES:
-            for y in range(cur - seasons_back, cur + 1):
+            for y in range(max(FIRST_SEASON, cur - seasons_back), cur + 1):
                 url = f"{BASE}/mmz4281/{season_code(y)}/{div}.csv"
                 try:
                     df = self._get_csv(url, max_age_s=12 * 3600 if y == cur else None)

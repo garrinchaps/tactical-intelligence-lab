@@ -187,9 +187,10 @@ REGRAS ANTI-ALUCINAÇÃO:
                 "Interprete a comparação abaixo entre o desempenho observado e a referência "
                 "de elite da mesma função (percentil 100 = melhor da base). Formato: "
                 "'## ✅ Pontos fortes' (até 4 tópicos), '## ⚠️ Pontos fracos' (até 4 tópicos), "
-                "'## 📌 Resumo executivo' (2 frases simples). Cada tópico cita o valor, a mediana "
-                "da referência e o percentil EXATAMENTE como no JSON. Não cite nenhum outro "
-                "atleta, número ou fato.\n\n"
+                "'## 📌 Resumo' (2 frases simples). Cada tópico cita o valor e a mediana da referência "
+                "EXATAMENTE como no JSON, em linguagem de analista de futebol (ex.: 'criou o dobro de chances "
+                "de um jogo típico'). Cite o percentil SÓ quando for ≥ 90 ou ≤ 10, e copie o número como está. "
+                "Seleções em português. Não cite nenhum outro atleta, número ou fato.\n\n"
                 f"{json.dumps(analysis, ensure_ascii=False, indent=1)}"
             )
             from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst

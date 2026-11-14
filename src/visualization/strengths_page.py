@@ -29,28 +29,38 @@ def _cached_baselines(_load_events_fn: Callable, cache_key: str) -> Dict[str, An
     return ReferenceBaselineBuilder.load_or_build(_load_events_fn)
 
 
-def _items_df(items: List[Dict[str, Any]]) -> pd.DataFrame:
+def _items_df(items: List[Dict[str, Any]], technical: bool = False) -> pd.DataFrame:
+    """Tabela para leitura rápida; `technical=True` mostra percentil, faixa e n (painel de detalhes)."""
+    E = StrengthsWeaknessesEngine
+    if technical:
+        cols = ["Métrica", "Valor", "Mediana ref.", "Percentil", "Faixa", "n ref."]
+        if not items:
+            return pd.DataFrame(columns=cols)
+        return pd.DataFrame([{"Métrica": d["label"], "Valor": d["value"], "Mediana ref.": d.get("reference_median"),
+                              "Percentil": d.get("percentile"), "Faixa": d.get("tier"), "n ref.": d.get("reference_n")}
+                             for d in items])
+    cols = ["Métrica", "No jogo", "Jogo típico", "Leitura"]
     if not items:
-        return pd.DataFrame(columns=["Métrica", "Valor", "Mediana ref.", "Percentil", "Faixa", "n ref."])
-    return pd.DataFrame([{"Métrica": d["label"], "Valor": d["value"], "Mediana ref.": d.get("reference_median"),
-                          "Percentil": d.get("percentile"), "Faixa": d.get("tier"), "n ref.": d.get("reference_n")}
+        return pd.DataFrame(columns=cols)
+    return pd.DataFrame([{"Métrica": d["label"], "No jogo": d["value"], "Jogo típico": d.get("reference_median"),
+                          "Leitura": E.rank_phrase(d) or E.compare_words(d["value"], d.get("reference_median"))}
                          for d in items])
 
 
 def radar(analysis: Dict[str, Any]) -> go.Figure:
     """Radar de percentis — só com métricas que têm n ≥ mínimo; o n entra no rótulo de cada eixo."""
     items = analysis["strengths"] + analysis["neutral"] + analysis["weaknesses"]
-    labels = [f"{d['label']} (n={d['reference_n']})" for d in items]
+    labels = [d["label"] for d in items]
     values = [d["percentile"] for d in items]
     fig = go.Figure()
     if len(labels) >= 3:
         fig.add_trace(go.Scatterpolar(r=values + values[:1], theta=labels + labels[:1], fill="toself",
                                       name=analysis["entity"], line=dict(color=PALETTE["primary"], width=2),
                                       fillcolor="rgba(34,197,94,0.18)"))
-        fig.add_trace(go.Scatterpolar(r=[50] * (len(labels) + 1), theta=labels + labels[:1], name="P50 da referência",
+        fig.add_trace(go.Scatterpolar(r=[50] * (len(labels) + 1), theta=labels + labels[:1], name="jogo típico",
                                       line=dict(color=PALETTE["muted"], dash="dot", width=1)))
     n_ins = len(analysis.get("insufficient", []))
-    title = "Percentil contextual" + (f" · {n_ins} métrica(s) fora do radar por amostra insuficiente" if n_ins else "")
+    title = "Perfil do jogo (50 = jogo típico da base)" + (f" · {n_ins} métrica(s) sem base suficiente" if n_ins else "")
     fig.update_layout(**PLOTLY_LAYOUT, title=title, height=480,
                       polar=dict(bgcolor=PALETTE["surface"],
                                  radialaxis=dict(range=[0, 100], tickvals=[10, 30, 50, 70, 90], color=PALETTE["muted"]),
@@ -63,7 +73,7 @@ def radar(analysis: Dict[str, Any]) -> go.Figure:
 
 def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_of: Optional[Dict[int, str]] = None) -> None:
     df_events, target_team = ctx.df, ctx.target_team
-    note("Como ler", f"Percentil contra a mesma função (atletas, por 90 min, mínimo {MIN_PLAYER_MINUTES} min) ou contra todas "
+    _how = (f"Percentil contra a mesma função (atletas, por 90 min, mínimo {MIN_PLAYER_MINUTES} min) ou contra todas "
          f"as equipes da referência. Faixas: elite ≥ P{ELITE_PERCENTILE:.0f} · forte ≥ P{STRENGTH_PERCENTILE:.0f} · "
          f"fraco ≤ P{WEAKNESS_PERCENTILE:.0f} · alerta ≤ P{ALERT_PERCENTILE:.0f}. Com menos de {MIN_GROUP_SAMPLE} "
          "referências a métrica não recebe percentil (amostra insuficiente). A referência usa partidas com eventos do "
@@ -108,17 +118,10 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
     n_ref = an.get("reference_players_n", an.get("reference_teams_n", 0))
     prov = ctx.prov(f"sw_{entity}", f"Percentis de {entity}", n_ref,
                     f"percentil contextual contra {an['comparison_scope']} ({an['league_scope']}), n = {n_ref}")
-    k = st.columns(4)
-    with k[0]:
-        kpi("grupo comparado", an["comparison_scope"].capitalize(), prov)
-    with k[1]:
-        kpi("n da referência", n_ref, prov)
-    with k[2]:
-        kpi("partidas na referência", an["reference_matches_n"], prov)
-    with k[3]:
-        kpi("grau de evidência" + (f" · {an['minutes']} min" if "minutes" in an else ""), an["evidence_grade"], prov)
+    st.caption(f"Comparado com {n_ref} {an['comparison_scope']} de {an['reference_matches_n']} jogos reais "
+               f"({an['league_scope']})" + (f" · {an['minutes']} min em campo" if "minutes" in an else ""))
     if an["evidence_grade"] == "LIMITADA":
-        note("Evidência limitada", "Pouco tempo em campo ou referência pequena: trate os percentis como indicativos.", "warn")
+        note("Base pequena", "Pouco tempo em campo ou poucos jogos para comparar: leia como indicação.", "warn")
 
     s, w = st.columns(2)
     with s:
@@ -134,7 +137,9 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
         res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)
         st.caption(f"Motor: {res['engine_used']}" + (f" · guard: {res['guard_outcome']}" if res.get("guard_outcome") else ""))
         st.markdown(res["report_markdown"])
-    with st.expander(f"Faixa normal ({len(an['neutral'])}) e amostra insuficiente ({len(an.get('insufficient', []))})"):
-        comparison_table(_items_df(an["neutral"]), "Entre P30 e P70.")
-        comparison_table(_items_df(an.get("insufficient", [])), f"n < {MIN_GROUP_SAMPLE}: sem percentil.")
+    with st.expander("Detalhes técnicos (percentis, faixas e tamanho da amostra)"):
+        st.caption(_how)
+        comparison_table(_items_df(an["strengths"] + an["neutral"] + an["weaknesses"], technical=True))
+        if an.get("insufficient"):
+            comparison_table(_items_df(an["insufficient"], technical=True), f"n < {MIN_GROUP_SAMPLE}: sem percentil.")
     provenance_panel(ctx.registry)

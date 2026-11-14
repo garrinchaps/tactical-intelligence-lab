@@ -358,9 +358,9 @@ class WyscoutProvider:
         cache = self.client.cache_dir / "index_README.md"
         if cache.exists():
             return cache.read_text(encoding="utf-8")
-        import requests
+        from src.data_hub import net
 
-        resp = requests.get(f"{RAW_BASE}/README.md", headers=self.client.headers, timeout=30)
+        resp = net.get(f"{RAW_BASE}/README.md", headers=self.client.headers, source="wyscout")
         resp.raise_for_status()
         cache.write_text(resp.text, encoding="utf-8")
         return resp.text

@@ -1,4 +1,4 @@
-"""👤 Jogadores — pesquisa de atletas em todas as fontes: perfil, valor de mercado, temporada e jogos com eventos."""
+"""👤 Tela do jogador — perfil, valor de mercado, temporada e TODOS os jogos com lances. Aberta pela busca única."""
 
 from __future__ import annotations
 
@@ -62,7 +62,7 @@ def player_matches(name: str) -> pd.DataFrame:
                   ROUND(SUM(CASE WHEN e.type_name = 'Shot' THEN COALESCE(e.shot_statsbomb_xg, 0) ELSE 0 END), 2) AS xg,
                   SUM(e.type_name = 'Dribble') AS dribles, SUM(e.type_name = 'Ball Recovery') AS recuperacoes
            FROM events e JOIN matches m ON m.match_id = e.match_id
-           WHERE e.player_name = ? GROUP BY e.match_id ORDER BY m.match_date DESC LIMIT 40"""
+           WHERE e.player_name = ? GROUP BY e.match_id ORDER BY m.match_date DESC"""
     with get_service().db.connect() as conn:
         try:
             return pd.read_sql_query(q, conn, params=(name,))
@@ -71,61 +71,55 @@ def player_matches(name: str) -> pd.DataFrame:
 
 
 def render(_ctx=None) -> None:
+    from src.ui import nav
     from src.ui.context import get_service
 
-    hero("Jogadores", "Pesquise atletas", "Perfil, valor de mercado (Transfermarkt), números da temporada (Understat) e "
-         "todos os jogos com eventos em que ele aparece.")
-    q = st.text_input("Atleta", key="pl_q", placeholder="ex.: Messi, Vinícius, Arrascaeta, Bellingham")
-    if len(q.strip()) < 3:
-        empty_state("Digite pelo menos 3 letras do nome", icon="👤")
+    nav.back_button(key="player_back")
+    core, given = nav.param("core"), nav.param("name")
+    if not (core or given):
+        empty_state("Nenhum jogador escolhido", "Use a busca no topo e clique no jogador.", "👤")
         return
     idx = player_index(get_service().db.catalog_version())
-    if idx.empty:
-        empty_state("Ainda não há jogadores na base", "", "👤", "Abra partidas com eventos ou sincronize Transfermarkt/Understat.")
-        return
-    core = _norm(q)
-    hit = idx[idx["core"].str.contains(core, regex=False) | idx["nome"].str.lower().str.contains(q.strip().lower(), regex=False)]
+    core = core or _norm(given)
+    hit = idx[idx["core"] == core] if not idx.empty else idx
     if hit.empty:
-        empty_state("Atleta não encontrado", "Confira a grafia.", "🔎")
+        empty_state("Jogador sem dados na base", "", "👤", "Abra partidas com eventos ou sincronize Transfermarkt/Understat.")
         return
-    groups = hit.groupby("core").agg(nome=("nome", lambda s: min(s, key=len)), nome_longo=("nome", lambda s: max(s, key=len)),
-                                     clube=("clube", lambda s: next((x for x in s if isinstance(x, str) and x), "")),
-                                     fontes=("fonte", lambda s: ", ".join(sorted(set(s)))),
-                                     jogos=("jogos", "sum")).reset_index().sort_values("jogos", ascending=False).head(25)
-    opt = groups.to_dict("records")
-    sel = st.selectbox("Resultado", range(len(opt)), format_func=lambda i: f"{opt[i]['nome']} · {opt[i]['clube']} · {opt[i]['fontes']}")
-    p = opt[sel]
-    names = hit[hit["core"] == p["core"]]["nome"].unique().tolist()
+    p = {"core": core, "nome": min(hit["nome"], key=len), "nome_longo": max(hit["nome"], key=len),
+         "clube": next((x for x in hit["clube"] if isinstance(x, str) and x), ""),
+         "fontes": ", ".join(sorted(set(hit["fonte"])))}
+    names = hit["nome"].unique().tolist()
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
                 f'<div class="d">{p["nome_longo"] if p["nome_longo"] != p["nome"] else ""} · {p["clube"]} · fontes: {p["fontes"]}</div>'
                 f'</div></div>', unsafe_allow_html=True)
-    t1, t2, t3 = st.tabs(["🗓️ Jogos com eventos", "💶 Perfil e valor", "📈 Temporada (Understat)"])
+    if p["clube"]:
+        nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
+    t1, t2, t3 = st.tabs(["🗓️ Jogos com todos os lances", "💶 Perfil e valor", "📈 Temporada (Understat)"])
     with t1:
         frames = [player_matches(n) for n in names]
         pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
         if pm.empty:
-            empty_state("Nenhuma partida com eventos para este atleta no banco", "", "🗓️",
-                        "Os jogos com eventos vêm da StatsBomb/Wyscout (abra ou sincronize partidas da competição dele).")
+            empty_state("Nenhum jogo com lances deste atleta na base", "", "🗓️",
+                        "Os jogos com todos os lances vêm da StatsBomb/Wyscout.")
         else:
+            pm = pm.sort_values("match_date", ascending=False)
             k = st.columns(5)
             k[0].metric("Jogos", len(pm))
             k[1].metric("Gols", int(pm["gols"].sum()))
             k[2].metric("xG", round(float(pm["xg"].sum()), 2))
             k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
             k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
-            pm["partida"] = pm["home_team_name"] + " " + pm["home_score"].astype("Int64").astype(str) + "–" + \
-                pm["away_score"].astype("Int64").astype(str) + " " + pm["away_team_name"]
-            comparison_table(pm[["match_date", "partida", "competition_name", "team_name", "acoes", "passes", "passes_certos",
-                                 "finalizacoes", "gols", "xg", "dribles", "recuperacoes"]]
-                             .rename(columns={"match_date": "data", "competition_name": "competição", "team_name": "equipe"}),
-                             "Contagens diretas dos eventos de cada partida.")
-            ids = pm["match_id"].tolist()
-            pick = st.selectbox("Abrir uma dessas partidas", range(len(ids)), format_func=lambda i: f"{pm.iloc[i]['match_date']} · {pm.iloc[i]['partida']}")
-            if st.button("Abrir em Jogos", type="primary"):
-                st.session_state["match_id"] = int(ids[pick])
-                st.session_state["team_focus"] = pm.iloc[pick]["team_name"]
-                st.session_state["goto"] = "jogos"
-                st.rerun()
+            for i, r in enumerate(pm.to_dict("records")):
+                a, b = st.columns([8, 1.3])
+                score = f"{int(r['home_score'])} – {int(r['away_score'])}" if pd.notna(r["home_score"]) else "x"
+                a.markdown(f'<div class="til-result"><div class="tm r">{r["home_team_name"]}</div><div class="sc">{score}</div>'
+                           f'<div class="tm">{r["away_team_name"]}</div><div class="meta">{r["competition_name"]}<br>'
+                           f'{r["match_date"]} · {int(r["acoes"])} ações · {int(r["gols"] or 0)} gol(s) · xG {r["xg"]}</div></div>',
+                           unsafe_allow_html=True)
+                b.write("")
+                if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", use_container_width=True, type="primary"):
+                    st.session_state["team_focus"] = r["team_name"]
+                    nav.open_view("jogo", match_id=int(r["match_id"]))
     with t2:
         try:
             from src.data_lake.lake import Lake

@@ -8,7 +8,7 @@ import streamlit as st
 
 from src.metrics.player_evaluator import PlayerTacticalEvaluator
 from src.reports.report_builder import TacticalReportBuilder
-from src.ui.components import comparison_table, empty_state, error_state, note, page_header, provenance_panel
+from src.ui.components import comparison_table, empty_state, error_state, note, page_header, provenance_panel, source_gap
 from src.ui.context import MatchContext
 from src.ui.theme import PALETTE, PLOTLY_LAYOUT
 
@@ -60,14 +60,14 @@ def _radar(players_df: pd.DataFrame, a: str, b: str) -> go.Figure:
     else:
         mx = {c: max(float(pool[c].max()), 1e-4) for c, _ in RADAR}
         labels = [l for _, l in RADAR]
-        for name, color in ((a, PALETTE["secondary"]), (b, PALETTE["warning"])):
+        for name, color, fill in ((a, "#3B82F6", "rgba(59,130,246,0.28)"), (b, "#EF4444", "rgba(239,68,68,0.25)")):
             row = players_df[players_df["player_name"] == name]
             if row.empty:
                 continue
             r = row.iloc[0]
             vals = [round(100 * float(r[c]) / mx[c], 1) for c, _ in RADAR]
-            fig.add_trace(go.Scatterpolar(r=vals + vals[:1], theta=labels + labels[:1], fill="toself",
-                                          name=f"{name} ({r['estimated_minutes_active']}')", line=dict(color=color)))
+            fig.add_trace(go.Scatterpolar(r=vals + vals[:1], theta=labels + labels[:1], fill="toself", fillcolor=fill,
+                                          name=f"{name} ({r['estimated_minutes_active']}')", line=dict(color=color, width=2)))
     fig.update_layout(**PLOTLY_LAYOUT, height=460,
                       title=f"% do máximo da equipe nesta partida · n = {n} atletas com ≥ {MIN_RADAR_MINUTES} min",
                       polar=dict(bgcolor=PALETTE["surface"], radialaxis=dict(range=[0, 100], color=PALETTE["muted"])))
@@ -154,7 +154,8 @@ def render(ctx: MatchContext) -> None:
             comparison_table(pd.concat([flat.reset_index(drop=True), extra], axis=1))
             provenance_panel(ctx.registry)
         else:
-            empty_state("Sem dados individuais nesta fonte", "", "👤", "Escolha uma partida ✅ (eventos) para o scout completo.")
+            source_gap("estatísticas individuais de atletas", ctx.bundle.source,
+                       "Escolha uma partida ✅ (eventos) para o scout completo.", "👤", ctx.bundle.level)
         return
     players_df = PlayerTacticalEvaluator.evaluate_team_players(ctx.df, ctx.target_team)
     t0, t1, t2 = st.tabs(["📋 Estatísticas individuais", "🧩 Elenco & substituições", "🕵️ Dossiê & comparador"])

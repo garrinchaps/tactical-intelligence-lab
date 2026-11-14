@@ -10,7 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 PALETTE = {
-    "bg": "#05070D",           # fundo (preto azulado)
+    "bg": "#090D16",           # fundo (preto azulado)
     "surface": "#0B1120",      # cartões
     "surface_2": "#111A2E",    # cartões elevados / barras
     "border": "#1E2A44",
@@ -43,15 +43,14 @@ PLOTLY_LAYOUT = dict(
 P = PALETTE
 GRAD = f"linear-gradient(135deg, {P['secondary']} 0%, #7C3AED 50%, {P['primary']} 100%)"
 CSS = f"""
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Space+Grotesk:wght@500;700&display=swap" rel="stylesheet">
 <style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Space+Grotesk:wght@500;700&display=swap');
 :root {{ --til-grad: {GRAD}; }}
 html, body, .stApp {{ font-family: Inter, 'Segoe UI', sans-serif; }}
 .stApp {{ color: {P['text']};
   background: radial-gradient(1200px 600px at 10% -10%, rgba(59,130,246,0.16), transparent 60%),
               radial-gradient(900px 500px at 100% 0%, rgba(239,68,68,0.13), transparent 55%),
-              linear-gradient(180deg, #05070D 0%, #060912 100%); background-attachment: fixed; }}
+              linear-gradient(180deg, #090D16 0%, #070A12 100%); background-attachment: fixed; }}
 h1, h2, h3, h4, h5 {{ color: {P['text']}; font-family: 'Space Grotesk', Inter, sans-serif; letter-spacing: -0.01em; }}
 h4, h5 {{ margin-top: 0.6rem; }}
 a {{ color: {P['accent']}; }}
@@ -63,7 +62,6 @@ header[data-testid="stHeader"] {{ background: rgba(5,7,13,0.82); backdrop-filter
 header[data-testid="stHeader"] a, header[data-testid="stHeader"] [role="button"] {{ border-radius: 999px !important; }}
 header[data-testid="stHeader"] a[aria-current="page"], header[data-testid="stHeader"] a[data-active="true"] {{
   background: rgba(59,130,246,0.18) !important; box-shadow: inset 0 0 0 1px rgba(59,130,246,0.55); }}
-
 /* abas e seletores em pílula */
 .stTabs [data-baseweb="tab-list"] {{ gap: 6px; background: rgba(17,26,46,0.6); padding: 6px; border-radius: 999px;
   border: 1px solid {P['border']}; width: fit-content; }}
@@ -74,30 +72,38 @@ div[role="radiogroup"] {{ gap: 6px; flex-wrap: wrap; }}
 div[role="radiogroup"] > label {{ background: {P['surface_2']}; border: 1px solid {P['border']}; border-radius: 999px;
   padding: 4px 14px !important; margin: 0 !important; }}
 div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246,0.18); border-color: {P['primary']}; }}
-
 /* botões e campos */
 .stButton > button, .stDownloadButton > button, [data-testid="stPopover"] button {{ border-radius: 12px;
   border: 1px solid {P['border']}; background: {P['surface_2']}; color: {P['text']}; font-weight: 700;
   transition: all .15s ease; }}
-.stButton > button:hover, [data-testid="stPopover"] button:hover {{ border-color: {P['accent']};
-  box-shadow: 0 0 0 1px {P['accent']}, 0 0 18px rgba(34,211,238,0.25); }}
+.stButton > button:hover, [data-testid="stPopover"] button:hover {{ border-color: {P['accent']}; color: {P['accent']};
+  box-shadow: 0 0 15px rgba(34,211,238,0.3); }}
+[data-testid="stPageLink"] a {{ border-radius: 999px; padding: 4px 12px; border: 1px solid transparent; transition: all .15s ease; }}
+[data-testid="stPageLink"] a:hover {{ border-color: {P['accent']}; box-shadow: 0 0 12px rgba(34,211,238,0.25); }}
+.fm-card {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); border: 1px solid {P['border']};
+  border-radius: 16px; padding: 18px; margin-bottom: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.6); }}
+.fm-card-blue {{ border-left: 4px solid {P['accent']}; }} .fm-card-red {{ border-left: 4px solid {P['secondary']}; }}
+.fm-card .h {{ font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.05rem; margin-bottom: 6px; }}
+.fm-card ul {{ margin: 0; padding-left: 1.1rem; }} .fm-card li {{ margin: 3px 0; color: {P['text']}; }}
+[data-testid="stMetricValue"] {{ font-family: 'Space Grotesk', sans-serif; }}
+[data-testid="stMetric"] {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); border: 1px solid {P['border']};
+  border-radius: 16px; padding: 12px 14px; }}
 .stButton > button[kind="primary"] {{ background: var(--til-grad); border: none; color: white; }}
 .stTextInput input, .stNumberInput input, .stTextArea textarea, [data-baseweb="select"] > div {{
-  background: {P['surface']} !important; border-radius: 12px !important; border-color: {P['border']} !important; }}
+  background: #0B1120 !important; border-radius: 12px !important; border-color: {P['border']} !important; color: {P['text']} !important; }}
+.stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {{ border-color: {P['primary']} !important; }}
 .stTextInput input:focus {{ box-shadow: 0 0 0 2px rgba(59,130,246,0.45) !important; }}
 [data-testid="stDataFrame"], [data-testid="stTable"] {{ border-radius: 14px; overflow: hidden; border: 1px solid {P['border']}; }}
 [data-testid="stExpander"] {{ border-radius: 14px; border: 1px solid {P['border']}; background: rgba(11,17,32,0.6); }}
 [data-testid="stPlotlyChart"] {{ border-radius: 16px; overflow: hidden; border: 1px solid {P['border']};
   background: rgba(11,17,32,0.55); }}
 [data-testid="stAlert"] {{ border-radius: 14px; }}
-
 /* chat */
 [data-testid="stChatMessage"] {{ background: rgba(17,26,46,0.65); border: 1px solid {P['border']}; border-radius: 18px;
   padding: 12px 16px; backdrop-filter: blur(6px); }}
 [data-testid="stChatInput"] {{ border-radius: 20px; }}
 [data-testid="stChatInput"] textarea {{ font-size: 1rem; }}
 [data-testid="stBottom"] > div {{ background: linear-gradient(180deg, rgba(5,7,13,0) 0%, rgba(5,7,13,0.95) 40%); }}
-
 /* hero e faixa da partida */
 .til-hero {{ border-radius: 22px; padding: 22px 26px; margin: 4px 0 16px 0; position: relative; overflow: hidden;
   background: linear-gradient(135deg, rgba(239,68,68,0.16), rgba(124,58,237,0.10) 45%, rgba(59,130,246,0.18));
@@ -132,7 +138,6 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-profile .n {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.7rem; font-weight: 700; }}
 .til-profile .d {{ color: {P['muted']}; font-size: 0.9rem; }}
 .til-glow {{ height: 2px; background: var(--til-grad); border-radius: 2px; margin: 6px 0 14px 0; opacity: .8; }}
-
 /* cabeçalho de contexto da página */
 .til-header {{ background: rgba(11,17,32,0.7); border: 1px solid {P['border']}; border-radius: 18px; padding: 14px 18px; margin: 0 0 16px 0;
   position: relative; overflow: hidden; }}
@@ -143,9 +148,8 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-chip {{ display: inline-block; padding: 3px 11px; border-radius: 999px; font-size: 0.76rem; font-weight: 700;
   border: 1px solid {P['border']}; color: {P['text']}; background: rgba(17,26,46,0.9); }}
 .til-chip.tier {{ border-width: 1.5px; }}
-
 /* cartões de métrica */
-.til-card {{ background: linear-gradient(180deg, rgba(17,26,46,0.85), rgba(11,17,32,0.85)); border: 1px solid {P['border']};
+.til-card {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); box-shadow: 0 4px 20px rgba(0,0,0,.6); border: 1px solid {P['border']};
   border-radius: 18px; padding: 14px 16px; margin-bottom: 12px; min-height: 118px; position: relative; overflow: hidden; }}
 .til-card::after {{ content: ""; position: absolute; left: 16px; right: 16px; top: 0; height: 2px; background: var(--til-grad); opacity: .55; }}
 .til-card .label {{ color: {P['muted']}; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }}
@@ -159,7 +163,6 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-prov b {{ font-weight: 800; }}
 .til-prov.missing {{ color: {P['danger']}; }}
 .til-sim {{ margin-top: 6px; font-size: 0.72rem; color: {P['warning']}; font-weight: 700; }}
-
 /* barras comparativas */
 .til-pill {{ margin: 0 0 12px 0; padding: 10px 12px; border-radius: 14px; background: rgba(11,17,32,0.6); border: 1px solid {P['border']}; }}
 .til-pill .head {{ display: flex; justify-content: space-between; font-size: 0.86rem; font-weight: 800; margin-bottom: 6px; }}
@@ -169,7 +172,6 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-pill .fl {{ background: linear-gradient(90deg, #1D4ED8, {P['primary']}); border-radius: 999px; }}
 .til-pill .fr {{ background: linear-gradient(90deg, {P['secondary']}, #B91C1C); border-radius: 999px; }}
 .til-pill .src {{ font-size: 0.66rem; color: {P['muted']}; margin-top: 4px; }}
-
 /* placar */
 .til-score {{ border-radius: 22px; padding: 20px; text-align: center; margin-bottom: 14px;
   background: linear-gradient(135deg, rgba(59,130,246,0.16), rgba(5,7,13,0.6) 50%, rgba(239,68,68,0.16));
@@ -186,12 +188,10 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-score .goals {{ color: {P['muted']}; font-size: 0.86rem; line-height: 1.6; }}
 .til-score .pen {{ margin-top: 8px; color: {P['warning']}; font-weight: 800; font-size: 0.9rem; }}
 .til-score .meta {{ margin-top: 10px; color: {P['muted']}; font-size: 0.84rem; }}
-
 /* faixa do nível de dado */
 .til-level {{ border-radius: 14px; padding: 9px 16px; margin: 0 0 14px 0; background: rgba(11,17,32,0.7); border: 1px solid {P['border']}; }}
 .til-level .t {{ font-weight: 800; font-size: 0.9rem; }}
 .til-level .d {{ color: {P['muted']}; font-size: 0.8rem; margin-top: 2px; }}
-
 /* estados vazios e de erro */
 .til-empty {{ border: 1px dashed {P['border']}; border-radius: 18px; padding: 26px; text-align: center; background: rgba(11,17,32,0.6); margin: 10px 0 16px 0; }}
 .til-empty .i {{ font-size: 2rem; }}
@@ -199,22 +199,18 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-empty .m {{ color: {P['muted']}; font-size: 0.9rem; margin-top: 4px; }}
 .til-empty .h {{ color: {P['accent']}; font-size: 0.85rem; margin-top: 8px; }}
 .til-empty.error {{ border-color: {P['danger']}; }}
-
 /* notas */
 .til-note {{ background: rgba(11,17,32,0.7); border: 1px solid {P['border']}; border-left: 4px solid {P['primary']};
   border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; font-size: 0.9rem; }}
 .til-note.alert {{ border-left-color: {P['secondary']}; }}
 .til-note.warn {{ border-left-color: {P['warning']}; }}
 .til-note .h {{ font-weight: 800; margin-bottom: 4px; }}
-
 .til-match-card {{ background: rgba(11,17,32,0.7); border: 1px solid {P['border']}; border-radius: 14px; padding: 12px 14px; margin: 8px 0; }}
 .til-match-card .teams {{ font-weight: 800; color: {P['text']}; font-size: 0.98rem; }}
 .til-match-card .meta {{ color: {P['muted']}; font-size: 0.78rem; margin-top: 3px; }}
-
 .til-kpi {{ background: rgba(11,17,32,0.75); border: 1px solid {P['border']}; border-radius: 16px; padding: 14px; text-align: center; }}
 .til-kpi .v {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem; font-weight: 700; color: {P['text']}; }}
 .til-kpi .l {{ font-size: 0.72rem; color: {P['muted']}; text-transform: uppercase; letter-spacing: 0.07em; }}
-
 .til-depth {{ background: rgba(11,17,32,0.7); border: 1px solid {P['border']}; border-radius: 16px; padding: 12px; min-height: 230px; }}
 .til-depth .h {{ color: {P['accent']}; font-weight: 800; font-size: 0.8rem; text-transform: uppercase; margin-bottom: 8px; }}
 .til-depth .m {{ color: {P['muted']}; font-size: 0.78rem; }}
@@ -228,4 +224,4 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 
 
 def inject_theme() -> None:
-    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(CSS.strip(), unsafe_allow_html=True)

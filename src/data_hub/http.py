@@ -3,7 +3,8 @@ Cliente HTTP educado para todas as fontes externas.
 
 * Cache em disco (data/raw/<fonte>/...) com validade configurável: nada é baixado duas vezes.
 * Intervalo mínimo entre requisições por fonte (respeita limites por minuto).
-* Repetição com espera exponencial em erros temporários (429, 5xx, rede).
+* Repetição com espera exponencial em erros temporários (429, 5xx, rede); tempo-limite de 15 s.
+* Transporte em src/data_hub/net.py (httpx se instalado, senão requests); erros e logs sem chaves.
 * Controle de cota diária via DataHubDB (ex.: API-Football = 100/dia no plano grátis).
 """
 
@@ -15,8 +16,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import requests
-
+from src.data_hub import net
 from src.data_hub.db import DataHubDB
 
 
@@ -39,7 +39,7 @@ class PoliteHttpClient:
         min_interval_s: float = 1.0,
         daily_quota: Optional[int] = None,
         default_headers: Optional[Dict[str, str]] = None,
-        timeout_s: float = 25.0,
+        timeout_s: float = net.DEFAULT_TIMEOUT,
         max_retries: int = 3,
     ) -> None:
         self.source = source
@@ -48,7 +48,7 @@ class PoliteHttpClient:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.min_interval_s = min_interval_s
         self.daily_quota = daily_quota
-        self.headers = {"User-Agent": "TacticalIntelligenceLab/1.0 (projeto acadêmico)"}
+        self.headers = {"User-Agent": "TacticalIntelligenceLab/1.0 (projeto academico)"}
         self.headers.update(default_headers or {})
         self.timeout_s = timeout_s
         self.max_retries = max_retries
@@ -104,7 +104,7 @@ class PoliteHttpClient:
             if wait > 0:
                 time.sleep(wait)
             try:
-                resp = requests.get(url, params=params, headers=self.headers, timeout=self.timeout_s)
+                resp = net.get(url, params=params, headers=self.headers, timeout=self.timeout_s, retries=1, source=self.source)
                 PoliteHttpClient._last_call[self.source] = time.time()
                 if self.db is not None and self.daily_quota is not None:
                     self.db.register_api_call(self.source)
@@ -115,18 +115,21 @@ class PoliteHttpClient:
                         f"Acesso negado por {self.source} (HTTP {resp.status_code}). Verifique a chave/plano."
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
-                    raise requests.HTTPError(f"HTTP {resp.status_code}")
+                    raise net.HTTPStatusError(resp.status_code, url)
                 resp.raise_for_status()
                 data = resp.json()
                 path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
                 return data
             except SourceUnavailable:
                 raise
-            except (requests.RequestException, ValueError) as exc:
+            except (net.NetError, ValueError) as exc:
                 last_err = exc
-                time.sleep(min(2 ** attempt, 8))
+                if attempt < self.max_retries - 1:
+                    delay = min(2 ** attempt, 30)
+                    net.log(self.source, f"tentativa {attempt + 1} falhou ({exc}); nova em {delay}s")
+                    time.sleep(delay)
         # rede falhou: usa cache vencido se existir
         stale = self._read_cache(path, None)
         if stale is not None:
             return stale
-        raise SourceUnavailable(f"Falha ao acessar {self.source}: {last_err}")
+        raise SourceUnavailable(net.redact(f"Falha ao acessar {self.source}: {last_err}"))

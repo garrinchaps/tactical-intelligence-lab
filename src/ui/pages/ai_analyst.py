@@ -102,6 +102,9 @@ def render(ctx: MatchContext) -> None:
                 except Exception as exc:
                     error_state("Não consegui responder", exc)
                     return
+            from src.guard.present import present
+
+            present(res)                                # confere os números; trechos sem origem saem do texto
             st.markdown(res["report_markdown"])
             if res.get("llm_error"):
                 st.warning(f"O Gemini não respondeu ({res['llm_error']}). O texto acima veio do redator local, "

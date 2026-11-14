@@ -5,7 +5,7 @@ Resultados de dezenas de ligas e copas (Inglaterra das 4 divisões, Alemanha, Es
 Holanda, Bélgica, Áustria, Suíça, Turquia, Grécia, Escócia, Brasil, Argentina, México, MLS, Japão, China,
 Champions/Europa League…) desde 2010. Os arquivos "-full" trazem também autores e minutos dos gols, pênaltis,
 gols contra, escalações, substituições, cartões, estádio, público e árbitro → partidas com esses detalhes entram no
-nível BOXSCORE (placar + linha do tempo + escalações); as demais, no nível RESULT.
+nível RESULT com linha do tempo (gols, cartões) e escalações — sem estatísticas de equipe.
 
 Atualização: `git pull` numa cópia local (data/raw/openfootball/football.json) quando o git está instalado; senão
 baixa o .zip do repositório. Uma vez por dia na sincronização automática.
@@ -34,6 +34,17 @@ COUNTRY = {"en": "England", "de": "Germany", "es": "Spain", "it": "Italy", "fr":
            "sco": "Scotland", "br": "Brazil", "ar": "Argentina", "mx": "Mexico", "mls": "USA", "jp": "Japan",
            "cn": "China", "ru": "Russia", "cz": "Czech Republic", "hu": "Hungary", "au": "Australia", "ma": "Morocco",
            "dz": "Algeria", "eg": "Egypt", "co": "Colombia", "uefa": "Europe", "copa": "South America"}
+
+
+def _team(v) -> str:
+    """team1/team2 podem vir como texto ou como objeto {"name": ...}."""
+    return _name(v)
+
+
+def _name(v) -> str:
+    if isinstance(v, dict):
+        return str(v.get("name") or v.get("code") or "")
+    return str(v or "")
 
 
 def _sid(*parts: Any) -> int:
@@ -79,9 +90,9 @@ class OpenFootballProvider:
                 return "git clone"
             except Exception as exc:
                 say(f"  openfootball: git falhou ({exc}); tentando o .zip")
-        import requests
+        from src.data_hub import net
 
-        r = requests.get(ZIP, timeout=300)
+        r = net.get(ZIP, source="openfootball")
         r.raise_for_status()
         tmp = self.local.parent / "_zip"
         shutil.rmtree(tmp, ignore_errors=True)
@@ -106,49 +117,64 @@ class OpenFootballProvider:
     @classmethod
     def parse_file(cls, path: Path) -> List[Tuple[Dict[str, Any], Dict[str, Any]]]:
         data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list):                         # alguns arquivos novos são só a lista de jogos
+            data = {"name": path.stem, "matches": data}
+        matches = list(data.get("matches") or [])
+        for rnd in data.get("rounds") or []:               # formato antigo: jogos dentro das rodadas
+            if isinstance(rnd, dict):
+                matches += [dict(m, round=m.get("round", rnd.get("name", ""))) for m in rnd.get("matches") or []
+                            if isinstance(m, dict)]
         comp, season = split_name(data.get("name", path.stem))
         code = path.name.split(".")[0]
         season = season or path.parent.name.replace("-", "/")
         out = []
-        for m in data.get("matches", []):
-            ft = (m.get("score") or {}).get("ft")
+        for m in matches:
+            if not isinstance(m, dict):
+                continue
+            score = m.get("score")
+            ft = score.get("ft") if isinstance(score, dict) else (score if isinstance(score, list) else None)
             if not ft or len(ft) != 2:
                 continue                                       # ainda não jogada
-            home, away = m["team1"], m["team2"]
+            home, away = _team(m.get("team1")), _team(m.get("team2"))
+            if not home or not away:
+                continue
             sid = _sid(path.parent.name, path.name.replace("-full", ""), m.get("date"), home, away)
             rec = {"match_id": to_internal_id("openfootball", sid), "source_match_id": f"{path.parent.name}/{path.name}:{m.get('date')}:{home}:{away}",
                    "competition_name": comp, "season_name": season, "country_name": COUNTRY.get(code, code.upper()),
                    "round_name": m.get("round", ""), "match_date": m.get("date", ""), "home_team_name": home,
                    "away_team_name": away, "home_score": int(ft[0]), "away_score": int(ft[1]),
                    "stadium_name": m.get("ground", ""),
-                   "referee_name": ((m.get("referees") or [{}])[0] or {}).get("name", ""),
+                   "referee_name": _name((m.get("referees") or [""])[0]),
                    "status": "FT", "data_source": "openfootball", "data_level": DataLevel.RESULT,
-                   "extra": {"publico": m.get("attendance"), "intervalo": (m.get("score") or {}).get("ht")}}
+                   "extra": {"publico": m.get("attendance"),
+                             "intervalo": score.get("ht") if isinstance(score, dict) else None}}
             timeline, lineups = [], []
-            for side, team in (("goals1", home), ("goals2", away)):
-                for g in m.get(side) or []:
-                    mi, ex = minute(g.get("minute"))
-                    detail = "Own Goal" if g.get("owngoal") else ("Penalty" if g.get("penalty") else "Normal Goal")
-                    timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(g.get("name", "")),
-                                     "related_player": None, "event_type": "Goal", "detail": detail})
-            for idx, team in enumerate((home, away)):
-                for b in ((m.get("bookings") or [[], []])[idx] if len(m.get("bookings") or []) > idx else []):
-                    mi, ex = minute(b.get("minute"))
-                    timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(b.get("name", "")),
-                                     "related_player": None, "event_type": "Card",
-                                     "detail": {"Y": "Yellow Card", "R": "Red Card", "Y/R": "Second Yellow"}.get(b.get("type"), b.get("type"))})
-                lu = (m.get("lineup") or [])
-                if len(lu) > idx:
-                    for p in lu[idx].get("starter") or []:
-                        lineups.append({"team_name": team, "player_name": nice_name(p["name"]), "is_starter": 1})
-                    for p in lu[idx].get("bench") or []:
-                        lineups.append({"team_name": team, "player_name": nice_name(p["name"]), "is_starter": 0})
-                    for s in lu[idx].get("subs") or []:
-                        mi, ex = minute(s.get("minute"))
-                        timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(s.get("on", "")),
-                                         "related_player": nice_name(s.get("off", "")), "event_type": "subst", "detail": "Substitution"})
-            if timeline or lineups:
-                rec["data_level"] = DataLevel.BOXSCORE
+            try:  # detalhes (gols, cartões, escalações) mudam de formato entre arquivos: o placar entra mesmo assim
+                for side, team in (("goals1", home), ("goals2", away)):
+                    for g in m.get(side) or []:
+                        mi, ex = minute(g.get("minute"))
+                        detail = "Own Goal" if g.get("owngoal") else ("Penalty" if g.get("penalty") else "Normal Goal")
+                        timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(g.get("name", "")),
+                                         "related_player": None, "event_type": "Goal", "detail": detail})
+                for idx, team in enumerate((home, away)):
+                    for b in ((m.get("bookings") or [[], []])[idx] if len(m.get("bookings") or []) > idx else []):
+                        mi, ex = minute(b.get("minute"))
+                        timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(b.get("name", "")),
+                                         "related_player": None, "event_type": "Card",
+                                         "detail": {"Y": "Yellow Card", "R": "Red Card", "Y/R": "Second Yellow"}.get(b.get("type"), b.get("type"))})
+                    lu = (m.get("lineup") or [])
+                    if len(lu) > idx:
+                        for p in lu[idx].get("starter") or []:
+                            lineups.append({"team_name": team, "player_name": nice_name(p["name"]), "is_starter": 1})
+                        for p in lu[idx].get("bench") or []:
+                            lineups.append({"team_name": team, "player_name": nice_name(p["name"]), "is_starter": 0})
+                        for s in lu[idx].get("subs") or []:
+                            mi, ex = minute(s.get("minute"))
+                            timeline.append({"minute": mi, "extra_minute": ex, "team_name": team, "player_name": nice_name(s.get("on", "")),
+                                             "related_player": nice_name(s.get("off", "")), "event_type": "subst", "detail": "Substitution"})
+            except (AttributeError, TypeError, KeyError, IndexError):
+                timeline, lineups = [], []
+            # gols/escalações não são estatísticas: o nível continua RESULT (BOXSCORE só com chutes, posse etc.)
             out.append((rec, {"team_stats": [], "lineups": lineups, "timeline": sorted(timeline, key=lambda e: (e["minute"] or 0, e["extra_minute"] or 0))}))
         return out
 

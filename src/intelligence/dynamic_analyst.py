@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -39,6 +40,10 @@ Como escrever:
 - Fale só do recorte pedido (minutos, lado, fase, atleta). Ignore o resto do jogo, exceto a comparação
   "resto do jogo" quando ela estiver no JSON.
 - No máximo ~180 palavras antes do resumo.
+- Linguagem de analista de futebol brasileiro, não de estatístico: "pelo lado esquerdo da defesa", "na saída de bola",
+  "entre as linhas", "chegou à área", "bola longa nas costas". Nada de "terço ofensivo — direita", "n =", "P90".
+- Não cite percentil, a não ser que seja extremo; nesse caso diga "entre os 10% melhores/piores".
+- Use os nomes das seleções em português (Brasil, Croácia, França…).
 - Termine SEMPRE com uma linha "**Resumo executivo:**" de 1 ou 2 frases simples para a comissão técnica.
 
 Regras de fidelidade (obrigatórias):
@@ -145,15 +150,16 @@ class LocalScopedWriter:
                 if b.get("jogou"):
                     f = list((b.get("quem_mais_o_abastece") or {}).keys())
                     summary.append(f"para anular {b['jogador']}, cortar a ligação com {f[0]}" if f else
-                                   f"para anular {b['jogador']}, fechar {b['zonas_onde_age'][0]['zona']}" if b.get("zonas_onde_age")
+                                   f"para anular {b['jogador']}, fechar o espaço {LocalScopedWriter._att(b['zonas_onde_age'][0]['zona'])}"
+                                   if b.get("zonas_onde_age")
                                    else f"{b['jogador']} teve pouca participação")
                 continue
             if key == "plano_equipe":
                 out.append(cls._plan_team(b))
                 z = b.get("corredores_das_entradas_na_area_do_adversario") or []
-                mine = {"esquerda": "o lado direito", "direita": "o lado esquerdo", "centro": "o corredor central"}
-                summary.append(f"{b['equipe']} precisava proteger {mine[z[0]['zona'].split(' — ')[-1]]} e reduzir as perdas no próprio campo"
-                               if z else f"{b['equipe']} precisava reduzir as perdas no próprio campo")
+                mine = {"esquerda": "o lado direito da defesa", "direita": "o lado esquerdo da defesa", "centro": "o meio da zaga"}
+                summary.append(f"{b['equipe']} precisava fechar {mine[z[0]['zona'].split(' — ')[-1]]} e errar menos na saída de bola"
+                               if z else f"{b['equipe']} precisava errar menos na saída de bola")
                 continue
             if key == "resultado":
                 from src.metrics.match_facts import goal_line
@@ -283,9 +289,37 @@ class LocalScopedWriter:
     def _model_line(card: Optional[Dict[str, Any]]) -> str:
         if not card:
             return ""
-        return (f"\n\n🧠 _Rede neural de perigo {card['versao']} (arquitetura {card['arquitetura']}, treinada em "
-                f"{card['partidas_de_treino']} partidas, AUC {_fmt(card['auc_validacao'])} na validação fixa) usada nesta resposta. "
-                "Treinar uma versão melhor na página Rede Neural muda estes resultados._")
+        auc = float(card.get("auc_validacao") or 0)
+        q = "boa" if auc >= 0.75 else ("razoável" if auc >= 0.65 else "modesta")
+        return (f"\n\n_🧠 O \"perigo\" vem da rede neural {card['versao']}, treinada em {card['partidas_de_treino']} partidas "
+                f"(precisão {q}): leia como indicação, não como certeza._")
+
+    # ---------------------------------------------------------- linguagem de futebol
+    THIRD_ATT = {"terço ofensivo": "já perto da área", "terço médio": "na intermediária",
+                 "terço defensivo": "ainda saindo do campo de defesa"}
+    THIRD_OWN = {"terço defensivo": "na saída de bola, perto da própria área", "terço médio": "no meio-campo",
+                 "terço ofensivo": "já no ataque"}
+    LANE_OWN = {"esquerda": "lado esquerdo", "direita": "lado direito", "centro": "meio"}
+
+    @classmethod
+    def _against(cls, zona: str, defender: str) -> str:
+        """Zona do ataque adversário dita do ponto de vista de quem defende: 'pelo lado esquerdo da defesa do Brasil'."""
+        third, _, lane = zona.partition(" — ")
+        mirror = {"esquerda": "lado direito", "direita": "lado esquerdo", "centro": "meio"}.get(lane, lane)
+        return f"pelo {mirror} da defesa de {defender}, {cls.THIRD_ATT.get(third, third)}"
+
+    @classmethod
+    def _own(cls, zona: str) -> str:
+        """Zona da própria equipe: 'pelo lado direito, na saída de bola perto da própria área'."""
+        third, _, lane = zona.partition(" — ")
+        return f"pelo {cls.LANE_OWN.get(lane, lane)}, {cls.THIRD_OWN.get(third, third)}"
+
+    @classmethod
+    def _att(cls, zona: str) -> str:
+        """Zona onde um atacante age: 'pela esquerda, já perto da área'."""
+        third, _, lane = zona.partition(" — ")
+        side = {"esquerda": "pela esquerda", "direita": "pela direita", "centro": "por dentro"}.get(lane, lane)
+        return f"{side}, {cls.THIRD_ATT.get(third, third)}"
 
     @classmethod
     def _danger_ranking(cls, b: Dict[str, Any]) -> str:
@@ -316,10 +350,11 @@ class LocalScopedWriter:
         if zr:
             z = zr[0]
             steps.append(f"**Encurtar onde ele recebe:** {z['acoes']} dos {b['passes_recebidos']} passes que {p} recebeu "
-                         f"foram em {z['zona']} ({_fmt(z['pct'])}%). Manter um marcador próximo nessa faixa e chegar antes do domínio.")
+                         f"foram {LocalScopedWriter._att(z['zona'])} ({_fmt(z['pct'])}%). Marcador colado nessa faixa, chegando antes do domínio.")
         za = b.get("zonas_onde_age") or []
         if za and (not zr or za[0]["zona"] != zr[0]["zona"]):
-            steps.append(f"**Vigiar a área de atuação:** {za[0]['acoes']} das {b['amostra_N']} ações dele foram em {za[0]['zona']}.")
+            steps.append(f"**Vigiar onde ele joga:** {za[0]['acoes']} das {b['amostra_N']} ações dele foram "
+                         f"{LocalScopedWriter._att(za[0]['zona'])}.")
         if b.get("finalizacoes"):
             steps.append(f"**Bloquear o chute:** {_pl(b['finalizacoes'], 'finalização', 'finalizações')} (xG {_fmt(b['xg'])}). "
                          "Não deixar espaço frontal para ele girar e finalizar.")
@@ -337,57 +372,58 @@ class LocalScopedWriter:
             zz = ia.get("zonas_das_acoes_perigosas") or []
             steps.append(f"**O que a rede neural aponta:** {ia['acoes_perigosas']} das {ia['acoes_avaliadas']} ações de {p} "
                          f"tinham ≥ {ia['limiar_pct']}% de chance de virar finalização"
-                         + (f", a maioria a partir de {zz[0]['zona']} ({zz[0]['acoes']})" if zz else "")
-                         + ". É nessa faixa que a marcação dele precisa ser mais agressiva.")
-        head = f"**Como anular {p} ({b['equipe']}) — plano para {r}, a partir dos dados desta partida:**"
+                         + (f", a maioria {LocalScopedWriter._att(zz[0]['zona'])} ({zz[0]['acoes']})" if zz else "")
+                         + ". É ali que a marcação nele tem de ser mais agressiva.")
+        head = f"**Como anular {p} ({b['equipe']}) — o que {r} precisa fazer, pelos números desta partida:**"
         return head + "\n" + "\n".join(f"{i}. {s_}" for i, s_ in enumerate(steps, 1)) + \
             ("\n\n⚠️ Amostra pequena: " + str(b["amostra_N"]) + " ações." if b["amostra_N"] < 15 else "") + \
             LocalScopedWriter._model_line((b.get("ia") or {}).get("modelo"))
 
     @staticmethod
     def _plan_team(b: Dict[str, Any]) -> str:
+        W = LocalScopedWriter
         t, o, steps = b["equipe"], b["adversario"], []
         z = b.get("corredores_das_entradas_na_area_do_adversario") or []
-        def own_side(zona: str) -> str:
-            lane = zona.split(" — ")[-1]
-            mine = {"esquerda": "lado direito", "direita": "lado esquerdo", "centro": "corredor central"}[lane]
-            return f"{zona.split(' — ')[0]}, pela {lane} do ataque de {o} = {mine} de {t}"
         if z:
-            zs = "; ".join(f"{own_side(x['zona'])} ({x['acoes']})" for x in z[:2])
-            steps.append(f"**Fechar o corredor mais usado:** {o} entrou na área {b['entradas_na_area_do_adversario']} vezes, "
-                         f"principalmente por {zs}. Dobrar a marcação desse lado (lateral + ponta recompondo) e não deixar o volante sair da frente da área.")
+            zs = " e ".join(f"{W._against(x['zona'], t)} ({x['acoes']})" for x in z[:2])
+            steps.append(f"**Fechar o lado que eles mais atacaram:** {o} chegou {b['entradas_na_area_do_adversario']} vezes "
+                         f"à área, principalmente {zs}. Dobrar a marcação ali (lateral com o ponta recompondo) e segurar "
+                         "o volante na frente da zaga.")
         cr = b.get("criadores_do_adversario") or []
         if cr:
-            steps.append("**Marcar quem cria:** " + ", ".join(f"{c['jogador']} (xT {_fmt(c['xt'])})" for c in cr[:3])
-                         + f" foram os que mais geraram ameaça para {o}. Encaixe individual ou pressão imediata quando receberem.")
+            steps.append("**Marcar quem pensa o jogo deles:** " + ", ".join(f"{c['jogador']} (xT {_fmt(c['xt'])})" for c in cr[:3])
+                         + f" foram os que mais empurraram {o} para o ataque. Encaixe individual ou bote no primeiro toque.")
         if b.get("perdas_no_proprio_campo"):
             zl = b.get("zonas_das_perdas") or []
-            steps.append(f"**Sair jogando com mais segurança:** {t} perdeu a bola {b['perdas_no_proprio_campo']} vezes no próprio campo"
-                         + (f" (mais em {zl[0]['zona']}, {zl[0]['acoes']})" if zl else "")
-                         + (f", e {o} finalizou em até 15 s depois de {b['finalizacoes_adversarias_ate_15s_apos_perda']} perdas"
-                            if b.get("finalizacoes_adversarias_ate_15s_apos_perda") else "")
-                         + ". Usar a bola longa nas saídas pressionadas e evitar passes curtos pelo meio.")
+            n15 = b.get("finalizacoes_adversarias_ate_15s_apos_perda") or 0
+            steps.append(f"**Sair jogando com mais segurança:** {t} perdeu a bola {b['perdas_no_proprio_campo']} vezes no "
+                         "próprio campo"
+                         + (f", a maior parte {W._own(zl[0]['zona'])} ({zl[0]['acoes']})" if zl else "")
+                         + (f". Em {n15} {'dessas perdas' if n15 != 1 else 'delas'}, {o} finalizou em até 15 segundos"
+                            if n15 else "")
+                         + ". Sob pressão, bola longa nas costas da defesa e nada de passe curto pelo meio.")
         if (b.get("cruzamentos_do_adversario") or 0) >= 10:
-            steps.append(f"**Defender a área:** {o} cruzou {b['cruzamentos_do_adversario']} vezes. Zagueiros fixos na área, "
-                         "marcação da segunda bola e pressão em quem cruza.")
+            steps.append(f"**Proteger a área nas bolas cruzadas:** {o} cruzou {b['cruzamentos_do_adversario']} vezes. "
+                         "Zagueiros fixos, atenção à segunda bola e pressão em quem cruza.")
         pos, pp = b.get("posse_pct") or {}, b.get("ppda") or {}
         if pos.get(t) is not None and pos[t] < 40:
-            steps.append(f"**Aceitar o jogo reativo com organização:** com {_fmt(pos[t])}% da posse contra {_fmt(pos.get(o))}%, "
-                         "um bloco médio-baixo compacto e a transição rápida pelos lados fazem mais sentido do que pressionar alto o tempo todo.")
+            steps.append(f"**Jogar no contra-ataque com organização:** com {_fmt(pos[t])}% da posse contra {_fmt(pos.get(o))}%, "
+                         "bloco médio-baixo compacto e saída rápida pelos lados rendem mais do que pressionar alto o jogo todo.")
         elif pp.get(t) is not None and pp.get(o) is not None and pp[t] > pp[o]:
-            steps.append(f"**Pressionar mais a saída de {o}:** PPDA de {t} {_fmt(pp[t])} contra {_fmt(pp[o])} de {o} "
-                         f"(quanto menor, mais intensa a pressão).")
+            steps.append(f"**Subir a pressão na saída de {o}:** {t} deixou o adversário trocar passes demais antes de "
+                         f"roubar (PPDA {_fmt(pp[t])} contra {_fmt(pp[o])} de {o}; quanto menor, mais intensa a pressão).")
         ia = b.get("ia") or {}
         zp = ia.get("zonas_perigosas_do_adversario") or []
         if zp:
             mp = ia.get("mais_perigosos_do_adversario") or []
-            steps.insert(1, f"**Onde a rede neural vê perigo:** das {zp[0]['de']} ações de {o} com ≥ {ia['limiar_pct']}% de chance de "
-                            f"virar finalização, {zp[0]['acoes_perigosas']} saíram de {own_side(zp[0]['zona'])}"
-                            + (f"; quem mais as executou: " + ", ".join(f"{m['jogador']} ({m['acoes_perigosas']})" for m in mp[:2]) if mp else "")
-                            + ". Priorizar a cobertura nessa faixa.")
-        head = f"**Plano para {t} contra {o}, a partir dos dados desta partida:**"
-        foot = ("\n\n_Recomendações geradas por regras sobre os números da partida (não são previsões). "
-                "Com o Gemini ativo, o texto fica mais elaborado usando as mesmas evidências._")
+            steps.insert(1, f"**De onde saiu o perigo de verdade:** das {zp[0]['de']} jogadas de {o} com chance alta "
+                            f"(≥ {ia['limiar_pct']}%) de acabar em finalização, {zp[0]['acoes_perigosas']} nasceram "
+                            f"{W._against(zp[0]['zona'], t)}"
+                            + (". Quem mais puxou essas jogadas: " + ", ".join(f"{m['jogador']} ({m['acoes_perigosas']})"
+                                                                               for m in mp[:2]) if mp else "")
+                            + ". É a faixa que pede cobertura extra.")
+        head = f"**Plano de jogo de {t} contra {o}, com base nos números desta partida:**"
+        foot = "\n\n_Leitura feita a partir dos números do jogo — não é previsão._"
         return head + "\n" + "\n".join(f"{i}. {s_}" for i, s_ in enumerate(steps, 1)) + foot + \
             LocalScopedWriter._model_line(ia.get("modelo"))
 
@@ -415,6 +451,12 @@ class LocalScopedWriter:
             teams = list(rows[0][1].keys())
             out.append("| Estatística | " + " | ".join(teams) + " |\n|---|" + "---|" * len(teams))
             out[-1] += "\n" + "\n".join(f"| {lab} | " + " | ".join(_fmt(v.get(t)) for t in teams) + " |" for lab, v in rows)
+        lt = b.get("leitura") or {}
+        if lt.get("fortes") or lt.get("fracos"):
+            if lt.get("fortes"):
+                out.append(f"**✅ Pontos fortes de {lt['equipe']}:** " + "; ".join(lt["fortes"]) + ".")
+            if lt.get("fracos"):
+                out.append(f"**⚠️ Pontos fracos de {lt['equipe']}:** " + "; ".join(lt["fracos"]) + ".")
         tl = b.get("linha_do_tempo_no_recorte") or []
         if tl:
             out.append("**Lances no recorte:** " + "; ".join(
@@ -447,6 +489,8 @@ class DynamicTacticalAnalyst:
         self.model_name = model_name
 
     FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+    _working_model: Optional[str] = None
+    _dead_models: set = set()
 
     @staticmethod
     def explain_error(err: Exception) -> str:
@@ -471,42 +515,91 @@ class DynamicTacticalAnalyst:
 
     @staticmethod
     def _rank_model(name: str) -> tuple:
-        """Prefere flash (rápido e com cota gratuita maior), versão mais nova, e evita variantes experimentais."""
+        """Ordem de preferência: modelo de TEXTO estável > flash (rápido, cota maior) > versão mais nova > sem 'lite'."""
         import re as _re
 
         n = name.lower()
         ver = _re.search(r"gemini-(\d+(?:\.\d+)?)", n)
-        return (("flash" in n) and ("lite" not in n), float(ver.group(1)) if ver else 0.0,
-                not any(k in n for k in ("exp", "preview", "thinking", "tts", "image", "live", "embedding")))
+        text_only = not any(k in n for k in ("image", "tts", "live", "embedding", "audio", "vision", "omni", "robotics"))
+        stable = not any(k in n for k in ("exp", "preview", "thinking", "latest"))
+        return (text_only, "flash" in n, stable, float(ver.group(1)) if ver else 0.0, "lite" not in n)
 
-    def available_models(self, client) -> List[str]:
-        if DynamicTacticalAnalyst._discovered is None:
-            names: List[str] = []
+    MODELS_CACHE = Path("data/gemini_modelos.json")
+
+    def available_models(self, client=None) -> List[str]:
+        """Modelos liberados para ESTA chave (1 chamada; lista guardada em disco por 24 h)."""
+        import hashlib
+        import json as _json
+        import time as _time
+
+        if DynamicTacticalAnalyst._discovered is not None:
+            return DynamicTacticalAnalyst._discovered
+        kid = hashlib.sha256((self.api_key or "").encode()).hexdigest()[:12]      # identifica a chave sem guardá-la
+        try:
+            c = _json.loads(self.MODELS_CACHE.read_text(encoding="utf-8"))
+            if c.get("chave") == kid and _time.time() - float(c.get("quando", 0)) < 86_400 and c.get("modelos"):
+                DynamicTacticalAnalyst._discovered = list(c["modelos"])
+                return DynamicTacticalAnalyst._discovered
+        except Exception:
+            pass
+        names: List[str] = []
+        try:
+            if client is None:
+                from google import genai
+                from google.genai import types
+
+                client = genai.Client(api_key=self.api_key, http_options=types.HttpOptions(timeout=8000))
+            for m in client.models.list():
+                actions = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
+                name = str(getattr(m, "name", "")).replace("models/", "")
+                if "gemini" in name and (not actions or "generateContent" in actions):
+                    names.append(name)
+        except Exception:
+            names = []
+        ranked = sorted(set(names), key=self._rank_model, reverse=True)
+        DynamicTacticalAnalyst._discovered = ranked
+        if ranked:
             try:
-                for m in client.models.list():
-                    actions = getattr(m, "supported_actions", None) or getattr(m, "supported_generation_methods", None) or []
-                    name = str(getattr(m, "name", "")).replace("models/", "")
-                    if "gemini" in name and (not actions or "generateContent" in actions):
-                        names.append(name)
+                self.MODELS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                self.MODELS_CACHE.write_text(_json.dumps({"chave": kid, "quando": _time.time(), "modelos": ranked}),
+                                             encoding="utf-8")
             except Exception:
-                names = []
-            DynamicTacticalAnalyst._discovered = sorted(set(names), key=self._rank_model, reverse=True)
-        return DynamicTacticalAnalyst._discovered
+                pass
+        return ranked
 
     def _llm(self, system: str, prompt: str) -> str:
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=self.api_key)
-        first = os.getenv("GEMINI_MODEL", "").strip() or self.model_name
+        import time as _time
+
+        budget = float(os.getenv("GEMINI_TIMEOUT_S", "60"))   # teto rígido para TODA a resposta (todas as tentativas)
+
+        def client_for(remaining: float):
+            try:                                         # cada tentativa só recebe o tempo que ainda resta
+                return genai.Client(api_key=self.api_key,
+                                    http_options=types.HttpOptions(timeout=int(max(remaining, 1.0) * 1000)))
+            except Exception:
+                return genai.Client(api_key=self.api_key)
+        t0 = _time.time()
+        # ordem: o que já funcionou → GEMINI_MODEL do .env → modelos liberados para a chave (mais novo primeiro)
+        #        → lista fixa só como último recurso. Assim nunca se perde tempo com modelo aposentado.
+        pref = [DynamicTacticalAnalyst._working_model, os.getenv("GEMINI_MODEL", "").strip() or None]
+        found = self.available_models(client_for(10))
+        good = [m for m in found if self._rank_model(m)[0]][:6]
+        candidates = [m for m in dict.fromkeys([*pref, *good, *self.FALLBACK_MODELS]) if m]
         tried: List[str] = []
         last: Optional[Exception] = None
-        candidates = [first, *self.FALLBACK_MODELS]
+        client = None
         while candidates:
+            remaining = budget - (_time.time() - t0)
+            if remaining <= 1:
+                raise TimeoutError(f"A API generativa passou de {budget:.0f} s — resposta redigida localmente.")
             model = candidates.pop(0)
-            if model in tried:
+            if model in tried or model in DynamicTacticalAnalyst._dead_models:
                 continue
             tried.append(model)
+            client = client_for(remaining)
             try:
                 resp = client.models.generate_content(
                     model=model, contents=prompt,
@@ -515,17 +608,18 @@ class DynamicTacticalAnalyst:
             except Exception as exc:
                 last = exc
                 low = str(exc).lower()
-                if "not_found" in low or "404" in low or "not supported" in low:
-                    if len(tried) == 1 + len(self.FALLBACK_MODELS) or not candidates:
-                        candidates += [m for m in self.available_models(client)[:6] if m not in tried]
+                if "not_found" in low or "404" in low or "not supported" in low or "no longer available" in low:
+                    DynamicTacticalAnalyst._dead_models.add(model)
+                    if model == DynamicTacticalAnalyst._working_model:
+                        DynamicTacticalAnalyst._working_model = None
                     continue
                 raise
             text = resp.text if resp and resp.text else ""
             if not text.strip():
                 raise RuntimeError("Resposta vazia da API generativa.")
             self.model_name = model
+            DynamicTacticalAnalyst._working_model = model  # próximas perguntas vão direto no modelo que funcionou
             return text
-        found = self.available_models(client)
         raise RuntimeError(f"404 NOT_FOUND — nenhum modelo respondeu. Testados: {', '.join(tried)}. "
                            f"Liberados para a chave: {', '.join(found[:8]) or 'nenhum (a chave não lista modelos)'}. "
                            f"Último erro: {str(last)[:160] if last else '—'}")

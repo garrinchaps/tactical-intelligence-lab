@@ -44,19 +44,47 @@ def _catalog_cached(version: str, where: str, params: tuple) -> pd.DataFrame:
     return get_service().db.catalog(where, params)
 
 
-def cached_catalog(where: str = "", params: tuple = ()) -> pd.DataFrame:
-    """Catálogo com cache: só é relido do banco quando ele muda (sync, partida nova)."""
-    return _catalog_cached(get_service().db.catalog_version(), where, tuple(params))
+ANALYZABLE_SQL = "data_level IN ('EVENTS', 'BOXSCORE', 'SIMULATED', 'UPLOAD')"
+REAL_SQL = "data_level NOT IN ('SIMULATED', 'UPLOAD')"
+
+
+def only_real() -> bool:
+    """Padrão: só partidas reais (sem simulações nem uploads). Alternável ao lado da busca."""
+    try:
+        return bool(st.session_state.get("_only_real", True))
+    except Exception:
+        return True
+
+
+def analyzable_only() -> bool:
+    """Padrão: só jogos com eventos ou estatísticas. 'Mostrar jogos só com placar' fica em Bastidores › Dados."""
+    try:
+        return not bool(st.session_state.get("_show_score_only", False))
+    except Exception:
+        return True
+
+
+def cached_catalog(where: str = "", params: tuple = (), include_score_only: Optional[bool] = None) -> pd.DataFrame:
+    """Catálogo com cache (só é relido quando o banco muda). Por padrão, sem jogos só com placar."""
+    only = analyzable_only() if include_score_only is None else not include_score_only
+    real = only_real()
+    svc = get_service()
+    svc.finder.only_analyzable = only
+    svc.finder.only_real = real
+    for cond, on in ((ANALYZABLE_SQL, only), (REAL_SQL, real)):
+        if on:
+            where = f"({where}) AND {cond}" if where else cond
+    return _catalog_cached(svc.db.catalog_version(), where, tuple(params))
 
 
 def filter_by_team(cat: pd.DataFrame, team: str, threshold: float = 0.86) -> pd.DataFrame:
     """Partidas do catálogo em que `team` jogou (busca aproximada de nome, calculada uma vez por nome distinto)."""
-    from src.data_hub.search import team_score
+    from src.data_hub.search import fast_scores
 
     if cat is None or cat.empty or not str(team).strip():
         return cat.iloc[0:0] if cat is not None else pd.DataFrame()
     names = pd.unique(pd.concat([cat["home_team_name"], cat["away_team_name"]]).dropna())
-    ok = {n for n in names if team_score(team, n) >= threshold}
+    ok = {n for n, v in fast_scores(team, names).items() if v >= threshold}
     return cat[cat["home_team_name"].isin(ok) | cat["away_team_name"].isin(ok)]
 
 

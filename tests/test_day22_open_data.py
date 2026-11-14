@@ -27,7 +27,7 @@ def test_helpers():
     assert split_name("Brasileiro Série A 2026") == ("Brasileiro Série A", "2026")
 
 
-def test_openfootball_full_files_become_boxscores(db):
+def test_openfootball_full_files_keep_timeline_but_level_result(db):
     p = OpenFootballProvider(db, local=FX / "openfootball")
     files = p.files(FX / "openfootball")
     assert any(f.name == "en.1-full.json" for f in files) and not any(f.name == "en.1.json" for f in files)
@@ -35,7 +35,7 @@ def test_openfootball_full_files_become_boxscores(db):
     assert out["added"] == 5                       # 2 da Premier (a de 2099 não foi jogada) + 3 do Brasileirão
     cat = db.catalog("data_source = 'openfootball'")
     pl = cat[cat["competition_name"] == "Premier League"]
-    assert set(pl["data_level"]) == {"BOXSCORE"} and set(pl["country_name"]) == {"England"}
+    assert set(pl["data_level"]) == {"RESULT"} and set(pl["country_name"]) == {"England"}
     b = MatchDataService(db).load(int(pl.iloc[0]["match_id"]))
     tl = b.boxscore["timeline"]
     assert (tl["event_type"] == "Goal").sum() == int(pl.iloc[0]["home_score"] + pl.iloc[0]["away_score"])
@@ -57,10 +57,13 @@ def test_open_sources_config_and_international_catalog(db, tmp_path):
     again = OpenSourcesIngestor(cache=tmp_path / "c", fetch=fetch).sync(lake, db=db)
     assert again["errors"] == 0 and len(lake.read("os_intl_resultados")) == n1      # sem duplicar linhas
     final = db.catalog("data_source = 'intl' AND home_team_name = 'Argentina' AND away_team_name = 'France'")
-    assert len(final) == 1 and final.iloc[0]["data_level"] == "BOXSCORE"
-    box = MatchDataService(db).load(int(final.iloc[0]["match_id"])).boxscore["timeline"]
+    assert len(final) == 1 and final.iloc[0]["data_level"] == "RESULT"
+    box = MatchDataService(db).load(int(final.iloc[0]["match_id"]), _redirect_ok=False).boxscore["timeline"]
     assert "Lionel Messi" in set(box["player_name"])
-    r = MatchDataService(db).finder.find("Brasil x Inglaterra 1970", allow_remote=False)
+    svc = MatchDataService(db)
+    assert svc.finder.find("Brasil x Inglaterra 1970", allow_remote=False)["candidates"].empty   # padrão: só analisáveis
+    svc.finder.only_analyzable = False                       # "mostrar jogos só com placar" ligado
+    r = svc.finder.find("Brasil x Inglaterra 1970", allow_remote=False)
     assert not r["candidates"].empty
 
 

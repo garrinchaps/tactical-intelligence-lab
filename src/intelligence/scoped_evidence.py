@@ -595,6 +595,7 @@ class ScopedEvidenceBuilder:
             "escopo": sc.to_dict(),
             "blocos": {
                 "estatisticas_dos_times": table,
+                "leitura": _leitura(stats, meta, target_team),
                 "linha_do_tempo_no_recorte": events,
                 "atletas_citados": players_block,
                 "limitacao": ("A fonte desta partida não traz coordenadas: perguntas sobre lado do campo, "
@@ -602,3 +603,19 @@ class ScopedEvidenceBuilder:
                               if sc.needs_spatial else ""),
             },
         }
+
+
+def _leitura(stats: pd.DataFrame, meta: Dict[str, Any], team: str) -> Dict[str, Any]:
+    """Pontos fortes/fracos derivados das estatísticas (mesma regra da tela do Match Center)."""
+    if stats is None or stats.empty or not team:
+        return {}
+    from src.metrics.box_facts import box_facts
+
+    home = meta.get("home_team_name")
+    opp = meta.get("away_team_name") if team == home else home
+    gf, ga = (meta.get("home_score"), meta.get("away_score")) if team == home else (meta.get("away_score"), meta.get("home_score"))
+    try:
+        good, bad = box_facts(stats, team, opp, gf, ga)
+    except Exception:
+        return {}
+    return {"equipe": team, "fortes": [t for t, _, _ in good], "fracos": [t for t, _, _ in bad]}

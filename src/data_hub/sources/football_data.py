@@ -30,7 +30,7 @@ class FootballDataProvider:
 
     def __init__(self, db: DataHubDB, token: Optional[str] = None):
         self.db = db
-        self.token = (token or os.getenv("FOOTBALL_DATA_TOKEN", "")).strip()
+        self.token = (token or (os.getenv("FOOTBALL_DATA_TOKEN") or os.getenv("FOOTBALL_DATA_KEY") or "")).strip()
         self.client = PoliteHttpClient("football_data", db=db, min_interval_s=6.5,
                                        default_headers={"X-Auth-Token": self.token})
 

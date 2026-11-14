@@ -117,9 +117,9 @@ class SimonettiCollector:
 
     # ------------------------------------------------------------------ rede
     def _http(self, url: str) -> Tuple[int, bytes, str]:
-        import requests
+        from src.data_hub import net
 
-        r = requests.get(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "pt-BR,pt;q=0.9"}, timeout=30)
+        r = net.get(url, headers={"User-Agent": USER_AGENT, "Accept-Language": "pt-BR,pt;q=0.9"}, source="simonetti")
         return r.status_code, r.content, r.headers.get("Content-Type", "")
 
     def get(self, url: str) -> Tuple[bytes, str]:

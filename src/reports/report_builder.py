@@ -537,35 +537,22 @@ class NumericHallucinationGuard:
         return text
 
     @classmethod
-    def audit_text_numbers(
-        cls, text: str, evidence_bundle: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """
-        Auditoria v2 (src/guard): cada número do texto é extraído com normalização BR/US e
-        classificado como EXATO, DERIVADO (recalculável a partir de dois fatos relacionados),
-        CONSTANTE (metodológica) ou NÃO RASTREÁVEL. Contagens ("8 passes") e minutos exigem
-        EXATO/DERIVADO — constante não basta. Nomes de atletas fora do elenco também reprovam.
-        Mantém as chaves históricas (is_grounded, unverified_decimals, unverified_integers...).
-        """
-        from src.guard.classifier import CONSTANTE, DERIVADO, EXATO, NAO_RASTREAVEL, NumberClassifier
+    def classify_numbers(cls, text: str, evidence_bundle: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Cada número do texto com posição e classe (EXATO / DERIVADO / CONSTANTE / NÃO RASTREÁVEL)."""
+        from src.guard.classifier import CONSTANTE, NAO_RASTREAVEL, NumberClassifier
         from src.guard.extractor import NumericExtractor
         from src.guard.ground_truth import GroundTruthSet
 
-        clean = cls._strip_echoed_context(text or "", evidence_bundle)
         gt = GroundTruthSet.from_evidence(evidence_bundle)
         constants = {float(c.replace(",", ".")) for c in cls.STRUCTURAL_CONSTANTS}
         clf = NumberClassifier(gt, constants=constants)
         count_rx = re.compile(rf"^\s*(?:%\s*)?(?:\*\*)?\s*(?:[\wÀ-ÿ]+\s+){{0,2}}?(?:{cls.COUNT_NOUNS})", re.IGNORECASE)
         minute_before = re.compile(r"(?:minuto|min\.?)\s*$", re.IGNORECASE)
-
-        rows: List[Dict[str, Any]] = []
-        unverified_dec: List[str] = []
-        unverified_int: List[str] = []
-        n_exact = n_derived = n_const = 0
-        for m in NumericExtractor.extract(clean):
+        out: List[Dict[str, Any]] = []
+        for m in NumericExtractor.extract(text or ""):
             c = clf.classify(m)
-            after = clean[m.end:m.end + 40]
-            before = clean[max(0, m.start - 10):m.start]
+            after = text[m.end:m.end + 40]
+            before = text[max(0, m.start - 10):m.start]
             ctx = ""
             if minute_before.search(before) or m.unit in ("'", "’", "min", "minuto", "minutos"):
                 ctx = "minuto"
@@ -576,8 +563,33 @@ class NumericHallucinationGuard:
                 if ctx == "contagem" or (ctx == "minuto" and m.value not in
                                          {float(x) for x in cls.MINUTE_CONSTANTS}):
                     label = NAO_RASTREAVEL
-            rows.append({"numero": m.raw, "classe": label, "explicacao": c.explanation if label == c.label else
-                         "constante metodológica não vale como contagem/minuto", "contexto": ctx})
+            out.append({"mention": m, "numero": m.raw, "classe": label, "contexto": ctx, "start": m.start, "end": m.end,
+                        "explicacao": c.explanation if label == c.label else
+                        "constante metodológica não vale como contagem/minuto"})
+        return out
+
+    @classmethod
+    def audit_text_numbers(
+        cls, text: str, evidence_bundle: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Auditoria v2 (src/guard): cada número do texto é extraído com normalização BR/US e
+        classificado como EXATO, DERIVADO (recalculável a partir de dois fatos relacionados),
+        CONSTANTE (metodológica) ou NÃO RASTREÁVEL. Contagens ("8 passes") e minutos exigem
+        EXATO/DERIVADO — constante não basta. Nomes de atletas fora do elenco também reprovam.
+        Mantém as chaves históricas (is_grounded, unverified_decimals, unverified_integers...).
+        """
+        from src.guard.classifier import CONSTANTE, DERIVADO, EXATO, NAO_RASTREAVEL
+
+        clean = cls._strip_echoed_context(text or "", evidence_bundle)
+        rows: List[Dict[str, Any]] = []
+        unverified_dec: List[str] = []
+        unverified_int: List[str] = []
+        n_exact = n_derived = n_const = 0
+        for item in cls.classify_numbers(clean, evidence_bundle):
+            m, label = item["mention"], item["classe"]
+            rows.append({k: item[k] for k in ("numero", "classe", "explicacao", "contexto")})
+            ctx = item["contexto"]
             if label == NAO_RASTREAVEL:
                 if m.is_integer:
                     unverified_int.append(f"{m.raw} ({ctx})" if ctx else m.raw)

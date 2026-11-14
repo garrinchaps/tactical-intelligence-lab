@@ -53,6 +53,16 @@ class Version:
     reason: str
     origin: str = "treino"
     history: Dict[str, List[float]] = field(default_factory=dict)
+    # validação agrupada por partida (GroupKFold) e critério estatístico de promoção
+    cv_folds: int = 0
+    cv_seeds: int = 0
+    cv_logloss_mean: Optional[float] = None
+    cv_logloss_std: Optional[float] = None
+    cv_auc_mean: Optional[float] = None
+    test_gain: Optional[float] = None
+    gain_ci_low: Optional[float] = None
+    gain_ci_high: Optional[float] = None
+    p_gain_positive: Optional[float] = None
 
 
 class DangerModelRegistry:
@@ -171,38 +181,114 @@ class DangerModelRegistry:
         _, val = self.split(data)
         return self._evaluate(net, val)
 
+    # ------------------------------------------------- validação agrupada
+    @staticmethod
+    def group_cv(train: pd.DataFrame, hidden: List[int], learning_rate: float, epochs: int, l2: float,
+                 batch_size: int, folds: int = 5, seeds=(11, 23)) -> Dict[str, Any]:
+        """GroupKFold por match_id (nenhuma partida aparece no treino e na validação da mesma dobra) × sementes."""
+        from sklearn.model_selection import GroupKFold
+
+        groups = train["match_id"].to_numpy()
+        k = int(min(folds, len(np.unique(groups))))
+        if k < 2:
+            return {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
+        X, y = train[FEATURES].to_numpy(float), train["target"].to_numpy(int)
+        ll, auc = [], []
+        for sd in seeds:
+            for tr, va in GroupKFold(n_splits=k).split(X, y, groups):
+                if len(np.unique(y[va])) < 2:
+                    continue
+                net = NeuralNetwork([len(FEATURES), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=int(sd))
+                net.fit(X[tr], y[tr], epochs=epochs, batch_size=batch_size)
+                pr = np.clip(net.predict_proba(X[va]), 1e-6, 1 - 1e-6)
+                ll.append(float(log_loss(y[va], pr)))
+                auc.append(float(roc_auc_score(y[va], pr)))
+        return {"folds": k, "seeds": len(seeds), "logloss": ll, "auc": auc}
+
+    @staticmethod
+    def paired_gain(champ: NeuralNetwork, chall: NeuralNetwork, test: pd.DataFrame, n_boot: int = 400,
+                    seed: int = 7) -> Dict[str, float]:
+        """Ganho de log-loss no teste isolado (campeão − desafiante) com bootstrap por PARTIDA (IC 95%)."""
+        X, y = test[FEATURES].to_numpy(float), test["target"].to_numpy(int)
+        pc = np.clip(champ.predict_proba(X), 1e-6, 1 - 1e-6)
+        pn = np.clip(chall.predict_proba(X), 1e-6, 1 - 1e-6)
+        loss = lambda p: -(y * np.log(p) + (1 - y) * np.log(1 - p))
+        d = loss(pc) - loss(pn)                              # > 0 = desafiante melhor naquela ação
+        g = test["match_id"].to_numpy()
+        ids, inv = np.unique(g, return_inverse=True)
+        sums = np.bincount(inv, weights=d, minlength=len(ids))
+        cnts = np.bincount(inv, minlength=len(ids)).astype(float)
+        rng = np.random.default_rng(seed)
+        boots = []
+        for _ in range(n_boot):
+            pick = rng.integers(0, len(ids), len(ids))
+            boots.append(sums[pick].sum() / max(cnts[pick].sum(), 1.0))
+        boots = np.array(boots)
+        return {"gain": float(d.mean()), "ci_low": float(np.percentile(boots, 2.5)),
+                "ci_high": float(np.percentile(boots, 97.5)), "p_positive": float((boots > 0).mean())}
+
     def train_round(self, data: pd.DataFrame, hidden: List[int], learning_rate: float = 0.05, epochs: int = 30,
                     l2: float = 1e-3, batch_size: int = 256, seed: Optional[int] = None,
-                    origin: str = "treino") -> Dict[str, Any]:
-        """Treina um desafiante; promove se melhorar a log-loss na validação fixa. Devolve o relatório da rodada."""
+                    origin: str = "treino", cv_folds: int = 5, cv_seeds=(11, 23)) -> Dict[str, Any]:
+        """
+        Treina um desafiante e decide a promoção com rigor:
+          1. GroupKFold por partida (× sementes) no conjunto de treino → variação entre dobras/sementes (σ);
+          2. treino final em todo o conjunto de treino; avaliação no TESTE ISOLADO (partidas que nunca treinam);
+          3. promove só se o ganho de log-loss sobre o campeão no teste for > σ, > MIN_IMPROVEMENT e
+             o IC 95% do bootstrap por partida ficar acima de zero. Toda tentativa é registrada.
+        """
         train, val = self.split(data)
         seed = int(seed if seed is not None else time.time()) % 100_000
+        cv = self.group_cv(train, hidden, learning_rate, epochs, l2, batch_size, cv_folds, cv_seeds) if cv_folds else \
+            {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
+        cv_mean = round(float(np.mean(cv["logloss"])), 5) if cv["logloss"] else None
+        cv_std = round(float(np.std(cv["logloss"], ddof=1)), 5) if len(cv["logloss"]) > 1 else None
         net = NeuralNetwork([len(FEATURES), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=seed, feature_names=FEATURES)
         net.fit(train[FEATURES].to_numpy(float), train["target"].to_numpy(int), epochs=epochs, batch_size=batch_size,
                 X_val=val[FEATURES].to_numpy(float), y_val=val["target"].to_numpy(int))
         m = self._evaluate(net, val)
         champ = self.champion_info()
-        champ_now = self.evaluate_champion(data) if champ else None
+        champ_net = self.champion() if champ else None
+        champ_now = self._evaluate(champ_net, val) if champ_net is not None else None
+        pg = self.paired_gain(champ_net, net, val) if champ_net is not None else None
         if champ_now is None:
             promoted, reason = True, "primeira versão: vira o modelo usado pelo Analista IA"
-        elif m["logloss"] <= champ_now["logloss"] - MIN_IMPROVEMENT:
-            promoted = True
-            reason = (f"melhorou a perda na validação fixa: {champ_now['logloss']:.5f} → {m['logloss']:.5f} "
-                      f"(AUC {champ_now['auc']:.3f} → {m['auc']:.3f})")
         else:
-            promoted = False
-            reason = (f"não melhorou (perda {m['logloss']:.5f} contra {champ_now['logloss']:.5f} do campeão "
-                      f"v{champ['version']:03d}); o Analista continua com o campeão")
+            gain = pg["gain"]
+            noise = cv_std if cv_std is not None else 0.0
+            ok_noise, ok_min, ok_ci = gain > noise, gain >= MIN_IMPROVEMENT, pg["ci_low"] > 0
+            promoted = bool(ok_noise and ok_min and ok_ci)
+            detail = (f"ganho no teste isolado {gain:+.5f} (IC 95% por partida {pg['ci_low']:+.5f} a {pg['ci_high']:+.5f}); "
+                      f"variação entre dobras/sementes σ = {noise:.5f}")
+            if promoted:
+                reason = (f"promovida: {detail}. Perda {champ_now['logloss']:.5f} → {m['logloss']:.5f} "
+                          f"(AUC {champ_now['auc']:.3f} → {m['auc']:.3f})")
+            else:
+                falhas = [t for t, ok in (("ganho não supera σ", ok_noise), (f"ganho < {MIN_IMPROVEMENT}", ok_min),
+                                          ("IC 95% inclui zero", ok_ci)) if not ok]
+                reason = (f"rejeitada ({', '.join(falhas)}): {detail}; o Analista continua com o campeão "
+                          f"v{champ['version']:03d}")
         v = len(self.meta["versions"]) + 1
         net.save(self.root / f"v{v:03d}.npz")
         rec = Version(v, time.strftime("%Y-%m-%d %H:%M"), list(hidden), learning_rate, epochs, l2, batch_size,
                       int(train["match_id"].nunique()), int(len(train)), m["auc"], m["logloss"], promoted, reason, origin,
-                      {k: [round(float(x), 5) for x in vals] for k, vals in net.history.items()})
+                      {k: [round(float(x), 5) for x in vals] for k, vals in net.history.items()},
+                      cv["folds"], cv["seeds"], cv_mean, cv_std,
+                      round(float(np.mean(cv["auc"])), 4) if cv["auc"] else None,
+                      round(pg["gain"], 6) if pg else None, round(pg["ci_low"], 6) if pg else None,
+                      round(pg["ci_high"], 6) if pg else None, round(pg["p_positive"], 4) if pg else None)
         self.meta["versions"].append(asdict(rec))
         if promoted:
             self.meta["champion"] = v
         self._write()
+        self._log_attempt(rec)
         return {**asdict(rec), "champion_before": champ_now, "net": net}
+
+    def _log_attempt(self, rec: "Version") -> None:
+        """Registro só-acréscimo de TODAS as tentativas (promovidas e rejeitadas)."""
+        row = {k: v for k, v in asdict(rec).items() if k != "history"}
+        with (self.root / "tentativas.jsonl").open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
     def auto_search(self, data: pd.DataFrame, trials: int = 3, epochs: int = 25, seed: int = 0,
                     progress: Optional[Callable[[str], None]] = None) -> List[Dict[str, Any]]:

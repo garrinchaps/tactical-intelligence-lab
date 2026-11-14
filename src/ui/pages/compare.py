@@ -330,7 +330,7 @@ def _club_vs_club() -> None:
         empty_state("Escolha os dois clubes", icon="🛡️")
         return
     ta, tb = picks
-    ma, mb = team_matches(ta), team_matches(tb)
+    ma, mb = team_matches(ta, include_score_only=True), team_matches(tb, include_score_only=True)   # retrospecto: todos os resultados
     ra, rb = record(ta, ma.head(38)), record(tb, mb.head(38))
     c1, c2 = st.columns(2)
     for col, t, r in ((c1, ta, ra), (c2, tb, rb)):

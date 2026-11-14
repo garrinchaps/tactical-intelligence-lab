@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -14,7 +16,9 @@ from src.tactical_engine.diagnostic_engine import TacticalDiagnosticEngine
 from src.ui import charts
 from src.ui.charts import _layout
 from src.ui.components import (comparison_table, empty_state, error_state, metric_card, note, page_header, provenance_panel, scoreboard,
+                               source_gap,
                                stat_pill)
+from src.metrics.box_facts import box_facts
 from src.ui.context import MatchContext
 from src.ui.theme import PALETTE
 from src.visualization.pitch_plots import TacticalVisualizer
@@ -155,15 +159,19 @@ def render_events(ctx: MatchContext) -> None:
 
 
 def _understat_shots(ctx: MatchContext, home: str) -> None:
-    """Mapa de finalizações e xG do Understat, quando a partida estiver ligada a um jogo Understat."""
+    """Mapa de finalizações e xG do Understat (baixado na hora, uma vez, se a partida estiver no Understat)."""
     try:
-        from src.data_lake.build import shots_for_match
+        from src.data_lake.understat_link import ensure_shots
 
-        shots = shots_for_match(ctx.match_id)
+        with st.spinner("Buscando as finalizações no Understat..."):
+            shots = ensure_shots(ctx.match_id)
     except Exception:
         return
-    if shots.empty:
+    if shots is None or shots.empty:
         return
+    m = ctx.bundle.meta or {}
+    shots = shots.assign(equipe=shots["lado"].map({"h": m.get("home_team_name", home), "a": m.get("away_team_name", "")})
+                         .fillna(shots["equipe"]))                   # nomes iguais aos do placar
     st.markdown("##### 📍 Finalizações e xG (Understat)")
     by = shots.groupby("equipe").agg(chutes=("xg", "size"), xg=("xg", "sum"), gols=("resultado", lambda r: int((r == "gol").sum())))
     c = st.columns(len(by))
@@ -173,10 +181,60 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
                         ctx.prov(f"us_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
                                  "soma do xG das finalizações (modelo do Understat)", tier="DERIVED"),
                         f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
-    st.plotly_chart(charts.shot_map(shots, home, "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
+    st.plotly_chart(charts.shot_map(shots, m.get("home_team_name", home), "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
                     use_container_width=True)
-    with st.expander("Lista de finalizações"):
-        comparison_table(shots[["minuto", "equipe", "jogador", "assistente", "situacao", "tipo", "resultado", "xg"]])
+    pl = (shots.groupby(["equipe", "jogador"]).agg(chutes=("xg", "size"), xg=("xg", "sum"),
+                                                   gols=("resultado", lambda r: int((r == "gol").sum())))
+          .reset_index().sort_values("xg", ascending=False))
+    pl["xg"] = pl["xg"].round(2)
+    a, b = st.columns(2)
+    with a:
+        st.markdown("###### Quem finalizou")
+        comparison_table(pl.rename(columns={"equipe": "time"}))
+    with b:
+        st.markdown("###### Lance a lance")
+        comparison_table(shots[["minuto", "equipe", "jogador", "assistente", "situacao", "tipo", "resultado", "xg"]]
+                         .rename(columns={"equipe": "time", "situacao": "situação"}))
+
+
+def _sources_panel(ctx: MatchContext) -> None:
+    """A mesma partida em outras fontes: valor escolhido por precedência e divergências (nunca média)."""
+    try:
+        from src.data_hub.consolidate import compare
+        from src.ui.context import get_service
+
+        tab = compare(get_service().db, ctx.match_id, ctx.bundle.meta)
+    except Exception:
+        return
+    if tab.empty:
+        return
+    n_div = int(tab["diverge"].sum())
+    srcs = sorted({x for x in tab["fonte escolhida"]} | {o.split(" ")[0] for v in tab["outras fontes"] if v != "—"
+                                                        for o in v.split(", ")})
+    with st.expander(f"🔀 Esta partida em {len(srcs)} fontes" + (f" · {n_div} número(s) divergem" if n_div else ""),
+                     expanded=False):
+        st.caption("Cada número vem da fonte de maior precedência para aquela estatística; quando outra fonte traz "
+                   "um valor diferente, ele aparece ao lado — nada é somado nem tirado média.")
+        comparison_table(tab.drop(columns=["stat_key", "side"]).assign(diverge=tab["diverge"].map({True: "⚠️ sim", False: ""})))
+
+
+def _box_insights(ctx: MatchContext, stats: pd.DataFrame, team: str, opp: str) -> None:
+    import html as _h
+
+    m = ctx.bundle.meta or {}
+    home = m.get("home_team_name")
+    gf, ga = (m.get("home_score"), m.get("away_score")) if team == home else (m.get("away_score"), m.get("home_score"))
+    good, bad = box_facts(stats, team, opp, gf, ga)
+    if not good and not bad:
+        return
+    st.markdown(f"##### Leitura dos números — {team}")
+    a, b = st.columns(2)
+    for col, items, cls, title in ((a, good, "fm-card-blue", "✅ Pontos fortes"), (b, bad, "fm-card-red", "⚠️ Pontos fracos")):
+        li = "".join(f"<li>{_h.escape(t)}</li>" for t, _, _ in items) or "<li>Nada que se destaque com clareza.</li>"
+        col.markdown(f'<div class="fm-card {cls}"><div class="h">{title}</div><ul style="margin:.3rem 0 0 1rem">{li}</ul></div>',
+                     unsafe_allow_html=True)
+        for i, (t, val, how) in enumerate(items):
+            ctx.prov(f"insight_{cls}_{i}", t.split(":")[0], val, how)
 
 
 def render_boxscore(ctx: MatchContext) -> None:
@@ -197,14 +255,17 @@ def render_boxscore(ctx: MatchContext) -> None:
                f"{m.get('competition_name', '')} · {m.get('round_name', '')} · {m.get('match_date', '')} · {m.get('stadium_name', '')}",
                home_goals=hg, away_goals=ag)
     for n in b.notes:
-        st.warning(n)
+        (st.info if ("trazidas" in n or "abrindo" in n) else st.warning)(n)
     _understat_shots(ctx, home)
+    _sources_panel(ctx)
     box = b.boxscore or {}
     stats, lineups, timeline, players = (box.get(k, pd.DataFrame()) for k in ("team_stats", "lineups", "timeline", "player_stats"))
     if stats.empty and lineups.empty and timeline.empty:
-        empty_state("Só o placar está disponível", "Esta fonte não traz estatísticas desta partida.", "📄",
-                    "Habilite a API-Football ou o feed ESPN no .env, ou escolha uma partida ✅ com eventos.")
+        source_gap("estatísticas de equipe", ctx.bundle.source,
+                   "Ative a ESPN ou a API-Football no .env, ou escolha uma partida ✅ com eventos.", "📄", ctx.bundle.level)
         return
+    if not stats.empty:
+        _box_insights(ctx, stats, ctx.target_team or home, (away if (ctx.target_team or home) == home else home))
     left, right = st.columns(2)
     with left:
         st.markdown("##### Estatísticas da partida")
@@ -222,7 +283,7 @@ def render_boxscore(ctx: MatchContext) -> None:
     with right:
         st.markdown("##### Linha do tempo")
         if timeline.empty:
-            empty_state("Sem lances registrados", "A fonte não informou gols, cartões ou substituições.", "⏱️")
+            source_gap("lances (gols, cartões, substituições)", ctx.bundle.source, icon="⏱️")
         else:
             icon = {"goal": "⚽", "card": "🟨", "subst": "🔁", "var": "📺"}
             for r in timeline.itertuples():

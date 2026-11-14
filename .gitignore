@@ -26,3 +26,8 @@ data/sync_log.txt
 
 # base unificada (gerada pela sincronização)
 data/lake/
+
+# backups locais (src/tools/backup_local.py)
+backups/
+data/gemini_modelos.json
+data/sync_log.txt

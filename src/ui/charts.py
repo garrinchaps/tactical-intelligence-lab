@@ -197,7 +197,7 @@ def nn_architecture(net, max_per_layer: int = 12, min_abs_weight: float = 0.0, t
                 fig.add_trace(go.Scatter(x=[x0, x1], y=[y0, y1], mode="lines", hoverinfo="text",
                                          text=f"{net.neuron_label(f'L{l}N{p}')} → {net.neuron_label(f'L{l + 1}N{c}')}: peso {w:+.3f}",
                                          line=dict(width=0.3 + 4.5 * abs(w) / wmax,
-                                                   color="rgba(34,197,94,0.55)" if w > 0 else "rgba(248,113,113,0.55)"),
+                                                   color="rgba(59,130,246,0.6)" if w > 0 else "rgba(239,68,68,0.55)"),
                                          showlegend=False))
     for l, idxs in enumerate(keep):
         xs = [pos[(l, k)][0] for k in idxs]
@@ -279,19 +279,22 @@ def lines(df: pd.DataFrame, x: str, ys: List[str], title: str, ytitle: str = "",
 
 
 def radar(values: Dict[str, List[float]], labels: List[str], title: str, height: int = 460) -> go.Figure:
-    colors = [P["secondary"], P["warning"], P["primary"], "#C084FC"]
+    colors = [("#3B82F6", "rgba(59,130,246,0.28)"), ("#EF4444", "rgba(239,68,68,0.25)"),
+              ("#22D3EE", "rgba(34,211,238,0.2)"), ("#C084FC", "rgba(192,132,252,0.2)")]   # A azul, B vermelho
     fig = go.Figure()
     for i, (name, v) in enumerate(values.items()):
+        line, fill = colors[i % len(colors)]
         fig.add_trace(go.Scatterpolar(r=list(v) + list(v[:1]), theta=labels + labels[:1], fill="toself", name=name,
-                                      line=dict(color=colors[i % len(colors)], width=2)))
-    fig.update_layout(polar=dict(bgcolor=P["surface"], radialaxis=dict(range=[0, 100], color=P["muted"])))
+                                      fillcolor=fill, line=dict(color=line, width=2)))
+    fig.update_layout(polar=dict(bgcolor=P["surface"], radialaxis=dict(range=[0, 100], color=P["muted"], gridcolor="#1E2A44"),
+                                 angularaxis=dict(gridcolor="#1E2A44", color=P["text"])))
     return _layout(fig, title, height)
 
 
 def shot_map(shots: pd.DataFrame, home: str, title: str) -> go.Figure:
     """Finalizações no campo: mandante atacando para a direita, visitante para a esquerda; tamanho ∝ xG; ★ = gol."""
     fig = pitch(title=title)
-    for side, color in (("h", P["secondary"]), ("a", P["warning"])):
+    for side, color in (("h", P["primary"]), ("a", P["secondary"])):   # mandante azul, visitante vermelho
         s = shots[shots["lado"] == side]
         if s.empty:
             continue

@@ -414,7 +414,7 @@ def test_plans_are_grounded(final_internal, tmp_path, monkeypatch):
     assert "Como anular Lionel" in md and "Cortar a fonte" in md
     assert r["hallucination_audit"]["untraceable_count"] == 0
     r = a.answer("qual tática a frança deveria usar para evitar a derrota?", "Argentina", meta, df, None, prefer_llm=False)
-    assert "Plano para France contra Argentina" in r["report_markdown"]
+    assert "Plano de jogo de France contra Argentina" in r["report_markdown"]
     assert r["hallucination_audit"]["untraceable_count"] == 0
 
 
@@ -432,7 +432,7 @@ def test_registry_promotes_only_when_better(tmp_path):
     if r2["promoted"]:
         assert r2["val_logloss"] < r1["val_logloss"] and champ["version"] == 2
     else:
-        assert champ["version"] == 1 and "não melhorou" in r2["reason"]
+        assert champ["version"] == 1 and "rejeitada" in r2["reason"]
     assert len(reg.split(data)[1]) == val_rows                      # validação congelada
     assert not set(reg.split(data)[0]["match_id"]) & set(reg.meta["validation_matches"])
 
@@ -457,5 +457,5 @@ def test_champion_is_used_in_danger_answers(final_internal, tmp_path, monkeypatc
         "quem mais criou perigo na partida?", "Argentina",
         {"match_id": FINAL, "data_level": "EVENTS", "home_team_name": "Argentina", "away_team_name": "France"},
         df, None, prefer_llm=False)
-    assert "Rede neural de perigo v001" in r["report_markdown"]
+    assert "rede neural v001" in r["report_markdown"]
     assert r["hallucination_audit"]["untraceable_count"] == 0
