@@ -307,3 +307,134 @@ def render(ctx: MatchContext) -> None:
     except Exception as exc:
         error_state("Comparação indisponível", exc)
     provenance_panel(ctx.registry)
+
+
+# =========================================================== página Comparar (todos os modos)
+def _club_vs_club() -> None:
+    from src.ui.components import form_html
+    from src.ui.crests import crest_img
+    from src.ui.pages.clubs import _lake_team, _team_names, record, team_matches
+    from src.ui.context import filter_by_team, get_service
+
+    names = _team_names(get_service().db.catalog_version())
+    pool = pd.DataFrame({"home_team_name": names, "away_team_name": names})
+    a, b = st.columns(2)
+    qa = a.text_input("Clube A", "Flamengo", key="cc_a")
+    qb = b.text_input("Clube B", "Palmeiras", key="cc_b")
+    picks = []
+    for col, q, key in ((a, qa, "cc_sa"), (b, qb, "cc_sb")):
+        cand = filter_by_team(pool, q, 0.86)["home_team_name"].tolist() if q.strip() else []
+        cand = sorted(cand, key=lambda n: -len(team_matches(n)))[:15]
+        picks.append(col.selectbox("Escolha", cand, key=key) if cand else None)
+    if not all(picks):
+        empty_state("Escolha os dois clubes", icon="🛡️")
+        return
+    ta, tb = picks
+    ma, mb = team_matches(ta), team_matches(tb)
+    ra, rb = record(ta, ma.head(38)), record(tb, mb.head(38))
+    c1, c2 = st.columns(2)
+    for col, t, r in ((c1, ta, ra), (c2, tb, rb)):
+        col.markdown(f'<div class="til-profile">{crest_img(t, "lg")}<div><div class="n">{t}</div>'
+                     f'<div class="d">últimos {r.get("jogos", 0)} jogos com placar</div>{form_html(r.get("forma", []))}</div></div>',
+                     unsafe_allow_html=True)
+    rows = []
+    for lab, k in (("Jogos", "jogos"), ("Vitórias", "V"), ("Empates", "E"), ("Derrotas", "D"), ("Gols pró", "gp"),
+                   ("Gols contra", "gc"), ("Aproveitamento (%)", "aprov")):
+        rows.append({"indicador": lab, ta: ra.get(k), tb: rb.get(k)})
+    tab = pd.DataFrame(rows)
+    st.plotly_chart(charts.grouped_bars(tab[tab["indicador"] != "Jogos"], "indicador", [ta, tb],
+                                        "Últimos 38 jogos com placar (todas as competições)", height=420), use_container_width=True)
+    h2h = ma[((ma["home_team_name"] == ta) & (ma["away_team_name"] == tb)) | ((ma["home_team_name"] == tb) & (ma["away_team_name"] == ta))]
+    st.markdown(f"##### Confronto direto: {len(h2h)} jogo(s) no catálogo")
+    if not h2h.empty:
+        rh = record(ta, h2h)
+        st.caption(f"{ta}: {rh['V']} vitórias · {rh['E']} empates · {rh['D']} derrotas · gols {rh['gp']} x {rh['gc']}")
+        from src.data_hub.registry import BADGES
+        from src.ui.components import result_card_html
+
+        for row in h2h.head(10).to_dict("records"):
+            st.markdown(result_card_html(row, BADGES.get(row["data_level"], "")), unsafe_allow_html=True)
+    lake, ka, ida = _lake_team(ta)
+    _, kb, idb = _lake_team(tb)
+    if lake is not None and lake.exists("tm_jogadores") and not ida.empty and not idb.empty:
+        tm = lake.read("tm_jogadores")
+        val = {}
+        for t, ids in ((ta, ida), (tb, idb)):
+            tid = ids[ids["fonte"] == "transfermarkt"]["id_fonte"].astype(str).tolist()
+            val[t] = round(tm[tm["clube_id"].astype(str).isin(tid)]["valor_mercado_eur"].fillna(0).sum() / 1e6, 1)
+        if any(val.values()):
+            x = st.columns(2)
+            for col, t in zip(x, (ta, tb)):
+                col.metric(f"Valor do elenco — {t} (€ mi, Transfermarkt)", val[t])
+
+
+def _match_vs_match() -> None:
+    from src.data_hub.registry import BADGES
+    from src.ui.components import result_card_html
+    from src.ui.context import get_service, load_bundle, match_team_stats, processed_events
+
+    cols = st.columns(2)
+    chosen = []
+    for col, key, default in ((cols[0], "mm_a", "Argentina x França 2022"), (cols[1], "mm_b", "Argentina x Croácia 2022")):
+        q = col.text_input("Jogo", default, key=key)
+        res = get_service().finder.find(q, allow_remote=False) if q.strip() else {"candidates": pd.DataFrame()}
+        c = res["candidates"] if not res["candidates"].empty else res.get("suggestions", pd.DataFrame())
+        if c is None or c.empty:
+            col.caption("Nenhum jogo encontrado.")
+            chosen.append(None)
+            continue
+        opts = c.head(8).to_dict("records")
+        i = col.selectbox("Resultado", range(len(opts)), key=key + "_s",
+                          format_func=lambda j: f"{opts[j]['match_date']} · {opts[j]['home_team_name']} x {opts[j]['away_team_name']}")
+        col.markdown(result_card_html(opts[i], BADGES.get(opts[i]["data_level"], "")), unsafe_allow_html=True)
+        chosen.append(opts[i])
+    if not all(chosen):
+        return
+    rows, labels = [], []
+    for m in chosen:
+        b = load_bundle(int(m["match_id"]))
+        label = f"{m['home_team_name']} x {m['away_team_name']} ({str(m['match_date'])[:4]})"
+        labels.append(label)
+        if b.events is not None and not b.events.empty:
+            df = processed_events(int(m["match_id"]), b.events)[0]
+            for side in ("home_team_name", "away_team_name"):
+                s = match_team_stats(int(m["match_id"]), m[side], df)
+                rows.append({"jogo": label, "equipe": m[side], **{TEAM_STAT_LABELS[k]: s.get(k) for k in TEAM_KEYS}})
+        else:
+            st_ = (b.boxscore or {}).get("team_stats", pd.DataFrame())
+            for side in ("home_team_name", "away_team_name"):
+                r = {"jogo": label, "equipe": m[side], "Gols": m["home_score"] if side == "home_team_name" else m["away_score"]}
+                if st_ is not None and not st_.empty:
+                    for x in st_[st_["team_name"] == m[side]].itertuples():
+                        r[x.stat_label] = x.value
+                rows.append(r)
+    tab = pd.DataFrame(rows)
+    comparison_table(tab.set_index(["jogo", "equipe"]).T.reset_index().rename(columns={"index": "indicador"}),
+                     "Jogos com eventos (✅) têm todos os indicadores; os demais, o que a fonte publica.")
+
+
+def render_page(current_context, match_bar) -> None:
+    from src.ui.components import hero
+
+    hero("Comparar", "Lado a lado", "Jogador × jogador, jogo × jogo, clube × clube, a equipe contra ela mesma ou as duas "
+         "equipes da partida aberta.")
+    modes = ["👥 Jogador × jogador", "🏟️ Jogo × jogo", "🛡️ Clube × clube", "📅 Equipe × ela mesma", "⚔️ Duas equipes da partida"]
+    pick = st.radio("Modo", modes, horizontal=True, key="cmp_page_mode", label_visibility="collapsed")
+    try:
+        if pick == modes[1]:
+            _match_vs_match()
+            return
+        if pick == modes[2]:
+            _club_vs_club()
+            return
+        match_bar()
+        ctx = current_context()
+        if ctx is None:
+            return
+        if not ctx.has_events:
+            empty_state("Este modo usa os eventos da partida aberta", "", "🆚", "Troque para uma partida ✅ no topo.")
+            return
+        {modes[0]: _players, modes[3]: _team_over_time, modes[4]: _two_teams}[pick](ctx)
+        provenance_panel(ctx.registry)
+    except Exception as exc:
+        error_state("Comparação indisponível", exc)

@@ -28,8 +28,8 @@ from dotenv import load_dotenv
 from src.data_hub.db import DataHubDB, utc_now
 from src.data_hub.service import MatchDataService
 
-ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "api_football", "football_data", "espn",
-               "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]
+ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "api_football", "football_data", "espn",
+               "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "open_sources", "lake"]
 LAKE_SOURCES = ["transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]   # alimentam data/lake
 QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
 
@@ -60,6 +60,8 @@ def run_sync(
         "understat": lambda: _lake_job("understat", svc, say, seasons_back),
         "api_futebol": lambda: _lake_job("api_futebol", svc, say, seasons_back),
         "basedosdados": lambda: _lake_job("basedosdados", svc, say, seasons_back),
+        "openfootball": lambda: svc.openfootball.sync(progress=say),
+        "open_sources": lambda: _lake_job("open_sources", svc, say, seasons_back),
         "simonetti": lambda: _lake_job("simonetti", svc, say, seasons_back),
         "lake": lambda: _lake_job("lake", svc, say, seasons_back),
     }
@@ -126,6 +128,10 @@ def _lake_job(name: str, svc: MatchDataService, say: Callable[[str], None], seas
         from src.data_hub.sources.api_futebol import ApiFutebolProvider
 
         return ApiFutebolProvider().sync(lake, progress=say)
+    if name == "open_sources":
+        from src.data_hub.sources.open_sources import OpenSourcesIngestor
+
+        return OpenSourcesIngestor().sync(lake, db=svc.db, progress=say)
     if name == "simonetti":
         from src.data_hub.sources.simonetti import SimonettiCollector
 

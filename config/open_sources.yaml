@@ -1,0 +1,23 @@
+# =============================================================================
+# FONTES ABERTAS — lista de bases públicas baixadas na sincronização diária.
+# Só entram aqui arquivos publicados para download livre (licença aberta). Para acrescentar uma fonte, copie um
+# bloco, troque id/url/licenca e rode:  python -m src.data_hub.sync --only open_sources lake
+#   formato: csv | json      catalogo: (opcional) converte em partidas do catálogo do app
+# =============================================================================
+fontes:
+  - id: intl_resultados
+    nome: Resultados de seleções desde 1872 (martj42/international_results)
+    url: https://raw.githubusercontent.com/martj42/international_results/master/results.csv
+    formato: csv
+    licenca: CC0 1.0 (domínio público)
+    catalogo: international_results
+  - id: intl_gols
+    nome: Autores dos gols das seleções (martj42/international_results)
+    url: https://raw.githubusercontent.com/martj42/international_results/master/goalscorers.csv
+    formato: csv
+    licenca: CC0 1.0 (domínio público)
+  - id: intl_penaltis
+    nome: Disputas de pênaltis das seleções (martj42/international_results)
+    url: https://raw.githubusercontent.com/martj42/international_results/master/shootouts.csv
+    formato: csv
+    licenca: CC0 1.0 (domínio público)

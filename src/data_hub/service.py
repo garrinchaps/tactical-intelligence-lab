@@ -63,6 +63,9 @@ class MatchDataService:
         self.football_data = FootballDataProvider(self.db)
         self.espn = EspnProvider(self.db)
         self.fdcouk = FootballDataCoUkProvider(self.db)
+        from src.data_hub.sources.openfootball import OpenFootballProvider
+
+        self.openfootball = OpenFootballProvider(self.db)
         self.finder = UniversalMatchFinder(self.db, providers={
             "api_football": self.api_football, "espn": self.espn, "football_data": self.football_data,
         })
@@ -76,6 +79,7 @@ class MatchDataService:
             "football_data": {"enabled": self.football_data.enabled},
             "espn": {"enabled": self.espn.enabled},
             "fdcouk": {"enabled": True, "note": "sem chave"},
+            "openfootball": {"enabled": True, "note": "sem chave (CC0)"},
         }
 
     def load(self, match_id: int) -> MatchBundle:

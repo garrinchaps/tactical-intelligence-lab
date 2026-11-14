@@ -24,10 +24,105 @@ def _data():
     return pd.read_csv(SAMPLE)
 
 
+def _didactic() -> None:
+    from src.machine_learning.model_registry import model_card
+    from src.ui.components import steps_html
+
+    st.markdown("### Em 30 segundos")
+    st.markdown("A cada passe ou condução de bola, a rede responde uma pergunta só: **qual a chance de esta posse terminar "
+                "em finalização?** Ela aprendeu isso olhando milhares de jogadas reais da Copa de 2022 e vendo quais "
+                "terminaram em chute. O Assistente usa essa chance para dizer quem criou mais perigo e de onde ele saiu.")
+    card = None
+    try:
+        card = model_card()
+    except Exception:
+        pass
+    if card:
+        c = st.columns(4)
+        c[0].metric("Versão em uso", card["versao"])
+        c[1].metric("Jogos usados no treino", card["partidas_de_treino"])
+        c[2].metric("Acerto na prova (AUC)", card["auc_validacao"])
+        c[3].metric("Treinada em", card["treinado_em"])
+        st.caption("AUC: 0,5 = chute no escuro; 1,0 = acerta sempre. Para perigo de posse, com dados abertos, valores entre "
+                   "0,6 e 0,7 são o normal da literatura.")
+    st.markdown("### Passo a passo")
+    st.markdown(steps_html([
+        ("O que a rede vê",
+         "Cada jogada vira 14 números: <b>distância</b> e <b>ângulo</b> até o gol, quantos <b>adversários estão a 5 m</b> "
+         "(medido pelo tracking 360 da StatsBomb), quantos <b>passes</b> a posse já teve, o <b>placar</b> naquele momento e "
+         "a <b>zona do campo</b>. É como um olheiro que anota a situação antes de cada toque."),
+        ("O neurônio: uma soma com pesos",
+         "Cada neurônio multiplica esses números por <b>pesos</b> (o quanto cada coisa importa), soma tudo e decide se "
+         "“acende”. Ex.: perto do gol e com poucos marcadores → soma alta. A rede tem 2 camadas escondidas (32 e 16 "
+         "neurônios) que combinam essas pistas e uma saída que dá a chance de 0% a 100%."),
+        ("Aprender = errar menos",
+         "No começo os pesos são aleatórios e a rede chuta. Para cada jogada ela compara o palpite com o que aconteceu "
+         "(teve chute ou não) e mede o erro — a <b>perda</b>. O objetivo do treino é fazer essa perda cair."),
+        ("Backpropagation: quem teve culpa no erro",
+         "Depois de cada lote de jogadas, o erro é “devolvido” da saída para trás: cada peso recebe a parcela de culpa "
+         "que teve e é ajustado um pouquinho na direção que diminui o erro (<b>descida do gradiente</b>). Repetir isso "
+         "milhares de vezes é o que chamamos de treinar. Tudo foi escrito do zero, sem biblioteca pronta de IA."),
+        ("Uma prova que a rede nunca viu",
+         "16 jogos ficam separados desde o início e <b>nunca</b> entram no treino. Toda versão nova faz a mesma prova. "
+         "Assim “melhorou” quer dizer melhorou de verdade, e não decorou as respostas."),
+        ("Guardamos sempre a melhor",
+         "Cada treino gera uma versão. Ela só vira a <b>versão oficial</b> se errar menos na prova do que a atual; senão "
+         "fica registrada como rejeitada. O Assistente sempre usa a oficial e diz qual é em cada resposta."),
+        ("Por que ela melhora",
+         "Treinar de novo nos mesmos dados quase não muda nada (a prova mostra isso). O que faz a rede aprender é ter "
+         "<b>mais jogos</b> para estudar — a curva de aprendizado lá embaixo mostra o erro caindo quando entram mais partidas."),
+        ("Onde aparece no programa",
+         "No Assistente: “quem mais criou perigo?”, nos planos “como anular o jogador X?” (de onde saem as jogadas perigosas "
+         "dele) e “que tática a equipe Y deveria usar?” (por onde o adversário cria perigo)."),
+    ]), unsafe_allow_html=True)
+
+
+def _simulator() -> None:
+    """Uma jogada inventada pelo usuário → chance de terminar em chute segundo a versão oficial."""
+    import numpy as np
+
+    from src.machine_learning.danger_dataset import ZONE_COLS, _zone_onehot
+    from src.machine_learning.model_registry import champion_cached
+
+    st.markdown("### 🎮 Teste a rede com uma jogada")
+    net = champion_cached()
+    if net is None:
+        st.caption("Ainda não há versão treinada.")
+        return
+    a, b, c, d = st.columns(4)
+    x_m = a.slider("Distância até a linha de fundo adversária (m)", 2, 100, 25)
+    lane = b.select_slider("Corredor", ["esquerda", "centro-esquerda", "centro", "centro-direita", "direita"], "centro")
+    dens = c.slider("Adversários a 5 m", 0, 6, 1)
+    passes = d.slider("Passes já feitos na posse", 0, 15, 4)
+    score = st.select_slider("Placar para quem tem a bola", ["perdendo por 2+", "perdendo por 1", "empatando",
+                                                             "ganhando por 1", "ganhando por 2+"], "empatando")
+    x = 120 - x_m / 0.9144
+    y = {"esquerda": 8, "centro-esquerda": 26, "centro": 40, "centro-direita": 54, "direita": 72}[lane]
+    dx = max(120 - x, 0.1)
+    dist = float(np.hypot(dx, 40 - y) * 0.9144)
+    ang = float(np.degrees(abs(np.arctan2(44 - y, dx) - np.arctan2(36 - y, dx))))
+    sd = {"perdendo por 2+": -2, "perdendo por 1": -1, "empatando": 0, "ganhando por 1": 1, "ganhando por 2+": 2}[score]
+    z = _zone_onehot(np.array([x]), np.array([float(y)]))
+    feats = [dist, ang, dens, passes, sd] + [float(z[c_][0]) for c_ in ZONE_COLS]
+    p = float(net.predict_proba(np.array([feats]))[0])
+    col1, col2 = st.columns([1, 2])
+    col1.metric("Chance de a posse terminar em finalização", f"{100 * p:.1f}%")
+    col2.markdown(f"Distância real ao gol: **{dist:.1f} m**, ângulo de visão do gol: **{ang:.1f}°**. "
+                  "Mexa nos controles: chegar mais perto e pelo centro aumenta a chance; mais marcadores por perto, em "
+                  "geral, diminuem. É exatamente esse número, calculado para cada jogada real, que o Assistente soma "
+                  "para dizer quem criou mais perigo.")
+
+
 def render(ctx=None) -> None:
-    page_header("🧠 Rede Neural do Zero",
-                "Perceptron multicamadas implementado em NumPy puro — forward, backpropagation e descida de gradiente "
-                "escritos à mão, para inspecionar o mecanismo de aprendizado.", ctx)
+    from src.ui.components import hero, steps_html
+
+    hero("Bastidores · como a IA aprende", "Uma rede neural que aprende a ler o perigo de uma jogada",
+         "Explicação para quem não é da área: o que a rede faz, como aprende, como sabemos que melhorou e onde ela "
+         "aparece nas respostas do Assistente. Abaixo, a parte técnica para quem quiser ver por dentro.")
+    _didactic()
+    _simulator()
+    st.markdown("---")
+    st.markdown("## 🔧 Por dentro (parte técnica)")
     note("Objetivo didático", "A rede resolve a mesma tarefa do XGBoost (perigo de posse) para comparação direta. "
          "Ficar abaixo do XGBoost seria esperado: o objetivo é mostrar como o aprendizado acontece, não superar o estado da arte.")
     with st.expander("📐 Como a rede aprende (fórmulas implementadas em src/machine_learning/neural_net.py)", expanded=False):

@@ -126,3 +126,17 @@ fica com chave própria (nada é fundido por palpite fraco).
 jan/2026, após a Opta encerrar o contrato — o conector pedido não teria esses dados. Sofascore, Flashscore,
 WhoScored e 365Scores proíbem coleta automatizada e bloqueiam robôs; WhoScored exibe dados licenciados da Opta.
 Simonetti Stats usa provedores pagos não identificados; planilhas exportadas entram pelo ScoutFileParser.
+
+## 5. Interface (v25) e fontes abertas globais
+
+* `app.py`: navegação oculta do Streamlit + barra própria no topo (page_link em pílulas, ⚙️ Bastidores num popover),
+  busca global e faixa da partida (`components.match_strip`) com "Trocar partida" (popover com o seletor).
+* `src/ui/pages/assistant.py` + `src/intelligence/match_locator.py`: chat único; o localizador lê times (inclusive
+  nomes em português) e ano dentro da pergunta e escolhe a versão mais rica do jogo no catálogo.
+* `src/ui/crests.py`: bandeiras (flagcdn) para seleções; escudos pela API-Football/Transfermarkt via `team_ids`;
+  escudo gerado (SVG) como reserva.
+* Fontes abertas: `openfootball` (CC0, `git pull` diário) e `config/open_sources.yaml` (lista de arquivos abertos;
+  hoje: resultados, gols e pênaltis de seleções, CC0). A sugestão de um rastreador genérico com rotação de
+  User-Agent e varredura de qualquer site com "football"/"stats" no endereço não foi adotada: contornar limites de
+  acesso e varrer sites de terceiros sem controle é o que faz sites bloquearem IPs; a lista explícita de fontes
+  abertas entrega a escala (≈ 130 mil jogos novos) sem esse risco.

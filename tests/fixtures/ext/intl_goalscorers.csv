@@ -1,0 +1,7 @@
+date,home_team,away_team,team,scorer,minute,own_goal,penalty,assist
+2022-12-18,Argentina,France,Argentina,Lionel Messi,23,FALSE,TRUE,NA
+2022-12-18,Argentina,France,Argentina,Ángel Di María,36,FALSE,FALSE,Alexis Mac Allister
+2022-12-18,Argentina,France,France,Kylian Mbappé,80,FALSE,TRUE,NA
+2022-12-18,Argentina,France,France,Kylian Mbappé,81,FALSE,FALSE,Marcus Thuram
+2022-12-18,Argentina,France,Argentina,Lionel Messi,109,FALSE,FALSE,NA
+2022-12-18,Argentina,France,France,Kylian Mbappé,118,FALSE,TRUE,NA

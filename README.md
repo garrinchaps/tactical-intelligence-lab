@@ -26,6 +26,8 @@ O **Data Hub** (`src/data_hub/`) junta várias fontes num único catálogo SQLit
 | [StatsBomb Open Data](https://github.com/statsbomb/open-data) | não | Copas do Mundo, Euros, Champions, La Liga (era Messi), Bundesliga 23/24, Premier 15/16, ligas femininas e outras | sincronização incremental: novas temporadas publicadas entram sozinhas |
 | [Wyscout Public Dataset](https://github.com/koenvo/wyscout-soccer-match-event-dataset) | não | 5 grandes ligas 2017/18, Copa 2018, Euro 2016 | CC BY 4.0. Sem eventos de pressão; xG estimado pelo modelo do laboratório; posições inferidas |
 | [API-Football](https://www.api-football.com) | `API_FOOTBALL_KEY` | +1.000 ligas, inclui Brasileirão A/B, Copa do Brasil, Libertadores | grátis: 100 req/dia (controladas). A temporada atual pode exigir plano pago |
+| [openfootball/football.json](https://github.com/openfootball/football.json) | não | ~84 mil jogos de dezenas de ligas desde 2010 (inclui Brasileirão 2026); arquivos completos com gols, escalações, cartões e público | CC0 (domínio público), atualizado por `git pull` |
+| [international_results](https://github.com/martj42/international_results) | não | ~50 mil jogos de seleções desde 1872, com autores dos gols | CC0; lista editável em `config/open_sources.yaml` |
 | [football-data.co.uk](https://www.football-data.co.uk) | não | 16 ligas europeias (placar, 1º tempo, finalizações, no alvo, escanteios, faltas, cartões) desde os anos 1990; Brasileirão, Argentina, MLS, Liga MX e outras (placar) | CSVs gratuitos para download, com crédito. `--seasons 30` baixa o histórico completo |
 | [football-data.org](https://www.football-data.org) | `FOOTBALL_DATA_TOKEN` | 12 competições, inclui Brasileirão Série A | grátis: só placares, 10 req/min |
 | ESPN (feed JSON público) | `ENABLE_ESPN_PUBLIC_FEED=true` | jogos atuais de muitas ligas | **não oficial e desativado por padrão**. Use só para fins pessoais/acadêmicos, com baixa frequência, e confira os termos da ESPN |
@@ -83,18 +85,17 @@ validação com analistas humanos em [`docs/VALIDACAO_QUALITATIVA.md`](docs/VALI
 
 ## 🖥️ Interface
 
-Navegação lateral agrupada; só a página aberta é calculada. Funciona offline com as partidas de `data/demo/`.
+Tema escuro (preto, branco, detalhes vermelho/azul), navegação em pílulas no topo, busca global e faixa da partida
+aberta com escudos/bandeiras. Funciona offline com as partidas de `data/demo/`.
 
-| Grupo | Página | Conteúdo |
-|---|---|---|
-| Partida | 🏟️ Centro da Partida | placar, KPIs com origem, momento do jogo, comparativo, boxscore quando não há eventos |
-| Partida | 🕸️ Redes de Passes & xT | rede de passes, progressão de xT, grau × betweenness por xT |
-| Inteligência Artificial | 🤖 Machine Learning & Inspeção | baselines, AUC por fold, importância, profundidade e ganho por split, matriz de confusão, K-Means com centróides, DBSCAN com eps/min_samples ajustáveis |
-| Inteligência Artificial | 🧠 Rede Neural do Zero | treino ao vivo com hiperparâmetros, curva de perda, arquitetura, pais → filhos de cada neurônio |
-| Inteligência Artificial | 💬 Analista IA | perguntas por recorte, classificação de cada número pelo guard, histórico da taxa |
-| Jogadores, Clube e Comparações | 🆚 Comparações | as duas equipes lado a lado (indicadores, gols, destaques, redes de passes); a equipe contra ela mesma em outras partidas; jogador × jogador na partida ou somando várias partidas (totais e por 90 min) |
-| Jogadores, Clube e Comparações | 👤 Jogadores · 📈 Clube · ⚖️ Pontos Fortes e Fracos | estatísticas individuais de todos os atletas (totais e por 90, exportáveis), elenco, dossiê, radar com n, tendências, percentis com “amostra insuficiente” |
-| Dados | 🗄️ Catálogo & Dados · 🧪 Laboratório | fontes, sync, catálogo YAML, schema, upload de arquivos de scout; simulador de cenários com IC 95% e homografia |
+| Página | Conteúdo |
+|---|---|
+| 💬 Assistente | chat único: a pergunta pode citar o jogo (“Argentina x França 2022: quem mais criou perigo?”) — o jogo é encontrado e aberto; respostas conferidas pelo guard |
+| 🏟️ Jogos | pesquisa em todas as fontes + análise da partida: resumo, redes & xT, jogadores, fortes e fracos, duas equipes |
+| 🛡️ Clubes | perfil, forma (V/E/D), jogos, elenco e valores (Transfermarkt), xG por temporada (Understat) |
+| 👤 Jogadores | perfil, valor de mercado e histórico, temporada (Understat), todos os jogos com eventos |
+| 🆚 Comparar | jogador × jogador (várias partidas, totais e por 90), jogo × jogo, clube × clube (forma, confronto direto, valor), equipe × ela mesma, duas equipes |
+| ⚙️ Bastidores | **Como a IA aprende** (explicação para leigos, simulador de jogada, treino, versões), ML & avaliação, analista técnico (guard), dados & fontes, laboratório |
 
 Roteiro de apresentação: [`docs/APRESENTACAO.md`](docs/APRESENTACAO.md).
 

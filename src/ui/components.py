@@ -124,8 +124,10 @@ def scoreboard(home: str, away: str, score: str, meta_text: str = "", home_goals
     if home_goals or away_goals:
         goals_row = (f'<div class="grow"><div class="gcol">{col(home_goals, "right")}</div><div class="gsep"></div>'
                      f'<div class="gcol">{col(away_goals, "left")}</div></div>')
-    st.markdown(f'<div class="til-score"><div class="row"><div class="team" style="text-align:right">{_esc(home)}</div>'
-                f'<div class="box">{_esc(score)}</div><div class="team" style="text-align:left">{_esc(away)}</div></div>'
+    from src.ui.crests import crest_img
+
+    st.markdown(f'<div class="til-score"><div class="row"><div class="team" style="text-align:right">{_esc(home)} {crest_img(home, "md")}</div>'
+                f'<div class="box">{_esc(score)}</div><div class="team" style="text-align:left">{crest_img(away, "md")} {_esc(away)}</div></div>'
                 f'{goals_row}' + (f'<div class="pen">{_esc(extra_line)}</div>' if extra_line else "")
                 + f'<div class="meta">{_esc(meta_text)}</div></div>', unsafe_allow_html=True)
 
@@ -153,3 +155,46 @@ def provenance_panel(registry: ProvenanceRegistry) -> None:
                                         "ingestion_timestamp": "ingestão", "generator": "gerador",
                                         "ci_low": "IC 2,5%", "ci_high": "IC 97,5%"}),
                      use_container_width=True, hide_index=True)
+
+
+def hero(kicker: str, title: str, subtitle: str = "") -> None:
+    st.markdown(f'<div class="til-hero"><div class="k">{_esc(kicker)}</div><div class="t">{_esc(title)}</div>'
+                f'<div class="s">{_esc(subtitle)}</div></div>', unsafe_allow_html=True)
+
+
+def _score_of(m) -> str:
+    hs, as_ = m.get("home_score"), m.get("away_score")
+    try:
+        return f"{int(hs)} – {int(as_)}" if hs is not None and as_ is not None and str(hs) != "nan" and str(as_) != "nan" else "x"
+    except (TypeError, ValueError):
+        return "x"
+
+
+def match_strip(meta: dict, level_badge: str = "") -> None:
+    """Faixa compacta da partida aberta (escudos, placar, competição, nível do dado)."""
+    from src.ui.crests import crest_img
+
+    h, a = meta.get("home_team_name", ""), meta.get("away_team_name", "")
+    st.markdown(f'<div class="til-strip"><div class="tm">{crest_img(h)} {_esc(h)}</div><div class="sc">{_score_of(meta)}</div>'
+                f'<div class="tm">{_esc(a)} {crest_img(a)}</div><div class="meta">{_esc(meta.get("competition_name", ""))} '
+                f'{_esc(meta.get("season_name", ""))}<br>{_esc(meta.get("match_date", ""))} · {_esc(level_badge)}</div></div>',
+                unsafe_allow_html=True)
+
+
+def result_card_html(m: dict, level_badge: str = "") -> str:
+    from src.ui.crests import crest_img
+
+    h, a = m.get("home_team_name", ""), m.get("away_team_name", "")
+    return (f'<div class="til-result"><div class="tm r">{_esc(h)} {crest_img(h)}</div><div class="sc">{_score_of(m)}</div>'
+            f'<div class="tm">{crest_img(a)} {_esc(a)}</div><div class="meta">{_esc(m.get("competition_name", ""))}<br>'
+            f'{_esc(m.get("match_date", ""))} · {_esc(level_badge)}</div></div>')
+
+
+def form_html(results) -> str:
+    """Sequência V/E/D (mais recente à direita)."""
+    return '<div class="til-form">' + "".join(f'<span class="{r}">{r}</span>' for r in results) + "</div>"
+
+
+def steps_html(items) -> str:
+    return "".join(f'<div class="til-step"><div class="n">{i}</div><div><div class="t">{_esc(t)}</div>'
+                   f'<div class="b">{b}</div></div></div>' for i, (t, b) in enumerate(items, 1))

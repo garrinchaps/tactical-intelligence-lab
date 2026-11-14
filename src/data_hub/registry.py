@@ -116,6 +116,18 @@ SOURCES: Dict[str, SourceInfo] = {
         "de equipe; ligas extras (inclui Brasileirão): placar.",
         "https://www.football-data.co.uk", connector="CSVConnector[football-data.co.uk]", raw_tier="OFFICIAL",
     ),
+    "openfootball": SourceInfo(
+        "openfootball", "openfootball / football.json (CC0)", DataLevel.BOXSCORE,
+        3_000_000_000, True,
+        "Domínio público (CC0 1.0). Resultados de dezenas de ligas; arquivos completos trazem gols, escalações, "
+        "cartões, público e árbitro.",
+        "https://github.com/openfootball/football.json", connector="OpenFootballProvider", raw_tier="OFFICIAL",
+    ),
+    "intl": SourceInfo(
+        "intl", "Resultados de seleções desde 1872 (martj42/international_results, CC0)", DataLevel.BOXSCORE,
+        4_000_000_000, True, "Domínio público (CC0 1.0). Placar, torneio, local e autores dos gols.",
+        "https://github.com/martj42/international_results", connector="OpenSourcesIngestor", raw_tier="OFFICIAL",
+    ),
 }
 
 SIMULATED_ID_RANGES = ((880_000, 889_999), (900_000, 989_999))
@@ -133,7 +145,7 @@ def source_from_internal_id(match_id: int) -> str:
             return "simulated"
     if mid == UPLOAD_ID:
         return "upload"
-    for key in ("fdcouk", "espn", "football_data", "api_football", "wyscout"):
+    for key in ("intl", "openfootball", "fdcouk", "espn", "football_data", "api_football", "wyscout"):
         off = SOURCES[key].id_offset
         if mid >= off:
             return key

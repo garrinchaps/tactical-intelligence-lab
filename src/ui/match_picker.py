@@ -36,12 +36,12 @@ def _select(service: MatchDataService, match_id: int) -> None:
     st.session_state.pop("upload_df", None)
 
 
-def render_match_picker(service: MatchDataService) -> None:
-    st.sidebar.markdown("## ⚽ Tactical Intelligence Lab")
-    st.sidebar.caption("Escolha a partida e a equipe em foco.")
+def render_match_picker(service: MatchDataService, box=None) -> None:
+    """Busca/catálogo/arquivo para escolher a partida. `box` = onde desenhar (painel do topo; antes era a barra lateral)."""
+    box = box if box is not None else st
     from src.data_hub.gender import LABELS, gender_of
 
-    genero = st.sidebar.radio("Futebol", ["masculino", "feminino", "todos"], horizontal=True, key="genero",
+    genero = box.radio("Futebol", ["masculino", "feminino", "todos"], horizontal=True, key="genero",
                               format_func=lambda g: LABELS[g],
                               help="Separa as competições masculinas e femininas na busca e no catálogo.")
 
@@ -51,7 +51,7 @@ def render_match_picker(service: MatchDataService) -> None:
         g = df["genero"] if "genero" in df.columns else pd.Series([gender_of(r) for r in df.to_dict("records")], index=df.index)
         return df[g == genero]
 
-    tab_search, tab_catalog, tab_upload = st.sidebar.tabs(["🔎 Buscar", "📚 Catálogo", "📁 Arquivo"])
+    tab_search, tab_catalog, tab_upload = box.tabs(["🔎 Buscar", "📚 Catálogo", "📁 Arquivo"])
 
     with tab_search:
         query = st.text_input(
