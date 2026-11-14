@@ -28,7 +28,9 @@ from dotenv import load_dotenv
 from src.data_hub.db import DataHubDB, utc_now
 from src.data_hub.service import MatchDataService
 
-ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "api_football", "football_data", "espn"]
+ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "api_football", "football_data", "espn",
+               "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]
+LAKE_SOURCES = ["transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]   # alimentam data/lake
 QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
 
 
@@ -54,9 +56,19 @@ def run_sync(
         "football_data": lambda: svc.football_data.sync_recent(days_back=max(days_back, 3)),
         "espn": lambda: svc.espn.sync_recent(days_back=days_back),
         "fdcouk": lambda: svc.fdcouk.sync(seasons_back=seasons_back, progress=say),
+        "transfermarkt": lambda: _lake_job("transfermarkt", svc, say, seasons_back),
+        "understat": lambda: _lake_job("understat", svc, say, seasons_back),
+        "api_futebol": lambda: _lake_job("api_futebol", svc, say, seasons_back),
+        "basedosdados": lambda: _lake_job("basedosdados", svc, say, seasons_back),
+        "simonetti": lambda: _lake_job("simonetti", svc, say, seasons_back),
+        "lake": lambda: _lake_job("lake", svc, say, seasons_back),
     }
+    from src.data_hub.sources.api_futebol import ApiFutebolProvider
+    from src.data_hub.sources.basedosdados import BaseDosDadosProvider
+
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
-               "espn": svc.espn.enabled}
+               "espn": svc.espn.enabled, "api_futebol": ApiFutebolProvider().enabled,
+               "basedosdados": BaseDosDadosProvider().enabled}
 
     for src in sources or ALL_SOURCES:
         if src not in jobs:
@@ -95,6 +107,45 @@ def run_sync(
     if prefetch_boxscores > 0:
         results["prefetch_boxscores"] = {"status": "OK", **prefetch_recent_boxscores(svc, days_back, prefetch_boxscores, say)}
     return results
+
+
+def _lake_job(name: str, svc: MatchDataService, say: Callable[[str], None], seasons_back: int) -> Dict[str, int]:
+    """Fontes que alimentam o lake (data/lake) e a camada unificada de IDs."""
+    from src.data_lake.lake import Lake
+
+    lake = Lake(sqlite_path=svc.db.db_path)
+    if name == "transfermarkt":
+        from src.data_hub.sources.transfermarkt_ds import TransfermarktDatasets
+
+        return TransfermarktDatasets().sync(lake, progress=say)
+    if name == "understat":
+        from src.data_hub.sources.understat import UnderstatProvider
+
+        return UnderstatProvider().sync(lake, seasons_back=min(seasons_back, 10), progress=say)
+    if name == "api_futebol":
+        from src.data_hub.sources.api_futebol import ApiFutebolProvider
+
+        return ApiFutebolProvider().sync(lake, progress=say)
+    if name == "simonetti":
+        from src.data_hub.sources.simonetti import SimonettiCollector
+
+        return SimonettiCollector().sync(lake, progress=say)
+    if name == "basedosdados":
+        from src.data_hub.sources.basedosdados import BaseDosDadosProvider
+
+        return BaseDosDadosProvider().sync(lake, progress=say)
+    out: Dict[str, int] = {}
+    if svc.api_football.enabled:                     # classificação + próximos jogos (API-Football)
+        from src.data_hub.sources.api_football import sync_tables
+
+        try:
+            out.update(sync_tables(svc.api_football, lake, progress=say))
+        except Exception as exc:
+            say(f"  api-football tabelas: {exc}")
+    from src.data_lake.build import build_all
+
+    out.update(build_all(svc.db, lake, progress=say))
+    return out
 
 
 def prefetch_recent_boxscores(svc: MatchDataService, days_back: int = 3, limit: int = 40,

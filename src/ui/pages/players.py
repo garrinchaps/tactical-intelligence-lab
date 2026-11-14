@@ -96,6 +96,26 @@ def _scout(ctx: MatchContext, players_df: pd.DataFrame) -> None:
             note("Partida simulada", "Os valores individuais vêm do gerador por perfis: comparação ilustrativa.", "warn")
 
 
+def _with_market_value(s: pd.DataFrame, ctx: MatchContext) -> pd.DataFrame:
+    """Acrescenta o valor de mercado (Transfermarkt) pelo mapeamento de IDs da base unificada, quando existir."""
+    try:
+        from src.data_lake.build import market_values
+
+        mv = market_values()
+    except Exception:
+        return s
+    if mv.empty:
+        return s
+    src = ctx.bundle.source
+    m = mv[mv["fonte"] == src][["nome", "valor_mercado_eur"]].drop_duplicates("nome")
+    out = s.merge(m.rename(columns={"nome": "jogador", "valor_mercado_eur": "valor_mercado_eur"}), on="jogador", how="left")
+    if out["valor_mercado_eur"].notna().any():
+        out["valor de mercado (€ mi, Transfermarkt)"] = (out.pop("valor_mercado_eur") / 1e6).round(1)
+    else:
+        out = out.drop(columns=["valor_mercado_eur"])
+    return out
+
+
 def _stats_table(ctx: MatchContext) -> None:
     from src.metrics.match_facts import PLAYER_STAT_LABELS, per90, player_match_stats
 
@@ -112,6 +132,7 @@ def _stats_table(ctx: MatchContext) -> None:
     if mode == "Por 90 minutos":
         s = per90(s)
         note("Por 90 minutos", "Atletas com poucos minutos têm valores por 90 instáveis: veja a coluna de minutos.", "warn")
+    s = _with_market_value(s, ctx)
     order = st.selectbox("Ordenar por", list(PLAYER_STAT_LABELS), index=list(PLAYER_STAT_LABELS).index("xt"),
                          format_func=lambda k: PLAYER_STAT_LABELS[k], key="ps_order")
     s = s.sort_values(order, ascending=False)

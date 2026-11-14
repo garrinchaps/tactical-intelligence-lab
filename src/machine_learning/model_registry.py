@@ -56,8 +56,9 @@ class Version:
 
 
 class DangerModelRegistry:
-    def __init__(self, root: Path = ROOT):
-        self.root = Path(root)
+    def __init__(self, root: Optional[Path] = None):
+        # a pasta padrão é lida na hora (e não na importação), para testes e ferramentas poderem redirecioná-la
+        self.root = Path(root) if root is not None else Path(ROOT)
         self.root.mkdir(parents=True, exist_ok=True)
         self.meta_path = self.root / "registry.json"
         self.meta = self._read()
@@ -237,7 +238,8 @@ def score_actions(df_events: pd.DataFrame, net: Optional[NeuralNetwork] = None) 
 
 
 def model_card() -> Optional[Dict[str, Any]]:
-    """Resumo do campeão para citar nas respostas."""
+    """Resumo do campeão para citar nas respostas (cria a v001 na primeira vez, como champion_cached)."""
+    champion_cached()
     reg = DangerModelRegistry()
     c = reg.champion_info()
     if not c:

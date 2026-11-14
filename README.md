@@ -41,6 +41,9 @@ python -m src.data_hub.sync --only fdcouk --seasons 30   # histórico completo d
 
 `--prefetch-events N` baixa os eventos das N partidas mais recentes que ainda não estão no banco. Isso alimenta a base de referência de *Pontos Fortes e Fracos*. A mesma sincronização tem um botão na página **🗄️ Catálogo & Dados**.
 
+**Base unificada (Understat, Transfermarkt, API-Futebol, Base dos Dados):** `python -m src.data_hub.sync --only transfermarkt understat lake`
+monta `data/lake/` (Parquet) e as tabelas de mapeamento de IDs (`dim_teams`, `dim_players`). Detalhes em `docs/ARQUITETURA.md` (seção 4).
+
 **Atualização automática (jogos novos entram sozinhos)**
 
 - **App aberto:** a cada 3 h (`AUTO_SYNC_HOURS` no `.env`) o app busca em segundo plano os jogos encerrados

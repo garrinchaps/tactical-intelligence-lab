@@ -11,8 +11,9 @@ from src.machine_learning.clustering import SpatialTacticalClustering
 from src.networks.pass_network import PassingNetworkAnalyzer
 from src.reports.report_builder import BenchmarkDiscrepancyEngine
 from src.tactical_engine.diagnostic_engine import TacticalDiagnosticEngine
+from src.ui import charts
 from src.ui.charts import _layout
-from src.ui.components import (empty_state, error_state, metric_card, note, page_header, provenance_panel, scoreboard,
+from src.ui.components import (comparison_table, empty_state, error_state, metric_card, note, page_header, provenance_panel, scoreboard,
                                stat_pill)
 from src.ui.context import MatchContext
 from src.ui.theme import PALETTE
@@ -153,6 +154,31 @@ def render_events(ctx: MatchContext) -> None:
         error_state("Diagnósticos indisponíveis", exc)
 
 
+def _understat_shots(ctx: MatchContext, home: str) -> None:
+    """Mapa de finalizações e xG do Understat, quando a partida estiver ligada a um jogo Understat."""
+    try:
+        from src.data_lake.build import shots_for_match
+
+        shots = shots_for_match(ctx.match_id)
+    except Exception:
+        return
+    if shots.empty:
+        return
+    st.markdown("##### 📍 Finalizações e xG (Understat)")
+    by = shots.groupby("equipe").agg(chutes=("xg", "size"), xg=("xg", "sum"), gols=("resultado", lambda r: int((r == "gol").sum())))
+    c = st.columns(len(by))
+    for col, (team, r) in zip(c, by.iterrows()):
+        with col:
+            metric_card(f"xG — {team}", f"{r['xg']:.2f}",
+                        ctx.prov(f"us_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
+                                 "soma do xG das finalizações (modelo do Understat)", tier="DERIVED"),
+                        f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
+    st.plotly_chart(charts.shot_map(shots, home, "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
+                    use_container_width=True)
+    with st.expander("Lista de finalizações"):
+        comparison_table(shots[["minuto", "equipe", "jogador", "assistente", "situacao", "tipo", "resultado", "xg"]])
+
+
 def render_boxscore(ctx: MatchContext) -> None:
     b, m = ctx.bundle, ctx.bundle.meta or {}
     home, away = m.get("home_team_name", ""), m.get("away_team_name", "")
@@ -172,6 +198,7 @@ def render_boxscore(ctx: MatchContext) -> None:
                home_goals=hg, away_goals=ag)
     for n in b.notes:
         st.warning(n)
+    _understat_shots(ctx, home)
     box = b.boxscore or {}
     stats, lineups, timeline, players = (box.get(k, pd.DataFrame()) for k in ("team_stats", "lineups", "timeline", "player_stats"))
     if stats.empty and lineups.empty and timeline.empty:

@@ -200,3 +200,69 @@ class ApiFootballProvider:
             totals["added"] += r["added"]
             totals["updated"] += r["updated"]
         return totals
+
+
+# ---------------------------------------------------------------------- classificação e calendário
+def standings_frame(resp: List[Dict[str, Any]], league_name: str = "") -> "pd.DataFrame":
+    import pandas as pd
+
+    rows = []
+    for item in resp or []:
+        lg = item.get("league") or {}
+        for group in lg.get("standings") or []:
+            for t in group:
+                a = t.get("all") or {}
+                g = a.get("goals") or {}
+                rows.append({"campeonato": league_name or lg.get("name"), "temporada": lg.get("season"),
+                             "grupo": t.get("group"), "posicao": t.get("rank"), "equipe": (t.get("team") or {}).get("name"),
+                             "api_football_id": (t.get("team") or {}).get("id"), "pontos": t.get("points"),
+                             "jogos": a.get("played"), "vitorias": a.get("win"), "empates": a.get("draw"),
+                             "derrotas": a.get("lose"), "gols_pro": g.get("for"), "gols_contra": g.get("against"),
+                             "saldo": t.get("goalsDiff"), "ultimos_jogos": t.get("form")})
+    return pd.DataFrame(rows)
+
+
+def fixtures_frame(resp: List[Dict[str, Any]], league_name: str = "") -> "pd.DataFrame":
+    import pandas as pd
+
+    rows = []
+    for fx in resp or []:
+        f, lg, tm = fx.get("fixture") or {}, fx.get("league") or {}, fx.get("teams") or {}
+        rows.append({"api_football_id": f.get("id"), "campeonato": league_name or lg.get("name"), "rodada": lg.get("round"),
+                     "data_hora_utc": f.get("date"), "status": (f.get("status") or {}).get("short"),
+                     "mandante": (tm.get("home") or {}).get("name"), "visitante": (tm.get("away") or {}).get("name"),
+                     "estadio": (f.get("venue") or {}).get("name"), "arbitro": f.get("referee")})
+    return pd.DataFrame(rows)
+
+
+def sync_tables(provider: "ApiFootballProvider", lake, days_ahead: int = 7, progress=None) -> Dict[str, int]:
+    """Classificação e próximos jogos das ligas acompanhadas (2 requisições por liga; cache de 12 h)."""
+    import pandas as pd
+
+    say = progress or (lambda m: None)
+    today = date.today()
+    tabs, fxs = [], []
+    for lid, name in TRACKED_LEAGUES.items():
+        season = season_for(lid, today)
+        try:
+            tabs.append(standings_frame(provider._get("standings", {"league": lid, "season": season}, 12 * 3600), name))
+        except Exception as exc:
+            say(f"  api-football {name}: classificação indisponível ({exc})")
+        try:
+            fxs.append(fixtures_frame(provider._get("fixtures", {"league": lid, "season": season, "from": today.isoformat(),
+                                                                  "to": (today + timedelta(days=days_ahead)).isoformat()},
+                                                    12 * 3600), name))
+        except Exception as exc:
+            say(f"  api-football {name}: calendário indisponível ({exc})")
+    prov = dict(source="API-Football", connector="APIConnector[api-football]", license="API oficial com chave")
+    out = {"tabelas": 0, "proximos_jogos": 0}
+    if tabs and any(not t.empty for t in tabs):
+        t = pd.concat(tabs, ignore_index=True)
+        lake.write("apf_classificacao", t, **prov)
+        out["tabelas"] = int(t["campeonato"].nunique())
+    if fxs and any(not f.empty for f in fxs):
+        f = pd.concat(fxs, ignore_index=True)
+        lake.write("apf_calendario", f, **prov)
+        out["proximos_jogos"] = len(f)
+    out["updated"] = out["tabelas"]
+    return out

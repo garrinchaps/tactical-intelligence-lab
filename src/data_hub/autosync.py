@@ -3,7 +3,8 @@ Atualização automática da base enquanto o app está aberto.
 
 * A cada AUTO_SYNC_HOURS (padrão 3 h): jogos recentes — football-data.co.uk (temporada atual), API-Football,
   football-data.org e ESPN (as que estiverem habilitadas no .env) — e o boxscore dos jogos novos.
-* A cada 24 h: catálogos do StatsBomb e da Wyscout (novas competições/temporadas publicadas).
+* A cada 24 h: catálogos do StatsBomb e da Wyscout, Transfermarkt (valores de mercado), Understat (xG e
+  finalizações), API-Futebol e Base dos Dados (se configuradas) e a reconstrução da camada unificada de IDs.
 
 Roda numa thread em segundo plano, uma de cada vez, sem travar a interface. Com o app fechado, use a tarefa
 agendada do Windows (scripts/agendar_atualizacao.ps1). Desligar: AUTO_SYNC=0 no .env.
@@ -20,7 +21,7 @@ _lock = threading.Lock()
 _state: Dict[str, Any] = {"running": False, "last_finished": None, "last_attempt": None, "last_log": [], "last_error": None}
 RETRY_MINUTES = 30   # se a última tentativa falhou (ex.: sem internet), espera antes de tentar de novo
 QUICK = ["fdcouk", "api_football", "football_data", "espn"]
-DAILY = ["statsbomb", "wyscout"]
+DAILY = ["statsbomb", "wyscout", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]
 
 
 def enabled() -> bool:

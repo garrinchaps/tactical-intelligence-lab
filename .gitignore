@@ -23,3 +23,6 @@ models/registry/
 data/processed/danger_rows_db.csv.gz
 data/processed/danger_full.csv.gz
 data/sync_log.txt
+
+# base unificada (gerada pela sincronização)
+data/lake/

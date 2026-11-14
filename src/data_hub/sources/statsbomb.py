@@ -10,6 +10,10 @@ StatsBomb Open Data — catálogo COMPLETO com atualização incremental.
 
 from __future__ import annotations
 
+import json
+import os
+from pathlib import Path
+
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -19,6 +23,35 @@ from src.data_hub.http import PoliteHttpClient
 from src.data_hub.registry import DataLevel
 
 BASE = "https://raw.githubusercontent.com/statsbomb/open-data/master/data"
+
+
+def local_root() -> Optional[Path]:
+    """
+    Cópia local do repositório statsbomb/open-data (git clone --depth 1 https://github.com/statsbomb/open-data).
+    Defina STATSBOMB_OPEN_DATA_PATH no .env com a pasta do clone; os JSONs passam a ser lidos do disco
+    (sem rede, sem limite de requisições e bem mais rápido).
+    """
+    raw = os.getenv("STATSBOMB_OPEN_DATA_PATH", "").strip().strip('"')
+    if not raw:
+        return None
+    p = Path(raw)
+    p = p / "data" if (p / "data" / "competitions.json").exists() else p
+    return p if (p / "competitions.json").exists() else None
+
+
+def _read_local(rel: str):
+    root = local_root()
+    if root is None:
+        return None
+    f = root / rel
+    if not f.exists():
+        return None
+    try:
+        import orjson  # opcional: 3–5× mais rápido para os JSONs grandes de eventos
+
+        return orjson.loads(f.read_bytes())
+    except ImportError:
+        return json.loads(f.read_text(encoding="utf-8"))
 CATALOG_MAX_AGE_S = 6 * 3600
 
 
@@ -64,7 +97,8 @@ class StatsBombProvider:
         return out
 
     def sync_catalog(self, include_women: bool = True, force: bool = False) -> Dict[str, int]:
-        comps = self.client.get_json(f"{BASE}/competitions.json", max_age_s=0 if force else CATALOG_MAX_AGE_S)
+        comps = _read_local("competitions.json") or self.client.get_json(
+            f"{BASE}/competitions.json", max_age_s=0 if force else CATALOG_MAX_AGE_S)
         totals = {"added": 0, "updated": 0, "seasons_checked": 0, "seasons_refreshed": 0}
         for comp in comps:
             if not include_women and comp.get("competition_gender") == "female":
@@ -75,7 +109,7 @@ class StatsBombProvider:
             if not force and self.db.get_state(self.source, key) == stamp:
                 continue
             try:
-                raw = self.client.get_json(
+                raw = _read_local(f"matches/{comp['competition_id']}/{comp['season_id']}.json") or self.client.get_json(
                     f"{BASE}/matches/{comp['competition_id']}/{comp['season_id']}.json",
                     max_age_s=0,  # temporada mudou: força download novo
                 )
@@ -96,6 +130,8 @@ class StatsBombProvider:
         # partidas do pacote de demonstração (data/demo/) abrem sem rede; as demais vêm do StatsBomb
         raw = load_demo_events(int(match_id))
         if raw is None:
+            raw = _read_local(f"events/{int(match_id)}.json")
+        if raw is None:
             raw = self.client.get_json(f"{BASE}/events/{int(match_id)}.json", max_age_s=None)
         df = StatsBombDataLoader._parse_raw_events(None, raw, int(match_id))  # parser não usa estado
         if not df.empty:
@@ -111,6 +147,9 @@ class StatsBombProvider:
 
     def load_360(self, match_id: int):
         """Freeze frames do StatsBomb 360 (posição dos atletas visíveis em cada evento); None se não houver."""
+        local = _read_local(f"three-sixty/{int(match_id)}.json")
+        if local is not None:
+            return local
         try:
             return self.client.get_json(f"{BASE}/three-sixty/{int(match_id)}.json", max_age_s=None)
         except Exception:

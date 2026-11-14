@@ -94,3 +94,35 @@ tabela `simulated_estimates`).
 | 9 | Gerador simulado com PPDA irreal (~217) | Camada defensiva calibrada pela Copa 2022 (0,316 ação defensiva por passe; 69% pressões). PPDA simulado 2,7–3,0; chutes e acerto de passe ainda acima/abaixo do real — limitação documentada. |
 | 10 | Pedido de raspar Sofascore, Flashscore, 365Scores, Oddspedia, Opta e Simonetti Stats | Não implementado: os termos de uso desses serviços proíbem coleta automatizada (Sofascore, Flashscore, 365Scores) ou os dados são licenciados (Opta/Stats Perform; a Simonetti usa provedores não nomeados). Em troca, entrou o football-data.co.uk, cujos CSVs são distribuídos gratuitamente, e o ScoutFileParser aceita planilhas exportadas pelo próprio usuário. |
 | 11 | Masculino × feminino misturados no catálogo | Coluna `genero` derivada do campo da StatsBomb e, sem ele, do nome da competição/equipes (`src/data_hub/gender.py`); filtro na barra lateral e nas comparações. |
+
+## 4. Base unificada (data/lake) e mapeamento de IDs
+
+```
+StatsBomb (clone local ou web) ─┐                      ┌─ dim_teams   + team_ids   (team_key ↔ id de cada fonte)
+Wyscout · football-data.co.uk ──┤                      ├─ dim_players + player_ids (player_key ↔ id de cada fonte)
+API-Football (+ classificação, ─┤   IdentityResolver   ├─ match_links (mesma partida em fontes diferentes)
+  calendário) · API-Futebol ────┼──────────────────────┤
+Understat (xG, finalizações) ───┤  src/data_lake/      ├─ us_*  tm_*  af_*  apf_*  bd_*  (tabelas por fonte)
+Transfermarkt (datasets) ───────┤                      └─ Parquet (pyarrow) ou CSV.gz · DuckDB opcional ·
+Base dos Dados (BigQuery) ──────┘                         espelho SQLite lake_*
+```
+
+| Fonte | O que traz | Acesso | Atualização |
+|---|---|---|---|
+| StatsBomb Open Data | eventos com coordenadas, 360 | web ou clone local (`STATSBOMB_OPEN_DATA_PATH`) | diária (catálogo) |
+| API-Football | resultados, boxscore, escalações, **classificação e próximos jogos** | chave grátis (100 req/dia) | a cada 3 h / diária |
+| API-Futebol | tabela, rodadas e partidas do futebol brasileiro | chave (`API_FUTEBOL_KEY`) | diária |
+| Understat | xG por partida e por jogador; **cada finalização com posição e xG** (6 ligas) | público | diária |
+| Transfermarkt | clubes, jogadores, **valor de mercado** e histórico, jogos com público e árbitro | transfermarkt-datasets (CSV público, semanal) | diária (baixa só se mudou) |
+| Base dos Dados | Brasileirão desde 2003: público, árbitro, técnicos, valor dos elencos | BigQuery (`BASEDOSDADOS_BILLING_ID`) | diária |
+| football-data.co.uk | resultados e estatísticas de 16 ligas europeias + placares de outras | CSV público | a cada 3 h |
+
+**Regras do mapeamento:** apelidos conhecidos → nome sem acento e sem sufixos (FC, EC, SC…) → semelhança ≥ 0,92 no
+mesmo país. Atletas: nome + clube, ou nome + data de nascimento (Transfermarkt); nome completo da StatsBomb casa
+com o curto quando primeiro e último nome coincidem no mesmo clube. Sem correspondência segura, a entidade
+fica com chave própria (nada é fundido por palpite fraco).
+
+**Fontes não incluídas e por quê:** FBref deixou de publicar métricas avançadas (xG, SCA, GCA, pressões) em
+jan/2026, após a Opta encerrar o contrato — o conector pedido não teria esses dados. Sofascore, Flashscore,
+WhoScored e 365Scores proíbem coleta automatizada e bloqueiam robôs; WhoScored exibe dados licenciados da Opta.
+Simonetti Stats usa provedores pagos não identificados; planilhas exportadas entram pelo ScoutFileParser.

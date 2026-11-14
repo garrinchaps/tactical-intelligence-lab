@@ -286,3 +286,22 @@ def radar(values: Dict[str, List[float]], labels: List[str], title: str, height:
                                       line=dict(color=colors[i % len(colors)], width=2)))
     fig.update_layout(polar=dict(bgcolor=P["surface"], radialaxis=dict(range=[0, 100], color=P["muted"])))
     return _layout(fig, title, height)
+
+
+def shot_map(shots: pd.DataFrame, home: str, title: str) -> go.Figure:
+    """Finalizações no campo: mandante atacando para a direita, visitante para a esquerda; tamanho ∝ xG; ★ = gol."""
+    fig = pitch(title=title)
+    for side, color in (("h", P["secondary"]), ("a", P["warning"])):
+        s = shots[shots["lado"] == side]
+        if s.empty:
+            continue
+        x = s["x"] if side == "h" else 120 - s["x"]
+        y = s["y"] if side == "h" else 80 - s["y"]
+        goal = s["resultado"].isin(["gol"])
+        fig.add_trace(go.Scatter(
+            x=x, y=y, mode="markers", name=str(s["equipe"].iloc[0]),
+            marker=dict(size=8 + 40 * s["xg"].clip(0, 1), color=color, line=dict(color=P["text"], width=goal.map({True: 2.5, False: 0.5})),
+                        symbol=["star" if g else "circle" for g in goal], opacity=0.85),
+            hovertext=[f"{r.minuto}' {r.jogador} — {r.resultado}, xG {r.xg:.2f} ({r.situacao})" for r in s.itertuples()],
+            hoverinfo="text"))
+    return fig

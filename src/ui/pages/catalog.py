@@ -176,10 +176,101 @@ def _scout_upload(reg: ProvenanceRegistry) -> None:
         kpi("linhas canônicas", len(canon), p)
 
 
+@st.cache_data(show_spinner=False, ttl=600)
+def _lake_table(name: str, version: str) -> pd.DataFrame:
+    from src.data_lake.lake import Lake
+
+    return Lake().read(name)
+
+
+def _simonetti_view(lake, ver: str) -> None:
+    """Tabelas coletadas do Simonetti Stats, com filtros por atleta, posição e clube."""
+    from src.data_hub.sources.simonetti import player_team_columns
+    from src.data_lake.build import simonetti_tables
+
+    names = simonetti_tables(lake)
+    if not names:
+        return
+    st.markdown("#### Simonetti Stats (coleta local para pesquisa)")
+    pick = st.selectbox("Tabela", names, key="sm_tab")
+    d = _lake_table(pick, ver)
+    pcol, tcol = player_team_columns(d)
+    poscol = next((c for c in d.columns if c.lower() in ("posicao", "posição", "position", "pos")), None)
+    a, b, c = st.columns(3)
+    q = a.text_input("Atleta contém", "", key="sm_q") if pcol else ""
+    clubs = ["todos"] + sorted(d[tcol].dropna().astype(str).unique()) if tcol else ["todos"]
+    club = b.selectbox("Clube", clubs, key="sm_club")
+    poss = ["todas"] + sorted(d[poscol].dropna().astype(str).unique()) if poscol else ["todas"]
+    pos = c.selectbox("Posição", poss, key="sm_pos")
+    f = d
+    if pcol and q.strip():
+        f = f[f[pcol].astype(str).str.contains(q.strip(), case=False, regex=False)]
+    if tcol and club != "todos":
+        f = f[f[tcol].astype(str) == club]
+    if poscol and pos != "todas":
+        f = f[f[poscol].astype(str) == pos]
+    comparison_table(f.drop(columns=[x for x in ("fonte", "conector", "licenca", "ingestao_utc", "arquivo_origem")
+                                     if x in f.columns]).head(500),
+                     f"{len(f)} de {len(d)} linhas · fonte: Simonetti Stats (dados de provedores não identificados pelo "
+                     "site) · uso local de pesquisa, não redistribuir.")
+
+
+def _unified(reg: ProvenanceRegistry) -> None:
+    from src.data_lake.lake import Lake, status
+
+    st.markdown("#### Base unificada (data/lake) e mapeamento de IDs entre fontes")
+    stt = status()
+    note("Formato", f"Arquivos {'Parquet' if stt['parquet'] else 'CSV comprimido (instale pyarrow para Parquet)'} em "
+         f"{stt['pasta']}; DuckDB {'ativo (data/lake/til.duckdb)' if stt['duckdb'] else 'opcional (pip install duckdb)'}; "
+         "espelho no banco do app (tabelas lake_*). Atualização diária automática.")
+    lake = Lake()
+    tabs = lake.tables()
+    if tabs.empty:
+        empty_state("A base unificada ainda está vazia", "Rode a sincronização das fontes externas uma vez.", "🧩",
+                    "python -m src.data_hub.sync --only transfermarkt understat lake")
+        return
+    p = reg.register(ProvenanceRecord("lake", "Base unificada", int(tabs["linhas"].fillna(0).sum()), "data/lake",
+                                      "Lake", "conforme cada fonte", "DERIVED", "soma das linhas das tabelas do lake"))
+    ver = str(tabs["MB"].sum()) + str(len(tabs))
+    k = st.columns(4)
+    dt = _lake_table("dim_teams", ver) if lake.exists("dim_teams") else pd.DataFrame()
+    dp = _lake_table("dim_players", ver) if lake.exists("dim_players") else pd.DataFrame()
+    with k[0]:
+        kpi("tabelas no lake", len(tabs), p)
+    with k[1]:
+        kpi("linhas no total", _fmt(tabs["linhas"].fillna(0).sum()), p)
+    with k[2]:
+        kpi("clubes/seleções (dim_teams)", _fmt(len(dt)), p)
+    with k[3]:
+        kpi("atletas (dim_players)", _fmt(len(dp)), p)
+    comparison_table(tabs, "us_* = Understat · tm_* = Transfermarkt · af_* = API-Futebol · apf_* = API-Football · "
+                     "bd_* = Base dos Dados · dim_*/…_ids = mapeamento de identificadores.")
+    if not dt.empty:
+        q = st.text_input("Ver como um clube aparece em cada fonte", "Manchester United", key="dim_q")
+        from src.data_lake.ids import team_core, slug
+
+        hit = dt[dt["team_key"].str.contains(slug(team_core(q)), regex=False) |
+                 dt["nomes_alternativos"].str.lower().str.contains(q.lower(), regex=False)] if q.strip() else dt.head(20)
+        cols = ["team_key", "nome", "pais", "n_fontes", "nomes_alternativos"] + [c for c in dt.columns if c.endswith("_id")]
+        comparison_table(hit[cols].head(20), "Uma linha por clube; cada coluna *_id é o identificador daquela fonte.")
+    _simonetti_view(lake, ver)
+    for name, title in (("apf_classificacao", "Classificação (API-Football)"), ("af_classificacao", "Classificação (API-Futebol)"),
+                        ("apf_calendario", "Próximos jogos (API-Football)")):
+        if lake.exists(name):
+            with st.expander(title):
+                comparison_table(_lake_table(name, ver))
+
+
 def render(_ctx=None) -> None:
     page_header("🗄️ Catálogo & Dados", "O que existe na base, de onde vem, em que formato entra e como adicionar mais.")
     reg = ProvenanceRegistry()
-    t1, t2, t3, t4 = st.tabs(["📦 Base & sincronização", "📚 Catálogo YAML", "🧬 Schema canônico", "📁 Arquivos de scout"])
+    t1, t5, t2, t3, t4 = st.tabs(["📦 Base & sincronização", "🧩 Base unificada", "📚 Catálogo YAML", "🧬 Schema canônico",
+                                  "📁 Arquivos de scout"])
+    with t5:
+        try:
+            _unified(reg)
+        except Exception as exc:
+            error_state("Base unificada indisponível", exc)
     with t1:
         try:
             _overview(reg)
