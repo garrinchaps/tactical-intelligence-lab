@@ -184,6 +184,7 @@ def provenance_panel(registry: ProvenanceRegistry) -> None:
     with st.expander(f"🧾 Proveniência das {len(rows)} métricas desta página"):
         df = pd.DataFrame(rows)[["label", "value", "confidence_tier", "source", "connector", "method", "license",
                                  "ingestion_timestamp", "generator", "ci_low", "ci_high"]]
+        df["value"] = df["value"].map(lambda v: "" if v is None else str(v))   # tipos misturados quebravam o pyarrow
         st.dataframe(df.rename(columns={"label": "métrica", "value": "valor", "confidence_tier": "tier", "source": "fonte",
                                         "connector": "conector", "method": "método", "license": "licença",
                                         "ingestion_timestamp": "ingestão", "generator": "gerador",

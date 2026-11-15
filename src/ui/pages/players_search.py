@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import pandas as pd
 import streamlit as st
@@ -70,6 +70,53 @@ def player_matches(name: str) -> pd.DataFrame:
             return pd.DataFrame()
 
 
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
+def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
+    """Nota 0–10 do atleta numa partida com lances (None = a partida não tem lances dele → fora da média)."""
+    from src.metrics.player_rating import match_ratings
+    from src.ui.context import load_bundle, processed_events
+
+    try:
+        b = load_bundle(int(match_id))
+        if b.events is None or b.events.empty:
+            return None
+        df, _ = processed_events(int(match_id), b.events)
+        r = match_ratings(df)
+    except Exception:
+        return None
+    hit = r[r["jogador"].isin(names)] if not r.empty else r
+    if hit.empty:
+        return None
+    x = hit.iloc[0]
+    return {"nota": None if pd.isna(x["nota"]) else float(x["nota"]), "minutos": float(x["minutos"]), "setor": x["setor"]}
+
+
+def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
+    from src.metrics.player_rating import average_rating
+
+    key = "pl_ratings_" + "|".join(sorted(names))
+    if st.button("🏅 Calcular a nota em cada jogo (até os 10 mais recentes)", key=key + "_go"):
+        out = {}
+        bar = st.progress(0.0, text="abrindo as partidas…")
+        ids = pm["match_id"].astype(int).tolist()[:10]
+        for i, mid in enumerate(ids, 1):
+            out[mid] = player_match_rating(mid, tuple(names))
+            bar.progress(i / len(ids), text=f"{i}/{len(ids)} partidas")
+        bar.empty()
+        st.session_state[key] = out
+    got = st.session_state.get(key) or {}
+    if got:
+        rows = pd.DataFrame([{"match_id": k, **v} for k, v in got.items() if v])
+        avg = average_rating(rows)
+        skipped = sum(1 for v in got.values() if not v)
+        st.metric("Nota média (0–10)", "—" if avg["media"] is None else f"{avg['media']:.1f}",
+                  help="Média só das partidas com lances do jogador e pelo menos 10 minutos em campo.")
+        st.caption(f"{avg['jogos_com_nota']} jogos com nota"
+                   + (f" · {avg.get('jogos_sem_nota', 0)} com menos de 10 min (fora da média)" if avg.get("jogos_sem_nota") else "")
+                   + (f" · {skipped} sem lances do jogador (fora da média)" if skipped else ""))
+    return got
+
+
 def render(_ctx=None) -> None:
     from src.ui import nav
     from src.ui.context import get_service
@@ -114,12 +161,15 @@ def render(_ctx=None) -> None:
             k[2].metric("xG", round(float(pm["xg"].sum()), 2))
             k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
             k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
+            notes = _ratings_block(pm, names)
             for i, r in enumerate(pm.to_dict("records")):
                 a, b = st.columns([8, 1.3])
+                nt = (notes.get(int(r["match_id"])) or {}).get("nota") if notes else None
                 score = f"{int(r['home_score'])} – {int(r['away_score'])}" if pd.notna(r["home_score"]) else "x"
                 a.markdown(f'<div class="til-result"><div class="tm r">{r["home_team_name"]}</div><div class="sc">{score}</div>'
                            f'<div class="tm">{r["away_team_name"]}</div><div class="meta">{r["competition_name"]}<br>'
-                           f'{r["match_date"]} · {int(r["acoes"])} ações · {int(r["gols"] or 0)} gol(s) · xG {r["xg"]}</div></div>',
+                           f'{r["match_date"]} · {int(r["acoes"])} ações · {int(r["gols"] or 0)} gol(s) · xG {r["xg"]}'
+                           + (f' · 🏅 {nt:.1f}' if nt is not None else '') + '</div></div>',
                            unsafe_allow_html=True)
                 b.write("")
                 if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", use_container_width=True, type="primary"):

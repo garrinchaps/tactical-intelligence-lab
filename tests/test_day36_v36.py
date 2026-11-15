@@ -210,3 +210,58 @@ def test_pass_network_can_show_only_starters(match):
     assert set(net["nodes_df"]["player_name"]) <= set(starters)
     fig = charts.pass_network(net, "t", subs={"Reserva Teste"})
     assert fig.data
+
+
+# ------------------------------------------------------------------ nota 0–10 por atuação
+@pytest.fixture(scope="module")
+def final_df():
+    from src.connectors.statsbomb_connector import load_demo_events
+    from src.ingestion.statsbomb_loader import StatsBombDataLoader
+    from src.metrics.xt_model import ExpectedThreatModel
+    from src.preprocessing.event_cleaner import EventPreprocessor
+
+    raw = StatsBombDataLoader._parse_raw_events(None, load_demo_events(3869685), 3869685)
+    return ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(raw))
+
+
+def test_rating_is_fair_and_bounded(final_df):
+    from src.metrics.player_rating import match_ratings
+
+    r = match_ratings(final_df)
+    ok = r["nota"].dropna()
+    assert ok.between(3, 10).all() and 6.2 <= ok.median() <= 7.2
+    top = r.iloc[0]["jogador"]
+    assert top in ("Lionel Messi", "Kylian Mbappé")
+    assert "Não identificado" not in set(r["jogador"])
+    # quem jogou menos de 10 minutos não recebe nota
+    assert r.loc[r["minutos"] < 10, "nota"].isna().all()
+    # goleiro: defesas e gols sofridos saem das finalizações do rival
+    gk = r[r["jogador"] == "Hugo Lloris"].iloc[0]
+    assert gk["setor"] == "goleiro" and gk["gols_sofridos_goleiro"] == 3
+
+
+def test_substitute_minutes_use_the_events_name(final_df):
+    from src.metrics.match_facts import _minutes
+
+    m = _minutes(final_df)
+    assert m["Randal Muani"] < 100                                     # entrou aos 41' (nome completo na troca)
+
+
+def test_errors_weigh_less_than_hits():
+    from src.metrics.player_rating import rate_row
+
+    base = {"minutos": 90, "posicao": "Center Midfield", "passes_certos": 50, "passes_errados": 0}
+    worse = {**base, "passes_errados": 10}
+    better = {**base, "passes_certos": 60}
+    d_err = rate_row(base)["erros"] - rate_row(worse)["erros"]          # custo de 10 passes errados
+    d_hit = rate_row(better)["acertos"] - rate_row(base)["acertos"]     # ganho de 10 passes certos
+    assert 0 < d_err < d_hit
+
+
+def test_average_rating_ignores_matches_without_rating():
+    import pandas as pd
+
+    from src.metrics.player_rating import average_rating
+
+    a = average_rating(pd.DataFrame({"nota": [7.0, None, 8.0]}))
+    assert a == {"media": 7.5, "jogos_com_nota": 2, "jogos_sem_nota": 1}

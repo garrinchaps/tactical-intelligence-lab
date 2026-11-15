@@ -127,6 +127,13 @@ def match_player_stats(match_id: int, team: Optional[str], _df: pd.DataFrame) ->
 
 
 @st.cache_data(show_spinner=False, max_entries=32)
+def match_ratings(match_id: int, team: Optional[str], _df: pd.DataFrame) -> pd.DataFrame:
+    from src.metrics.player_rating import match_ratings as _mr
+
+    return _mr(_df, team)
+
+
+@st.cache_data(show_spinner=False, max_entries=32)
 def match_team_stats(match_id: int, team: str, _df: pd.DataFrame) -> Dict[str, Any]:
     from src.metrics.match_facts import team_match_stats
 

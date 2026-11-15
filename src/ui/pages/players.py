@@ -116,29 +116,50 @@ def _with_market_value(s: pd.DataFrame, ctx: MatchContext) -> pd.DataFrame:
     return out
 
 
+RATING_HELP = ("Nota própria do laboratório, de 0 a 10, só com os lances desta partida: parte de 6,0, soma os acertos "
+               "e desconta os erros com peso menor, com pesos diferentes para goleiro, defesa, meio e ataque (o zagueiro "
+               "não perde nota por não finalizar). Menos de 30 min: nota puxada para 6,0; menos de 10 min: sem nota.")
+
+
 def _stats_table(ctx: MatchContext) -> None:
-    from src.metrics.match_facts import PLAYER_STAT_LABELS, per90, player_match_stats
+    from src.metrics.match_facts import PLAYER_STAT_LABELS, per90
+    from src.metrics.player_rating import CATEGORIES
 
-    a, b = st.columns([1.4, 1])
+    a, b, c = st.columns([1.4, 1.2, 1])
     who = a.radio("Atletas de", [ctx.target_team, ctx.opponent, "Ambas as equipes"], horizontal=True, key="ps_team")
-    mode = b.radio("Valores", ["Totais", "Por 90 minutos"], horizontal=True, key="ps_mode")
-    from src.ui.context import match_player_stats
+    cat = b.radio("Mostrar", ["Nota", *CATEGORIES, "Tudo"], horizontal=True, key="ps_cat")
+    mode = c.radio("Valores", ["Totais", "Por 90 minutos"], horizontal=True, key="ps_mode")
+    from src.ui.context import match_ratings
 
-    s = match_player_stats(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
+    s = match_ratings(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
     if s.empty:
         empty_state("Sem atletas com eventos.")
         return
     ctx.prov("ps_table", "Estatísticas individuais", len(s), "contagem de eventos por atleta; minutos estimados pelas substituições")
+    ctx.prov("nota", "Nota da atuação (0–10)", "por jogador", "regras abertas em src/metrics/player_rating.py", tier="DERIVED")
     if mode == "Por 90 minutos":
         s = per90(s)
         note("Por 90 minutos", "Atletas com poucos minutos têm valores por 90 instáveis: veja a coluna de minutos.", "warn")
     s = _with_market_value(s, ctx)
-    order = st.selectbox("Ordenar por", list(PLAYER_STAT_LABELS), index=list(PLAYER_STAT_LABELS).index("xt"),
-                         format_func=lambda k: PLAYER_STAT_LABELS[k], key="ps_order")
-    s = s.sort_values(order, ascending=False)
-    comparison_table(s.rename(columns={"jogador": "Jogador", "equipe": "Equipe", "posicao": "Posição", **PLAYER_STAT_LABELS}),
+    labels = {**PLAYER_STAT_LABELS, "nota": "Nota (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
+              "defesas_goleiro": "Defesas (goleiro)", "gols_sofridos_goleiro": "Gols sofridos (goleiro)"}
+    base = ["jogador", "equipe", "posicao", "setor", "nota", "minutos"]
+    if cat == "Nota":
+        cols = base + ["gols", "assistencias", "xg", "xt", "passes_certos", "acoes_defensivas", "passes_errados",
+                       "perdas_de_posse", "obs_nota"]
+    elif cat == "Tudo":
+        cols = list(s.columns)
+    else:
+        cols = base + CATEGORIES[cat] + (["defesas_goleiro", "gols_sofridos_goleiro"] if cat == "Defesa" else [])
+    cols = [x for x in dict.fromkeys(cols) if x in s.columns]
+    order_opts = [x for x in cols if x not in ("jogador", "equipe", "posicao", "setor", "obs_nota")]
+    order = st.selectbox("Ordenar por", order_opts, index=order_opts.index("nota") if "nota" in order_opts else 0,
+                         format_func=lambda k: labels.get(k, k), key=f"ps_order_{cat}")
+    view = s[cols].sort_values(order, ascending=False, na_position="last")
+    st.caption("🏅 " + RATING_HELP)
+    comparison_table(view.rename(columns={"jogador": "Jogador", "equipe": "Equipe", "posicao": "Posição", **labels}),
                      "Contagens diretas dos eventos da partida. Assistência = último passe certo para o autor do gol.")
-    st.download_button("Baixar tabela (.csv)", s.to_csv(index=False).encode("utf-8-sig"),
+    st.download_button("Baixar tabela (.csv)", view.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"atletas_{ctx.match_id}.csv", mime="text/csv")
 
 

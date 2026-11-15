@@ -115,6 +115,7 @@ def _minutes(df: pd.DataFrame) -> Dict[str, float]:
             mins[out_p][1] = float(s.minute)
         inn = getattr(s, "substitution_replacement_name", None)
         if isinstance(inn, str) and inn:
+            inn = _same_player(inn, d[d["team_name"] == s.team_name]["player_name"].dropna().unique())
             mins.setdefault(inn, [0.0, end])[0] = float(s.minute)
     red = d[_col(d, "foul_committed_card_name").isin(["Red Card", "Second Yellow"])]
     for r in red.itertuples():
@@ -123,13 +124,32 @@ def _minutes(df: pd.DataFrame) -> Dict[str, float]:
     return {p: round(max(b - a, 0.0), 0) for p, (a, b) in mins.items()}
 
 
+def _same_player(name: str, candidates) -> str:
+    """
+    O nome na substituição pode vir completo ("Randal Kolo Muani") e o dos lances, o nome comum ("Randal Muani").
+    Devolve o nome dos lances quando todas as palavras do nome comum estão no nome completo (ou vice-versa).
+    """
+    import unicodedata
+
+    def toks(x):
+        t = unicodedata.normalize("NFKD", str(x)).encode("ascii", "ignore").decode().lower()
+        return set(t.replace("-", " ").split())
+    if name in set(map(str, candidates)):
+        return name
+    a = toks(name)
+    hits = [str(c) for c in candidates if toks(c) and (toks(c) <= a or a <= toks(c))]
+    return hits[0] if len(hits) == 1 else name
+
+
 def lineup_split(df: Optional[pd.DataFrame], team: str) -> Tuple[List[str], List[str]]:
     """(titulares, quem entrou) de uma equipe: quem entrou = substituto registrado; titular = o resto que atuou."""
     if df is None or df.empty:
         return [], []
     d = df[df["team_name"] == team]
     subs = d[d["type_name"] == "Substitution"]
-    came = [str(x) for x in _col(subs, "substitution_replacement_name").dropna().unique()] if not subs.empty else []
+    names = d["player_name"].dropna().unique()
+    came = [_same_player(str(x), names) for x in _col(subs, "substitution_replacement_name").dropna().unique()] \
+        if not subs.empty else []
     order = d.dropna(subset=["player_name"]).drop_duplicates("player_name")
     starters = [str(p) for p in order["player_name"] if str(p) not in came]
     return starters, came
