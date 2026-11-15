@@ -437,3 +437,39 @@ def test_tenure_loan_return_and_unknown():
     assert c.loc["Kaiki", "situacao"] == "no elenco" and c.loc["Kaiki", "vinculo"] == "retorno"
     assert c.loc["Rodri", "situacao"] == "saiu"
     assert c.loc["Sem informação", "confidence_tier"] == "UNKNOWN" and c.loc["Sem informação", "situacao"] == "não confirmado"
+
+
+# ------------------------------------------------------------------ B4: homônimos
+def test_player_resolver_needs_more_than_the_name():
+    import pandas as pd
+
+    from src.data_hub.player_resolver import merge_match_rows, resolve
+
+    idx = pd.DataFrame([
+        {"nome": "Lionel Andrés Messi Cuccittini", "clube": "Argentina", "fonte": "eventos"},
+        {"nome": "Lionel Andrés Messi Cuccittini", "clube": "Barcelona", "fonte": "eventos"},
+        {"nome": "Lionel Messi", "clube": "Inter Miami", "fonte": "Transfermarkt", "nascimento": "1987-06-24",
+         "nacionalidade": "Argentina"},
+        {"nome": "L. Messi", "clube": "Barcelona", "fonte": "eventos"},
+        {"nome": "Kylian Mbappé Lottin", "clube": "France", "fonte": "eventos"},
+        {"nome": "Kylian Mbappé", "clube": "Real Madrid", "fonte": "Transfermarkt", "nascimento": "1998-12-20",
+         "nacionalidade": "France"},
+        # mesmo nome, nada que confirme: NÃO funde, vai para revisão
+        {"nome": "Gabriel Souza", "clube": "Time A", "fonte": "eventos"},
+        {"nome": "Gabriel Souza Lima", "clube": "Time B", "fonte": "eventos"},
+        # homônimos com nascimentos diferentes
+        {"nome": "Danilo", "clube": "Flamengo", "fonte": "Transfermarkt", "nascimento": "1991-07-15"},
+        {"nome": "Danilo", "clube": "Botafogo", "fonte": "Transfermarkt", "nascimento": "2001-04-29"},
+    ])
+    p, review = resolve(idx)
+    p = p.tolist()
+    assert p[0] == p[1] == p[2] == p[3]                                  # Messi: seleção + clube + abreviado
+    assert p[4] == p[5]
+    assert p[6] != p[7] and set(review["a"]) >= {"Gabriel Souza"}       # só o nome: revisão, sem fusão
+    assert p[8] != p[9]
+    rows = pd.DataFrame([
+        {"match_date": "2022-12-18", "home_team_name": "Argentina", "away_team_name": "France", "acoes": 120},
+        {"match_date": "2022-12-19", "home_team_name": "Argentina", "away_team_name": "France", "acoes": 30},  # outra fonte
+        {"match_date": "2022-12-13", "home_team_name": "Argentina", "away_team_name": "Croatia", "acoes": 90}])
+    m = merge_match_rows(rows)
+    assert len(m) == 2 and m["acoes"].max() == 120                      # mesma partida conta uma vez

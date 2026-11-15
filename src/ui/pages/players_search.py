@@ -38,12 +38,13 @@ def player_index(version: str) -> pd.DataFrame:
         if lake.exists("tm_jogadores"):
             cols = ["nome", "clube", "ultima_temporada"]
             try:
-                tm = lake.read("tm_jogadores", cols + ["nascimento"])
+                tm = lake.read("tm_jogadores", cols + ["nascimento", "nacionalidade"])
             except Exception:
                 tm = lake.read("tm_jogadores", cols)
             tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= 2015]
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Transfermarkt", "jogos": None,
-                      "nascimento": str(getattr(r, "nascimento", "") or "")[:10]} for r in tm.itertuples()]
+                      "nascimento": str(getattr(r, "nascimento", "") or "")[:10],
+                      "nacionalidade": getattr(r, "nacionalidade", None)} for r in tm.itertuples()]
         if lake.exists("us_jogadores"):
             us = lake.read("us_jogadores", ["nome", "clube"]).drop_duplicates()
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Understat", "jogos": None} for r in us.itertuples()]
@@ -51,13 +52,19 @@ def player_index(version: str) -> pd.DataFrame:
         pass
     df = pd.DataFrame(rows)
     if not df.empty:
-        from src.data_lake.ids import unify_people
+        from src.data_hub.player_resolver import resolve, save_candidates
 
         df["core"] = df["nome"].map(_norm)
         df = df[df["core"] != ""].copy()
         if "nascimento" not in df:
             df["nascimento"] = ""
-        df["pessoa"] = unify_people(df)            # v36: o mesmo atleta em várias fontes/nomes vira uma linha só
+        # B4: mesma pessoa só com nome + confirmação (nascimento, nacionalidade, clube/seleção em comum);
+        # pares duvidosos vão para player_merge_candidates em vez de serem fundidos
+        df["pessoa"], review = resolve(df)
+        try:
+            save_candidates(get_service().db, review)
+        except Exception:
+            pass
     return df
 
 
@@ -166,6 +173,10 @@ def render(_ctx=None) -> None:
     with t1:
         frames = [player_matches(n) for n in names]
         pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
+        if not pm.empty:                                   # B4: mesmo jogo em duas fontes conta uma vez
+            from src.data_hub.player_resolver import merge_match_rows
+
+            pm = merge_match_rows(pm)
         if pm.empty:
             empty_state("Nenhum jogo com lances deste atleta na base", "", "🗓️",
                         "Os jogos com todos os lances vêm da StatsBomb/Wyscout.")
