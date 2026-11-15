@@ -12,7 +12,7 @@ Tudo é contagem direta de eventos; o que é estimado (minutos, assistência, PP
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -121,6 +121,18 @@ def _minutes(df: pd.DataFrame) -> Dict[str, float]:
         if str(r.player_name) in mins:
             mins[str(r.player_name)][1] = min(mins[str(r.player_name)][1], float(r.minute))
     return {p: round(max(b - a, 0.0), 0) for p, (a, b) in mins.items()}
+
+
+def lineup_split(df: Optional[pd.DataFrame], team: str) -> Tuple[List[str], List[str]]:
+    """(titulares, quem entrou) de uma equipe: quem entrou = substituto registrado; titular = o resto que atuou."""
+    if df is None or df.empty:
+        return [], []
+    d = df[df["team_name"] == team]
+    subs = d[d["type_name"] == "Substitution"]
+    came = [str(x) for x in _col(subs, "substitution_replacement_name").dropna().unique()] if not subs.empty else []
+    order = d.dropna(subset=["player_name"]).drop_duplicates("player_name")
+    starters = [str(p) for p in order["player_name"] if str(p) not in came]
+    return starters, came
 
 
 def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -> pd.DataFrame:

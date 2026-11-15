@@ -186,3 +186,27 @@ def test_feature_report_and_class_balance():
     assert len(rep) == 14 and set(rep.columns) >= {"variavel", "auc_sozinha", "alerta"}
     bal = R.class_balance(data)
     assert 0 < bal["positivas_pct"] < 100
+
+
+# ------------------------------------------------------------------ rede de passes: só o XI
+def test_pass_network_can_show_only_starters(match):
+    from src.metrics.match_facts import lineup_split
+    from src.networks.pass_network import PassingNetworkAnalyzer
+    from src.ui import charts
+
+    df = match[0].copy()
+    team = "Croatia"
+    starters, came = lineup_split(df, team)
+    # cria uma substituição sintética para garantir o caso "quem entrou"
+    import pandas as pd
+
+    who = starters[0]
+    sub = df[df["team_name"] == team].iloc[[-1]].copy()
+    sub["type_name"], sub["player_name"], sub["substitution_replacement_name"] = "Substitution", who, "Reserva Teste"
+    df = pd.concat([df, sub], ignore_index=True)
+    starters, came = lineup_split(df, team)
+    assert came == ["Reserva Teste"] and "Reserva Teste" not in starters and len(starters) <= 11
+    net = PassingNetworkAnalyzer.build_pass_network(df, team, until_first_sub=False, players_only=starters)
+    assert set(net["nodes_df"]["player_name"]) <= set(starters)
+    fig = charts.pass_network(net, "t", subs={"Reserva Teste"})
+    assert fig.data

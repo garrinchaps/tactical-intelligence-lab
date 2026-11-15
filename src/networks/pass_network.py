@@ -5,7 +5,7 @@ Calcula métricas topológicas via NetworkX para identificar organizadores, garg
 de bola, triangulações e assimetrias posicionais.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 import networkx as nx
 import numpy as np
 import pandas as pd
@@ -41,6 +41,7 @@ class PassingNetworkAnalyzer:
         target_team: str,
         until_first_sub: bool = True,
         min_pass_count: int = 2,
+        players_only: Optional[Iterable[str]] = None,
     ) -> Dict[str, Any]:
         """
         Constrói o grafo direcionado de passes completos da equipe `target_team`
@@ -74,6 +75,10 @@ class PassingNetworkAnalyzer:
             & (window_ev["y"].notna())
         ].copy()
 
+        if players_only is not None:          # ex.: só o XI inicial (sem os que entraram)
+            keep = set(players_only)
+            completed_passes = completed_passes[completed_passes["player_name"].isin(keep)
+                                                & completed_passes["pass_recipient_name"].isin(keep)]
         if completed_passes.empty:
             return cls._empty_network_response(target_team)
 

@@ -43,7 +43,8 @@ def pitch(fig: Optional[go.Figure] = None, title: str = "", height: int = 460) -
     return _layout(fig, title, height)
 
 
-def pass_network(net: Dict[str, Any], title: str) -> go.Figure:
+def pass_network(net: Dict[str, Any], title: str, subs: Optional[set] = None) -> go.Figure:
+    """`subs` = quem entrou no decorrer do jogo: aparece com bolinha vazada âmbar, separado dos titulares."""
     nodes, edges = net.get("nodes_df", pd.DataFrame()), net.get("edges_df", pd.DataFrame())
     fig = pitch(title=title, height=520)
     if nodes is None or nodes.empty:
@@ -65,14 +66,26 @@ def pass_network(net: Dict[str, Any], title: str) -> go.Figure:
     size_col = "passes_made" if "passes_made" in nodes.columns else None
     sizes = 14 + 26 * (nodes[size_col] / max(nodes[size_col].max(), 1)) if size_col else 20
     color = nodes["betweenness_centrality"] if "betweenness_centrality" in nodes.columns else P["primary"]
-    fig.add_trace(go.Scatter(
-        x=nodes["avg_x"], y=nodes["avg_y"], mode="markers+text", text=nodes["player_name"].str.split().str[-1],
-        textposition="top center", textfont=dict(size=11, color=P["text"]),
-        marker=dict(size=sizes, color=color, colorscale="Greens", line=dict(color=P["text"], width=1),
-                    colorbar=dict(title="betweenness", thickness=10) if size_col else None),
-        hovertext=[f"{r.player_name}<br>passes: {getattr(r, 'passes_made', '-')}<br>betweenness: "
-                   f"{getattr(r, 'betweenness_centrality', 0):.3f}" for r in nodes.itertuples()],
-        hoverinfo="text", showlegend=False))
+    subs = set(subs or [])
+    is_sub = nodes["player_name"].isin(subs)
+    sizes = pd.Series(sizes, index=nodes.index) if not isinstance(sizes, (int, float)) else pd.Series(sizes, index=nodes.index)
+    for mask, name, sub in ((~is_sub, "Titulares", False), (is_sub, "Entraram no jogo", True)):
+        if not mask.any():
+            continue
+        nd = nodes[mask]
+        fig.add_trace(go.Scatter(
+            x=nd["avg_x"], y=nd["avg_y"], mode="markers+text", text=nd["player_name"].str.split().str[-1],
+            textposition="top center", textfont=dict(size=11, color=P["text"]), name=name,
+            marker=(dict(size=sizes[mask], color="rgba(0,0,0,0)", line=dict(color="#F59E0B", width=2.5), symbol="circle")
+                    if sub else
+                    dict(size=sizes[mask], color=color[mask] if hasattr(color, "__getitem__") and not isinstance(color, str) else color,
+                         colorscale="Greens", line=dict(color=P["text"], width=1),
+                         colorbar=dict(title="liga o time", thickness=10) if size_col else None)),
+            hovertext=[f"{r.player_name}{' (entrou)' if sub else ''}<br>passes: {getattr(r, 'passes_made', '-')}<br>"
+                       f"importância para ligar o time: {getattr(r, 'betweenness_centrality', 0):.3f}" for r in nd.itertuples()],
+            hoverinfo="text", showlegend=bool(subs)))
+    if subs:
+        fig.update_layout(legend=dict(orientation="h", y=-0.02, x=0.5, xanchor="center"))
     return fig
 
 
