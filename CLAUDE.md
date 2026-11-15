@@ -99,55 +99,48 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
 **Fontes com limitação conhecida:**
 - API-Football (plano grátis): só temporadas 2022–2024, sem `?ids=` (1 jogo por requisição), 100 req/dia; o app
   guarda isso em `source_state` e não gasta cota redescobrindo.
-- ESPN histórico: deu HTTP 400 no mês inteiro para `bra.1`; a v35 tenta semana a semana — conferir se funcionou.
+- ESPN histórico: dá HTTP 400 para `bra.1` em períodos antigos. Na v36 o 400 não é mais repetido com espera (era o
+  "travado 10 min"): a recusa fica lembrada 7 dias, cada mês mostra progresso e, depois de 6 meses recusados, pula
+  para o ano seguinte. Conferir no PC quais anos a ESPN realmente entrega.
 - Understat: deu 0 partidas; a v35 não guarda mais resposta vazia em cache e mostra o motivo — conferir.
 - Nenhuma fonte aberta tem lances com coordenadas do Brasileirão nem dados físicos (velocidade, distância, mapa de
   calor de tracking).
 
-## 7. Pedidos pendentes do usuário (v36) — fazer nesta ordem
+## 7. Pedidos do usuário (v36) — estado
 
-1. **Assistente mais rápido e respondendo o que foi perguntado.** Casos que ainda falham (jogo Barcelona 2–0 Real
-   Madrid, La Liga 25/26): "qual foi o jogador com mais xG?" (devolve resumo do Real Madrid), "o Mbappé jogou esse
-   jogo?" (devolve resumo genérico), "qual foi a maior falha tática do Real Madrid?" (resumo genérico), "quantos
-   erros o Gerard Martín teve?" (não responde "erros" — deveria somar passes errados, perdas, erros que levaram a
-   chute). "jogadores com maior perigo gerado" deveria usar xT/xG por jogador. Regra geral: nunca cair no resumo
-   padrão quando a pergunta tem um alvo; frases menos prontas; quando não houver dado, dizer.
-   Aprender com as interações: registrar perguntas que caíram no resumo genérico para virarem casos de teste.
-2. **Treino da rede neural** (o usuário quer exatamente este plano): 4 experimentos controlados, todos com Adam,
-   até 100 épocas, lote 256, parada antecipada com paciência 10, inicialização He nas camadas ReLU:
-   A `14→32→1` η 0,001 λ 0,0001 · B `14→32→16→1` η 0,001 λ 0,0001 · C `14→32→16→8→1` η 0,001 λ 0,001 ·
-   D `14→64→32→16→1` η 0,0005 λ 0,001. Começar pelo B. Manter v002 campeão até superioridade estatística.
-   Conferir: padronização ajustada só com o treino de cada dobra, balanceamento das classes, qualidade das 14
-   variáveis. Opção de **várias tentativas por clique** na tela Bastidores. O texto da tela ainda fala em
-   "5 dobras × 2 sementes" e "maior que σ" — atualizar para o critério atual (IC 95% pareado > 0, ganho ≥ 0,0005,
-   AUC sem queda > 0,005, desvio da AUC entre dobras ≤ 0,05).
-3. **Jogadores dentro da partida:** estatísticas separadas (ofensivo, defensivo, passe, duelos…) e **nota 0–10 por
-   atuação**, própria (no espírito de Opta/Sofascore), ajustada à posição jogada e aos minutos, acertos pesando mais
-   que erros. Jogo sem dados do jogador não entra na média dele.
-4. **Rede de passes / formação:** com substituições ficam 16 jogadores em campo — mostrar só o XI (ou separar
-   titulares e quem entrou) e reescrever os textos da página em linguagem de futebol.
-5. **Clicar no nome de clube ou jogador abre a página dele**, em qualquer tela.
-6. **Comparar:** qualquer jogador com qualquer outro que tenha dados concretos (não só da partida aberta), com
-   recorte: último jogo, últimos 5, temporada.
-7. **Filtro de nível dentro do clube:** se escolheu "🟢 lances" e abriu o Barcelona, a lista de jogos do clube
-   também deve mostrar só jogos com lances.
-8. **Jogadores duplicados** (dois "Lionel Messi" — Argentina e Inter Miami; Mbappé e muitos outros): unificar o
-   atleta entre seleção/clubes/fontes (nome + data de nascimento + ids do lake; quando ambíguo, não juntar).
-9. **Escalação:** elenco com transferências e empréstimos atualizados (ex.: Matheus Cunha e Kaiki não estão mais no
-   Cruzeiro; Rodri não é do Barcelona) — usar `tm_jogadores`, `tm_aparicoes` e `tm_escalacoes` para o clube ATUAL;
-   **campinho interativo de arrastar** (estilo FM) com várias formações; mais leitura tática no campinho
-   (fraquezas e fortalezas além das duas setas); a expectativa do jogo deve usar só jogos recentes com alto nível de
-   dado (lances/estatísticas completas).
-10. **Tradução da interface** para inglês e espanhol (padrão português).
-11. **Cobertura (v36):** Brasil em profundidade máxima (Série A–D, Copa do Brasil, regionais, estaduais e divisões
-    inferiores, feminino e base quando houver dado); América do Sul (Libertadores, Sul-Americana, Recopa, ligas
-    principais, Copa América, Eliminatórias); Europa principal (UCL, UEL, UECL, 5 grandes ligas e segundas
-    divisões, Holanda, Portugal, Bélgica, Turquia, Escócia, Euro, Nations League); outros relevantes (MLS, Liga MX,
-    J1, K League, Saudi Pro League, AFC CL, CAF, A-League, Copa do Mundo, Mundial de Clubes). Não priorizar ligas
-    pequenas (ex.: Azerbaijão, 2ª divisão argentina). Fontes a avaliar: OpenLigaDB, football-data.org (token grátis),
-    RSSSF (histórico), MinuteLab. Nunca considerar uma fonte "integrada" só porque respondeu: validar os dados.
-    Painel de fontes com saúde, cota, última atualização, cobertura por país/competição/temporada e ações manuais
-    que não travem a interface.
+Feito na sessão de 15/11/2026 (branch `claude/gifted-knuth-q93cbz`, testes: 216 verdes):
+1. ✅ Assistente: perguntas com alvo têm resposta própria — ranking de xG/perigo (xT + xG, rede neural como 2ª
+   opinião), "fulano jogou?" (`presence`), erros do jogador separados por tipo (`errors`), maior falha tática e
+   ponto forte da equipe (`weakness`/`strength`). Perguntas de fato não esperam o Gemini (mais rápido). Perguntas
+   que caem no panorama vão para `data/assistente_sem_alvo.jsonl` e aparecem em Bastidores (viram casos de teste).
+2. ✅ Rede neural: experimentos A–D (`EXPERIMENTS` em `model_registry.py`, B primeiro), Adam, 100 épocas, lote 256,
+   paciência 10, He, treino do zero; parada antecipada também dentro das dobras; L2 corrigido (era dividido pelo
+   lote); várias tentativas por clique; conferência de classes (13% positivas) e das 14 variáveis; texto do critério
+   atualizado. CLI: `python -m src.machine_learning.model_registry --treinar --experimentos B`.
+   Achado: 9 das 14 variáveis são zonas (one-hot) quase redundantes com distância/ângulo — o teto de AUC ~0,60
+   vem mais das variáveis do que da arquitetura.
+3. ✅ Nota 0–10 por atuação (`src/metrics/player_rating.py`): pesos por setor, erros pesam metade, desconto do
+   "esperado" por 90 min (calibração PROVISÓRIA em 3 jogos da Copa 2022), < 10 min sem nota. Aba Jogadores com
+   Ataque/Passe/Defesa/Duelos e erros; nota média na página do jogador (só jogos com lances dele).
+4. ✅ Rede de passes: só o XI por padrão (ou titulares e quem entrou separados); textos em linguagem de futebol.
+   Corrigido o minuto de quem entra quando o nome da troca é o completo ("Randal Kolo Muani").
+5. ✅ (parcial) Clicar no jogador nas tabelas da partida e do elenco abre a página; respostas do Assistente têm botões
+   dos jogadores/times citados. Falta: nomes dentro de textos/cartões HTML (o Streamlit recarrega a sessão em links).
+6. ✅ Comparar: qualquer jogador com lances na base, recorte último jogo / últimos 5 / temporada.
+7. ✅ Lista de jogos do clube respeita o nível de dado do topo.
+8. ✅ Atleta unificado na busca (`unify_people` em `src/data_lake/ids.py`): nome curto/completo/abreviado + nascimento;
+   homônimos e casos ambíguos ficam separados. Clube atual pelo Transfermarkt.
+9. ✅ Escalação: elenco atual pelos jogos (`apply_transfers`: saiu = jogou por outro clube depois; chegou = jogou pelo
+   clube nos últimos 150 dias); campinho de arrastar (`src/ui/drag_pitch.py`, troca com o banco e de formação;
+   posições ficam no navegador, não voltam ao Python); marcas E/N/F/C no campo; expectativa só com jogos recentes
+   (≤ 400 dias) com lances ou ≥ 5 estatísticas.
+
+Pendente (próximas sessões):
+10. ❌ Tradução da interface (inglês/espanhol, padrão português).
+11. ❌ Cobertura v36 (Brasil profundo, América do Sul, Europa, outros) + painel de fontes com saúde/cota. A sessão na
+    nuvem não alcança sites externos (ESPN etc. bloqueados), então fontes novas precisam ser validadas no PC.
+- Conferir no PC: ESPN histórico com a correção; Understat; rodar os experimentos B, A, C, D.
+- Recalibrar `EXPECTED_PER90` da nota com mais partidas (hoje 3 jogos).
 
 ## 8. Ao final de cada sessão
 
