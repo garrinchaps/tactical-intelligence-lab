@@ -21,14 +21,35 @@ from src.data_hub.registry import DataLevel, to_internal_id
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
-LEAGUES: Dict[str, str] = {
-    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B", "bra.copa_do_brazil": "Copa do Brasil",
-    "conmebol.libertadores": "CONMEBOL Libertadores", "conmebol.sudamericana": "CONMEBOL Sul-Americana",
-    "eng.1": "Premier League", "esp.1": "La Liga", "ita.1": "Serie A", "ger.1": "Bundesliga",
-    "fra.1": "Ligue 1", "por.1": "Primeira Liga", "ned.1": "Eredivisie", "arg.1": "Liga Profesional (ARG)",
-    "usa.1": "MLS", "uefa.champions": "UEFA Champions League", "uefa.europa": "UEFA Europa League",
-    "fifa.world": "Copa do Mundo",
+# v36 (B1) — cobertura em duas prioridades. Os códigos seguem o padrão da ESPN; os marcados como "a validar" ainda
+# não foram conferidos (a sessão na nuvem não alcança a ESPN). Código que a ESPN recusar (400/404) é pulado e a recusa
+# fica lembrada por 7 dias — nada é dado como "integrado" sem ter devolvido jogos de verdade.
+PRIORITY_A: Dict[str, str] = {   # Brasil, profundidade máxima
+    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B", "bra.3": "Brasileirão Série C (a validar)",
+    "bra.copa_do_brazil": "Copa do Brasil", "bra.supercopa": "Supercopa do Brasil (a validar)",
+    "bra.copa_do_nordeste": "Copa do Nordeste (a validar)",
+    "bra.camp.paulista": "Paulistão (a validar)", "bra.camp.carioca": "Carioca (a validar)",
+    "bra.camp.mineiro": "Mineiro (a validar)", "bra.camp.gaucho": "Gaúcho (a validar)",
 }
+PRIORITY_B: Dict[str, str] = {   # exterior seletivo
+    "conmebol.libertadores": "CONMEBOL Libertadores", "conmebol.sudamericana": "CONMEBOL Sul-Americana",
+    "conmebol.recopa": "Recopa Sul-Americana (a validar)", "arg.1": "Liga Profesional (ARG)", "uru.1": "Uruguai (a validar)",
+    "chi.1": "Chile (a validar)", "col.1": "Colômbia (a validar)", "par.1": "Paraguai (a validar)",
+    "ecu.1": "Equador (a validar)", "per.1": "Peru (a validar)", "bol.1": "Bolívia (a validar)",
+    "conmebol.america": "Copa América (a validar)", "fifa.worldq.conmebol": "Eliminatórias CONMEBOL (a validar)",
+    "uefa.champions": "UEFA Champions League", "uefa.europa": "UEFA Europa League",
+    "uefa.europa.conf": "UEFA Conference League (a validar)", "eng.1": "Premier League", "eng.2": "Championship (a validar)",
+    "esp.1": "La Liga", "esp.2": "La Liga 2 (a validar)", "ger.1": "Bundesliga", "ger.2": "2. Bundesliga (a validar)",
+    "ita.1": "Serie A", "ita.2": "Serie B (ITA) (a validar)", "fra.1": "Ligue 1", "fra.2": "Ligue 2 (a validar)",
+    "ned.1": "Eredivisie", "por.1": "Primeira Liga", "bel.1": "Bélgica (a validar)", "tur.1": "Turquia (a validar)",
+    "sco.1": "Escócia (a validar)", "uefa.euro": "Eurocopa (a validar)", "uefa.nations": "Nations League (a validar)",
+    "usa.1": "MLS", "mex.1": "Liga MX (a validar)", "concacaf.leagues.cup": "Leagues Cup (a validar)",
+    "afc.champions": "Champions Asiática (a validar)", "jpn.1": "J1 League (a validar)", "kor.1": "K League (a validar)",
+    "ksa.1": "Saudi Pro League (a validar)", "caf.champions": "CAF Champions League (a validar)",
+    "aus.1": "A-League (a validar)", "fifa.world": "Copa do Mundo", "fifa.cwc": "Mundial de Clubes (a validar)",
+}
+LEAGUES: Dict[str, str] = {**PRIORITY_A, **PRIORITY_B}
+LEAGUE_NAMES = {k: v.replace(" (a validar)", "") for k, v in LEAGUES.items()}
 
 
 class EspnProvider:
@@ -63,7 +84,7 @@ class EspnProvider:
         return {
             "match_id": to_internal_id("espn", int(ev["id"])),
             "source_match_id": str(ev["id"]),
-            "competition_name": LEAGUES.get(league, league),
+            "competition_name": LEAGUE_NAMES.get(league, league),
             "season_name": str((ev.get("season") or {}).get("year") or (ev.get("date") or "")[:4]),
             "season_id": int((ev.get("season") or {}).get("year") or 0),
             "match_date": (ev.get("date") or "")[:10],
@@ -87,7 +108,7 @@ class EspnProvider:
         record = {
             "match_id": to_internal_id("espn", int(event_id)),
             "source_match_id": str(event_id),
-            "competition_name": LEAGUES.get(league, league),
+            "competition_name": LEAGUE_NAMES.get(league, league),
             "season_name": str((header.get("season") or {}).get("year") or (comp.get("date") or "")[:4]),
             "match_date": (comp.get("date") or "")[:10],
             "home_team_name": (home.get("team") or {}).get("displayName", ""),
@@ -182,7 +203,7 @@ class EspnProvider:
         say = progress or (lambda m: None)
         tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "meses": 0, "janelas_falhas": 0}
         until = until or date.today()
-        leagues = leagues or ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana"]
+        leagues = leagues or list(PRIORITY_A) + ["conmebol.libertadores", "conmebol.sudamericana"]
         fails = 0
 
         def refused(exc) -> bool:
@@ -261,10 +282,10 @@ class EspnProvider:
                 if ref:
                     refused_months += 1
                     tot["recusados"] = tot.get("recusados", 0) + 1
-                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: ESPN recusou o período (HTTP 400) — sem calendário")
+                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: ESPN recusou o período (HTTP 400) — sem calendário")
                     if refused_months >= 6:
                         # meia temporada inteira recusada: a ESPN não tem esse histórico; pula para o próximo ano
-                        say(f"  {LEAGUES.get(lg, lg)}: 6 meses seguidos recusados — pulando para {y + 1}")
+                        say(f"  {LEAGUE_NAMES.get(lg, lg)}: 6 meses seguidos recusados — pulando para {y + 1}")
                         y, m, refused_months = y + 1, 1, 0
                         continue
                 else:
@@ -283,9 +304,9 @@ class EspnProvider:
                         except Exception as exc:
                             tot["errors"] += 1
                             say(f"  espn resumo {x['home_team_name']} x {x['away_team_name']}: {exc}")
-                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: {len(recs)} jogos, {len(todo)} resumos novos")
+                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: {len(recs)} jogos, {len(todo)} resumos novos")
                 elif not ref:
-                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: nenhum jogo encerrado no período")
+                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: nenhum jogo encerrado no período")
                 y, m = (y + 1, 1) if m == 12 else (y, m + 1)
         return tot
 
@@ -320,7 +341,7 @@ class EspnProvider:
         """
         from src.data_hub import sync_policy as P
 
-        out = {"ao_vivo": 0, "encerrados": 0, "errors": 0}
+        out = {"ao_vivo": 0, "encerrados": 0, "errors": 0, "ligas_ao_vivo": []}
         today = date.today()
         for lg in leagues or list(LEAGUES):
             try:
@@ -336,6 +357,8 @@ class EspnProvider:
             for r in recs:
                 if r["status"] == "LIVE":
                     out["ao_vivo"] += 1
+                    if lg not in out["ligas_ao_vivo"]:
+                        out["ligas_ao_vivo"].append(lg)
                 elif not P.is_frozen(self.db, r["match_id"]):
                     try:
                         self.ingest_event(int(r["match_id"]))

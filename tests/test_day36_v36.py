@@ -655,3 +655,56 @@ def test_espn_live_tick_freezes_finished_match(db):
     assert db.get_match(500_000_001)["status"] == "LIVE"
     p.live_tick(["bra.1"])
     assert ingested == [500_000_002]                                                            # congelado: não repete
+
+
+# ------------------------------------------------------------------ G: painel de fontes
+def test_source_health_and_background_jobs(db):
+    import time as _t
+
+    from src.data_hub import health
+    from src.data_hub.registry import DataLevel
+
+    base = {"home_team_name": "A", "away_team_name": "B", "match_date": "2026-10-01", "home_score": 1, "away_score": 0,
+            "competition_name": "L", "season_name": "2026", "status": "FT"}
+    db.upsert_matches([{**base, "match_id": 500_000_001, "data_source": "espn", "data_level": DataLevel.BOXSCORE},
+                       {**base, "match_id": 100_000_001, "data_source": "api_football", "data_level": DataLevel.RESULT}])
+    with db.connect() as c:
+        c.execute("INSERT INTO sync_runs (source, started_at, finished_at, status, message) VALUES "
+                  "('espn', datetime('now'), datetime('now'), 'OK', '')")
+        c.execute("INSERT INTO sync_runs (source, started_at, finished_at, status, message) VALUES "
+                  "('api_football', datetime('now'), datetime('now'), 'ERRO', 'Cota diária esgotada')")
+    db.register_api_call("api_football", 37)
+    h = health.source_health(db).set_index("fonte")
+    assert h.loc["espn", "status"].startswith("✅") and h.loc["espn", "com estatísticas"] == 1
+    assert h.loc["api_football", "status"].startswith("⚠️") and "Cota" in h.loc["api_football", "erro mais recente"]
+    assert h.loc["api_football", "cota hoje"] == "37/100"
+    assert health.start_job("t", lambda say: (_t.sleep(0.3), say("ok"))) is True
+    assert health.start_job("t", lambda say: None) is False                         # não duplica, não trava
+    _t.sleep(0.6)
+    assert not health.jobs()["t"]["running"] and health.jobs()["t"]["log"] == ["ok"]
+
+
+# ------------------------------------------------------------------ A5/H1: filtro de nível vai na consulta ao banco
+def test_level_filter_goes_into_the_sql(monkeypatch):
+    import src.ui.context as C
+
+    seen = {}
+    monkeypatch.setattr(C, "_catalog_cached", lambda version, where, params: seen.setdefault("where", where))
+
+    class FakeFinder:
+        only_real = True
+        levels = None
+        only_analyzable = True
+
+    class FakeDB:
+        def stable_version(self):
+            return "v"
+
+    class FakeSvc:
+        finder, db = FakeFinder(), FakeDB()
+    monkeypatch.setattr(C, "get_service", lambda: FakeSvc())
+    monkeypatch.setattr(C, "chosen_levels", lambda: ("EVENTS",))
+    monkeypatch.setattr(C, "only_real", lambda: True)
+    C.cached_catalog()
+    w = seen["where"]
+    assert "data_level IN ('EVENTS'" in w and "BOXSCORE" not in w and "'RESULT'" not in w

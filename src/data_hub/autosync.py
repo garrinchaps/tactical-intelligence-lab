@@ -79,7 +79,7 @@ def _run(sources: List[str]) -> None:
         _state.update(running=False, last_finished=datetime.now(timezone.utc), last_log=log[-30:])
 
 
-_live = {"running": False, "last": None, "ao_vivo": 0}
+_live = {"running": False, "last": None, "ao_vivo": 0, "ligas": []}
 LIVE_CHECK_MIN = 15          # sem jogo ao vivo: confere a cada 15 min; com jogo ao vivo: a cada 1 min
 
 
@@ -94,9 +94,10 @@ def _live_loop() -> None:
         if not svc.espn.enabled:
             return
         while enabled():
-            try:
-                r = svc.espn.live_tick()
-                _live.update(last=datetime.now(timezone.utc), ao_vivo=r.get("ao_vivo", 0))
+            try:                                     # ao vivo: só as ligas com jogo rolando; senão, varredura completa
+                r = svc.espn.live_tick(_live["ligas"] or None)
+                _live.update(last=datetime.now(timezone.utc), ao_vivo=r.get("ao_vivo", 0),
+                             ligas=r.get("ligas_ao_vivo", []))
             except Exception:
                 pass
             time.sleep(60 if _live["ao_vivo"] else LIVE_CHECK_MIN * 60)

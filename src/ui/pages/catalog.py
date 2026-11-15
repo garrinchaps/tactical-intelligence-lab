@@ -263,6 +263,58 @@ def _unified(reg: ProvenanceRegistry) -> None:
                 comparison_table(_lake_table(name, ver))
 
 
+def _health_panel() -> None:
+    """G1/G2 — painel de fontes: saúde, cota, última atualização, profundidade e ações em segundo plano."""
+    from src.data_hub import health
+    from src.data_hub.sources.espn import LEAGUE_NAMES
+    from src.ui.context import get_service
+
+    svc = get_service()
+    try:
+        h = health.source_health(svc.db)
+    except Exception as exc:
+        error_state("Não foi possível ler a saúde das fontes", exc)
+        return
+    if h.empty:
+        empty_state("Nenhuma fonte sincronizada ainda", "", "🩺", "Use as ações abaixo para a primeira sincronização.")
+    else:
+        k = st.columns(4)
+        k[0].metric("Fontes", len(h))
+        k[1].metric("Funcionando", int(h["status"].str.startswith("✅").sum()))
+        k[2].metric("Com falhas", int(h["status"].str.startswith("⚠️").sum()))
+        k[3].metric("Partidas na base", f"{int(h['partidas'].sum()):,}".replace(",", "."))
+        comparison_table(h, "Status: ✅ última sincronização OK nos últimos 3 dias · 🕒 OK mas antiga · ⚠️ a última "
+                            "falhou · ⏸ desativada no .env. Uma fonte só conta como integrada quando trouxe partidas.")
+    st.markdown("#### Ações (rodam em segundo plano — pode continuar usando o app)")
+    st.caption("Evite sincronizações grandes com o app em uso pesado: o banco aceita um gravador por vez.")
+    a, b = st.columns(2)
+    with a:
+        src = st.selectbox("Sincronizar uma fonte", ALL_SOURCES, key="hp_src",
+                           format_func=lambda s: SOURCES[s].label if s in SOURCES else s)
+        if st.button("▶ Sincronizar em segundo plano", key="hp_go"):
+            ok = health.start_job(f"fonte:{src}", lambda say: run_sync([src], 3, 0, service=svc, progress=say))
+            st.toast("Sincronização iniciada." if ok else "Essa fonte já está sincronizando.")
+    with b:
+        lg = st.selectbox("Atualizar uma competição (ESPN)", list(LEAGUE_NAMES), format_func=LEAGUE_NAMES.get, key="hp_lg")
+        if st.button("▶ Atualizar competição", key="hp_lg_go"):
+            ok = health.start_job(f"competicao:{lg}", lambda say: svc.espn.sync_recent(leagues=[lg]))
+            st.toast("Atualização iniciada." if ok else "Essa competição já está atualizando.")
+    jobs = health.jobs()
+    if jobs:
+        st.markdown("#### Trabalhos")
+        for name, j in sorted(jobs.items(), key=lambda kv: kv[1]["started"], reverse=True)[:6]:
+            state = "🔄 rodando" if j["running"] else ("⚠️ erro: " + j["error"] if j.get("error") else "✅ concluído")
+            with st.expander(f"{name} — {state}"):
+                st.code("\n".join(j["log"][-20:]) or "(sem mensagens ainda)")
+                if j.get("result") is not None:
+                    st.caption(f"Resultado: {j['result']}")
+        if any(j["running"] for j in jobs.values()):
+            st.button("🔄 Atualizar o painel", key="hp_refresh")
+    with st.expander("📜 Ver logs de sincronização (últimas 60 linhas)"):
+        lines = health.tail_log()
+        st.code("\n".join(lines) if lines else "Sem log ainda (data/sync_log.txt).")
+
+
 def render(_ctx=None) -> None:
     page_header("🗄️ Catálogo & Dados", "O que existe na base, de onde vem, em que formato entra e como adicionar mais.")
     # a chave do widget some quando a página não é desenhada; o valor fica guardado em outra chave
@@ -271,8 +323,13 @@ def render(_ctx=None) -> None:
               on_change=lambda: st.session_state.__setitem__("_show_score_only", st.session_state["w_show_score_only"]),
               help="Desligado (padrão): o app só mostra jogos com eventos ou estatísticas — os únicos que dão análise.")
     reg = ProvenanceRegistry()
-    t1, t5, t2, t3, t4 = st.tabs(["📦 Base & sincronização", "🧩 Base unificada", "📚 Catálogo YAML", "🧬 Schema canônico",
-                                  "📁 Arquivos de scout"])
+    t0, t1, t5, t2, t3, t4 = st.tabs(["🩺 Painel de fontes", "📦 Base & sincronização", "🧩 Base unificada",
+                                      "📚 Catálogo YAML", "🧬 Schema canônico", "📁 Arquivos de scout"])
+    with t0:
+        try:
+            _health_panel()
+        except Exception as exc:
+            error_state("Painel de fontes indisponível", exc)
     with t5:
         try:
             _unified(reg)
