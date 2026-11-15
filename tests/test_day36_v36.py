@@ -405,3 +405,35 @@ def test_on_field_has_eleven_at_any_minute(final_df):
     f = on_field(final_df, "France", 45)                                 # Dembélé e Giroud saíram aos 40/41'
     assert "Randal Muani" in f["jogadores"] and "Ousmane Dembélé" not in f["jogadores"]
     assert f["de"] <= 45 < f["ate"]
+
+
+# ------------------------------------------------------------------ B3: vínculo jogador-clube
+def test_tenure_loan_return_and_unknown():
+    from datetime import date
+
+    import pandas as pd
+
+    from src.squad.tenure import active_on, build_tenures, classify_squad
+
+    apps = pd.DataFrame([
+        # Kaiki: Cruzeiro → emprestado (curto) → volta ao Cruzeiro em 2026
+        {"transfermarkt_id": 1, "clube_id": 10, "data": "2025-02-01", "nome": "Kaiki"},
+        {"transfermarkt_id": 1, "clube_id": 55, "data": "2025-08-01", "nome": "Kaiki"},
+        {"transfermarkt_id": 1, "clube_id": 55, "data": "2026-01-10", "nome": "Kaiki"},
+        {"transfermarkt_id": 1, "clube_id": 10, "data": "2026-08-01", "nome": "Kaiki"},
+        {"transfermarkt_id": 3, "clube_id": 10, "data": "2026-10-01", "nome": "Titular"},
+    ])
+    # Rodri: transferência registrada do Barcelona B (20) para outro clube — não é do Barcelona
+    tr = pd.DataFrame([{"transfermarkt_id": 2, "nome": "Rodri", "data": "2019-07-01", "de_clube_id": 20, "para_clube_id": 30},
+                       {"transfermarkt_id": 2, "nome": "Rodri", "data": "2024-07-01", "de_clube_id": 30, "para_clube_id": 40}])
+    ten = build_tenures(tr, apps)
+    k = ten[ten["transfermarkt_id"] == "1"].sort_values("start_date")
+    assert k["type"].tolist() == ["definitivo", "emprestimo", "retorno"]
+    assert set(active_on(ten, 10, date(2026, 11, 15))["transfermarkt_id"]) == {"1", "3"}
+    assert active_on(ten, 20, date(2026, 11, 15)).empty                  # Rodri fora
+    sq = pd.DataFrame([{"transfermarkt_id": 1, "nome": "Kaiki"}, {"transfermarkt_id": 2, "nome": "Rodri"},
+                       {"transfermarkt_id": 3, "nome": "Titular"}, {"transfermarkt_id": 9, "nome": "Sem informação"}])
+    c = classify_squad(sq, ten, 10, apps, date(2026, 11, 15)).set_index("nome")
+    assert c.loc["Kaiki", "situacao"] == "no elenco" and c.loc["Kaiki", "vinculo"] == "retorno"
+    assert c.loc["Rodri", "situacao"] == "saiu"
+    assert c.loc["Sem informação", "confidence_tier"] == "UNKNOWN" and c.loc["Sem informação", "situacao"] == "não confirmado"

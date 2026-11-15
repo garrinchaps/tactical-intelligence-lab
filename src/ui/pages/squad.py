@@ -65,6 +65,7 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
     sq = squad_frame(tm, [club["transfermarkt_id"]] if club else [], [team] + names, added)
     source = "Transfermarkt" if club and not tm.empty else ""
     changes: List[Dict[str, Any]] = []
+    unconfirmed = pd.DataFrame()
     if club:                                             # v36: janelas de transferência e empréstimos pelos jogos
         try:
             cid = club["transfermarkt_id"]
@@ -78,6 +79,16 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
                 mine = pd.concat([mine, late], ignore_index=True) if not mine.empty else late
                 own = own[~own["transfermarkt_id"].isin(_left_after(late, cid))]
             sq, changes = apply_transfers(sq, cid, own, mine, tmp)
+            # B3: vínculo jogador-clube (transferências + jogos); sem informação = UNKNOWN, fora do elenco
+            from src.squad.tenure import build_tenures, classify_squad
+
+            ids_all = sq["transfermarkt_id"].dropna().tolist() if "transfermarkt_id" in sq else []
+            trf = D.table("tm_transferencias", None, "transfermarkt_id", ids_all) if ids_all else pd.DataFrame()
+            sq = classify_squad(sq, build_tenures(trf, mine), cid, mine)
+            unconfirmed = sq[sq["situacao"] == "não confirmado"]
+            for r in sq[sq["situacao"] == "saiu"].to_dict("records"):
+                changes.append({"nome": r["nome"], "mudanca": "saiu", "motivo": "vínculo ativo com outro clube"})
+            sq = sq[sq["situacao"] == "no elenco"].reset_index(drop=True)
         except Exception:
             changes = []
     if sq.empty or len(sq) < 11:                         # clube fora do Transfermarkt: elenco pelas escalações da base
@@ -91,7 +102,9 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
         usage = season_usage(ap, sq["transfermarkt_id"].dropna().tolist(),
                              since=(date.today() - timedelta(days=365)).isoformat())
     rated = lab_rating(sq, D.tm_reference(), usage, D.external_ratings()) if not sq.empty else sq
-    return {"squad": rated, "club": club, "names": names, "fonte": source or "—", "mudancas": changes}
+    return {"squad": rated, "club": club, "names": names, "fonte": source or "—", "mudancas": changes,
+            "nao_confirmados": unconfirmed[[c for c in ("nome", "posicao", "ultima_temporada") if c in unconfirmed]]
+            if not unconfirmed.empty else unconfirmed}
 
 
 def _left_after(apps: pd.DataFrame, club_id) -> List[Any]:
@@ -298,6 +311,13 @@ def render(_ctx=None) -> None:
                                "jogo por este saiu (venda ou empréstimo); quem jogou por este nos últimos 150 dias chegou.")
                     comparison_table(pd.DataFrame(mud).rename(columns={"nome": "Jogador", "mudanca": "Mudança",
                                                                         "motivo": "Por quê"}))
+            nc = sq.get("nao_confirmados")
+            if nc is not None and not nc.empty:
+                with st.expander(f"❔ {len(nc)} atleta(s) do cadastro sem vínculo confirmado (fora do elenco)"):
+                    st.caption("Sem transferência registrada e sem jogo pelo clube nos últimos 12 meses: não dá para "
+                               "afirmar que ainda estão no clube. Cadastre-os em “Adicionar atleta” se estiverem.")
+                    comparison_table(nc.rename(columns={"nome": "Atleta", "posicao": "Posição",
+                                                        "ultima_temporada": "Última temporada no cadastro"}))
             if why:
                 note("Ajustes pelo adversário", "; ".join(why) + ".")
             if mode == "Provável" and not info.get("jogos_considerados"):

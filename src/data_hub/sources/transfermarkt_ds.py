@@ -17,7 +17,7 @@ from typing import Callable, Dict, Optional
 import pandas as pd
 
 BASE = "https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data"
-FILES = ("competitions", "clubs", "players", "player_valuations", "games", "appearances", "game_lineups")
+FILES = ("competitions", "clubs", "players", "player_valuations", "games", "appearances", "game_lineups", "transfers")
 # appearances (~1,7 mi linhas) e game_lineups (~2 mi): carreira jogo a jogo e escalações — usadas no planejador
 HEAVY = {"appearances", "game_lineups"}
 CACHE = Path("data/raw/transfermarkt")
@@ -116,6 +116,17 @@ class TransfermarktDatasets:
             out["data"] = out["data"].astype(str).str[:10]
         return out
 
+    @staticmethod
+    def transfers_frame(t: pd.DataFrame) -> pd.DataFrame:
+        """Transferências (v36): data, de/para, taxa. Base do vínculo jogador-clube (src/squad/tenure.py)."""
+        keep = {"player_id": "transfermarkt_id", "player_name": "nome", "transfer_date": "data",
+                "transfer_season": "temporada", "from_club_id": "de_clube_id", "to_club_id": "para_clube_id",
+                "from_club_name": "de_clube", "to_club_name": "para_clube", "transfer_fee": "taxa_eur"}
+        out = t[[k for k in keep if k in t.columns]].rename(columns=keep)
+        if "data" in out:
+            out["data"] = out["data"].astype(str).str[:10]
+        return out
+
     # --------------------------------------------------------------------- sync
     def sync(self, lake, progress: Optional[Callable[[str], None]] = None, max_age_s: float = 24 * 3600) -> Dict[str, int]:
         say = progress or (lambda m: None)
@@ -144,6 +155,9 @@ class TransfermarktDatasets:
             lake.write("tm_competicoes", raw["competitions"], **prov)
         if "appearances" in raw:
             lake.write("tm_aparicoes", self.appearances_frame(raw.pop("appearances")), mirror_sqlite=False, **prov)
+            out["tabelas"] += 1
+        if "transfers" in raw:
+            lake.write("tm_transferencias", self.transfers_frame(raw.pop("transfers")), mirror_sqlite=False, **prov)
             out["tabelas"] += 1
         if "game_lineups" in raw:
             lake.write("tm_escalacoes", self.lineups_frame(raw.pop("game_lineups")), mirror_sqlite=False, **prov)
