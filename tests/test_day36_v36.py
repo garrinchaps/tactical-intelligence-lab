@@ -345,3 +345,18 @@ def test_profile_ignores_old_and_thin_matches():
                      [{"match_id": 3, "team_name": "Nós", "stat_key": k, "value": 50} for k in rich])    # antigo
     p = team_profile(m, s, ["Nós"], {}, 5)
     assert [g["match_id"] for g in p["jogos"]] == [1] and p["descartados_por_dado_incompleto"] == 1
+
+
+def test_drag_pitch_html_and_tips():
+    from src.squad.formations import FORMATIONS
+    from src.ui.drag_pitch import html, pitch_tips
+
+    xi = [{"jogador": f"J{i}", "nota": 70, "papel_pt": "x", "encaixe": 1} for i in range(11)]
+    plan = {"explorar": [{"chave": "crosses_total", "acao": "cruzar", "rotulo": "Cruzamentos cedidos", "media": 20, "dif_pct": 40}],
+            "neutralizar": [{"chave": "corners", "acao": "a", "rotulo": "Escanteios", "media": 7, "dif_pct": 30}],
+            "nossos_fortes": [{"chave": "shots_total", "rotulo": "Finalizações", "media": 15, "dif_pct": 20}],
+            "nossos_fracos": [{"chave": "xg", "rotulo": "xG cedido", "media": 1.6, "dif_pct": 25}]}
+    tips = pitch_tips(plan)
+    assert [t["marca"] for t in tips] == ["E1", "N1", "F1", "C1"] and all("%" in t["texto"] for t in tips)
+    page = html("Time", "4-3-3", xi, [{"nome": "R1", "nota": 60}], tips)
+    assert "%%DATA%%" not in page and all(f in page for f in FORMATIONS) and "localStorage" in page

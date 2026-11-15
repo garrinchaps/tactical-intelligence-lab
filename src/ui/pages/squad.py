@@ -149,6 +149,12 @@ def _pitch(xi: List[Dict[str, Any]], plan: Optional[Dict[str, Any]], rival_corr:
                            arrowhead=3, arrowwidth=3, arrowcolor=P["accent"], text="")
         fig.add_annotation(x=92, y=y - 5 if y > 10 else y + 5, text=f"explorar: rival sofre por aqui ({pct:.0f}%)",
                            showarrow=False, font=dict(color=P["accent"], size=11))
+    from src.ui.drag_pitch import pitch_tips
+
+    for t in pitch_tips(plan):                        # mais leitura além das setas: E/N/F/C com o número que sustenta
+        fig.add_trace(go.Scatter(x=[t["x"]], y=[t["y"]], mode="markers+text", text=[t["marca"]], showlegend=False,
+                                 marker=dict(size=20, color=t["cor"], opacity=0.85, line=dict(color="#090D16", width=1)),
+                                 textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
     xs = [p["x"] for p in xi]
     ys = [p["y"] for p in xi]
     labels = [(p["jogador"] or "—").split(" ")[-1] if p["jogador"] else "vaga" for p in xi]
@@ -256,7 +262,25 @@ def render(_ctx=None) -> None:
                                  encaixe=None if row.empty else round(fit(p["papel"], row.iloc[0]["papel"]), 2),
                                  papel_natural=None if row.empty else ROLE_PT.get(row.iloc[0]["papel"], "—"))
             corr = (theirs or {}).get("corredores") or {}
-            st.plotly_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+            interactive = st.toggle("🖐️ Campinho interativo (arrastar jogadores, trocar com o banco e de formação)",
+                                    value=False, key="sq_drag")
+            if interactive:
+                import streamlit.components.v1 as components
+
+                from src.ui import drag_pitch
+
+                in_xi = {p["jogador"] for p in xi if p.get("jogador")}
+                bench = [{"nome": r["nome"], "nota": None if pd.isna(r.get("nota")) else float(r["nota"]),
+                          "papel_pt": ROLE_PT.get(r.get("papel"), "")}
+                         for r in squad.sort_values("nota", ascending=False).to_dict("records") if r["nome"] not in in_xi]
+                components.html(drag_pitch.html(team, formation, xi, bench, drag_pitch.pitch_tips(plan, corr)), height=760)
+                st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
+                           "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
+            else:
+                st.plotly_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                if plan:
+                    st.caption("Marcas no campo (passe o mouse): E = explorar a fraqueza do rival · N = neutralizar a força "
+                               "dele · F = nossa força · C = cuidado com o nosso ponto fraco.")
             vals = [p["nota"] for p in xi if p.get("nota") is not None]
             k = st.columns(4)
             k[0].metric("Nota média do XI", f"{sum(vals) / len(vals):.0f}" if vals else "—")
