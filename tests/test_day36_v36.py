@@ -360,3 +360,17 @@ def test_drag_pitch_html_and_tips():
     assert [t["marca"] for t in tips] == ["E1", "N1", "F1", "C1"] and all("%" in t["texto"] for t in tips)
     page = html("Time", "4-3-3", xi, [{"nome": "R1", "nota": 60}], tips)
     assert "%%DATA%%" not in page and all(f in page for f in FORMATIONS) and "localStorage" in page
+
+
+def test_compare_player_cut():
+    import pandas as pd
+
+    from src.ui.pages.compare import player_cut
+
+    pm = pd.DataFrame({"match_id": [1, 2, 3, 4, 5, 6, 7], "gols": [1] * 7})
+    d = pd.DataFrame({"match_id": [1, 2, 3, 4, 5, 6, 7],
+                      "match_date": ["2026-01-0%d" % i for i in range(1, 8)],
+                      "season_name": ["2024/25"] * 3 + ["2025/26"] * 4})
+    assert player_cut(pm, d, "Último jogo")["match_id"].tolist() == [7]
+    assert len(player_cut(pm, d, "Últimos 5 jogos")) == 5
+    assert set(player_cut(pm, d, "Temporada mais recente")["match_id"]) == {4, 5, 6, 7}

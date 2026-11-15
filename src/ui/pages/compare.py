@@ -413,6 +413,104 @@ def _match_vs_match() -> None:
                      "Jogos com eventos (✅) têm todos os indicadores; os demais, o que a fonte publica.")
 
 
+# ------------------------------------------------------------------ v36: qualquer jogador × qualquer jogador
+RECORTES = {"Último jogo": 1, "Últimos 5 jogos": 5, "Temporada mais recente": None}
+
+
+@st.cache_data(show_spinner=False, ttl=900, max_entries=64)
+def _match_dates(ids: tuple) -> pd.DataFrame:
+    from src.ui.context import get_service
+
+    if not ids:
+        return pd.DataFrame(columns=["match_id", "match_date", "season_name", "competition_name"])
+    ph = ",".join("?" * len(ids))
+    with get_service().db.connect() as conn:
+        return pd.read_sql_query(f"SELECT match_id, match_date, season_name, competition_name, home_team_name, "
+                                 f"away_team_name FROM matches WHERE match_id IN ({ph})", conn, params=list(ids))
+
+
+def player_cut(per_match: pd.DataFrame, dates: pd.DataFrame, recorte: str) -> pd.DataFrame:
+    """Jogos do recorte (só partidas com lances do jogador): último, últimos 5 ou a temporada mais recente."""
+    if per_match is None or per_match.empty:
+        return pd.DataFrame()
+    m = per_match.merge(dates, on="match_id", how="left").sort_values("match_date", ascending=False)
+    n = RECORTES.get(recorte)
+    if n:
+        return m.head(n)
+    season = m["season_name"].dropna().astype(str)
+    return m[m["season_name"].astype(str) == season.iloc[0]] if not season.empty else m.head(0)
+
+
+def _player_pick(label: str, key: str):
+    from src.ui.context import get_service
+    from src.ui.pages.players_search import player_index
+    from src.ui.pages.search_all import find_players
+
+    q = st.text_input(label, key=f"{key}_q", placeholder="nome do jogador (ex.: Messi, Vinícius)")
+    if len(q.strip()) < 3:
+        return None, []
+    version = get_service().db.stable_version()
+    found = find_players(q, version, n=10)
+    if found.empty:
+        st.caption("Nenhum jogador com esse nome.")
+        return None, []
+    found = found[found["fontes"].str.contains("eventos")] if found["fontes"].str.contains("eventos").any() else found
+    opts = found.to_dict("records")
+    r = st.selectbox("Escolha", opts, key=f"{key}_pick", label_visibility="collapsed",
+                     format_func=lambda x: f"{x['nome']}" + (f" · {x['clube']}" if x.get("clube") else "")
+                     + (f" · {int(x['jogos'])} jogos com lances" if pd.notna(x.get("jogos")) and x.get("jogos") else ""))
+    idx = player_index(version)
+    names = idx.loc[(idx["pessoa"] == r["core"]) & (idx["fonte"].str.startswith("eventos")), "nome"].unique().tolist()
+    return r, names
+
+
+def _any_players() -> None:
+    from src.ui.pages.players_search import SCOUT_GROUPS, player_scout
+
+    st.caption("Qualquer jogador com lances na base (StatsBomb, Wyscout, OpenPlay e os jogos já abertos), "
+               "não só os da partida aberta.")
+    a, b = st.columns(2)
+    with a:
+        pa, na = _player_pick("Jogador A", "cmpA")
+    with b:
+        pb, nb = _player_pick("Jogador B", "cmpB")
+    recorte = st.radio("Recorte", list(RECORTES), horizontal=True, key="cmp_any_cut", index=1)
+    if not (pa and pb):
+        empty_state("Escolha os dois jogadores", "Digite pelo menos 3 letras de cada nome.", "👥")
+        return
+    cols, info = {}, []
+    for p, names in ((pa, na), (pb, nb)):
+        sc = player_scout(tuple(names)) if names else pd.DataFrame()
+        if sc.empty:
+            info.append(f"**{p['nome']}**: nenhum jogo com lances na base — sem números concretos para comparar.")
+            continue
+        cut = player_cut(sc.fillna(0), _match_dates(tuple(int(x) for x in sc["match_id"])), recorte)
+        if cut.empty:
+            info.append(f"**{p['nome']}**: nenhum jogo no recorte escolhido.")
+            continue
+        mins = float((cut["m1"] - cut["m0"]).clip(lower=1, upper=125).sum())
+        per = {k: float(cut[k].sum()) / max(mins, 1) * 90 for g in SCOUT_GROUPS.values() for k, _ in g if k in cut}
+        cols[p["nome"]] = per
+        last = cut.iloc[0]
+        info.append(f"**{p['nome']}**: {len(cut)} jogo(s), ~{mins:.0f} min estimados · último: {last.get('match_date')} "
+                    f"{last.get('home_team_name', '')} x {last.get('away_team_name', '')}")
+    for line in info:
+        st.markdown("- " + line)
+    if len(cols) < 2:
+        return
+    (n1, v1), (n2, v2) = list(cols.items())
+    rows = []
+    for g, items in SCOUT_GROUPS.items():
+        for k, lab in items:
+            if k in v1 and k in v2:
+                worse_is_more = k in ("perdas_de_posse", "faltas_cometidas", "amarelos", "vermelhos", "erros")
+                best = "" if abs(v1[k] - v2[k]) < 1e-9 else (n1 if (v1[k] > v2[k]) != worse_is_more else n2)
+                rows.append({"Grupo": g, "Indicador (por 90 min)": lab, n1: round(v1[k], 2), n2: round(v2[k], 2),
+                             "Melhor": best})
+    comparison_table(pd.DataFrame(rows), "Valores por 90 minutos no recorte. Minutos estimados pelo intervalo entre a "
+                                         "primeira e a última ação de cada jogo. Partidas sem lances do jogador não entram.")
+
+
 def render_page(current_context, match_bar) -> None:
     from src.ui.components import hero
 
@@ -420,6 +518,14 @@ def render_page(current_context, match_bar) -> None:
          "equipes da partida aberta.")
     modes = ["👥 Jogador × jogador", "🏟️ Jogo × jogo", "🛡️ Clube × clube", "📅 Equipe × ela mesma", "⚔️ Duas equipes da partida"]
     pick = st.radio("Modo", modes, horizontal=True, key="cmp_page_mode", label_visibility="collapsed")
+    if pick == modes[0]:
+        src = st.radio("Jogadores", ["De qualquer jogo da base", "Da partida aberta"], horizontal=True, key="cmp_any_src")
+        if src == "De qualquer jogo da base":
+            try:
+                _any_players()
+            except Exception as exc:
+                error_state("Comparação indisponível", exc)
+            return
     try:
         if pick == modes[1]:
             _match_vs_match()
