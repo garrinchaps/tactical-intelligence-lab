@@ -69,6 +69,82 @@ def squad_frame(tm_players: pd.DataFrame, club_ids: Iterable[Any] = (), club_nam
     return df
 
 
+def _tid(x: Any) -> str:
+    return str(x).replace(".0", "") if x is not None and str(x) not in ("", "nan", "None") else ""
+
+
+def apply_transfers(squad: pd.DataFrame, club_id: Any, own_apps: Optional[pd.DataFrame],
+                    squad_apps: Optional[pd.DataFrame], tm_players: Optional[pd.DataFrame] = None,
+                    ref: Optional[date] = None, arrival_days: int = 150) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+    """
+    v36 — elenco ATUAL a partir dos jogos, não só do cadastro (o cadastro do Transfermarkt atrasa nas janelas):
+    * SAIU: o último jogo do atleta foi por OUTRO clube, depois do último jogo por este (venda ou empréstimo);
+    * CHEGOU: jogou por este clube nos últimos `arrival_days` dias e não jogou por outro depois (contratação/empréstimo).
+    `own_apps` = aparições de jogos do clube (tm_aparicoes filtrado por clube_id); `squad_apps` = aparições, em
+    qualquer clube, dos atletas do elenco cadastrado. Devolve (elenco ajustado, lista de mudanças com o motivo).
+    """
+    cid = _tid(club_id)
+    changes: List[Dict[str, Any]] = []
+    if squad is None:
+        squad = pd.DataFrame()
+    sq = squad.copy()
+    if not cid:
+        return sq, changes
+    today = pd.Timestamp(ref or date.today())
+
+    def last_by(apps: pd.DataFrame) -> pd.DataFrame:
+        a = apps.assign(tid=apps["transfermarkt_id"].map(_tid), cl=apps["clube_id"].map(_tid),
+                        d=pd.to_datetime(apps["data"], errors="coerce")).dropna(subset=["d"])
+        return a.sort_values("d")
+
+    # saídas
+    if squad_apps is not None and not squad_apps.empty and "transfermarkt_id" in sq:
+        a = last_by(squad_apps)
+        last_any = a.groupby("tid").tail(1).set_index("tid")
+        last_here = a[a["cl"] == cid].groupby("tid")["d"].max()
+        drop = []
+        for i, r in sq.iterrows():
+            t = _tid(r.get("transfermarkt_id"))
+            if t not in last_any.index:
+                continue
+            la = last_any.loc[t]
+            here = last_here.get(t)
+            if la["cl"] != cid and (here is None or pd.isna(here) or la["d"] > here):
+                drop.append(i)
+                changes.append({"nome": r.get("nome"), "mudanca": "saiu",
+                                "motivo": f"último jogo por outro clube em {la['d']:%d/%m/%Y}"
+                                          + (f" (pelo daqui: {here:%d/%m/%Y})" if here is not None and not pd.isna(here) else "")})
+        sq = sq.drop(index=drop)
+    # chegadas
+    if own_apps is not None and not own_apps.empty:
+        a = last_by(own_apps)
+        recent = a[(a["cl"] == cid) & (a["d"] >= today - pd.Timedelta(days=arrival_days))]
+        have = set(sq["transfermarkt_id"].map(_tid)) if "transfermarkt_id" in sq else set()
+        new_ids = [t for t in recent["tid"].unique() if t and t not in have]
+        if new_ids:
+            info = pd.DataFrame()
+            if tm_players is not None and not tm_players.empty:
+                info = tm_players[tm_players["transfermarkt_id"].map(_tid).isin(new_ids)].copy()
+            rows = []
+            for t in new_ids:
+                last_here = recent.loc[recent["tid"] == t, "d"].max()
+                row = info[info["transfermarkt_id"].map(_tid) == t]
+                base = row.iloc[0].to_dict() if not row.empty else {
+                    "transfermarkt_id": t, "nome": recent.loc[recent["tid"] == t, "nome"].iloc[-1]}
+                base["origem"] = "chegou (jogou pelo clube)"
+                rows.append(base)
+                changes.append({"nome": base.get("nome"), "mudanca": "chegou",
+                                "motivo": f"jogou pelo clube em {last_here:%d/%m/%Y}"})
+            add = pd.DataFrame(rows)
+            for c in ("funcao", "posicao", "nascimento"):
+                if c not in add:
+                    add[c] = None
+            add["papel"] = [natural_role(f, p) for f, p in zip(add["funcao"], add["posicao"])]
+            add["idade"] = add["nascimento"].map(lambda b: age_on(b, ref))
+            sq = pd.concat([sq, add], ignore_index=True)
+    return sq.reset_index(drop=True), changes
+
+
 def season_usage(appearances: Optional[pd.DataFrame], player_ids: Iterable[Any], since: Optional[str] = None
                  ) -> pd.DataFrame:
     """Minutos, jogos, gols e assistências por atleta desde `since` (aparições do Transfermarkt)."""
@@ -226,8 +302,13 @@ AGAINST_METRICS = [
 ]
 
 
+MIN_STAT_KEYS = 5        # estatísticas distintas no jogo (dos dois times) para contar como "dado completo"
+RECENT_DAYS = 400        # não usa jogo de mais de ~1 temporada antes do mais recente
+
+
 def team_profile(matches: pd.DataFrame, stats: pd.DataFrame, team_names: Sequence[str],
-                 baseline: Optional[Dict[str, float]] = None, last_n: int = 5) -> Dict[str, Any]:
+                 baseline: Optional[Dict[str, float]] = None, last_n: int = 5,
+                 min_stat_keys: int = MIN_STAT_KEYS) -> Dict[str, Any]:
     """
     `matches`: catálogo (match_id, match_date, home/away_team_name, home/away_score) já filtrado para o time.
     `stats`: match_team_stats (match_id, team_name, stat_key, value) desses jogos.
@@ -236,8 +317,21 @@ def team_profile(matches: pd.DataFrame, stats: pd.DataFrame, team_names: Sequenc
     """
     names = set(team_names)
     m = matches.sort_values("match_date", ascending=False)
-    with_stats = set(stats["match_id"].unique()) if stats is not None and not stats.empty else set()
-    m = m[m["match_id"].isin(with_stats)].head(last_n)
+    # v36: só jogos RECENTES e com dado COMPLETO (lances, ou estatísticas com pelo menos MIN_STAT_KEYS indicadores
+    # para o time) — jogo com 2 números soltos não define o perfil de ninguém
+    rich = set()
+    if stats is not None and not stats.empty:
+        per = stats.groupby("match_id")["stat_key"].nunique()
+        rich = set(per[per >= min_stat_keys].index)
+    lvl = m["data_level"] if "data_level" in m else pd.Series("", index=m.index)
+    ok = m["match_id"].isin(rich) | ((lvl == "EVENTS") & m["match_id"].isin(set(stats["match_id"]) if stats is not None
+                                                                              and not stats.empty else set()))
+    skipped = int((~ok).sum())
+    m = m[ok]
+    if not m.empty:
+        newest = pd.to_datetime(m["match_date"], errors="coerce").max()
+        m = m[pd.to_datetime(m["match_date"], errors="coerce") >= newest - pd.Timedelta(days=RECENT_DAYS)]
+    m = m.head(last_n)
     rows_for, rows_against, games = [], [], []
     for r in m.itertuples():
         home = r.home_team_name in names
@@ -253,7 +347,10 @@ def team_profile(matches: pd.DataFrame, stats: pd.DataFrame, team_names: Sequenc
         games.append({"data": r.match_date, "adversario": r.away_team_name if home else r.home_team_name,
                       "placar": f"{gf}–{ga}", "mando": "casa" if home else "fora", "match_id": int(r.match_id)})
     F, A = pd.DataFrame(rows_for), pd.DataFrame(rows_against)
-    out: Dict[str, Any] = {"jogos": games, "n": len(games), "a_favor": {}, "contra": {}}
+    out: Dict[str, Any] = {"jogos": games, "n": len(games), "a_favor": {}, "contra": {},
+                           "descartados_por_dado_incompleto": skipped,
+                           "criterio": f"últimos jogos com lances ou ≥ {min_stat_keys} estatísticas no jogo, "
+                                       f"até {RECENT_DAYS} dias antes do mais recente"}
     for key, lab, up in FOR_METRICS:
         if key in F and F[key].notna().sum():
             v = float(pd.to_numeric(F[key], errors="coerce").mean())

@@ -173,9 +173,41 @@ def db_lineups(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFrame
         return pd.DataFrame()
 
 
+def moved_elsewhere(db, last_here: Dict[str, str], team_names: Sequence[str]) -> set:
+    """Atletas que aparecem numa escalação de OUTRO time depois do último jogo por este (transferência/empréstimo)."""
+    names = [n for n in last_here if n]
+    if not names:
+        return set()
+    out = set()
+    for i in range(0, len(names), 400):
+        chunk = names[i:i + 400]
+        q = (f"SELECT l.player_name AS jogador, l.team_name AS time, MAX(m.match_date) AS data FROM match_lineups l "
+             f"JOIN matches m ON m.match_id = l.match_id WHERE l.player_name IN ({','.join('?' * len(chunk))}) "
+             f"GROUP BY l.player_name, l.team_name")
+        try:
+            with db.connect() as conn:
+                df = pd.read_sql_query(q, conn, params=chunk)
+        except Exception:
+            return out
+        other = df[~df["time"].isin(list(team_names))]
+        for r in other.itertuples():
+            if str(r.data) > str(last_here.get(r.jogador, "")):
+                out.add(r.jogador)
+    return out
+
+
 def squad_from_db(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFrame:
     """Sem Transfermarkt para o clube: elenco = quem apareceu nas escalações/lances recentes da base local."""
     lu = db_lineups(db, team_names, n_games)
+    if lu.empty:
+        return pd.DataFrame()
+    # v36: só a janela recente (até 150 dias antes do último jogo do time) — quem sumiu das escalações saiu
+    d = pd.to_datetime(lu["data"], errors="coerce")
+    lu = lu[d >= d.max() - pd.Timedelta(days=150)]
+    # sai quem jogou por outro time depois E não está nos 5 jogos mais recentes daqui (homônimo não derruba titular)
+    last5 = set(lu.loc[lu["jogo"].isin(lu.drop_duplicates("jogo").sort_values("data").tail(5)["jogo"]), "jogador"])
+    gone = moved_elsewhere(db, lu.groupby("jogador")["data"].max().to_dict(), team_names) - last5
+    lu = lu[~lu["jogador"].isin(gone)]
     if lu.empty:
         return pd.DataFrame()
     g = lu.groupby("jogador")

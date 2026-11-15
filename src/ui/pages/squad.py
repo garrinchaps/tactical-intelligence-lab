@@ -14,7 +14,8 @@ import streamlit as st
 
 from src.squad import data as D
 from src.squad.formations import FORMATIONS, ROLE_PT, fit, natural_role
-from src.squad.planner import (best_xi, lab_rating, matchup_plan, plan_bonus, probable_xi, season_usage, squad_frame,
+from src.squad.planner import (apply_transfers, best_xi, lab_rating, matchup_plan, plan_bonus, probable_xi, season_usage,
+                               squad_frame,
                                team_profile)
 from src.ui.components import comparison_table, empty_state, hero, note
 from src.ui.theme import PALETTE as P
@@ -63,6 +64,22 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
     added = D.added_players()
     sq = squad_frame(tm, [club["transfermarkt_id"]] if club else [], [team] + names, added)
     source = "Transfermarkt" if club and not tm.empty else ""
+    changes: List[Dict[str, Any]] = []
+    if club:                                             # v36: janelas de transferência e empréstimos pelos jogos
+        try:
+            cid = club["transfermarkt_id"]
+            own = D.table("tm_aparicoes", None, "clube_id", [cid])
+            ids = sq["transfermarkt_id"].dropna().tolist() if "transfermarkt_id" in sq else []
+            mine = D.table("tm_aparicoes", None, "transfermarkt_id", ids) if ids else pd.DataFrame()
+            arrivals = own["transfermarkt_id"].dropna().unique().tolist() if not own.empty else []
+            tmp = D.table("tm_jogadores", None, "transfermarkt_id", arrivals) if arrivals else pd.DataFrame()
+            if not own.empty and arrivals:              # quem chegou mas já jogou por outro depois não entra
+                late = D.table("tm_aparicoes", None, "transfermarkt_id", arrivals)
+                mine = pd.concat([mine, late], ignore_index=True) if not mine.empty else late
+                own = own[~own["transfermarkt_id"].isin(_left_after(late, cid))]
+            sq, changes = apply_transfers(sq, cid, own, mine, tmp)
+        except Exception:
+            changes = []
     if sq.empty or len(sq) < 11:                         # clube fora do Transfermarkt: elenco pelas escalações da base
         local = D.squad_from_db(get_service().db, names)
         if not local.empty:
@@ -74,7 +91,17 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
         usage = season_usage(ap, sq["transfermarkt_id"].dropna().tolist(),
                              since=(date.today() - timedelta(days=365)).isoformat())
     rated = lab_rating(sq, D.tm_reference(), usage, D.external_ratings()) if not sq.empty else sq
-    return {"squad": rated, "club": club, "names": names, "fonte": source or "—"}
+    return {"squad": rated, "club": club, "names": names, "fonte": source or "—", "mudancas": changes}
+
+
+def _left_after(apps: pd.DataFrame, club_id) -> List[Any]:
+    """Atletas cujo último jogo foi por outro clube (para não 'trazer de volta' quem já saiu)."""
+    from src.squad.planner import _tid
+
+    if apps is None or apps.empty:
+        return []
+    a = apps.assign(d=pd.to_datetime(apps["data"], errors="coerce")).sort_values("d").groupby("transfermarkt_id").tail(1)
+    return a.loc[a["clube_id"].map(_tid) != _tid(club_id), "transfermarkt_id"].tolist()
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=32)
@@ -239,6 +266,14 @@ def render(_ctx=None) -> None:
                 k[3].metric("Jogos usados", info.get("jogos_considerados", 0))
             st.caption("🔵 na posição de origem · 🟡 adaptado · 🔴 improvisado. O número no círculo é a nota do "
                        "laboratório. Fonte do elenco: " + sq["fonte"] + ".")
+            mud = sq.get("mudancas") or []
+            if mud:
+                with st.expander(f"🔁 Elenco atualizado pelos jogos: {sum(m['mudanca'] == 'saiu' for m in mud)} saída(s), "
+                                 f"{sum(m['mudanca'] == 'chegou' for m in mud)} chegada(s)"):
+                    st.caption("O cadastro do Transfermarkt atrasa nas janelas. Quem jogou por outro clube depois do último "
+                               "jogo por este saiu (venda ou empréstimo); quem jogou por este nos últimos 150 dias chegou.")
+                    comparison_table(pd.DataFrame(mud).rename(columns={"nome": "Jogador", "mudanca": "Mudança",
+                                                                        "motivo": "Por quê"}))
             if why:
                 note("Ajustes pelo adversário", "; ".join(why) + ".")
             if mode == "Provável" and not info.get("jogos_considerados"):
@@ -253,10 +288,14 @@ def render(_ctx=None) -> None:
         if not rival:
             empty_state("Escolha o adversário", "O plano compara os últimos jogos dos dois times.", "🎯")
         elif not theirs or not theirs.get("n"):
-            empty_state(f"Sem jogos com estatísticas de {rival}", "", "🎯",
-                        "O plano usa jogos com estatísticas ou lances. Sincronize a liga do adversário.")
+            empty_state(f"Sem jogos recentes com dado completo de {rival}", "", "🎯",
+                        "O plano usa só jogos recentes com lances ou estatísticas completas (≥ 5 indicadores). "
+                        "Sincronize a liga do adversário.")
         else:
             st.markdown(f"#### {team} x {rival} — últimos {theirs['n']} jogo(s) do rival e {mine.get('n', 0)} nossos")
+            skip = (theirs.get("descartados_por_dado_incompleto") or 0) + (mine.get("descartados_por_dado_incompleto") or 0)
+            st.caption("Critério: " + (theirs.get("criterio") or "") +
+                       (f". {skip} jogo(s) recente(s) com dado incompleto ficaram de fora." if skip else "."))
             st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
             x, y = st.columns(2)
             with x:

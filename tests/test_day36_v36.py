@@ -302,3 +302,46 @@ def test_unify_people_merges_same_athlete_and_keeps_homonyms_apart():
     assert p[3] == p[4] and p[3] != p[0]
     assert p[5] != p[6]                                                 # dois Danilos diferentes
     assert len({p[7], p[8], p[9]}) == 3                                 # ambíguo: não junta
+
+
+# ------------------------------------------------------------------ escalação: transferências e empréstimos
+def test_apply_transfers_removes_departures_and_adds_arrivals():
+    from datetime import date
+
+    import pandas as pd
+
+    from src.squad.planner import apply_transfers
+
+    sq = pd.DataFrame([{"transfermarkt_id": 1, "nome": "Kaiki", "funcao": "Left-Back", "posicao": "Defender"},
+                       {"transfermarkt_id": 2, "nome": "Titular Fixo", "funcao": "Centre-Back", "posicao": "Defender"},
+                       {"transfermarkt_id": 3, "nome": "Emprestado", "funcao": "Centre-Forward", "posicao": "Attack"}])
+    apps = pd.DataFrame([
+        {"transfermarkt_id": 1, "clube_id": 10, "data": "2026-03-01", "nome": "Kaiki"},
+        {"transfermarkt_id": 1, "clube_id": 99, "data": "2026-08-20", "nome": "Kaiki"},      # foi vendido
+        {"transfermarkt_id": 2, "clube_id": 10, "data": "2026-11-01", "nome": "Titular Fixo"},
+        {"transfermarkt_id": 3, "clube_id": 10, "data": "2026-05-01", "nome": "Emprestado"},
+        {"transfermarkt_id": 3, "clube_id": 77, "data": "2026-10-01", "nome": "Emprestado"},  # emprestado
+    ])
+    own = pd.DataFrame([{"transfermarkt_id": 2, "clube_id": 10, "data": "2026-11-01", "nome": "Titular Fixo"},
+                        {"transfermarkt_id": 5, "clube_id": 10, "data": "2026-10-20", "nome": "Reforço"}])   # chegou
+    tm = pd.DataFrame([{"transfermarkt_id": 5, "nome": "Reforço", "funcao": "Central Midfield", "posicao": "Midfield",
+                        "nascimento": "2000-01-01"}])
+    out, ch = apply_transfers(sq, 10, own, apps, tm, ref=date(2026, 11, 15))
+    assert set(out["nome"]) == {"Titular Fixo", "Reforço"}
+    assert {(c["nome"], c["mudanca"]) for c in ch} == {("Kaiki", "saiu"), ("Emprestado", "saiu"), ("Reforço", "chegou")}
+
+
+def test_profile_ignores_old_and_thin_matches():
+    import pandas as pd
+
+    from src.squad.planner import team_profile
+
+    m = pd.DataFrame([{"match_id": i, "match_date": d, "home_team_name": "Nós", "away_team_name": "X", "home_score": 1,
+                       "away_score": 0, "data_level": "BOXSCORE"} for i, d in
+                      [(1, "2026-11-01"), (2, "2026-10-20"), (3, "2024-01-01")]])
+    rich = ["shots_total", "shots_on_target", "fouls", "corners", "possession_pct"]
+    s = pd.DataFrame([{"match_id": 1, "team_name": "Nós", "stat_key": k, "value": 10} for k in rich] +
+                     [{"match_id": 2, "team_name": "Nós", "stat_key": "shots_total", "value": 99}] +     # dado ralo
+                     [{"match_id": 3, "team_name": "Nós", "stat_key": k, "value": 50} for k in rich])    # antigo
+    p = team_profile(m, s, ["Nós"], {}, 5)
+    assert [g["match_id"] for g in p["jogos"]] == [1] and p["descartados_por_dado_incompleto"] == 1

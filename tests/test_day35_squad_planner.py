@@ -128,8 +128,9 @@ def test_data_layer_db_profile(tmp_path):
     assert base["shots_total"] > 0 and base["goals"] == 0.5
     from src.squad.planner import team_profile
 
-    p = team_profile(m, s, ["Rival"], base, 5)
+    p = team_profile(m, s, ["Rival"], base, 5, min_stat_keys=2)   # v36: limiar de "dado completo" ajustável
     assert p["n"] == 5 and p["a_favor"]["passes_total"]["media"] == 600
+    assert team_profile(m, s, ["Rival"], base, 5)["n"] == 0             # só 2 números por jogo: não define perfil
 
 
 def test_lake_table_filter_and_added_players(tmp_path, monkeypatch):
