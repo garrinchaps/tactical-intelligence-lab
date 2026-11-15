@@ -172,7 +172,7 @@ class EspnProvider:
         meses passados ficam em cache e não são baixados de novo. Pode ser interrompido e retomado.
         """
         say = progress or (lambda m: None)
-        tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "meses": 0}
+        tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "meses": 0, "janelas_falhas": 0}
         until = until or date.today()
         leagues = leagues or ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana"]
         fails = 0
@@ -180,30 +180,54 @@ class EspnProvider:
         def refused(exc) -> bool:
             return isinstance(exc, ClientRefused) or " 400" in str(exc)
 
-        def month(lg, first, last):
+        def fetch(lg, d, e):
+            return self.scoreboard(lg, d, e)
+
+        def window(lg, d, e, size):
             """
-            Mês inteiro; se a ESPN recusar o intervalo (HTTP 400), tenta semana a semana sem o limite.
-            Devolve (jogos, recusado) — recusado=True quando o mês E todas as semanas deram 400.
-            Recusas não são repetidas (o cliente lembra por 7 dias), então rodar de novo é rápido.
+            Janela [d, e] de até `size` dias. HTTP 400 = a ESPN recusou a JANELA (não é erro fatal): divide em
+            janelas menores, 7 → 3 → 1 dia. Devolve (jogos, janelas de 1 dia que continuaram recusadas, recusou_tudo).
+            Para não martelar o site: se todas as janelas de 3 dias falharem, testa só o 1º dia; se ele também
+            falhar, a semana é dada como sem calendário.
             """
             try:
-                return self.scoreboard(lg, first, last), False
+                return fetch(lg, d, e), 0, False
             except Exception as exc:
                 if not refused(exc):
                     raise
+            if size <= 1:
+                return [], 1, True
+            nxt = 3 if size > 3 else 1
+            out, fails, parts, all_bad, cur = [], 0, 0, True, d
+            while cur <= e:
+                ce = min(cur + timedelta(days=nxt - 1), e)
+                parts += 1
+                if nxt == 1 and all_bad and parts > 1 and size <= 3 and fails >= 1:
+                    fails += (e - cur).days + 1               # 1º dia recusado: o resto da janela também
+                    break
+                got, f, bad = window(lg, cur, ce, nxt)
+                out += got
+                fails += f
+                all_bad = all_bad and bad
+                cur = ce + timedelta(days=1)
+            return out, fails, all_bad
+
+        def month(lg, first, last):
+            """
+            Mês em janelas de no máximo 7 dias (a ESPN recusa janelas longas). Devolve (jogos, recusado):
+            recusado=True quando as duas primeiras semanas foram recusadas até o nível de 1 dia e nada veio.
+            Recusas não são repetidas (o cliente lembra por 7 dias), então rodar de novo é rápido.
+            """
             out, d, weeks, bad = [], first, 0, 0
             while d <= last:
                 e = min(d + timedelta(days=6), last)
                 weeks += 1
-                try:
-                    data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{d:%Y%m%d}-{e:%Y%m%d}"},
-                                     max_age_s=None if (date.today() - e).days >= 3 else 1800)
-                    out += [r for r in (self.parse_scoreboard_event(ev, lg) for ev in data.get("events", []) or []) if r]
-                except Exception as exc:
-                    if not refused(exc):
-                        raise
-                    bad += 1                              # semana sem calendário nessa liga: não é falha de rede
-                    if bad >= 2 and not out:              # duas semanas seguidas recusadas: o mês todo é recusado
+                got, fails, all_bad = window(lg, d, e, 7)
+                out += got
+                tot["janelas_falhas"] = tot.get("janelas_falhas", 0) + fails
+                if all_bad:
+                    bad += 1
+                    if bad >= 2 and not out:
                         return out, True
                 d = e + timedelta(days=1)
             return out, bad == weeks

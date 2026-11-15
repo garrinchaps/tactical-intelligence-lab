@@ -151,8 +151,38 @@ def lineup_split(df: Optional[pd.DataFrame], team: str) -> Tuple[List[str], List
     came = [_same_player(str(x), names) for x in _col(subs, "substitution_replacement_name").dropna().unique()] \
         if not subs.empty else []
     order = d.dropna(subset=["player_name"]).drop_duplicates("player_name")
-    starters = [str(p) for p in order["player_name"] if str(p) not in came]
+    unknown = {"não identificado", "nao identificado", "unknown", ""}
+    starters = [str(p) for p in order["player_name"] if str(p) not in came and str(p).strip().lower() not in unknown]
     return starters, came
+
+
+def on_field(df: Optional[pd.DataFrame], team: str, minute: float) -> Dict[str, Any]:
+    """
+    Quem estava em campo pela equipe no minuto `minute` (titulares − quem saiu + quem entrou − expulsos) e o trecho
+    [início, fim) em que exatamente esses jogadores estiveram juntos (entre a troca anterior e a seguinte).
+    """
+    if df is None or df.empty:
+        return {"jogadores": [], "de": 0.0, "ate": 0.0}
+    starters, _ = lineup_split(df, team)
+    d = df[df["team_name"] == team]
+    names = d["player_name"].dropna().unique()
+    changes = []                                     # (minuto, sai, entra)
+    for s in d[d["type_name"] == "Substitution"].itertuples():
+        inn = getattr(s, "substitution_replacement_name", None)
+        changes.append((float(s.minute), str(s.player_name), _same_player(str(inn), names) if isinstance(inn, str) else None))
+    red = d[_col(d, "foul_committed_card_name").isin(["Red Card", "Second Yellow"])]
+    changes += [(float(r.minute), str(r.player_name), None) for r in red.itertuples()]
+    changes.sort(key=lambda c: c[0])
+    on = list(starters)
+    start, end = 0.0, float(df["minute"].max() + 1) if "minute" in df else 90.0
+    for m, out_p, in_p in changes:
+        if m <= minute:
+            on = [p for p in on if p != out_p] + ([in_p] if in_p and in_p not in on else [])
+            start = m
+        else:
+            end = m
+            break
+    return {"jogadores": on, "de": start, "ate": end}
 
 
 def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -> pd.DataFrame:

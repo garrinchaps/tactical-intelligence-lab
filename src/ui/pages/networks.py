@@ -14,6 +14,7 @@ from src.ui.context import MatchContext
 
 
 VIEWS = {
+    "min": "Os 11 em campo num minuto",
     "xi": "Os 11 titulares até a 1ª troca",
     "xi_full": "Os 11 titulares, jogo inteiro",
     "all": "Jogo inteiro, com quem entrou (marcado à parte)",
@@ -36,10 +37,23 @@ def render(ctx: MatchContext) -> None:
                    help="Com as trocas, o campinho chegava a ter 16 jogadores. Por padrão mostramos só o XI que "
                         "começou; na última opção, quem entrou aparece com bolinha vazada.")
     min_pass = int(b.number_input("Ligação só aparece com pelo menos … passes", min_value=1, max_value=10, value=2))
+    from src.metrics.match_facts import on_field
+
+    field = None
+    d_net = df
+    if view == "min":
+        last = int(df["minute"].max()) if "minute" in df else 90
+        minute = st.slider("Minuto do recorte", 0, max(last, 1), min(30, last), key="net_minute",
+                           help="Mostra quem estava em campo neste minuto e como esses jogadores trocaram passes "
+                                "enquanto estiveram juntos (da troca anterior até a seguinte).")
+        field = on_field(df, team, minute)
+        d_net = df[(df["minute"] >= field["de"]) & (df["minute"] < field["ate"])]
+        st.caption(f"Em campo aos {minute}': {len(field['jogadores'])} jogadores · trecho analisado: "
+                   f"{int(field['de'])}' a {int(field['ate'])}' (sem trocas no meio).")
     try:
         net = PassingNetworkAnalyzer.build_pass_network(
-            df, team, until_first_sub=(view == "xi"), min_pass_count=min_pass,
-            players_only=starters if view in ("xi", "xi_full") and starters else None)
+            d_net, team, until_first_sub=(view == "xi"), min_pass_count=min_pass,
+            players_only=(field["jogadores"] if field else starters if view in ("xi", "xi_full") and starters else None))
         gm = net["graph_metrics"]
         xt = ExpectedThreatModel.compute_team_xt_summary(df, team)
     except Exception as exc:
@@ -83,7 +97,7 @@ def render(ctx: MatchContext) -> None:
                                                         "(verde: passe · amarelo: condução)"), use_container_width=True)
 
     st.markdown("##### Quem mais toca na bola × quem mais leva o time ao ataque")
-    keep = set(starters) if view in ("xi", "xi_full") and starters else None
+    keep = set(field["jogadores"]) if field else set(starters) if view in ("xi", "xi_full") and starters else None
     d2 = df if keep is None else df[df["player_name"].isin(keep) | (df["team_name"] != team)]
     comp = centrality_comparison(d2, team)
     if comp.empty:

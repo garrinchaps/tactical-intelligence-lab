@@ -57,7 +57,26 @@ def test_espn_backfill_skips_refused_year_quickly(db, monkeypatch):
     out = p.backfill(["bra.1"], since_year=2019, until=date(2020, 12, 31), progress=msgs.append)
     assert time.time() - t0 < 2
     assert out["errors"] == 0 and out["recusados"] == 12               # 6 meses por ano, depois pula o ano
-    assert any("pulando para 2020" in m for m in msgs) and len(n) <= 12 * 3
+    assert any("pulando para 2020" in m for m in msgs)
+    assert out["janelas_falhas"] > 0 and len(n) <= 12 * 2 * 7         # 7 → 3 → 1 dia, ~7 pedidos por semana recusada
+
+
+def test_espn_window_shrinks_7_3_1_and_keeps_good_days(db):
+    from src.data_hub.http import ClientRefused
+    from src.data_hub.sources.espn import EspnProvider
+
+    p = EspnProvider(db, enabled=True)
+    asked = []
+
+    def sb(lg, d, e):
+        asked.append((d.day, e.day))
+        if (e - d).days >= 1 and d.day < 15:
+            raise ClientRefused(400, "HTTP 400")                         # janela longa recusada na 1ª quinzena
+        return []
+    p.scoreboard = sb
+    out = p.backfill(["bra.1"], since_year=2019, until=date(2019, 3, 31))
+    sizes = {(e - d) + 1 for d, e in asked}
+    assert {7, 3, 1} <= sizes and out["janelas_falhas"] == 0             # dias isolados funcionaram
 
 
 # ------------------------------------------------------------------ assistente: perguntas com alvo
@@ -374,3 +393,15 @@ def test_compare_player_cut():
     assert player_cut(pm, d, "Último jogo")["match_id"].tolist() == [7]
     assert len(player_cut(pm, d, "Últimos 5 jogos")) == 5
     assert set(player_cut(pm, d, "Temporada mais recente")["match_id"]) == {4, 5, 6, 7}
+
+
+def test_on_field_has_eleven_at_any_minute(final_df):
+    from src.metrics.match_facts import on_field
+
+    for team in ("Argentina", "France"):
+        for minute in (5, 45, 70, 100, 118):
+            f = on_field(final_df, team, minute)
+            assert len(f["jogadores"]) == 11, (team, minute, f)
+    f = on_field(final_df, "France", 45)                                 # Dembélé e Giroud saíram aos 40/41'
+    assert "Randal Muani" in f["jogadores"] and "Ousmane Dembélé" not in f["jogadores"]
+    assert f["de"] <= 45 < f["ate"]

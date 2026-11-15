@@ -88,7 +88,7 @@ def test_espn_backfill_walks_months_and_downloads_summaries(db):
 
     def scoreboard(lg, d1, d2):
         months.append((lg, d1.isoformat(), d2.isoformat()))
-        if d1.month == 5:
+        if d1.month == 5 and d1.day == 8:
             return [{**_m(500_000_000 + 77, "espn", DataLevel.RESULT, "Flamengo", "Palmeiras", d="2024-05-12"),
                      "extra_json": '{"espn_league": "bra.1"}'}]
         return []
@@ -99,8 +99,10 @@ def test_espn_backfill_walks_months_and_downloads_summaries(db):
                                "lineups": [], "timeline": []})
     p.scoreboard, p.ingest_event = scoreboard, ingest
     out = p.backfill(["bra.1"], since_year=2024, until=date(2024, 6, 30))
-    assert [m[1] for m in months] == [f"2024-0{i}-01" for i in range(1, 7)]
-    assert months[1][2] == "2024-02-29"                                 # fim de mês certo (bissexto)
+    starts = [m[1] for m in months]
+    assert [s for s in starts if s.endswith("-01")] == [f"2024-0{i}-01" for i in range(1, 7)]   # todo mês percorrido
+    assert all((date.fromisoformat(b) - date.fromisoformat(a)).days <= 6 for _, a, b in months)  # janelas ≤ 7 dias
+    assert ("bra.1", "2024-02-29", "2024-02-29") in months               # fim de mês certo (bissexto)
     assert summaries == [500_000_077] and out["resumos"] == 1
     out2 = p.backfill(["bra.1"], since_year=2024, until=date(2024, 6, 30))
     assert out2["resumos"] == 0                                         # já tem números: não baixa de novo
