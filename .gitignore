@@ -31,3 +31,4 @@ data/lake/
 backups/
 data/gemini_modelos.json
 data/sync_log.txt
+data/assistente_sem_alvo.jsonl

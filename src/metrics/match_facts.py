@@ -30,7 +30,9 @@ PLAYER_STAT_LABELS = {
     "xt": "xT gerado", "dribles": "Dribles", "conducoes": "Conduções", "desarmes": "Desarmes", "interceptacoes": "Interceptações",
     "recuperacoes": "Recuperações", "pressoes": "Pressões", "acoes_defensivas": "Ações defensivas", "perdas_de_posse": "Perdas de posse",
     "faltas_cometidas": "Faltas cometidas", "faltas_sofridas": "Faltas sofridas", "cartoes_amarelos": "Cartões amarelos",
-    "cartoes_vermelhos": "Cartões vermelhos",
+    "cartoes_vermelhos": "Cartões vermelhos", "passes_errados": "Passes errados",
+    "erros_diretos": "Erros que deram finalização ao rival", "duelos_perdidos": "Duelos perdidos",
+    "perigo": "Perigo gerado (xT + xG)",
 }
 TEAM_STAT_LABELS = {
     "gols": "Gols", "xg": "xG", "finalizacoes": "Finalizações", "finalizacoes_no_alvo": "Finalizações no alvo",
@@ -157,6 +159,13 @@ def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -
         "faltas_cometidas": (t == "Foul Committed").astype(int), "faltas_sofridas": (t == "Foul Won").astype(int),
         "cartoes_amarelos": (card == "Yellow Card").astype(int),
         "cartoes_vermelhos": card.isin(["Red Card", "Second Yellow"]).astype(int),
+        "passes_errados": (is_pass & ~ok_pass).astype(int),
+        # "Error" (StatsBomb) = erro do jogador que deu finalização/gol ao adversário
+        "erros_diretos": (t == "Error").astype(int),
+        "duelos_perdidos": (((t == "Duel") & (_col(d, "duel_type_name") == "Aerial Lost")) |
+                            ((t == "Duel") & (_col(d, "duel_type_name") == "Tackle") &
+                             _col(d, "duel_outcome_name").isin(["Lost", "Lost In Play", "Lost Out"])) |
+                            (t == "Dribbled Past")).astype(int),
     })
     # passes que antecedem finalização (último passe certo para o finalizador na posse)
     key = []
@@ -179,6 +188,7 @@ def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -
     agg["precisao_passe_pct"] = np.where(agg["passes"] > 0, (100 * agg["passes_certos"] / agg["passes"].clip(lower=1)).round(1), np.nan)
     agg["xg"] = agg["xg"].round(2)
     agg["xt"] = agg["xt"].round(3)
+    agg["perigo"] = (agg["xt"] + agg["xg"]).round(3)
     cols = ["jogador", "equipe", "posicao"] + [c for c in PLAYER_STAT_LABELS if c in agg.columns]
     return agg[cols].sort_values(["equipe", "minutos"], ascending=[True, False]).reset_index(drop=True)
 

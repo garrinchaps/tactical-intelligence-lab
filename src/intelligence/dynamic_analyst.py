@@ -67,6 +67,38 @@ e em seguida convide a pessoa a perguntar sobre a partida carregada, com 2 exemp
 Não cite números nem estatísticas."""
 
 
+MISSES_PATH = "data/assistente_sem_alvo.jsonl"
+FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors"}
+
+
+def log_generic_fallback(query: str, sc: Any, path: Optional[str] = None) -> None:
+    """
+    Aprender com as interações: toda pergunta que caiu no resumo genérico fica registrada (sem dados pessoais)
+    para virar caso de teste. A tela Bastidores lista esse arquivo.
+    """
+    import datetime
+    import os
+
+    path = path or MISSES_PATH
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"quando": datetime.datetime.now().isoformat(timespec="seconds"), "pergunta": query,
+                                 "ask": getattr(sc, "ask", None), "jogadores": getattr(sc, "players", []),
+                                 "metricas": getattr(sc, "metrics", [])}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def read_generic_fallbacks(path: Optional[str] = None, last: int = 50) -> List[Dict[str, Any]]:
+    try:
+        with open(path or MISSES_PATH, encoding="utf-8") as fh:
+            rows = [json.loads(x) for x in fh if x.strip()]
+    except Exception:
+        return []
+    return rows[-last:][::-1]
+
+
 def _pl(n: Any, singular: str, plural: str) -> str:
     return f"{n} {singular if n == 1 else plural}"
 
@@ -144,6 +176,22 @@ class LocalScopedWriter:
                     summary.append(f"{best[0]} marcou {_pl(best[1], 'gol', 'gols')}" if best[1] > 1 else
                                    f"{len(b['gols'])} gols de {len(scorers)} autores diferentes")
                 continue
+            if key == "presenca":
+                out.append(cls._presence(b, sc))
+                if b.get("jogou"):
+                    summary.append(f"{b['jogador']} esteve em campo" + (f" (~{_fmt(b['minutos_estimados'])} min)" if b.get("minutos_estimados") else ""))
+                continue
+            if key.startswith("erros::"):
+                out.append(cls._errors(b, sc))
+                if not b.get("sem_dados"):
+                    summary.append(f"{b['jogador']} somou {_pl(b['total_de_erros'], 'erro', 'erros')} registrados")
+                continue
+            if key in ("falhas", "fortes"):
+                out.append(cls._issues(b, sc, key))
+                items = b.get(key) or []
+                if items:
+                    summary.append(cls.ISSUE_SHORT[key].get(items[0]["tipo"], "").format(t=b["equipe"], o=b["adversario"]))
+                continue
             if key == "ranking" and b.get("chave") == "perigo_ia":
                 out.append(cls._danger_ranking(b))
                 if b.get("lideres_ia"):
@@ -160,6 +208,9 @@ class LocalScopedWriter:
                                   + (f" · {r['secundaria'].lower()}: {_fmt(r['valor_secundario'])}" if r.get("secundaria") else "")
                                   for i, r in enumerate(lid, 1))
                 out.append(head + "\n" + rows)
+                ia = b.get("segunda_opiniao_ia") or {}
+                if ia.get("modelo") and ia.get("lideres_ia"):
+                    out.append(cls._danger_ranking(ia))
                 lab = b["metrica"] if b["metrica"].startswith("x") else b["metrica"].lower()
                 summary.append(f"{lid[0]['jogador']} liderou em {lab} ({_fmt(lid[0]['valor'])})")
                 continue
@@ -428,6 +479,143 @@ class LocalScopedWriter:
         third, _, lane = zona.partition(" — ")
         side = {"esquerda": "pela esquerda", "direita": "pela direita", "centro": "por dentro"}.get(lane, lane)
         return f"{side}, {cls.THIRD_ATT.get(third, third)}"
+
+    # ---------------------------------------------------------- alvos específicos (v36)
+    @staticmethod
+    def _pick(sc: QueryScope, *options: str) -> str:
+        """Varia a frase conforme a pergunta (determinístico: a mesma pergunta dá a mesma frase)."""
+        import zlib
+
+        return options[zlib.crc32(sc.raw.encode("utf-8")) % len(options)]
+
+    @classmethod
+    def _presence(cls, b: Dict[str, Any], sc: QueryScope) -> str:
+        asked = b.get("pedido") or "esse jogador"
+        if not b.get("jogou"):
+            if b.get("jogador"):
+                return f"**Não.** {b['jogador']} não tem nenhum lance registrado nesta partida."
+            return (f"**Não encontrei \u201c{asked}\u201d entre os jogadores desta partida.** Ninguém com esse nome tem lance, "
+                    "entrada ou saída registrados — ou não jogou, ou ficou no banco sem entrar. "
+                    "Os dados de lances não trazem a lista de reservas não utilizados nem o motivo da ausência (lesão, suspensão).")
+        p, tm = b["jogador"], b.get("equipe") or ""
+        if b.get("entrou_aos"):
+            how = f"entrou no decorrer do jogo, aos {b['entrou_aos']}'"
+        elif b.get("saiu_aos"):
+            how = f"começou jogando e saiu aos {b['saiu_aos']}'"
+        else:
+            how = "começou jogando e ficou até o fim"
+        mins = f" — cerca de {_fmt(b['minutos_estimados'])} minutos" if b.get("minutos_estimados") else ""
+        return (f"**Sim.** {p}{f' ({tm})' if tm else ''} {how}{mins}, com {b['eventos_registrados']} ações registradas. "
+                + cls._pick(sc, "Quer o que ele fez com a bola? Pergunte, por exemplo, \u201cquantos erros ele teve?\u201d.",
+                            "Dá para pedir os números dele: passes, finalizações, perigo criado ou erros.", ""))
+
+    @classmethod
+    def _errors(cls, b: Dict[str, Any], sc: QueryScope) -> str:
+        p = b["jogador"]
+        if b.get("sem_dados"):
+            return f"{p} não tem ações registradas no recorte, então não há erros para contar."
+        lines = [f"- Passes errados: {b['passes_errados']} de {b['passes_tentados']} tentados"
+                 + (f" ({_fmt(b['precisao_passe_pct'])}% de acerto)" if b.get("precisao_passe_pct") is not None else "")
+                 + (f"; {b['passes_errados_no_proprio_campo']} deles no próprio campo" if b.get("passes_errados_no_proprio_campo") else ""),
+                 f"- Outras perdas de bola (domínio, desarmado, drible sem sucesso): {b['outras_perdas_de_bola']}",
+                 f"- Duelos perdidos: {b['duelos_perdidos']}",
+                 f"- Erros que deram finalização ao rival: {b['erros_que_deram_finalizacao_ao_rival']}"]
+        if b.get("faltas_cometidas"):
+            lines.append(f"- Faltas cometidas (não somadas acima): {b['faltas_cometidas']}"
+                         + (f", {b['cartoes_amarelos']} amarelo" if b.get("cartoes_amarelos") else ""))
+        tot = b["total_de_erros"]
+        head = cls._pick(sc, f"**{p} teve {_pl(tot, 'erro registrado', 'erros registrados')}** no jogo:",
+                         f"**Foram {tot} erros de {p}** ({b.get('equipe', '')}), assim:",
+                         f"**{p}: {tot} erros no total**, separados por tipo:")
+        tail = ""
+        if tot == b["passes_errados"] and b["passes_errados"] > 0:
+            tail = " Todos foram passes errados — nenhuma perda em drible ou domínio."
+        elif b["erros_que_deram_finalizacao_ao_rival"]:
+            tail = " O ponto mais grave: um erro dele terminou em finalização do adversário."
+        return head + "\n" + "\n".join(lines) + tail
+
+    ISSUE_TEXT = {
+        "cedeu_mais_chances": "{t} cedeu mais do que criou: o rival somou xG {xg_cedido} em {finalizacoes_cedidas} finalizações, "
+                              "contra xG {xg_criado} em {finalizacoes_feitas} de {t}.",
+        "saida_de_bola_e_transicao": "A saída de bola foi o problema: {perdas_no_proprio_campo} bolas perdidas no próprio campo "
+                                     "(o rival perdeu {perdas_no_proprio_campo_rival}) e {finalizacoes_rivais_ate_15s} "
+                                     "finalizações sofridas em até 15 s depois de perder a bola.",
+        "corredor_vulneravel": "Um lado ficou exposto: {pct}% das entradas do rival na área ({entradas} de {entradas_totais}) "
+                               "vieram {zona_txt}.",
+        "pouca_presenca_no_campo_rival": "{t} quase não morou no campo de ataque: {field_tilt}% dos passes no terço final "
+                                         "(rival {field_tilt_rival}%) e {entradas_na_area} entradas na área contra {entradas_na_area_rival}.",
+        "pressao_frouxa": "A marcação pressionou pouco: o rival trocou {ppda} passes por ação defensiva de {t} no campo de ataque "
+                          "(PPDA estimado), contra {ppda_rival} do outro lado.",
+        "finalizacao_ruim": "Faltou pontaria: {finalizacoes} finalizações, {no_alvo} no alvo, {gols} gols para xG {xg}.",
+        "passe_impreciso": "O passe saiu pior que o do rival: {precisao}% de acerto contra {precisao_rival}%.",
+        "bola_parada_defensiva": "A bola parada defensiva preocupou: o rival gerou xG {xg_rival_em_bola_parada} só em lances de bola parada.",
+    }
+    STRENGTH_TEXT = {
+        "cedeu_mais_chances": "{t} criou mais do que cedeu: xG {xg_cedido} em {finalizacoes_cedidas} finalizações, "
+                              "contra xG {xg_criado} em {finalizacoes_feitas} de {o}.",
+        "saida_de_bola_e_transicao": "{t} sufocou a saída de bola de {o}: {perdas_no_proprio_campo} bolas roubadas no campo de "
+                                     "{o} e {finalizacoes_rivais_ate_15s} finalizações em até 15 s depois de recuperar.",
+        "corredor_vulneravel": "{t} achou um caminho: {pct}% das entradas na área ({entradas} de {entradas_totais}) vieram {zona_txt}.",
+        "pouca_presenca_no_campo_rival": "{t} empurrou {o} para trás: {field_tilt_rival}% dos passes no terço final, contra "
+                                         "{field_tilt}%; {entradas_na_area_rival} entradas na área contra {entradas_na_area}.",
+        "pressao_frouxa": "{t} pressionou melhor: PPDA estimado {ppda_rival}, contra {ppda} de {o}.",
+        "finalizacao_ruim": "{t} protegeu bem a área: {o} finalizou {finalizacoes} vezes, {no_alvo} no alvo, {gols} gols para xG {xg}.",
+        "passe_impreciso": "{t} trocou passes melhor: {precisao_rival}% de acerto contra {precisao}%.",
+        "bola_parada_defensiva": "{t} levou perigo na bola parada: xG {xg_rival_em_bola_parada} só nesses lances.",
+    }
+    ISSUE_SHORT = {
+        "falhas": {"cedeu_mais_chances": "a maior falha de {t} foi ceder mais chances do que criou",
+                   "saida_de_bola_e_transicao": "a maior falha de {t} foi perder a bola na saída e não reagir",
+                   "corredor_vulneravel": "a maior falha de {t} foi deixar um corredor exposto",
+                   "pouca_presenca_no_campo_rival": "a maior falha de {t} foi não conseguir jogar no campo de ataque",
+                   "pressao_frouxa": "a maior falha de {t} foi a pressão sem intensidade",
+                   "finalizacao_ruim": "a maior falha de {t} foi a finalização",
+                   "passe_impreciso": "a maior falha de {t} foi o passe impreciso",
+                   "bola_parada_defensiva": "a maior falha de {t} foi a bola parada defensiva"},
+        "fortes": {"cedeu_mais_chances": "o ponto forte de {t} foi criar mais do que cedeu",
+                   "saida_de_bola_e_transicao": "o ponto forte de {t} foi roubar a bola na saída do rival e finalizar rápido",
+                   "corredor_vulneravel": "o ponto forte de {t} foi insistir num corredor do rival",
+                   "pouca_presenca_no_campo_rival": "o ponto forte de {t} foi empurrar {o} para trás",
+                   "pressao_frouxa": "o ponto forte de {t} foi a pressão alta",
+                   "finalizacao_ruim": "o ponto forte de {t} foi defender bem a própria área",
+                   "passe_impreciso": "o ponto forte de {t} foi trocar passes melhor",
+                   "bola_parada_defensiva": "o ponto forte de {t} foi a bola parada ofensiva"},
+    }
+
+    @classmethod
+    def _issues(cls, b: Dict[str, Any], sc: QueryScope, key: str) -> str:
+        team, opp = b["equipe"], b["adversario"]
+        items = b.get(key) or []
+        if not items:
+            return (f"Nos números deste jogo, {team} não ficou atrás de {opp} em nenhum dos critérios que eu meço "
+                    "(chances, saída de bola, corredores, presença no ataque, pressão, finalização, passe e bola parada)."
+                    if key == "falhas" else
+                    f"Nos números deste jogo, {team} não superou {opp} com folga em nenhum critério que eu meço.")
+        # pontos fortes = falhas que a equipe provocou no rival, contadas do ponto de vista de quem impôs
+        texts = cls.STRENGTH_TEXT if key == "fortes" else cls.ISSUE_TEXT
+        sufferer = opp if key == "fortes" else team
+
+        def line(it):
+            kw = {k: _fmt(v) if not isinstance(v, (list, dict)) else v for k, v in it.items()}
+            kw.update(t=team, o=opp)
+            if it["tipo"] == "corredor_vulneravel" and it.get("zona"):
+                kw["zona_txt"] = cls._against(it["zona"], sufferer)
+            try:
+                return texts[it["tipo"]].format(**kw)
+            except Exception:
+                return it["tipo"].replace("_", " ")
+        main, rest = items[0], items[1:3]
+        if key == "falhas":
+            head = cls._pick(sc, f"**A maior falha tática de {team}:** ", f"**Onde {team} mais errou:** ",
+                             f"**O principal problema de {team} no jogo:** ")
+            tail = "Também pesaram:" if rest else ""
+        else:
+            head = cls._pick(sc, f"**O que {team} fez de melhor:** ", f"**A principal arma de {team}:** ")
+            tail = "Outros pontos a favor:" if rest else ""
+        txt = head + line(main)
+        if rest:
+            txt += f"\n\n{tail}\n" + "\n".join(f"- {line(x)}" for x in rest)
+        return txt + "\n\n_Critério: cada item compara as duas equipes no mesmo jogo; vem primeiro o de maior diferença._"
 
     @classmethod
     def _danger_ranking(cls, b: Dict[str, Any]) -> str:
@@ -847,10 +1035,18 @@ class DynamicTacticalAnalyst:
             evidence = ScopedEvidenceBuilder.build_boxscore(boxscore or {}, sc, meta, target_team)
             local_md = LocalScopedWriter.write_boxscore(evidence, sc)
 
+        if (evidence.get("escopo") or {}).get("resumo_generico"):
+            log_generic_fallback(query, sc)
+            if re.search(r"\b(quem|qual|quais|quantos|quantas|onde|quando)\b", norm_q(query)):
+                local_md = ("_Não achei nos dados um alvo exato para essa pergunta; abaixo está o panorama do jogo. "
+                            "Tente citar o jogador, a equipe ou o número que quer (ex.: \u201cquem teve mais xG?\u201d)._\n\n"
+                            + local_md)
         local_audit = NumericHallucinationGuard.audit_text_numbers(local_md, evidence)
         result = {"engine_used": "LOCAL_SCOPED_ENGINE", "report_markdown": local_md,
                   "hallucination_audit": local_audit, "scope": sc.to_dict(), "evidence": evidence}
-        if not use_llm:
+        # perguntas de fato (quem jogou, quantos erros, quem teve mais xG, gols...) já saem exatas do redator local:
+        # não vale esperar a nuvem (5–20 s) para reescrever uma lista de números.
+        if not use_llm or sc.ask in FACT_ASKS:
             return result
 
         try:

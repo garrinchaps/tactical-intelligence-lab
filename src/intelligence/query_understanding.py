@@ -40,11 +40,23 @@ FOOTBALL_TERMS = {
     "decisivo", "virada", "classificou", "eliminou", "final", "semifinal", "jogada", "lance", "lances",
     "estrategia", "goleada", "perigo", "perigoso", "perigosa", "tocou", "toques", "anular", "parar", "neutralizar", "plano", "jogar",
 }
+# alvos específicos da pergunta (v36): nunca cair no resumo genérico quando um destes aparece
+ERROR_RX = r"\berr(o|os|ou|aram|ar|ando)\b|\bfalh(a|as|ou|aram)\b|\bvacil|\bmancad|\bpisou na bola"
+WEAK_RX = (r"falha|falhou|erro tatic|errou tatic|ponto(s)? fraco|fraqueza|deficien|vulnerab|deixou a desejar|"
+           r"onde (errou|pecou|sofreu)|pecou|o que (deu|saiu) errado|pior (setor|parte|coisa)|calcanhar|"
+           r"problema(s)? (tatic|do|da|no|na)|maior(es)? (erro|problema|defeito)|defeito")
+STRENGTH_RX = (r"ponto(s)? forte|fortaleza|acerto(s)? tatic|maior(es)? (acerto|virtude|qualidade|trunfo|arma)|"
+               r"o que (deu|funcionou) certo|melhor (setor|arma|coisa)|virtude")
+PRESENCE_RX = (r"\b(jogou|atuou|entrou|participou|esteve em campo|estava em campo|foi titular|comecou jogando|"
+               r"saiu do banco|foi relacionado|estava no jogo|esteve no jogo|jogaram)\b")
+
 # perguntas que pedem um fato ou um ranking de atletas (respondidas com tabela curta, não com visão geral)
 RANKING_METRICS: Tuple[Tuple[str, str], ...] = (
     (r"assist", "assistencias"), (r"passe.*(decisiv|para finaliz|para chute)|criou mais chances", "passes_decisivos"),
-    (r"perig|chance de (gol|finaliza)", "perigo_ia"),
-    (r"no alvo|no gol|acert\w* o gol|enquadr", "finalizacoes_no_alvo"), (r"xg", "xg"), (r"xt|ameaca", "xt"),
+    (r"(rede neural|segundo a ia|pela ia|modelo).*perig|perig\w*.*(rede neural|pela ia|segundo a ia)", "perigo_ia"),
+    (r"perig|chance de (gol|finaliza)|ameaca", "perigo"),
+    (r"no alvo|no gol|acert\w* o gol|enquadr", "finalizacoes_no_alvo"), (r"xg", "xg"), (r"\bxt\b", "xt"),
+    (r"(err\w*|perd\w*) (mais )?passe|passes? errad", "passes_errados"), (r"duelos? perdid|perd\w* (mais )?duelo", "duelos_perdidos"),
     (r"chut|finaliz", "finalizacoes"), (r"quebra", "quebras_de_linha"), (r"progress", "passes_progressivos"),
     (r"cruz", "cruzamentos"), (r"dribl", "dribles"), (r"desarm", "desarmes"), (r"intercept", "interceptacoes"),
     (r"recuper|roub", "recuperacoes"), (r"press", "pressoes"), (r"perd\w* (a )?(bola|posse)|errou mais", "perdas_de_posse"),
@@ -271,15 +283,27 @@ class QueryUnderstanding:
         plan_rx = (r"estrategi|tatica (para|a ser|ideal|melhor)|melhor tatica|como (anular|parar|neutralizar|marcar|"
                    r"conter|segurar|evitar|vencer|ganhar d|explorar|superar)|o que (o|a|deveria|devia|poderia)\b.*\b(fazer|ter feito|mudar)|"
                    r"(poderia|deveria|podia|devia) ter (vencido|ganhado|evitado|empatado|jogado)|plano de jogo|para evitar|como (deveria|devia|poderia) jogar|o que fazer|como enfrentar")
+        many = re.search(r"\b(mais|maior|maiores|menos|ranking)\b", t)
         if re.search(plan_rx, t):
             sc.ask = "plan"
+        elif sc.players and re.search(ERROR_RX, t) and not many:
+            sc.ask = "errors"                         # "quantos erros o Gerard Martín teve?"
+        elif re.search(PRESENCE_RX, t) and not re.search(r"\bquem\b|\bquais\b|\bmais\b|como (o|a) .* jogou|jogou bem|jogou mal", t):
+            sc.ask = "presence"                       # "o Mbappé jogou esse jogo?"
+            sc.attribute = cls._presence_name(t)
+        elif not sc.players and re.search(WEAK_RX, t):
+            sc.ask = "weakness"                       # "qual foi a maior falha tática do Real Madrid?"
+        elif not sc.players and re.search(STRENGTH_RX, t):
+            sc.ask = "strength"
         elif re.search(r"(de )?quem (foram|foi|deu|deram|fez|fizeram) (as |a )?assistenc|quais (foram )?as assistenc|"
                        r"assistenc\w* (da|do|desta|dessa|nessa|nesta|no|na) (partida|jogo)", t) and not re.search(r"\bmais\b", t):
             sc.ask = "goals"
         elif re.search(r"quem (fez|marcou|anotou)( o| os)? gol|quem (fez|marcou) (os )?gols|autor(es)? d\w* gol|artilheiro|"
                      r"gols? (da|do|desta|dessa|nessa|nesta) (partida|jogo)|como (foram|sairam|saiu) os gols|quando (foi|foram|sairam) os gols", t):
             sc.ask = "goals"
-        elif re.search(r"(quem|qual (jogador|atleta)|que jogador|jogador que|atleta que)\b.*\bmais\b|\bmais .*(jogador|atleta)|"
+        elif re.search(r"(quem|qual (jogador|atleta)|que jogador|jogador que|atleta que)\b.*\b(mais|maior|maiores|menos)\b|"
+                       r"\b(qual|quais|que)\b[^?]*\b(jogador|jogadores|atleta|atletas)\b[^?]*\b(mais|maior|maiores|lider\w*)\b|"
+                       r"\b(mais|maior|maiores) .*(jogador|atleta)|"
                        r"(melhor|destaque|craque|principal) (jogador|atleta|em campo|da partida|do jogo)|ranking", t):
             sc.ask = "ranking"
             sc.ranking_metric = next((m for rx, m in RANKING_METRICS if re.search(rx, t)), None)
@@ -299,13 +323,23 @@ class QueryUnderstanding:
         for key, kws in METRIC_KEYWORDS.items():
             if any(k in t for k in kws):
                 sc.metrics.append(key)
-        if sc.players and sc.ask not in ("ranking", "profile", "unavailable", "goals"):
+        if sc.players and sc.ask not in ("ranking", "profile", "unavailable", "goals", "presence", "errors"):
             sc.category = "player" if sc.category != "full_report" else sc.category
             sc.descriptors.insert(0, " / ".join(sc.players))
 
         sc.needs_spatial = bool(sc.side or sc.third or (set(sc.metrics) & SPATIAL_METRICS) or
                                 sc.phase in ("defensive", "transition") and "compactness" in sc.metrics)
         return sc
+
+    @staticmethod
+    def _presence_name(t: str) -> Optional[str]:
+        """Nome citado antes do verbo ("o mbappe jogou esse jogo?" → "mbappe"), para checar no elenco."""
+        m = re.search(r"(?:^|\b(?:o|a|e o|e a|sera que o|sera que a|sabe se o|sabe se a)\s+)([a-z][a-z.'\- ]{1,40}?)\s+"
+                      r"(?:nao\s+)?(?:jogou|atuou|entrou|participou|esteve|estava|foi titular|comecou|saiu do banco|foi relacionado)", t)
+        if not m:
+            return None
+        name = re.sub(r"^(e|o|a|sera que|sabe se)\s+", "", m.group(1)).strip()
+        return name if name and name not in {"ele", "ela", "time", "equipe", "quem"} else None
 
     @staticmethod
     def _team_position(t: str, team: str) -> Optional[int]:

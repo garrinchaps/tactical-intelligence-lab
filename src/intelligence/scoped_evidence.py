@@ -321,8 +321,14 @@ class ScopedEvidenceBuilder:
             return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0}
         st = st[st[metric].fillna(0) > 0].sort_values([metric, "minutos"], ascending=[False, True]).head(top)
         extra = {"finalizacoes_no_alvo": "finalizacoes", "passes_certos": "passes", "gols": "finalizacoes",
-                 "assistencias": "passes_decisivos"}.get(metric)
-        return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "chave": metric,
+                 "assistencias": "passes_decisivos", "perigo": "xg", "passes_errados": "passes"}.get(metric)
+        ia = {}
+        if metric == "perigo":   # xT + xG por jogador; a rede neural entra como segunda opinião
+            try:
+                ia = {"segunda_opiniao_ia": cls.block_danger_ranking(df[cls._time_mask(df, sc)], sc, team, opp, 3)}
+            except Exception:
+                ia = {}
+        return {**ia, "metrica": PLAYER_STAT_LABELS.get(metric, metric), "chave": metric,
                 "equipes_consideradas": scope_team or f"{team} e {opp}",
                 "lideres": [{"jogador": r.jogador, "equipe": r.equipe, "valor": _r(getattr(r, metric), 3),
                              **({"secundaria": PLAYER_STAT_LABELS[extra], "valor_secundario": _r(getattr(r, extra), 3)} if extra else {})}
@@ -557,6 +563,136 @@ class ScopedEvidenceBuilder:
                                      if found else []}
         return out
 
+    # ------------------------------------------------- alvos específicos (v36)
+    @classmethod
+    def block_presence(cls, df: pd.DataFrame, sc: QueryScope, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """"Fulano jogou?" — responde pelo que a partida registra (lances, entrada/saída), sem supor."""
+        from src.metrics.match_facts import _minutes
+
+        names = list(sc.players)
+        asked = sc.attribute or (names[0] if names else None)
+        if not names and asked:
+            import difflib
+
+            from src.intelligence.query_understanding import norm
+
+            roster = df["player_name"].dropna().astype(str).unique().tolist()
+            nr = {norm(r): r for r in roster}
+            hit = difflib.get_close_matches(norm(asked), list(nr), n=1, cutoff=0.82)
+            if not hit:  # sobrenome parecido ("mbape" ≈ "mbappe")
+                parts = {p: r for r in roster for p in norm(r).split() if len(p) >= 4}
+                hit2 = difflib.get_close_matches(norm(asked).split()[-1], list(parts), n=1, cutoff=0.82)
+                names = [parts[hit2[0]]] if hit2 else []
+            else:
+                names = [nr[hit[0]]]
+        if not names:
+            return {"pedido": asked, "jogou": False, "eventos_registrados": 0}
+        p = names[0]
+        ev = df[df["player_name"] == p]
+        mins = _minutes(df).get(p)
+        subs = df[df["type_name"] == "Substitution"] if "type_name" in df else df.iloc[0:0]
+        came_in = subs[subs.get("substitution_replacement_name", pd.Series(index=subs.index, dtype=object)) == p]
+        went_out = subs[subs["player_name"] == p]
+        team = ev["team_name"].dropna().iloc[0] if not ev.empty else (came_in["team_name"].iloc[0] if not came_in.empty else "")
+        return {"pedido": asked, "jogador": p, "equipe": team, "jogou": bool(len(ev) or len(came_in)),
+                "titular": bool(len(ev)) and came_in.empty,
+                "entrou_aos": int(came_in["minute"].iloc[0]) + 1 if not came_in.empty else None,
+                "saiu_aos": int(went_out["minute"].iloc[0]) + 1 if not went_out.empty else None,
+                "minutos_estimados": mins, "eventos_registrados": int(len(ev))}
+
+    @classmethod
+    def block_errors(cls, df: pd.DataFrame, sc: QueryScope, player: str) -> Dict[str, Any]:
+        """Erros de um atleta, separados por tipo (nada somado escondido)."""
+        from src.metrics.match_facts import player_match_stats
+
+        w = df[cls._time_mask(df, sc)]
+        st = player_match_stats(w)
+        row = st[st["jogador"] == player]
+        if row.empty:
+            return {"jogador": player, "sem_dados": True}
+        r = row.iloc[0]
+        other_losses = max(int(r["perdas_de_posse"]) - int(r["passes_errados"]), 0)
+        parts = {"passes_errados": int(r["passes_errados"]), "outras_perdas_de_bola": other_losses,
+                 "erros_que_deram_finalizacao_ao_rival": int(r["erros_diretos"]),
+                 "duelos_perdidos": int(r["duelos_perdidos"])}
+        own = w[(w["player_name"] == player) & (w["type_name"] == "Pass") & w.get("pass_outcome_name").notna()] \
+            if "pass_outcome_name" in w else w.iloc[0:0]
+        own_half = int((own["x"] < 60).sum()) if "x" in own else None
+        return {"jogador": player, "equipe": r["equipe"], "minutos_estimados": float(r["minutos"]),
+                **parts, "total_de_erros": int(sum(parts.values())),
+                "passes_tentados": int(r["passes"]), "precisao_passe_pct": None if pd.isna(r["precisao_passe_pct"]) else float(r["precisao_passe_pct"]),
+                "passes_errados_no_proprio_campo": own_half,
+                "faltas_cometidas": int(r["faltas_cometidas"]), "cartoes_amarelos": int(r["cartoes_amarelos"]),
+                "nota": "perdas de bola = domínio errado, desarmado ou drible sem sucesso; passes errados contados à parte",
+                "amostra_N": int(r["toques"])}
+
+    @classmethod
+    def _team_issues(cls, df: pd.DataFrame, sc: QueryScope, team: str, opp: str) -> List[Dict[str, Any]]:
+        """Candidatos a falha tática do `team`, cada um com número próprio e peso (maior = mais grave)."""
+        from src.metrics.match_facts import team_match_stats
+
+        w = df[cls._time_mask(df, sc)]
+        a, b = team_match_stats(w, team), team_match_stats(w, opp)
+        tr = cls.block_transition(df, sc, team, opp)
+        plan = cls.block_plan_team(df, sc, team, opp)
+        sp = cls.block_set_pieces(df, sc, team, opp) if "play_pattern_name" in df else {}
+        out: List[Dict[str, Any]] = []
+
+        def add(tipo, peso, **kw):
+            if peso > 0:
+                out.append({"tipo": tipo, "peso": round(float(peso), 2), **kw})
+
+        xa, xb = a.get("xg") or 0.0, b.get("xg") or 0.0
+        add("cedeu_mais_chances", (xb - xa) * 3, xg_cedido=xb, xg_criado=xa,
+            finalizacoes_cedidas=b.get("finalizacoes"), finalizacoes_feitas=a.get("finalizacoes"))
+        n_after = tr.get("finalizacoes_adversarias_em_ate_15s_apos_perda") or 0
+        tr_o = cls.block_transition(df, sc, opp, team)
+        n_after_o = tr_o.get("finalizacoes_adversarias_em_ate_15s_apos_perda") or 0
+        g = cls._own_frame(w, opp)
+        lo = g[(g["team_name"] == opp) & (g.get("is_turnover", 0) == 1) & (g["x"] < 60)] if "is_turnover" in g else g.iloc[0:0]
+        own_l, opp_l = plan.get("perdas_no_proprio_campo") or 0, int(len(lo))
+        add("saida_de_bola_e_transicao", (n_after - n_after_o) * 0.8 + (own_l - opp_l) / 8,
+            perdas_no_proprio_campo=own_l, perdas_no_proprio_campo_rival=opp_l, finalizacoes_rivais_ate_15s=n_after,
+            finalizacoes_ate_15s_apos_roubo=n_after_o, zonas_das_perdas=plan.get("zonas_das_perdas"))
+        z = plan.get("corredores_das_entradas_na_area_do_adversario") or []
+        n_ent = plan.get("entradas_na_area_do_adversario") or 0
+        if z and n_ent >= 4:
+            top = z[0]
+            share = float(top.get("pct") or 0)
+            add("corredor_vulneravel", max(share - 40, 0) / 12, zona=top.get("zona"), entradas=top.get("acoes"),
+                pct=top.get("pct"), entradas_totais=n_ent)
+        ta, tb = a.get("field_tilt_pct"), b.get("field_tilt_pct")
+        if ta is not None and tb is not None:
+            add("pouca_presenca_no_campo_rival", (tb - ta) / 15, field_tilt=ta, field_tilt_rival=tb,
+                entradas_na_area=a.get("entradas_na_area"), entradas_na_area_rival=b.get("entradas_na_area"))
+        pa, pb = a.get("ppda"), b.get("ppda")
+        if pa and pb:
+            add("pressao_frouxa", (pa / pb - 1.2) * 1.5, ppda=pa, ppda_rival=pb)
+        ga = a.get("gols") or 0
+        if (a.get("finalizacoes") or 0) >= 3:
+            add("finalizacao_ruim", (xa - ga) * 1.2 + (0.4 if (a.get("finalizacoes_no_alvo") or 0) <= 1 else 0),
+                gols=ga, xg=xa, finalizacoes=a.get("finalizacoes"), no_alvo=a.get("finalizacoes_no_alvo"))
+        pra, prb = a.get("precisao_passe_pct"), b.get("precisao_passe_pct")
+        if pra is not None and prb is not None:
+            add("passe_impreciso", (prb - pra) / 4, precisao=pra, precisao_rival=prb)
+        xsp = (sp.get(opp) or {}).get("xg_bola_parada")
+        if xsp:
+            add("bola_parada_defensiva", float(xsp) * 2.5, xg_rival_em_bola_parada=xsp)
+        return sorted(out, key=lambda d: -d["peso"])
+
+    @classmethod
+    def block_weakness(cls, df: pd.DataFrame, sc: QueryScope, team: str, opp: str) -> Dict[str, Any]:
+        issues = cls._team_issues(df, sc, team, opp)
+        return {"equipe": team, "adversario": opp, "falhas": issues[:4], "amostra_N": int(len(df)),
+                "criterio": "cada falha é comparada com o que o rival fez no mesmo jogo; a mais grave vem primeiro"}
+
+    @classmethod
+    def block_strength(cls, df: pd.DataFrame, sc: QueryScope, team: str, opp: str) -> Dict[str, Any]:
+        """Pontos fortes do `team` = as falhas que ele provocou no rival (mesmos critérios, lado espelhado)."""
+        issues = cls._team_issues(df, sc, opp, team)
+        return {"equipe": team, "adversario": opp, "fortes": issues[:4], "amostra_N": int(len(df)),
+                "criterio": "o que a equipe impôs ao rival no mesmo jogo (mesma régua das falhas, lado trocado)"}
+
     # ------------------------------------------------------- montagem
     @classmethod
     def build(cls, df: pd.DataFrame, sc: QueryScope, target_team: str, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -577,6 +713,15 @@ class ScopedEvidenceBuilder:
             blocks["ranking"] = cls.block_ranking(df, sc, team, other)
         elif sc.ask == "result":
             blocks["resultado"] = cls.block_result(df, team, other, meta)
+        elif sc.ask == "presence":
+            blocks["presenca"] = cls.block_presence(df, sc, meta)
+        elif sc.ask == "errors":
+            for p in sc.players[:2]:
+                blocks[f"erros::{p}"] = cls.block_errors(df, sc, p)
+        elif sc.ask == "weakness":
+            blocks["falhas"] = cls.block_weakness(df, sc, team, other)
+        elif sc.ask == "strength":
+            blocks["fortes"] = cls.block_strength(df, sc, team, other)
         elif sc.ask == "plan":
             if sc.players:
                 for p in sc.players[:2]:
@@ -602,11 +747,14 @@ class ScopedEvidenceBuilder:
             blocks["bola_parada"] = cls.block_set_pieces(df, sc, team, other)
         if m & {"possession"}:
             blocks["posse"] = cls.block_possession(df, sc, team, other)
-        if len(blocks) == 1:  # pergunta genérica: visão curta do jogo no recorte
+        generic = len(blocks) == 1
+        if generic:  # pergunta genérica: visão curta do jogo no recorte
             blocks["posse"] = cls.block_possession(df, sc, team, other)
             blocks["ataque_no_recorte"] = cls.block_attack(df, sc, team)
             blocks["ataque_adversario"] = cls.block_attack(df, sc, other)
-        return cls._wrap(df, sc, team, other, meta, blocks)
+        out = cls._wrap(df, sc, team, other, meta, blocks)
+        out["escopo"]["resumo_generico"] = generic
+        return out
 
     @staticmethod
     def _wrap(df, sc, team, other, meta, blocks) -> Dict[str, Any]:

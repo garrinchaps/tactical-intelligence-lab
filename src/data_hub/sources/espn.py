@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from src.data_hub.boxscore import ESPN_MAP, stat_row
 from src.data_hub.db import DataHubDB
-from src.data_hub.http import PoliteHttpClient, SourceUnavailable
+from src.data_hub.http import ClientRefused, PoliteHttpClient, SourceUnavailable
 from src.data_hub.registry import DataLevel, to_internal_id
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
@@ -177,35 +177,45 @@ class EspnProvider:
         leagues = leagues or ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana"]
         fails = 0
 
+        def refused(exc) -> bool:
+            return isinstance(exc, ClientRefused) or " 400" in str(exc)
+
         def month(lg, first, last):
-            """Mês inteiro; se a ESPN recusar o intervalo (HTTP 400), tenta semana a semana sem o limite."""
+            """
+            Mês inteiro; se a ESPN recusar o intervalo (HTTP 400), tenta semana a semana sem o limite.
+            Devolve (jogos, recusado) — recusado=True quando o mês E todas as semanas deram 400.
+            Recusas não são repetidas (o cliente lembra por 7 dias), então rodar de novo é rápido.
+            """
             try:
-                return self.scoreboard(lg, first, last)
+                return self.scoreboard(lg, first, last), False
             except Exception as exc:
-                if "400" not in str(exc):
+                if not refused(exc):
                     raise
-            out, d = [], first
-            bad = 0
+            out, d, weeks, bad = [], first, 0, 0
             while d <= last:
                 e = min(d + timedelta(days=6), last)
+                weeks += 1
                 try:
                     data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{d:%Y%m%d}-{e:%Y%m%d}"},
                                      max_age_s=None if (date.today() - e).days >= 3 else 1800)
                     out += [r for r in (self.parse_scoreboard_event(ev, lg) for ev in data.get("events", []) or []) if r]
                 except Exception as exc:
-                    if "400" not in str(exc):
+                    if not refused(exc):
                         raise
                     bad += 1                              # semana sem calendário nessa liga: não é falha de rede
+                    if bad >= 2 and not out:              # duas semanas seguidas recusadas: o mês todo é recusado
+                        return out, True
                 d = e + timedelta(days=1)
-            return out
+            return out, bad == weeks
 
         for lg in leagues:
             y, m = since_year, 1
+            refused_months = 0
             while date(y, m, 1) <= until:
                 first = date(y, m, 1)
                 last = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
                 try:
-                    recs = month(lg, first, min(last, until))
+                    recs, ref = month(lg, first, min(last, until))
                     fails = 0
                 except Exception as exc:
                     tot["errors"] += 1
@@ -214,8 +224,19 @@ class EspnProvider:
                     if fails >= 5:
                         say("  espn: 5 falhas seguidas — parando para não insistir; rode de novo mais tarde.")
                         return tot
-                    recs = []
+                    recs, ref = [], False
                 tot["meses"] += 1
+                if ref:
+                    refused_months += 1
+                    tot["recusados"] = tot.get("recusados", 0) + 1
+                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: ESPN recusou o período (HTTP 400) — sem calendário")
+                    if refused_months >= 6:
+                        # meia temporada inteira recusada: a ESPN não tem esse histórico; pula para o próximo ano
+                        say(f"  {LEAGUES.get(lg, lg)}: 6 meses seguidos recusados — pulando para {y + 1}")
+                        y, m, refused_months = y + 1, 1, 0
+                        continue
+                else:
+                    refused_months = 0
                 if recs:
                     r = self.db.upsert_matches(recs)
                     tot["added"] += r["added"]
@@ -231,6 +252,8 @@ class EspnProvider:
                             tot["errors"] += 1
                             say(f"  espn resumo {x['home_team_name']} x {x['away_team_name']}: {exc}")
                     say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: {len(recs)} jogos, {len(todo)} resumos novos")
+                elif not ref:
+                    say(f"  {LEAGUES.get(lg, lg)} {first:%m/%Y}: nenhum jogo encerrado no período")
                 y, m = (y + 1, 1) if m == 12 else (y, m + 1)
         return tot
 

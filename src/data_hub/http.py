@@ -28,6 +28,17 @@ class SourceUnavailable(RuntimeError):
     """A fonte não respondeu, não tem o recurso ou recusou a chave."""
 
 
+class ClientRefused(SourceUnavailable):
+    """A fonte recusou o pedido em si (HTTP 4xx, ex.: 400): repetir não adianta."""
+
+    def __init__(self, status_code: int, message: str):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+NEGATIVE_CACHE_S = 7 * 24 * 3600      # recusa (4xx) lembrada por 7 dias: não insiste a cada execução
+
+
 class PoliteHttpClient:
     _last_call: Dict[str, float] = {}
 
@@ -69,6 +80,18 @@ class PoliteHttpClient:
         except Exception:
             return None
 
+    def _neg_path(self, path: Path) -> Path:
+        return path.with_suffix(".neg")
+
+    def _negative(self, path: Path) -> Optional[int]:
+        neg = self._neg_path(path)
+        if not neg.exists() or (time.time() - neg.stat().st_mtime) > NEGATIVE_CACHE_S:
+            return None
+        try:
+            return int(neg.read_text(encoding="utf-8").strip() or 400)
+        except Exception:
+            return 400
+
     # ---------------------------------------------------------------- request
     def quota_left(self) -> Optional[int]:
         if self.daily_quota is None or self.db is None:
@@ -91,6 +114,9 @@ class PoliteHttpClient:
             cached = self._read_cache(path, max_age_s)
             if cached is not None:
                 return cached
+            code = self._negative(path)
+            if code is not None:
+                raise ClientRefused(code, f"HTTP {code} em {self.source} (recusa já registrada; não repete por 7 dias)")
 
         left = self.quota_left()
         if left is not None and left <= 0:
@@ -116,6 +142,13 @@ class PoliteHttpClient:
                     )
                 if resp.status_code == 429 or resp.status_code >= 500:
                     raise net.HTTPStatusError(resp.status_code, url)
+                if 400 <= resp.status_code < 500:
+                    # erro do pedido (ex.: 400 = intervalo/liga sem calendário): sem repetir, lembra a recusa
+                    try:
+                        self._neg_path(path).write_text(str(resp.status_code), encoding="utf-8")
+                    except Exception:
+                        pass
+                    raise ClientRefused(resp.status_code, net.redact(f"HTTP {resp.status_code} em {url}"))
                 resp.raise_for_status()
                 data = resp.json()
                 path.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")

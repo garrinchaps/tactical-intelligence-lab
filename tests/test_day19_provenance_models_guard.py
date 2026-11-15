@@ -400,7 +400,8 @@ def test_new_question_types():
     assert Q.parse("quem foi o jogador que mais tocou na bola na partida?").ranking_metric == "toques"
     assert Q.parse("de quem foram as assistencias nesse jogo?").ask == "goals"
     assert Q.parse("qual seria a melhor estratégia para anular o harry kane", ["Harry Kane"]).ask == "plan"
-    assert Q.parse("quem mais criou perigo?").ranking_metric == "perigo_ia"
+    assert Q.parse("quem mais criou perigo?").ranking_metric == "perigo"          # v36: xT + xG, rede como 2ª opinião
+    assert Q.parse("quem mais criou perigo segundo a rede neural?").ranking_metric == "perigo_ia"
 
 
 def test_plans_are_grounded(final_internal, tmp_path, monkeypatch):
