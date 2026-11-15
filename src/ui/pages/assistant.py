@@ -107,6 +107,17 @@ def _answer(question: str, current_context, use_llm: bool):
     return res, loc, switched
 
 
+def _mentioned(res) -> dict:
+    """Jogadores e times citados na resposta → botões que abrem as páginas deles (v36)."""
+    ev = res.get("evidence") or {}
+    meta = ev.get("metadata") or {}
+    text = res.get("report_markdown") or ""
+    roster = meta.get("match_player_roster") or []
+    players = [p for p in roster if isinstance(p, str) and p and p in text][:6]
+    teams = [t for t in (meta.get("target_team"), meta.get("opponent_team")) if isinstance(t, str) and t and t in text]
+    return {"chips_p": players, "chips_t": teams}
+
+
 WELCOME = [
     ("🎯", "Cite o jogo na pergunta", "“Flamengo x Palmeiras 2025: quem finalizou mais?” — o jogo é localizado sozinho."),
     ("📊", "Só números conferidos", "Cada número é checado contra os dados do jogo; frase com número sem origem é cortada."),
@@ -163,7 +174,7 @@ def render(current_context, match_bar) -> None:
         for i, e in enumerate(EXAMPLES):
             if cols[i % 3].button(e, key=f"as_ex_{i}", use_container_width=True):
                 clicked = e
-    for h in history:
+    for hi, h in enumerate(history):
         with st.chat_message("user", avatar="🧑‍💼"):
             st.markdown(h["q"])
         with st.chat_message("assistant", avatar="⚽"):
@@ -173,6 +184,10 @@ def render(current_context, match_bar) -> None:
                 st.caption(h["note"])
             st.markdown(h["a"])
             st.caption(h["meta"])
+            if h.get("chips_p") or h.get("chips_t"):
+                from src.ui.components import entity_chips
+
+                entity_chips(h.get("chips_p") or [], h.get("chips_t") or [], key=f"as_chip_{hi}")
             _audit_panel(h)
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked
@@ -195,5 +210,5 @@ def render(current_context, match_bar) -> None:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
                     "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
-                    "audit": (res.get("number_tags") or {}).get("linhas", [])})
+                    "audit": (res.get("number_tags") or {}).get("linhas", []), **_mentioned(res)})
     st.rerun()

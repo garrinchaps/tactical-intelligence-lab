@@ -157,8 +157,11 @@ def _stats_table(ctx: MatchContext) -> None:
                          format_func=lambda k: labels.get(k, k), key=f"ps_order_{cat}")
     view = s[cols].sort_values(order, ascending=False, na_position="last")
     st.caption("🏅 " + RATING_HELP)
-    comparison_table(view.rename(columns={"jogador": "Jogador", "equipe": "Equipe", "posicao": "Posição", **labels}),
-                     "Contagens diretas dos eventos da partida. Assistência = último passe certo para o autor do gol.")
+    from src.ui.components import clickable_table
+
+    clickable_table(view.rename(columns={"jogador": "Jogador", "equipe": "Equipe", "posicao": "Posição", **labels}),
+                    f"ps_click_{cat}", "Jogador", "jogador",
+                    "Contagens diretas dos eventos da partida. Assistência = último passe certo para o autor do gol.")
     st.download_button("Baixar tabela (.csv)", view.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"atletas_{ctx.match_id}.csv", mime="text/csv")
 

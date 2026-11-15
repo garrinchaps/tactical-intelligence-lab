@@ -351,8 +351,10 @@ def render(_ctx=None) -> None:
                     "valor": "Valor (€ mi)", "nota": "Nota", "nota_base": "Base da nota",
                     "minutos_temporada": "Min. (12 meses)", "gols_temporada": "Gols", "assist_temporada": "Assist.",
                     "origem": "Origem"}
-            comparison_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
-                             .sort_values("Nota", ascending=False, na_position="last"),
+            from src.ui.components import clickable_table
+
+            clickable_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
+                            .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador",
                              "Nota do laboratório (0–100): valor de mercado comparado com a mesma posição + minutos e "
                              "participação em gols nos últimos 12 meses + nota externa quando houver. É uma estimativa: "
                              "a base de cada nota aparece ao lado.")

@@ -10,7 +10,7 @@ Métricas SIMULATED exibem o selo não removível com gerador e IC 95%.
 from __future__ import annotations
 
 import html
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -174,6 +174,51 @@ def comparison_table(df: pd.DataFrame, caption: str = "") -> None:
     st.dataframe(zebra(df.reset_index(drop=True)), use_container_width=True, hide_index=True)
     if caption:
         st.caption(caption)
+
+
+def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "jogador", caption: str = "",
+                    team_col: Optional[str] = None) -> None:
+    """
+    Tabela em que clicar numa linha abre a página da entidade (jogador ou time) — v36: "clicar no nome abre a página".
+    A seleção é limpa ao abrir, para o "← Voltar" não reabrir a mesma página.
+    """
+    view = df.reset_index(drop=True)
+    ev = st.dataframe(zebra(view), use_container_width=True, hide_index=True, on_select="rerun",
+                      selection_mode="single-row", key=key)
+    rows = list(getattr(getattr(ev, "selection", None), "rows", []) or []) if ev is not None else []
+    st.caption(("🖱️ Clique numa linha para abrir a página do " + ("jogador" if kind == "jogador" else "time") + ". ")
+               + caption)
+    if rows:
+        r = view.iloc[int(rows[0])]
+        name = str(r.get(name_col) or "")
+        st.session_state.pop(key, None)
+        if name:
+            from src.ui import nav
+
+            if kind == "jogador":
+                from src.data_lake.ids import player_core
+
+                nav.open_view("jogador", name=name, core=player_core(name))
+            else:
+                nav.open_view("time", name=name)
+
+
+def entity_chips(players: List[str], teams: List[str], key: str) -> None:
+    """Botões pequenos para abrir as páginas dos jogadores/times citados (ex.: numa resposta do Assistente)."""
+    from src.ui import nav
+
+    items = [("time", t) for t in teams if t] + [("jogador", p) for p in players if p]
+    if not items:
+        return
+    cols = st.columns(min(len(items), 5))
+    for i, (kind, name) in enumerate(items[:10]):
+        with cols[i % len(cols)]:
+            if kind == "jogador":
+                from src.data_lake.ids import player_core
+
+                nav.link(f"👤 {name}", "jogador", key=f"{key}_{i}", name=name, core=player_core(name))
+            else:
+                nav.link(f"🛡️ {name}", "time", key=f"{key}_{i}", name=name)
 
 
 def provenance_panel(registry: ProvenanceRegistry) -> None:
