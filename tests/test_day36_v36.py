@@ -265,3 +265,12 @@ def test_average_rating_ignores_matches_without_rating():
 
     a = average_rating(pd.DataFrame({"nota": [7.0, None, 8.0]}))
     assert a == {"media": 7.5, "jogos_com_nota": 2, "jogos_sem_nota": 1}
+
+
+def test_club_page_respects_top_level_filter():
+    import inspect
+
+    import src.ui.pages.clubs as C
+
+    src = inspect.getsource(C.render)
+    assert "team_matches(names, include_score_only=None)" in src          # nível do topo, não "tudo analisável"

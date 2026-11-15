@@ -123,13 +123,15 @@ def render(_ctx=None) -> None:
         empty_state("Nenhum time escolhido", "Use a busca no topo e clique no time.", "🛡️")
         return
     names = same_team_names(name)
-    m = team_matches(names)                                    # jogos com dados para análise
+    from src.ui.context import LEVEL_CHOICES, chosen_levels
+
+    m = team_matches(names, include_score_only=None)           # v36: respeita o nível escolhido no topo (🟢/📊/📄)
     allm = team_matches(names, include_score_only=True)        # campanha usa todos os resultados
     r = record(names, allm)
     lake, key, ids = _lake_team(name)
     fontes = sorted(ids["fonte"].unique()) if not ids.empty else sorted(m["data_source"].unique()) if not m.empty else []
     st.markdown(f'<div class="til-profile">{crest_img(name, "lg")}<div><div class="n">{pt(name)}</div>'
-                f'<div class="d">{len(m)} jogos com dados para análise · {len(allm)} resultados no total'
+                f'<div class="d">{len(m)} jogos no nível escolhido · {len(allm)} resultados no total'
                 + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
                 unsafe_allow_html=True)
     k = st.columns(5)
@@ -146,9 +148,12 @@ def render(_ctx=None) -> None:
         comparison_table(nxt.head(5))
     t1, t2, t3 = st.tabs(["🗓️ Jogos", "💶 Elenco e valores", "📈 Temporada (xG)"])
     with t1:
+        lv_names = [k for k, v in LEVEL_CHOICES.items() if v in chosen_levels()]
+        st.caption("Mostrando só jogos com: " + " · ".join(lv_names) + " (o filtro de nível do topo vale aqui também).")
         if m.empty:
-            empty_state("Nenhum jogo deste time com estatísticas ou lances", "Só existem resultados (placar) dele nas "
-                        "fontes abertas.", "🗓️", "Bastidores › Dados: ligue 'mostrar jogos só com placar' para vê-los.")
+            empty_state("Nenhum jogo deste time no nível escolhido", f"Há {len(allm)} resultado(s) dele no total, mas "
+                        "nenhum com o nível de dado marcado no topo.", "🗓️",
+                        "Marque outro nível no seletor do topo (ex.: 📊 estatísticas ou 📄 só placar).")
         else:
             f1, f2 = st.columns(2)
             seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)
