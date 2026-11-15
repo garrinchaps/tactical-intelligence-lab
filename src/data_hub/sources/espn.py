@@ -51,10 +51,12 @@ class EspnProvider:
 
     # ----------------------------------------------------------------- parse
     @staticmethod
-    def parse_scoreboard_event(ev: Dict[str, Any], league: str) -> Optional[Dict[str, Any]]:
+    def parse_scoreboard_event(ev: Dict[str, Any], league: str, include_live: bool = False) -> Optional[Dict[str, Any]]:
         comp = (ev.get("competitions") or [{}])[0]
         status = ((comp.get("status") or ev.get("status") or {}).get("type") or {})
-        if not status.get("completed"):
+        live = status.get("state") == "in" or str(status.get("name", "")).upper() in (
+            "STATUS_IN_PROGRESS", "STATUS_HALFTIME", "STATUS_FIRST_HALF", "STATUS_SECOND_HALF", "STATUS_EXTRA_TIME")
+        if not status.get("completed") and not (include_live and live):
             return None
         sides = {c.get("homeAway"): c for c in comp.get("competitors", [])}
         home, away = sides.get("home", {}), sides.get("away", {})
@@ -70,7 +72,7 @@ class EspnProvider:
             "home_score": int(home["score"]) if str(home.get("score", "")).isdigit() else None,
             "away_score": int(away["score"]) if str(away.get("score", "")).isdigit() else None,
             "stadium_name": ((comp.get("venue") or {}).get("fullName") or ""),
-            "status": "FT",
+            "status": "FT" if status.get("completed") else "LIVE",
             "data_source": "espn",
             "data_level": DataLevel.RESULT,
             "extra": {"espn_league": league},
@@ -151,6 +153,10 @@ class EspnProvider:
         return out
 
     def ingest_event(self, internal_match_id: int) -> Dict[str, Any]:
+        from src.data_hub import sync_policy as P
+
+        if P.is_frozen(self.db, internal_match_id) and self.db.has_boxscore(int(internal_match_id)):
+            return self.db.get_match(internal_match_id) or {}       # B2: encerrada e consolidada — não baixa de novo
         match = self.db.get_match(internal_match_id) or {}
         import json as _json
 
@@ -162,6 +168,8 @@ class EspnProvider:
         record, box = self.parse_summary(summary, league, event_id)
         self.db.upsert_matches([record])
         self.db.save_boxscore(record["match_id"], box)
+        if record.get("status") == "FT" and (box["team_stats"] or box["lineups"]):
+            P.freeze(self.db, [record["match_id"]])                 # consolidação final feita: congela
         return record
 
     def backfill(self, leagues: Optional[List[str]] = None, since_year: int = 2018, until: Optional[date] = None,
@@ -282,15 +290,56 @@ class EspnProvider:
         return tot
 
     def sync_recent(self, days_back: int = 3, leagues: Optional[List[str]] = None) -> Dict[str, int]:
+        """B2: incremental por competição (do último sync − 2 dias), em vez de uma janela fixa."""
+        from src.data_hub import sync_policy as P
+
         totals = {"added": 0, "updated": 0, "errors": 0}
         today = date.today()
         for lg in leagues or list(LEAGUES):
+            d0, d1 = P.window(self.db, "espn", lg, today, default_days=days_back)
             try:
-                recs = self.scoreboard(lg, today - timedelta(days=days_back), today)
+                recs = []
+                d = d0
+                while d <= d1:                                  # janelas de até 7 dias (a ESPN recusa janelas longas)
+                    e = min(d + timedelta(days=6), d1)
+                    recs += self.scoreboard(lg, d, e)
+                    d = e + timedelta(days=1)
             except Exception:
                 totals["errors"] += 1
                 continue
             r = self.db.upsert_matches(recs)
             totals["added"] += r["added"]
             totals["updated"] += r["updated"]
+            P.mark_synced(self.db, "espn", lg)
         return totals
+
+    def live_tick(self, leagues: Optional[List[str]] = None) -> Dict[str, int]:
+        """
+        B2: placar ao vivo (chamado a cada minuto enquanto houver jogo em andamento). Jogo que acabou recebe a
+        consolidação final (resumo com estatísticas) e é congelado. Fixture futura não é buscada aqui.
+        """
+        from src.data_hub import sync_policy as P
+
+        out = {"ao_vivo": 0, "encerrados": 0, "errors": 0}
+        today = date.today()
+        for lg in leagues or list(LEAGUES):
+            try:
+                data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{today:%Y%m%d}"}, max_age_s=50)
+            except Exception:
+                out["errors"] += 1
+                continue
+            recs = [r for r in (self.parse_scoreboard_event(ev, lg, include_live=True)
+                                for ev in data.get("events", []) or []) if r]
+            if not recs:
+                continue
+            self.db.upsert_matches(recs)
+            for r in recs:
+                if r["status"] == "LIVE":
+                    out["ao_vivo"] += 1
+                elif not P.is_frozen(self.db, r["match_id"]):
+                    try:
+                        self.ingest_event(int(r["match_id"]))
+                        out["encerrados"] += 1
+                    except Exception:
+                        out["errors"] += 1
+        return out

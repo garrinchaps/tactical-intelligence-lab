@@ -79,11 +79,39 @@ def _run(sources: List[str]) -> None:
         _state.update(running=False, last_finished=datetime.now(timezone.utc), last_log=log[-30:])
 
 
+_live = {"running": False, "last": None, "ao_vivo": 0}
+LIVE_CHECK_MIN = 15          # sem jogo ao vivo: confere a cada 15 min; com jogo ao vivo: a cada 1 min
+
+
+def _live_loop() -> None:
+    """B2: enquanto houver jogo ao vivo (ESPN), atualiza o placar a cada minuto; senão, confere a cada 15 min."""
+    import time
+
+    from src.data_hub.service import MatchDataService
+
+    try:
+        svc = MatchDataService()
+        if not svc.espn.enabled:
+            return
+        while enabled():
+            try:
+                r = svc.espn.live_tick()
+                _live.update(last=datetime.now(timezone.utc), ao_vivo=r.get("ao_vivo", 0))
+            except Exception:
+                pass
+            time.sleep(60 if _live["ao_vivo"] else LIVE_CHECK_MIN * 60)
+    finally:
+        _live["running"] = False
+
+
 def ensure_started(db) -> Dict[str, Any]:
     """Dispara a atualização em segundo plano se algo estiver vencido. Seguro chamar a cada recarga da página."""
     if not enabled():
         return {**_state, "enabled": False, "due": []}
     with _lock:
+        if not _live["running"] and os.getenv("AUTO_SYNC_LIVE", "1").strip() not in ("0", "false"):
+            _live["running"] = True
+            threading.Thread(target=_live_loop, daemon=True, name="til-ao-vivo").start()
         recent = _state["last_attempt"] and datetime.now(timezone.utc) - _state["last_attempt"] < timedelta(minutes=RETRY_MINUTES)
         if not _state["running"] and not recent:
             pending = due(db)

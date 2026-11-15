@@ -607,3 +607,51 @@ def test_crest_never_breaks_and_uses_local_cache(tmp_path, monkeypatch):
                         "competition_name": ["Brasileirão Série A", "Azerbaijan Premier League"],
                         "match_date": ["2026-05-01", "2026-05-01"]})
     assert C.priority_teams(cat) == ["Cruzeiro", "Flamengo"]             # Azerbaijão fora da prioridade
+
+
+# ------------------------------------------------------------------ B2: política de atualização
+def test_sync_policy_incremental_live_freeze(db):
+    from datetime import date, datetime, timedelta, timezone
+
+    from src.data_hub import sync_policy as P
+
+    assert P.kind("LIVE") == "ao_vivo" and P.kind("FT") == "encerrada" and P.kind("NS") == "futura"
+    assert P.kind("FT", frozen=True) == "congelada"
+    assert not P.fetch_stats("futura") and not P.fetch_stats("congelada") and P.fetch_stats("ao_vivo")
+    today = date(2026, 11, 15)
+    assert P.window(db, "espn", "bra.1", today) == (today - timedelta(days=3), today)            # sem histórico
+    P.mark_synced(db, "espn", "bra.1", datetime(2026, 11, 10, tzinfo=timezone.utc))
+    assert P.window(db, "espn", "bra.1", today) == (date(2026, 11, 8), today)                     # incremental
+    P.mark_synced(db, "espn", "bra.1", datetime(2025, 1, 1, tzinfo=timezone.utc))
+    assert P.window(db, "espn", "bra.1", today)[0] == today - timedelta(days=30)                  # nunca a temporada
+    P.freeze(db, [42])
+    assert P.is_frozen(db, 42) and not P.is_frozen(db, 43)
+    now = datetime(2026, 11, 15, 12, tzinfo=timezone.utc)
+    P.mark_synced(db, "espn", "eng.1", now - timedelta(hours=1))
+    P.mark_synced(db, "espn", "esp.1", now - timedelta(hours=4))
+    assert P.due_fixtures(db, "espn", ["eng.1", "esp.1"], now) == ["esp.1"]                       # 3 h
+
+
+def test_espn_live_tick_freezes_finished_match(db):
+    from src.data_hub.sources.espn import EspnProvider
+
+    p = EspnProvider(db, enabled=True)
+    ev = lambda i, done, state: {"id": i, "date": "2026-11-15T19:00Z", "season": {"year": 2026}, "competitions": [{
+        "status": {"type": {"completed": done, "state": state}},
+        "competitors": [{"homeAway": "home", "score": "1", "team": {"displayName": "Cruzeiro"}},
+                        {"homeAway": "away", "score": "0", "team": {"displayName": "Atlético-MG"}}]}]}
+    p._get = lambda *a, **k: {"events": [ev(1, False, "in"), ev(2, True, "post"), ev(3, False, "pre")]}
+    ingested = []
+
+    def fake_ingest(mid):
+        ingested.append(mid)
+        db.save_boxscore(mid, {"team_stats": [{"team_name": "Cruzeiro", "stat_key": "shots_total", "value": 9}],
+                               "lineups": [], "timeline": []})
+        from src.data_hub import sync_policy as P
+        P.freeze(db, [mid])
+    p.ingest_event = fake_ingest
+    out = p.live_tick(["bra.1"])
+    assert out["ao_vivo"] == 1 and out["encerrados"] == 1 and ingested == [500_000_002]          # fixture (pre) ignorada
+    assert db.get_match(500_000_001)["status"] == "LIVE"
+    p.live_tick(["bra.1"])
+    assert ingested == [500_000_002]                                                            # congelado: não repete
