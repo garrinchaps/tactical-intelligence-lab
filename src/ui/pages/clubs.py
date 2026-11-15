@@ -27,13 +27,20 @@ def same_team_names(name: str) -> List[str]:
     from src.ui.context import get_service
     from src.ui.pages.search_all import team_table
 
-    t = team_table(get_service().db.catalog_version(), False)
+    t = team_table(get_service().db.stable_version(), False)
     if t.empty:
         return [name]
     core = team_core(name)
     same = set(t.loc[t["core"] == core, "nome"])
     sc = fast_scores(name, t["nome"].tolist())
     same |= {n for n, v in sc.items() if v >= 0.92}
+    # time feminino, sub-20, reservas etc. não são "o mesmo time" (Barcelona × Barcelona WFC)
+    import re as _re
+
+    tag = _re.compile(r"\b(wfc|women|womens|ladies|feminino|femenino|f[eé]minin|fem|w|u-?\d{2}|sub-?\d{2}|ii|b|reserves?)\b|\(w\)",
+                      _re.I)
+    if not tag.search(name):
+        same = {n for n in same if not tag.search(n)}
     return sorted(same | {name})
 
 

@@ -152,7 +152,7 @@ class ReferenceBaselineBuilder:
         with sqlite3.connect(str(path)) as conn:
             rows = conn.execute("SELECT DISTINCT match_id FROM events").fetchall()
         ids = sorted(int(r[0]) for r in rows)
-        return [m for m in ids if source_from_internal_id(m) in ("statsbomb", "wyscout")]
+        return [m for m in ids if source_from_internal_id(m) in ("statsbomb", "wyscout", "openplay")]
 
     @staticmethod
     def player_rows_from_match(df_events: pd.DataFrame, match_id: int) -> List[Dict[str, Any]]:
@@ -217,7 +217,7 @@ class ReferenceBaselineBuilder:
             pending = pending[:max_new]
         for mid in pending:
             attempted.add(mid)
-            if source_from_internal_id(mid) not in ("statsbomb", "wyscout"):
+            if source_from_internal_id(mid) not in ("statsbomb", "wyscout", "openplay"):
                 continue
             try:
                 raw = load_events_fn(int(mid))
@@ -309,7 +309,7 @@ class StrengthsWeaknessesEngine:
         if exclude_match_id is None:
             return rows
         fam = source_from_internal_id(int(exclude_match_id))
-        fam = fam if fam in ("statsbomb", "wyscout") else "statsbomb"
+        fam = fam if fam in ("statsbomb", "wyscout", "openplay") else "statsbomb"
         same = [r for r in rows if r.get("source", "statsbomb") == fam]
         return same if len(same) >= 2 * MIN_GROUP_SAMPLE else rows
 

@@ -111,9 +111,19 @@ def test_answer_falls_back_to_local_writer_when_gemini_fails(monkeypatch, analys
     box = {"team_stats": pd.DataFrame([{"team_name": "A", "stat_key": "shots_total", "stat_label": "Finalizações", "value": 18},
                                        {"team_name": "B", "stat_key": "shots_total", "stat_label": "Finalizações", "value": 7}]),
            "timeline": pd.DataFrame(), "lineups": pd.DataFrame(), "player_stats": pd.DataFrame()}
+    from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst as D
+
+    monkeypatch.setattr(D, "_down_until", 0.0)
+    monkeypatch.setattr(D, "_reach", {"t": 9e18, "ok": 1.0})            # rede "no ar": a falha vem do servidor
     res = analyst.answer("quantas finalizações?", "A", meta, boxscore=box, prefer_llm=True)
     assert res["engine_used"].startswith("REDATOR LOCAL") and res.get("llm_error")
     assert "18" in res["report_markdown"]
+    # disjuntor: depois da falha, a próxima pergunta nem tenta a nuvem (resposta local instantânea)
+    import time
+
+    t0 = time.time()
+    res2 = analyst.answer("quantas finalizações?", "A", meta, boxscore=box, prefer_llm=True)
+    assert res2["engine_used"] == "LOCAL_SCOPED_ENGINE" and time.time() - t0 < 1.0
 
 
 # ------------------------------------------------- motor neural (GroupKFold + promoção estatística)
@@ -150,7 +160,8 @@ def test_clone_of_champion_is_rejected_and_every_attempt_is_logged(tmp_path, sma
 
     reg = DangerModelRegistry(root=tmp_path / "reg")
     r1 = reg.train_round(small_data, [8], 0.05, 3, 1e-3, 256, seed=5, cv_folds=3, cv_seeds=(1,))
-    r2 = reg.train_round(small_data, [8], 0.05, 3, 1e-3, 256, seed=5, cv_folds=3, cv_seeds=(1,))   # mesmo modelo
+    r2 = reg.train_round(small_data, [8], 0.05, 3, 1e-3, 256, seed=5, cv_folds=3, cv_seeds=(1,),
+                         warm_start=False)                                                          # mesmo modelo
     assert r1["promoted"] and not r2["promoted"]
     assert abs(r2["test_gain"]) < 1e-9 and "IC 95% inclui zero" in r2["reason"]
     assert r2["cv_folds"] == 3 and r2["cv_logloss_std"] is not None
@@ -166,7 +177,7 @@ def test_clear_improvement_is_promoted(tmp_path, small_data):
     reg.train_round(small_data, [4], 0.001, 1, 1e-3, 256, seed=3, cv_folds=0)          # campeão fraco (quase sem treino)
     r = reg.train_round(small_data, [16], 0.05, 20, 1e-3, 256, seed=3, cv_folds=3, cv_seeds=(1, 2))
     assert r["promoted"], r["reason"]
-    assert r["gain_ci_low"] > 0 and r["test_gain"] > (r["cv_logloss_std"] or 0)
+    assert r["gain_ci_low"] > 0 and r["test_gain"] >= 0.0005 and r["optimizer"] == "adam"
     assert reg.champion_info()["version"] == 2
 
 

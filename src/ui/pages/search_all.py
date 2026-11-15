@@ -33,12 +33,12 @@ def one_per_game(out: pd.DataFrame) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
-def team_table(version: str, only: bool, real: bool = True) -> pd.DataFrame:
+def team_table(version: str, only, real: bool = True) -> pd.DataFrame:
     """Uma linha por nome de time: nº de jogos analisáveis e o núcleo do nome (para agrupar variações)."""
     from src.data_lake.ids import team_core
     from src.ui.context import cached_catalog
 
-    c = cached_catalog(include_score_only=not only)
+    c = cached_catalog() if isinstance(only, str) else cached_catalog(include_score_only=not only)
     if c.empty:
         return pd.DataFrame(columns=["nome", "jogos", "core"])
     s = pd.concat([c["home_team_name"], c["away_team_name"]]).dropna().value_counts()
@@ -48,10 +48,10 @@ def team_table(version: str, only: bool, real: bool = True) -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
-def competition_table(version: str, only: bool, real: bool = True) -> pd.DataFrame:
+def competition_table(version: str, only, real: bool = True) -> pd.DataFrame:
     from src.ui.context import cached_catalog
 
-    c = cached_catalog(include_score_only=not only)
+    c = cached_catalog() if isinstance(only, str) else cached_catalog(include_score_only=not only)
     if c.empty:
         return pd.DataFrame(columns=["competicao", "jogos", "temporadas", "pais"])
     g = c.groupby("competition_name")
@@ -146,11 +146,13 @@ def render(_ctx=None) -> None:
     q = (st.session_state.get("global_q") or nav.param("q") or st.session_state.get("_last_q") or "").strip()
     if not q:
         hero("Buscar", "Um jogo, um time, um jogador ou uma competição",
-             "Digite na caixa do topo. Clique no resultado para abrir a análise. Só aparecem jogos com dados "
-             "para analisar (todos os lances ✅ ou estatísticas 📊).")
+             "Digite na caixa do topo. Clique no resultado para abrir a análise. Escolha ao lado da busca que "
+             "jogos aparecem: 🟢 com todos os lances, 📊 com estatísticas, 📄 só placar — ou os três.")
         _showcase()
         return
-    version, only = get_service().db.catalog_version(), analyzable_only()
+    from src.ui.context import chosen_levels
+
+    version, only = get_service().db.stable_version(), "|".join(chosen_levels())   # níveis escolhidos no topo
     with st.spinner("Procurando..."):
         matches = find_matches(q)
         teams = find_teams(q, version, only)

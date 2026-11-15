@@ -165,7 +165,9 @@ class ScopedEvidenceBuilder:
         passes = ev[(ev["type_name"] == "Pass") & zone]
         comp = passes[passes["is_pass_completed"] == 1]
         shots = ev[(ev["type_name"] == "Shot") & zone]
-        actors = ev[zone & ev["player_name"].notna()].groupby("player_name").size().sort_values(ascending=False)
+        # "mais passes" usa exatamente a mesma contagem do ranking de passes (todos os passes tentados, sem
+        # conduções nem recepções) — assim a mesma pergunta nunca dá dois números diferentes
+        actors = passes[passes["player_name"].notna()].groupby("player_name").size().sort_values(ascending=False)
         xt = comp["delta_xt"].clip(lower=0).sum() if "delta_xt" in comp else None
         return {
             "setor": SIDE_PT.get(sc.side, "todo o campo") + (f" / {sc.third}" if sc.third else ""),
@@ -179,7 +181,7 @@ class ScopedEvidenceBuilder:
             "xg": _r(shots["shot_statsbomb_xg"].sum(), 2),
             "gols": int((shots.get("shot_outcome_name") == "Goal").sum()),
             "xt_gerado": _r(xt, 3),
-            "protagonistas_no_setor": [{"jogador": k, "acoes": int(v)} for k, v in actors.head(3).items()],
+            "protagonistas_no_setor": [{"jogador": k, "acoes": int(v), "passes": int(v)} for k, v in actors.head(3).items()],
             "amostra_N": int(len(passes) + len(shots)),
         }
 
@@ -483,6 +485,78 @@ class ScopedEvidenceBuilder:
                        "zonas_perigosas_do_adversario": danger_zones(sco, attacker),
                        "mais_perigosos_do_adversario": danger_by_player(sco, attacker, 3)}}
 
+    # ------------------------------------------------------- perfil dos atletas (fora dos eventos)
+    _tm_cache: Dict[str, Any] = {}
+
+    @classmethod
+    def _tm_players(cls) -> pd.DataFrame:
+        """Cadastro do Transfermarkt no data lake (altura, nascimento, valor). Vazio se o lake não tiver a tabela."""
+        try:
+            from src.data_lake.lake import Lake
+
+            lake = Lake(sqlite_path=None)
+            if not lake.exists("tm_jogadores"):
+                return pd.DataFrame()
+            path = lake.path("tm_jogadores")
+            key = f"{path}:{path.stat().st_mtime}"
+            if cls._tm_cache.get("key") != key:
+                tm = lake.read("tm_jogadores")
+                from src.intelligence.query_understanding import norm
+
+                tm = tm.assign(_n=tm["nome"].map(norm))
+                tm["_fl"] = tm["_n"].str.split().map(lambda w: f"{w[0]} {w[-1]}" if len(w) > 1 else (w[0] if w else ""))
+                cls._tm_cache = {"key": key, "df": tm}
+            return cls._tm_cache["df"]
+        except Exception:
+            return pd.DataFrame()
+
+    @classmethod
+    def block_profile(cls, df: pd.DataFrame, team: str, opp: str, attr: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Altura, idade ou valor de mercado médio de quem entrou em campo. Os eventos não trazem isso: cruza os atletas
+        da partida com o cadastro do Transfermarkt (nome completo, ou primeiro + último nome quando é único).
+        Informa quantos atletas foram encontrados — média de poucos atletas não é média do time.
+        """
+        from src.intelligence.query_understanding import norm
+
+        tm = cls._tm_players()
+        col = {"altura": "altura_cm", "idade": "nascimento", "valor": "valor_mercado_eur"}[attr]
+        out: Dict[str, Any] = {"atributo": attr, "fonte": "cadastro do Transfermarkt (data lake)",
+                               "disponivel": not tm.empty and col in tm.columns, "equipes": {}}
+        if not out["disponivel"]:
+            return out
+        by_n = tm.drop_duplicates("_n").set_index("_n")
+        fl_counts = tm["_fl"].value_counts()
+        by_fl = tm[tm["_fl"].map(fl_counts) == 1].set_index("_fl")
+        d = df[df["player_name"].notna()]
+        if "period" in d.columns:
+            d = d[d["period"] <= 4]                       # disputa de pênaltis não conta como "entrou em campo"
+        match_day = pd.to_datetime(meta.get("match_date"), errors="coerce")
+        for tname in (team, opp):
+            names = sorted(d.loc[d["team_name"] == tname, "player_name"].astype(str).unique())
+            vals, found = [], []
+            for nm in names:
+                n = norm(nm)
+                w = n.split()
+                row = by_n.loc[n] if n in by_n.index else (by_fl.loc[f"{w[0]} {w[-1]}"] if len(w) > 1 and
+                                                          f"{w[0]} {w[-1]}" in by_fl.index else None)
+                if row is None:
+                    continue
+                v = row[col]
+                if attr == "idade":
+                    born = pd.to_datetime(v, errors="coerce")
+                    ref = match_day if pd.notna(match_day) else pd.Timestamp.today()
+                    v = (ref - born).days / 365.25 if pd.notna(born) else None
+                v = pd.to_numeric(v, errors="coerce")
+                if pd.notna(v) and v > 0:
+                    vals.append(float(v))
+                    found.append({"jogador": nm, "valor": round(float(v), 1)})
+            out["equipes"][tname] = {"atletas_na_partida": len(names), "encontrados": len(vals),
+                                     "media": round(float(np.mean(vals)), 1) if vals else None,
+                                     "extremos": sorted(found, key=lambda r: -r["valor"])[:1] + sorted(found, key=lambda r: r["valor"])[:1]
+                                     if found else []}
+        return out
+
     # ------------------------------------------------------- montagem
     @classmethod
     def build(cls, df: pd.DataFrame, sc: QueryScope, target_team: str, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -491,8 +565,14 @@ class ScopedEvidenceBuilder:
         team, other = (opp, target_team) if sc.team_focus == "opponent" else (target_team, opp)
 
         blocks: Dict[str, Any] = {"contexto": cls.block_context(df, sc, team, other)}
-        if sc.ask == "goals":
+        if sc.ask == "profile":
+            blocks["perfil"] = cls.block_profile(df, team, other, sc.attribute or "altura", meta)
+        elif sc.ask == "unavailable":
+            blocks["indisponivel"] = {"pedido": sc.attribute}
+        elif sc.ask == "goals":
             blocks["gols"] = cls.block_goals(df, team, other, meta)
+            if sc.goal_order:
+                blocks["gols"]["ordem_pedida"] = sc.goal_order
         elif sc.ask == "ranking":
             blocks["ranking"] = cls.block_ranking(df, sc, team, other)
         elif sc.ask == "result":
@@ -581,6 +661,17 @@ class ScopedEvidenceBuilder:
                         set(e["jogador"] for e in events if e.get("jogador")) |
                         set(e["relacionado"] for e in events if e.get("relacionado")))
         roster = {r for r in roster if isinstance(r, str)}
+        opp = meta.get("away_team_name") if meta.get("home_team_name") == target_team else meta.get("home_team_name")
+        extra: Dict[str, Any] = {}
+        if sc.ask == "profile":
+            who = lu if not lu.empty else ps
+            frame = who[["player_name", "team_name"]] if not who.empty else pd.DataFrame(columns=["player_name", "team_name"])
+            extra["perfil"] = cls.block_profile(frame, target_team, opp, sc.attribute or "altura", meta)
+        elif sc.ask == "unavailable":
+            extra["indisponivel"] = {"pedido": sc.attribute}
+        if sc.goal_order:
+            gls = [e for e in events if e["tipo"] in ("Goal", "goal")]
+            extra["gol_pedido"] = {"ordem": sc.goal_order, "gols": gls}
         return {
             "metadata": {
                 "match_id": int(meta.get("match_id", 0) or 0),
@@ -598,6 +689,7 @@ class ScopedEvidenceBuilder:
                 "leitura": _leitura(stats, meta, target_team),
                 "linha_do_tempo_no_recorte": events,
                 "atletas_citados": players_block,
+                **extra,
                 "limitacao": ("A fonte desta partida não traz coordenadas: perguntas sobre lado do campo, "
                               "compactação, redes de passes ou xT não podem ser respondidas com dados reais."
                               if sc.needs_spatial else ""),

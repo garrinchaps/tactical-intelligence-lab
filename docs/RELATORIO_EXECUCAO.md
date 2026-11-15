@@ -149,3 +149,43 @@ Laboratório) abriram sem erro no teste de fumaça. A interface **não** foi vis
 5. **Modelos antigos:** as versões da rede já salvas foram promovidas pela regra antiga; a regra nova vale a
    partir da próxima tentativa (as colunas novas aparecem vazias nas versões antigas).
 6. **Olhar o visual no navegador** — não foi possível aqui.
+
+## v34 (15/11/2026)
+
+- **Assistente:** perguntas sobre dados que não existem (altura sem cadastro, distância percorrida, peso…)
+  recebem resposta honesta em vez de um resumo genérico; altura, idade e valor de mercado são respondidos pelo
+  cadastro do Transfermarkt quando o lake tem a tabela, com a cobertura (atletas encontrados) declarada.
+  "Qual time fez o primeiro gol?", "quem abriu o placar?", "gol da vitória" respondem o gol pedido.
+  "Mais passes" e o ranking de passes usam a mesma contagem. "Resumo executivo" → "Resumo".
+- **Gemini:** disjuntor (falha de rede/servidor pausa a nuvem por 5 min) + checagem de conexão de 0,8 s; teto
+  total de 20 s. Sem rede, a resposta local sai na hora.
+- **Rede neural:** Adam + parada antecipada numa fatia separada do treino; ajuste fino a partir do campeão quando a
+  arquitetura é a mesma; promoção por ganho pareado no teste isolado (IC 95% por partida > 0, ganho ≥ 0,0005,
+  AUC sem queda > 0,005) com estabilidade no GroupKFold (desvio da AUC ≤ 0,05). O desvio da perda entre dobras
+  deixou de ser barreira (era ~10× maior que qualquer melhoria real, por isso tudo era rejeitado). Rodada de
+  treino na amostra: ~0,5 s. Treino pelo terminal: `python -m src.machine_learning.model_registry --treinar`.
+- **Brasileirão:** `--only estatisticas_brasil` (xG e números por jogador via API-Football em lotes de 20).
+- **CBF:** leitor do formato real (`results/processed/*_games.json`), com placar, estádio, gols e cartões por
+  minuto conferidos com o placar.
+- **Base:** OpenPlay com temporadas no padrão "2014/2015"; open-matchday com o ano para ligas de ano-calendário;
+  partidas "ESTATÍSTICAS" sem nenhuma estatística de jogo (só gols do 1º tempo) voltam a "só placar".
+
+## v35 (15/11/2026)
+
+- **Erro "UnserializableReturnValueError" ao abrir partida:** o cache guardava o objeto MatchBundle; ao atualizar o
+  código com o app aberto, o Streamlit recarrega o módulo e o pickle recusa o objeto antigo. O cache agora guarda só
+  dict/DataFrames e o objeto é remontado na saída.
+- **Lentidão com sincronização rodando:** a cada gravação da sincronização o catálogo "mudava" e toda tela relia ~300
+  mil partidas e reconstruía os índices. Agora a interface usa `stable_version()`: consulta o banco no máximo a cada
+  20 s e só adota uma versão nova 10 min depois da anterior (gravações feitas pela própria tela aparecem na hora).
+- **Nível de dado no topo:** 🟢 lances · 📊 estatísticas · 📄 só placar — qualquer combinação, na busca, no Assistente
+  e nas listas.
+- **📋 Escalação (novo):** elenco atual (Transfermarkt + atletas cadastrados por você, salvos no lake), nota do
+  laboratório com a base declarada, campinho com escalação provável (titulares dos últimos N jogos), melhor possível
+  (algoritmo húngaro: nota × encaixe) e ajustada ao adversário; plano de jogo pelos últimos 1/3/5/10/20 jogos contra a
+  média das mesmas competições; corredores por onde o rival ataca e sofre (jogos com lances); escalações salvas.
+- **Jogador:** scout por 90 minutos (atacando, passe, defendendo, outros) dos lances e carreira temporada a temporada
+  (aparições do Transfermarkt).
+- **Fontes:** CBF no formato real ({"003": {...}}); ESPN tenta semana a semana quando recusa o mês (HTTP 400) e não
+  conta isso como falha; API-Football no plano grátis segue jogo a jogo e guarda as temporadas liberadas; Understat
+  nunca mais guarda resposta vazia em cache e mostra o motivo; Transfermarkt baixa também aparições e escalações.

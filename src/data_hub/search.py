@@ -202,10 +202,14 @@ class UniversalMatchFinder:
     # ------------------------------------------------------------- local
     only_analyzable: bool = True     # esconde jogos só com placar (ajustável em Bastidores › Dados)
     only_real: bool = True           # esconde simulações e uploads (alternável ao lado da busca)
+    levels: Optional[Tuple[str, ...]] = None   # níveis escolhidos no topo (EVENTS/BOXSCORE/RESULT); None = regra acima
 
     def search_local(self, q: ParsedQuery, limit: int = 15) -> pd.DataFrame:
         where, params = [], []
-        if self.only_analyzable:
+        if self.levels:
+            where.append("data_level IN (" + ",".join(f"'{l}'" for l in self.levels if l.isalpha() or "_" in l)
+                         + ",'SIMULATED','UPLOAD')")
+        elif self.only_analyzable:
             where.append("data_level IN ('EVENTS', 'BOXSCORE', 'SIMULATED', 'UPLOAD')")
         if self.only_real:
             where.append("data_level NOT IN ('SIMULATED', 'UPLOAD')")
@@ -254,7 +258,7 @@ class UniversalMatchFinder:
     def _catalog(self, where: str, params: tuple) -> pd.DataFrame:
         """Catálogo com memória: relido só quando o banco muda (a busca roda a cada tecla/clique)."""
         try:
-            ver = self.db.catalog_version()
+            ver = self.db.stable_version()
         except Exception:
             ver = None
         key = (ver, where, params)

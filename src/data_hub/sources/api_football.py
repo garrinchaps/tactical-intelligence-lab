@@ -35,6 +35,18 @@ CALENDAR_YEAR_LEAGUES = {71, 72, 73, 13, 11, 1}
 FINISHED = {"FT", "AET", "PEN"}
 
 
+class PlanRestricted(SourceUnavailable):
+    """O plano da chave não cobre essa temporada/consulta (o plano grátis só abre algumas temporadas)."""
+
+    @property
+    def season_range(self) -> Optional[Tuple[int, int]]:
+        """"...try from 2022 to 2024." → (2022, 2024)"""
+        import re as _re
+
+        m = _re.search(r"from\s+(\d{4})\s*to\s*(\d{4})", str(self))
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+
 def season_for(league_id: Optional[int], d: date) -> int:
     if league_id in CALENDAR_YEAR_LEAGUES:
         return d.year
@@ -62,6 +74,12 @@ class ApiFootballProvider:
         data = self.client.get_json(f"{BASE}/{path}", params=params, max_age_s=max_age_s)
         errors = data.get("errors")
         if errors and (isinstance(errors, dict) and errors or isinstance(errors, list) and errors):
+            try:                                   # recusa não fica em cache: depois de trocar de plano, tenta de novo
+                self.client._cache_path(f"{BASE}/{path}", params).unlink(missing_ok=True)
+            except Exception:
+                pass
+            if isinstance(errors, dict) and ("plan" in errors or any("free plan" in str(v).lower() for v in errors.values())):
+                raise PlanRestricted(str(errors.get("plan") or next(iter(errors.values()))))
             raise SourceUnavailable(f"API-Football recusou a consulta: {errors}")
         return data.get("response", []) or []
 
@@ -183,6 +201,119 @@ class ApiFootballProvider:
         self.db.save_boxscore(record["match_id"], box)
         return record
 
+    def backfill_stats(self, leagues: Optional[List[int]] = None, since_year: int = 2015,
+                       until_year: Optional[int] = None, max_requests: int = 90,
+                       progress=None) -> Dict[str, Any]:
+        """
+        Estatísticas completas (xG, passes, posse, finalizações, escalações, notas e números por jogador) de
+        temporadas inteiras, priorizando o Brasileirão. Uso econômico da cota: 1 requisição lista a temporada e
+        cada requisição seguinte traz até 20 jogos completos (`/fixtures?ids=a-b-...`). Jogos que já têm
+        estatísticas desta fonte são pulados, então rodar todo dia continua de onde parou.
+        """
+        say = progress or (lambda m: None)
+        leagues = leagues or [71, 72, 73]
+        until_year = until_year or date.today().year
+        out: Dict[str, Any] = {"requisicoes": 0, "jogos": 0, "com_xg": 0, "temporadas_bloqueadas": [], "cota_atingida": 0}
+        have = set()
+        try:
+            with self.db.connect() as conn:
+                have = {int(r[0]) for r in conn.execute(
+                    "SELECT DISTINCT match_id FROM match_team_stats WHERE match_id BETWEEN ? AND ?",
+                    (100_000_000, 299_999_999)).fetchall()}
+        except Exception:
+            pass
+
+        def budget() -> bool:
+            return out["requisicoes"] < max_requests
+
+        def state(key):
+            try:
+                return self.db.get_state("api_football", key)
+            except Exception:
+                return None
+
+        def remember(key, val):
+            try:
+                self.db.set_state("api_football", key, val)
+            except Exception:
+                pass
+
+        # o que o plano da chave libera fica guardado: nas próximas vezes não gasta cota descobrindo de novo
+        pr = state("temporadas_plano")
+        plan: Optional[Tuple[int, int]] = tuple(int(x) for x in pr.split("-")) if pr and "-" in pr else None
+        single = state("lotes") == "nao"                 # plano grátis não aceita ?ids= → 1 jogo por requisição
+        for lid in leagues:
+            for season in range(until_year, since_year - 1, -1):          # mais recentes primeiro
+                if not budget():
+                    return out
+                if plan and not (plan[0] <= season <= plan[1]):
+                    continue
+                past = season < date.today().year - (0 if lid in CALENDAR_YEAR_LEAGUES else 1)
+                try:
+                    out["requisicoes"] += 1
+                    fx = self._get("fixtures", {"league": lid, "season": season},
+                                   max_age_s=None if past else 12 * 3600)
+                except PlanRestricted as exc:
+                    out["temporadas_bloqueadas"].append(f"{TRACKED_LEAGUES.get(lid, lid)} {season}")
+                    if not plan and exc.season_range:
+                        plan = exc.season_range
+                        remember("temporadas_plano", f"{plan[0]}-{plan[1]}")
+                    say(f"  api-football {TRACKED_LEAGUES.get(lid, lid)} {season}: o plano da chave não cobre"
+                        + (f" — só {plan[0]}–{plan[1]}; pulando as outras temporadas" if plan else f" ({exc})"))
+                    continue
+                except QuotaExceeded as exc:
+                    out["cota_atingida"] = 1
+                    say(f"  api-football: {exc} — continua amanhã de onde parou")
+                    return out
+                except Exception as exc:
+                    say(f"  api-football {lid} {season}: {exc}")
+                    continue
+                ids = [int((f.get("fixture") or {}).get("id")) for f in fx
+                       if ((f.get("fixture") or {}).get("status") or {}).get("short") in FINISHED
+                       and (f.get("fixture") or {}).get("id")]
+                todo = [i for i in ids if to_internal_id("api_football", i) not in have]
+                if not todo:
+                    continue
+                say(f"  api-football {TRACKED_LEAGUES.get(lid, lid)} {season}: {len(todo)} jogo(s) sem estatística")
+                k = 0
+                while k < len(todo):
+                    if not budget():
+                        say(f"  api-football: {out['jogos']} jogo(s) completos nesta rodada; o resto continua na próxima")
+                        return out
+                    size = 1 if single else 20
+                    chunk = todo[k:k + size]
+                    try:
+                        out["requisicoes"] += 1
+                        params = {"id": chunk[0]} if single else {"ids": "-".join(str(i) for i in chunk)}
+                        full = self._get("fixtures", params, max_age_s=None)
+                    except QuotaExceeded as exc:
+                        out["cota_atingida"] = 1
+                        say(f"  api-football: {exc} — continua amanhã de onde parou")
+                        return out
+                    except PlanRestricted as exc:
+                        if not single and "ids" in str(exc).lower():
+                            single = True                 # plano grátis: segue jogo a jogo (mais lento, mesma cota)
+                            remember("lotes", "nao")
+                            say("  api-football: o plano grátis não aceita lotes — seguindo 1 jogo por requisição "
+                                f"(~{max(0, max_requests - out['requisicoes'])} jogos hoje)")
+                            continue
+                        say(f"  api-football {chunk[0]}: {exc}")
+                        k += size
+                        continue
+                    except Exception as exc:
+                        say(f"  api-football lote {chunk[0]}…: {exc}")
+                        k += size
+                        continue
+                    k += size
+                    for item in full:
+                        record, box = self.parse_fixture(item)
+                        self.db.upsert_matches([record])
+                        self.db.save_boxscore(record["match_id"], box)
+                        have.add(record["match_id"])
+                        out["jogos"] += 1
+                        out["com_xg"] += int(any(r.get("stat_key") == "xg" for r in box["team_stats"]))
+        return out
+
     def sync_recent(self, days_back: int = 3, leagues: Optional[Dict[int, str]] = None) -> Dict[str, int]:
         """Catálogo dos jogos encerrados nos últimos dias das ligas acompanhadas (1 req/liga)."""
         totals = {"added": 0, "updated": 0, "errors": 0}
@@ -253,6 +384,10 @@ def sync_tables(provider: "ApiFootballProvider", lake, days_ahead: int = 7, prog
             tabs.append(standings_frame(provider._get("standings", {"league": lid, "season": season}, 12 * 3600), name))
         except QuotaExceeded as exc:
             say(f"  api-football: {exc} — parando aqui.")
+            break
+        except PlanRestricted as exc:                    # mesma recusa para todas as ligas: avisa uma vez e economiza cota
+            say(f"  api-football: classificação e calendário da temporada {season} não fazem parte do plano da chave "
+                f"({exc}). Pulando esta parte.")
             break
         except Exception as exc:
             say(f"  api-football {name}: classificação indisponível ({exc})")

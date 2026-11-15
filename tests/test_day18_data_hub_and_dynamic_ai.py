@@ -183,7 +183,7 @@ def test_dynamic_analyst_scoped_and_grounded(wyscout_events):
     blocks = r["evidence"]["blocos"]
     assert "defesa_no_recorte" in blocks and "ataque_no_recorte" not in blocks
     assert r["scope"]["minute_from"] == 10 and r["scope"]["side"] == "left"
-    assert "Resumo executivo" in r["report_markdown"]
+    assert "**Resumo:**" in r["report_markdown"]
     assert r["hallucination_audit"]["is_grounded"] is True, r["hallucination_audit"]
 
     r2 = ai.answer("Como o Modric foi abastecido?", "France", meta, df, chains, prefer_llm=False)

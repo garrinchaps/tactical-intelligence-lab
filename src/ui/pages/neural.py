@@ -144,7 +144,8 @@ def render(ctx=None) -> None:
     st.markdown("### Hiperparâmetros")
     a, b, c, d, e = st.columns(5)
     hidden_txt = a.text_input("Neurônios por camada oculta", "32, 16", help="ex.: 32, 16  ou  8")
-    lr = b.select_slider("Taxa de aprendizado (η)", [0.005, 0.01, 0.02, 0.05, 0.1, 0.2], value=0.05)
+    lr = b.select_slider("Taxa de aprendizado (η, Adam)", [0.001, 0.003, 0.005, 0.01, 0.02, 0.05], value=0.01,
+                         help="Otimizador Adam: converge em poucas épocas; a parada antecipada guarda a melhor época.")
     epochs = c.slider("Épocas", 5, 80, 30)
     l2 = d.select_slider("Regularização L2 (λ)", [0.0, 1e-4, 1e-3, 1e-2], value=1e-3)
     batch = e.select_slider("Tamanho do lote", [64, 128, 256, 512], value=256)
@@ -160,7 +161,11 @@ def render(ctx=None) -> None:
 
     reg = DangerModelRegistry()
     champion_cached()                                    # garante a v001 na primeira execução
-    use_db = st.toggle("Incluir partidas do banco com tracking 360 (o conjunto cresce com a sincronização)", value=True)
+    t1, t2 = st.columns(2)
+    use_db = t1.toggle("Incluir partidas do banco com tracking 360 (o conjunto cresce com a sincronização)", value=True)
+    use_proxy = t2.toggle("Incluir também as sem 360 (densidade de adversários estimada pelos eventos)", value=False,
+                          help="Muito mais partidas (OpenPlay, Wyscout, StatsBomb sem 360), com uma das variáveis "
+                               "estimada. O teste continua só com 360 medido, então a promoção mostra se ajudou.")
     c1, c2 = st.columns([1, 1])
     train_now = c1.button("▶ Treinar nova versão (desafiante)", type="primary", use_container_width=True)
     search_now = c2.button("🎲 Busca automática de hiperparâmetros (3 tentativas)", use_container_width=True)
@@ -168,7 +173,9 @@ def render(ctx=None) -> None:
         with st.spinner("Montando o conjunto de treino (amostra + protocolo + banco)..."):
             from src.ui.context import get_service
 
-            full = DangerModelRegistry.dataset((lambda: db_rows(get_service().db, max_new=15)) if use_db else None)
+            full = DangerModelRegistry.dataset((lambda: db_rows(get_service().db, max_new=40)) if use_db else None,
+                                               include_proxy=use_proxy)
+        st.caption(f"Conjunto: {full['match_id'].nunique()} partidas · {len(full):,} ações".replace(",", "."))
         with st.spinner("Treinando (forward → perda → backpropagation → atualização) e comparando com o campeão..."):
             if train_now:
                 rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch)]

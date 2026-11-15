@@ -26,7 +26,7 @@ from src.ui.components import empty_state, error_state, match_strip  # noqa: E40
 from src.ui.context import build_context, get_service, load_bundle, teams_of  # noqa: E402
 from src.ui import nav  # noqa: E402
 from src.ui.pages import (ai_analyst, assistant, catalog, clubs, compare, competition, games, lab,  # noqa: E402
-                          ml_inspection, neural, players_search, search_all)
+                          ml_inspection, neural, players_search, search_all, squad)
 
 DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — disponível offline em data/demo
 
@@ -107,6 +107,7 @@ MAIN = [
     st.Page(standalone(search_all.render), title="Buscar", icon="🔎", url_path="buscar"),
     st.Page(_named(lambda: compare.render_page(current_context, match_bar), "page_comparar"), title="Comparar", icon="🆚",
             url_path="comparar"),
+    st.Page(standalone(squad.render), title="Escalação", icon="📋", url_path="escalacao"),
 ]
 VIEWS = {   # telas abertas pelo clique (fora do menu)
     "jogo": st.Page(_named(lambda: games.render(current_context), "page_jogo"), title="Jogo", icon="🏟️", url_path="jogo"),
@@ -147,7 +148,20 @@ def top_bar(focused: bool = False) -> None:
         st.caption("Como tudo foi feito — separado do programa.")
         for page in BACKSTAGE:
             st.page_link(page, label=page.title, icon=page.icon)
-    q1, q3, q2 = st.columns([6, 1.5, 1])
+    q1, q4, q3, q2 = st.columns([5, 2.6, 1.4, 1])
+    from src.ui.context import DEFAULT_LEVELS, LEVEL_CHOICES
+
+    inv = {v: k for k, v in LEVEL_CHOICES.items()}
+    st.session_state.setdefault("w_levels", [inv[l] for l in (st.session_state.get("_levels") or DEFAULT_LEVELS)])
+
+    def _set_levels():
+        picked = [LEVEL_CHOICES[k] for k in st.session_state.get("w_levels") or []]
+        st.session_state["_levels"] = tuple(picked) or DEFAULT_LEVELS
+
+    q4.multiselect("Nível de dado", list(LEVEL_CHOICES), key="w_levels", on_change=_set_levels,
+                   label_visibility="collapsed", placeholder="Nível de dado",
+                   help="Que jogos aparecem na busca, no Assistente e nas listas: 🟢 com lances e coordenadas, "
+                        "📊 com estatísticas da partida, 📄 só com o placar. Marque os três para ver tudo.")
     st.session_state.setdefault("w_only_real", bool(st.session_state.get("_only_real", True)))
     q3.toggle("Só partidas reais", key="w_only_real",
               on_change=lambda: st.session_state.__setitem__("_only_real", st.session_state["w_only_real"]),
@@ -168,7 +182,7 @@ def main() -> None:
     st.session_state.setdefault("match_id", DEFAULT_MATCH_ID)
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
-    nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], **VIEWS})
+    nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo
     if goto:
         if goto == "jogos":
@@ -177,7 +191,7 @@ def main() -> None:
             st.switch_page({"assistente": MAIN[0], "comparar": MAIN[2], "buscar": MAIN[1]}.get(goto, MAIN[0]))
     focused = getattr(page, "url_path", "") in {p.url_path for p in VIEWS.values()}
     if not focused:                                      # página do menu = ponto de partida do "← Voltar"
-        key = {"assistente": "assistente", "buscar": "buscar", "comparar": "comparar"}.get(getattr(page, "url_path", ""))
+        key = {"assistente": "assistente", "buscar": "buscar", "comparar": "comparar", "escalacao": "escalacao"}.get(getattr(page, "url_path", ""))
         if key and nav.current().get("kind") != key:
             st.session_state[nav.VIEW] = {"kind": key, **({"q": st.session_state.get("_last_q", "")} if key == "buscar" else {})}
     top_bar(focused)

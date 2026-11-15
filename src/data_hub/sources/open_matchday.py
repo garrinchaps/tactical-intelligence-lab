@@ -54,6 +54,16 @@ STAT_KEYS = [("shots_on_target", "shots_on_target", "Finalizações no gol"), ("
              ("red", "red_cards", "Cartões vermelhos")]
 
 
+CALENDAR_YEAR = {"Brazil", "Argentina", "South America", "USA", "Japan", "China", "Sweden", "Norway"}
+
+
+def season_label(code: str, country: str, match_date: str) -> str:
+    """Ligas de ano-calendário (Brasileirão, Libertadores...) usam o ano do jogo; as europeias, "2025/2026"."""
+    if country in CALENDAR_YEAR and match_date:
+        return str(match_date)[:4]
+    return f"20{code[:2]}/20{code[2:]}"
+
+
 def season_code(today: Optional[date] = None) -> str:
     t = today or date.today()
     y = t.year if t.month >= 7 else t.year - 1
@@ -140,7 +150,7 @@ class OpenMatchdayProvider:
             timeline = cls._timeline(gl.get((d, h, a), []), h, a, goals) or cls._minutes(r.get(c_gm) if c_gm else None)
             has_stats = any(s["stat_key"] != "ht_goals" for s in stats)
             rec = {"match_id": cls.match_id(folder, d, h, a), "home_team_name": h, "away_team_name": a, "match_date": d,
-                   "home_score": hs, "away_score": as_, "competition_name": name, "season_name": f"20{season[:2]}/20{season[2:]}",
+                   "home_score": hs, "away_score": as_, "competition_name": name, "season_name": season_label(season, country, d),
                    "country_name": country, "status": "FT", "round_name": f"Rodada {to_int(r.get(c_gw))}" if c_gw and
                    to_int(r.get(c_gw)) else "", "data_source": "open_matchday",
                    "data_level": DataLevel.BOXSCORE if has_stats else DataLevel.RESULT}

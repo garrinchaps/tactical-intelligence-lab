@@ -13,6 +13,7 @@ import streamlit as st
 from src.data_hub.registry import BADGES
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
 from src.ui.components import hero, note, result_card_html
+from src.ui.context import chosen_levels
 
 EXAMPLES = [
     "Na final da Copa de 2022 entre Argentina e França, quem fez os gols?",
@@ -25,11 +26,11 @@ EXAMPLES = [
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
-def _index(version: str, only_analyzable: bool = True, only_real: bool = True):
+def _index(version: str, levels="EVENTS|BOXSCORE", only_real: bool = True):
     from src.intelligence.match_locator import build_index
     from src.ui.context import cached_catalog
 
-    return build_index(cached_catalog(include_score_only=not only_analyzable))
+    return build_index(cached_catalog() if isinstance(levels, str) else cached_catalog(include_score_only=not levels))
 
 
 def _meta_line(res) -> str:
@@ -63,7 +64,7 @@ def _answer(question: str, current_context, use_llm: bool):
     try:
         from src.ui.context import only_real
 
-        loc = locate(question, cached_catalog(), _index(get_service().db.catalog_version(), analyzable_only(), only_real()))
+        loc = locate(question, cached_catalog(), _index(get_service().db.stable_version(), "|".join(chosen_levels()), only_real()))
     except Exception:
         loc = None
     previous = int(st.session_state.get("match_id", 0))
@@ -125,7 +126,7 @@ def _db_status() -> None:
     try:
         from src.ui.context import get_service
 
-        lv = _level_counts(get_service().db.catalog_version())
+        lv = _level_counts(get_service().db.stable_version())
         ev, bx = int(lv.get("EVENTS", 0)), int(lv.get("BOXSCORE", 0))
     except Exception:
         return

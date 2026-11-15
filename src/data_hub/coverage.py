@@ -132,9 +132,9 @@ def summarize(data: Dict[str, Any], max_comp_rows: int = 400) -> Dict[str, pd.Da
     if len(sem_num):
         inc.append({"problema": "marcadas ESTATÍSTICAS mas sem nenhum dos indicadores principais",
                     "partidas": len(sem_num), "fontes": ", ".join(sorted(set(sem_num["fonte"])))})
-    ev_fora = df[(df["nivel"] == "EVENTS") & ~df["fonte"].isin(["statsbomb", "wyscout"])]
+    ev_fora = df[(df["nivel"] == "EVENTS") & ~df["fonte"].isin(["statsbomb", "wyscout", "openplay"])]
     if len(ev_fora):
-        inc.append({"problema": "marcadas EVENTOS fora de StatsBomb/Wyscout", "partidas": len(ev_fora),
+        inc.append({"problema": "marcadas EVENTOS fora das fontes com lances (StatsBomb, Wyscout, OpenPlay)", "partidas": len(ev_fora),
                     "fontes": ", ".join(sorted(set(ev_fora["fonte"])))})
     return {"geral": geral, "fonte": fonte, "comp": comp, "campos": pd.DataFrame(campos),
             "inconsistencias": pd.DataFrame(inc, columns=["problema", "partidas", "fontes"])}

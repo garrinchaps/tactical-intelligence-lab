@@ -176,13 +176,36 @@ class EspnProvider:
         until = until or date.today()
         leagues = leagues or ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana"]
         fails = 0
+
+        def month(lg, first, last):
+            """Mês inteiro; se a ESPN recusar o intervalo (HTTP 400), tenta semana a semana sem o limite."""
+            try:
+                return self.scoreboard(lg, first, last)
+            except Exception as exc:
+                if "400" not in str(exc):
+                    raise
+            out, d = [], first
+            bad = 0
+            while d <= last:
+                e = min(d + timedelta(days=6), last)
+                try:
+                    data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{d:%Y%m%d}-{e:%Y%m%d}"},
+                                     max_age_s=None if (date.today() - e).days >= 3 else 1800)
+                    out += [r for r in (self.parse_scoreboard_event(ev, lg) for ev in data.get("events", []) or []) if r]
+                except Exception as exc:
+                    if "400" not in str(exc):
+                        raise
+                    bad += 1                              # semana sem calendário nessa liga: não é falha de rede
+                d = e + timedelta(days=1)
+            return out
+
         for lg in leagues:
             y, m = since_year, 1
             while date(y, m, 1) <= until:
                 first = date(y, m, 1)
                 last = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
                 try:
-                    recs = self.scoreboard(lg, first, min(last, until))
+                    recs = month(lg, first, min(last, until))
                     fails = 0
                 except Exception as exc:
                     tot["errors"] += 1

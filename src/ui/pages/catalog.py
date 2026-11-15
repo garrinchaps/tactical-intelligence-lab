@@ -75,7 +75,9 @@ def _overview(reg: ProvenanceRegistry) -> None:
             log.code("\n".join(lines[-14:]))
         with st.spinner("Sincronizando..."):
             run_sync(chosen, days, prefetch, service=svc, progress=say)
-        load_bundle.clear()
+        from src.ui.context import _bundle_parts
+
+        _bundle_parts.clear()
         st.success("Sincronização concluída.")
     with st.expander("Atualização automática diária (Agendador de Tarefas do Windows)"):
         st.code('schtasks /Create /SC DAILY /ST 06:00 /TN "TacticalLabSync" /TR "cmd /c cd /d %CD% && '

@@ -16,6 +16,7 @@ Fluxo:
 from __future__ import annotations
 
 import json
+import re
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -44,7 +45,7 @@ Como escrever:
   "entre as linhas", "chegou à área", "bola longa nas costas". Nada de "terço ofensivo — direita", "n =", "P90".
 - Não cite percentil, a não ser que seja extremo; nesse caso diga "entre os 10% melhores/piores".
 - Use os nomes das seleções em português (Brasil, Croácia, França…).
-- Termine SEMPRE com uma linha "**Resumo executivo:**" de 1 ou 2 frases simples para a comissão técnica.
+- Termine SEMPRE com uma linha "**Resumo:**" de 1 ou 2 frases simples para a comissão técnica.
 
 Regras de fidelidade (obrigatórias):
 - Copie números exatamente como estão no JSON. Não calcule diferenças, médias ou porcentagens novas.
@@ -54,7 +55,11 @@ Regras de fidelidade (obrigatórias):
 - Se blocos.limitacao não estiver vazio, explique a limitação na primeira frase.
 - Se metadata.is_simulation_data for true, a primeira linha deve ser: ⚠️ [DADOS SIMULADOS / MODELAGEM PROBABILÍSTICA].
 - Se houver um bloco "ia" ou "lideres_ia" (rede neural de perigo), use-o e cite a versão do modelo e a AUC de validação.
-- Em perguntas de estratégia ("como anular", "qual tática"), responda com passos numerados, cada um justificado por um número do JSON."""
+- Em perguntas de estratégia ("como anular", "qual tática"), responda com passos numerados, cada um justificado por um número do JSON.
+- Se existir blocos.indisponivel, diga com clareza que esse dado não existe na base e não estime nada.
+- Se existir blocos.perfil, use só as médias e a cobertura (encontrados de atletas_na_partida) do JSON.
+- Se existir blocos.gols.ordem_pedida (ou blocos.gol_pedido), responda primeiro exatamente o gol perguntado
+  (time, minuto, autor) e só depois o placar. Não responda com estatísticas gerais."""
 
 OFF_TOPIC_SYSTEM = """Você é o analista tático do Tactical Intelligence Lab. O usuário perguntou algo fora de futebol.
 Responda em no máximo 2 frases, com bom humor e com precisão sobre o que foi perguntado (sem inventar fatos),
@@ -91,6 +96,19 @@ class LocalScopedWriter:
         summary: List[str] = []
 
         for key, b in blocks.items():
+            if key == "perfil":
+                out.append(cls._profile(b))
+                continue
+            if key == "indisponivel":
+                out.append(cls._unavailable(b))
+                continue
+            if key == "gols" and b.get("ordem_pedida"):
+                from src.metrics.match_facts import goal_line
+
+                out.append(cls._goal_order(b["ordem_pedida"], b["gols"], goal_line))
+                pl = b["placar"]
+                out.append("Placar final: " + " x ".join(f"{t} {n}" for t, n in pl.items()) + ".")
+                continue
             if key == "gols":
                 from src.metrics.match_facts import goal_line
 
@@ -234,7 +252,7 @@ class LocalScopedWriter:
                     f"**Com a bola — {who} ({b['setor']}):** {b['passes_no_setor']} passes ({_fmt(b['precisao_passes_no_setor_pct'])}% certos), "
                     f"{b['acoes_progressivas']} ações progressivas, {b['passes_que_quebram_linhas']} quebras de linha, "
                     f"{_pl(b['entradas_na_area'], 'entrada', 'entradas')} na área e {_pl(b['cruzamentos'], 'cruzamento', 'cruzamentos')}; "
-                    f"{_pl(b['finalizacoes'], 'finalização', 'finalizações')} (xG {_fmt(b['xg'])}, {_pl(b['gols'], 'gol', 'gols')})." + (f" Mais acionados: {prot}." if prot else "")
+                    f"{_pl(b['finalizacoes'], 'finalização', 'finalizações')} (xG {_fmt(b['xg'])}, {_pl(b['gols'], 'gol', 'gols')})." + (f" Mais passes: {prot}." if prot else "")
                     + cls._small_sample(b.get("amostra_N")))
                 if key == "ataque_no_recorte" or sc.team_focus == "both":
                     summary.append(f"{who} finalizou {_pl(b['finalizacoes'], 'vez', 'vezes')} (xG {_fmt(b['xg'])}) no recorte")
@@ -282,8 +300,98 @@ class LocalScopedWriter:
                     summary.append(f"{b['jogador']} participou de {b['acoes']} ações no recorte")
         if summary:
             joined = "; ".join(summary[:2])
-            out.append("\n**Resumo executivo:** " + joined[:1].upper() + joined[1:] + ".")
+            out.append("\n**Resumo:** " + joined[:1].upper() + joined[1:] + ".")
         return "\n\n".join(out)
+
+    # ------------------------------------------------------------------ perguntas fora dos eventos
+    UNAVAILABLE_WHY = {
+        "distancia": "distância percorrida, velocidade e sprints vêm de rastreamento físico (GPS/câmeras de tracking), "
+                     "que nenhuma fonte aberta publica",
+        "fisico": "dados físicos e médicos (peso, batimentos, lesões) não fazem parte das bases de jogo",
+        "contexto": "público, clima, gramado e salários não constam nas fontes de lances e estatísticas",
+    }
+
+    @classmethod
+    def _unavailable(cls, b: Dict[str, Any]) -> str:
+        ped = str(b.get("pedido") or "")
+        kind = ("distancia" if re.search(r"distanc|km|quilometr|corr|velocid|sprint|acelera", ped) else
+                "fisico" if re.search(r"peso|pesa|batiment|cardiac|lesa|lesion|machuc", ped) else "contexto")
+        return (f"**Essa informação não existe na base desta partida.** O pedido (\"{ped}\") não é registrado: "
+                f"{cls.UNAVAILABLE_WHY[kind]}. Não vou estimar um número sem dado.\n\n"
+                "O que dá para responder com dados reais deste jogo: posse e circulação, finalizações e xG, gols e "
+                "assistências, duelos, pressão, transições, bola parada e o desempenho de cada atleta.")
+
+    @staticmethod
+    def _profile(b: Dict[str, Any]) -> str:
+        attr = b.get("atributo", "altura")
+        unit = {"altura": " cm", "idade": " anos", "valor": ""}[attr]
+        name = {"altura": "altura", "idade": "idade", "valor": "valor de mercado"}[attr]
+
+        def val(v):
+            if v is None:
+                return "—"
+            return f"€ {v / 1e6:.1f} mi" if attr == "valor" else f"{_fmt(v)}{unit}"
+
+        if not b.get("disponivel"):
+            return (f"**A {name} dos atletas não está nos dados desta partida.** Lances e estatísticas não trazem perfil "
+                    "físico. Esse dado vem do cadastro do Transfermarkt, que ainda não está no data lake desta "
+                    "instalação (rode `python -m src.data_hub.sync --only transfermarkt`).")
+        eq = b.get("equipes") or {}
+        rows = [(t, v) for t, v in eq.items() if v.get("encontrados")]
+        if not rows:
+            return (f"**Não encontrei a {name} dos atletas desta partida no cadastro do Transfermarkt** — os nomes dos "
+                    "jogadores nos eventos não bateram com nenhum cadastro. Prefiro não responder a chutar.")
+        lines = [f"**{name.capitalize()} média de quem entrou em campo** (cadastro do Transfermarkt, não medido no jogo):"]
+        for t, v in eq.items():
+            cov = f"{v['encontrados']} de {v['atletas_na_partida']} atletas encontrados"
+            lines.append(f"- **{t}:** {val(v['media'])} ({cov})")
+        out = "\n".join(lines)
+        ok = [(t, v) for t, v in rows if v["encontrados"] >= max(3, 0.5 * v["atletas_na_partida"])]
+        if len(ok) == 2:
+            (t1, v1), (t2, v2) = ok
+            if v1["media"] == v2["media"]:
+                out += f"\n\nAs duas equipes ficaram com a mesma média."
+            else:
+                hi = t1 if v1["media"] > v2["media"] else t2
+                word = {"altura": "mais alto", "idade": "mais experiente (mais velho)", "valor": "mais valioso"}[attr]
+                out += f"\n\n**Resumo:** {hi} teve o time {word} em campo."
+        else:
+            out += ("\n\nPoucos atletas foram encontrados no cadastro para comparar as equipes com segurança — "
+                    "a média acima vale só para os atletas listados.")
+        return out
+
+    @staticmethod
+    def _goal_order(order: str, goals: List[Dict[str, Any]], line) -> str:
+        """"Qual time fez o primeiro gol?" → o gol pedido, com minuto, autor e time."""
+        if not goals:
+            return "**Não houve gols** no tempo de jogo."
+        idx = {"1": 0, "2": 1, "3": 2, "last": len(goals) - 1}.get(order)
+        label = {"1": "Primeiro gol", "2": "Segundo gol", "3": "Terceiro gol", "last": "Último gol",
+                 "winner": "Gol da vitória"}.get(order, "Gol")
+        if order == "winner":
+            teams = list(dict.fromkeys(g["equipe"] for g in goals))
+            cnt = {t: sum(g["equipe"] == t for g in goals) for t in teams}
+            if len(cnt) == 1:
+                win, need = teams[0], 1
+            elif len(set(cnt.values())) == 1:
+                return "**O jogo terminou empatado no tempo de jogo** — não houve gol da vitória."
+            else:
+                win = max(cnt, key=cnt.get)
+                lose = min(cnt, key=cnt.get)
+                need = cnt[lose] + 1                                  # o gol que colocou o placar fora de alcance
+            k = [g for g in goals if g["equipe"] == win][need - 1]
+            return f"**{label}:** {k['equipe']} — {line(k)}."
+        if idx is None or idx >= len(goals):
+            return f"A partida teve só {_pl(len(goals), 'gol', 'gols')}: " + "; ".join(
+                f"{line(g)} — {g['equipe']}" for g in goals) + "."
+        g = goals[idx]
+        before = goals[:idx + 1]
+        tally = {}
+        for x in before:
+            tally[x["equipe"]] = tally.get(x["equipe"], 0) + 1
+        placar = " x ".join(f"{t} {n}" for t, n in tally.items())
+        return (f"**{label}:** {g['equipe']}, {line(g)}." + (f" Com ele, o placar foi para {placar}." if idx else
+                f" {g['equipe']} abriu o placar."))
 
     @staticmethod
     def _model_line(card: Optional[Dict[str, Any]]) -> str:
@@ -464,7 +572,24 @@ class LocalScopedWriter:
                 for e in tl[:12]) + ".")
         for p in b.get("atletas_citados") or []:
             out.append(f"**{p['jogador']}:** " + ", ".join(f"{k} {_fmt(v)}" for k, v in p.items() if k != "jogador") + ".")
-        out.append(f"\n**Resumo executivo:** {meta.get('placar', '')}. Para análises espaciais, escolha uma partida com eventos oficiais.")
+        if b.get("perfil"):
+            out.insert(0, LocalScopedWriter._profile(b["perfil"]))
+            return "\n\n".join(out[:1])
+        if b.get("indisponivel"):
+            return LocalScopedWriter._unavailable(b["indisponivel"])
+        if b.get("gol_pedido"):
+            gp = b["gol_pedido"]
+            gl = [{"minuto": e["minuto"], "jogador": e["jogador"] or "autor não informado", "equipe": e["equipe"],
+                   "tipo": "pênalti" if "pen" in str(e.get("detalhe", "")).lower() else
+                   ("gol contra" if "own" in str(e.get("detalhe", "")).lower() else ""), "assistencia": None}
+                  for e in gp["gols"]]
+            if not gl and meta.get("placar") and not re.search(r"\b0 x 0\b", meta["placar"]):
+                return (f"Placar: {meta['placar']}. **A fonte desta partida não registra a ordem dos gols** (sem linha "
+                        "do tempo), então não dá para dizer quem marcou primeiro.")
+            from src.metrics.match_facts import goal_line
+
+            return LocalScopedWriter._goal_order(gp["ordem"], gl, goal_line) + f"\n\nPlacar final: {meta.get('placar', '')}."
+        out.append(f"\n**Resumo:** {meta.get('placar', '')}. Para análises espaciais, escolha uma partida com eventos oficiais.")
         return "\n\n".join(out)
 
     @staticmethod
@@ -489,6 +614,39 @@ class DynamicTacticalAnalyst:
         self.model_name = model_name
 
     FALLBACK_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.0-flash")
+    _down_until: float = 0.0          # disjuntor: depois de uma falha de rede/tempo, pula a nuvem por alguns minutos
+    _reach: Dict[str, float] = {}     # última checagem rápida de conexão com a API
+
+    @classmethod
+    def cloud_ready(cls) -> bool:
+        """
+        Decide em menos de 1 s se vale chamar a nuvem: disjuntor aberto (falha recente) → não; senão, uma conexão
+        TCP rápida (0,8 s) com a API, guardada por 60 s. Sem rede, o redator local responde na hora.
+        """
+        import socket
+        import time as _time
+
+        now = _time.time()
+        if now < cls._down_until:
+            return False
+        if now - cls._reach.get("t", 0) < 60:
+            return bool(cls._reach.get("ok"))
+        ok = True
+        try:
+            with socket.create_connection(("generativelanguage.googleapis.com", 443), timeout=0.8):
+                pass
+        except OSError:
+            ok = False
+        cls._reach = {"t": now, "ok": float(ok)}
+        if not ok:
+            cls.trip()
+        return ok
+
+    @classmethod
+    def trip(cls, seconds: Optional[float] = None) -> None:
+        import time as _time
+
+        cls._down_until = _time.time() + (seconds if seconds is not None else float(os.getenv("GEMINI_PAUSA_S", "300")))
     _working_model: Optional[str] = None
     _dead_models: set = set()
 
@@ -573,7 +731,7 @@ class DynamicTacticalAnalyst:
 
         import time as _time
 
-        budget = float(os.getenv("GEMINI_TIMEOUT_S", "60"))   # teto rígido para TODA a resposta (todas as tentativas)
+        budget = float(os.getenv("GEMINI_TIMEOUT_S", "20"))   # teto rígido para TODA a resposta (todas as tentativas)
 
         def client_for(remaining: float):
             try:                                         # cada tentativa só recebe o tempo que ainda resta
@@ -585,7 +743,7 @@ class DynamicTacticalAnalyst:
         # ordem: o que já funcionou → GEMINI_MODEL do .env → modelos liberados para a chave (mais novo primeiro)
         #        → lista fixa só como último recurso. Assim nunca se perde tempo com modelo aposentado.
         pref = [DynamicTacticalAnalyst._working_model, os.getenv("GEMINI_MODEL", "").strip() or None]
-        found = self.available_models(client_for(10))
+        found = self.available_models(client_for(4))
         good = [m for m in found if self._rank_model(m)[0]][:6]
         candidates = [m for m in dict.fromkeys([*pref, *good, *self.FALLBACK_MODELS]) if m]
         tried: List[str] = []
@@ -650,7 +808,7 @@ class DynamicTacticalAnalyst:
             teams_in_match = [meta.get("home_team_name", ""), meta.get("away_team_name", "")]
         ordered = [target_team] + [t for t in teams_in_match if t != target_team][:1]
         sc = QueryUnderstanding.parse(query, roster, ordered if len(ordered) == 2 else None)
-        use_llm = prefer_llm and self.api_key is not None
+        use_llm = prefer_llm and self.api_key is not None and self.cloud_ready()
 
         # 1) fora do escopo / saudação / ajuda
         if not sc.in_scope:
@@ -720,6 +878,9 @@ class DynamicTacticalAnalyst:
                     "guard_outcome": pol.outcome, "guard_metrics": pol.metrics.as_dict(),
                     "scope": sc.to_dict(), "evidence": evidence}
         except Exception as err:
+            low = str(err).lower()
+            if not any(k in low for k in ("api_key", "permission", "invalid")):   # rede/tempo/servidor: pausa a nuvem
+                self.trip()
             result["engine_used"] = "REDATOR LOCAL (Gemini indisponível)"
             result["llm_error"] = self.explain_error(err)
             return result

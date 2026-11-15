@@ -34,11 +34,11 @@ ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", 
                "football_data", "espn", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti",
                "open_sources", "lake"]
 # cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
-HEAVY_SOURCES = ["espn_historico", "openplay", "cbf"]
+HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil"]
 # --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
 # bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
 EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
-              "openplay", "cbf", "espn", "espn_historico", "api_football", "football_data", "api_futebol",
+              "openplay", "cbf", "espn", "espn_historico", "api_football", "estatisticas_brasil", "football_data", "api_futebol",
               "basedosdados", "transfermarkt", "understat", "simonetti", "lake"]   # openplay/cbf: precisam dos arquivos baixados na sua máquina
 LAKE_SOURCES = ["transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake"]   # alimentam data/lake
 QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
@@ -68,6 +68,11 @@ def run_sync(
         "football_data": lambda: svc.football_data.sync_recent(days_back=max(days_back, 3)),
         "espn": lambda: svc.espn.sync_recent(days_back=days_back),
         "espn_historico": lambda: svc.espn.backfill(espn_leagues, since_year=since_year, progress=say),
+        # Brasileirão (A, B, Copa do Brasil) com xG, passes, posse e números por jogador: API-Football, lotes de 20
+        # jogos por requisição, dentro da cota do dia (continua de onde parou na próxima vez)
+        "estatisticas_brasil": lambda: svc.api_football.backfill_stats(
+            since_year=since_year, max_requests=max(0, min(90, svc.api_football.client.quota_left() or 0) - 15),   # 15 ficam livres para o app
+            progress=say),
         "brasileirao": lambda: _community("brasileirao", svc, say),
         "open_matchday": lambda: _community("open_matchday", svc, say),
         "cbf": lambda: _community("cbf", svc, say),
@@ -86,7 +91,8 @@ def run_sync(
     from src.data_hub.sources.basedosdados import BaseDosDadosProvider
 
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
-               "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled, "api_futebol": ApiFutebolProvider().enabled,
+               "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled,
+               "estatisticas_brasil": svc.api_football.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 
     for src in sources or ALL_SOURCES:

@@ -55,18 +55,23 @@ class UnderstatProvider:
         self.min_interval_s = min_interval_s
         self._last = 0.0
 
-    def _get(self, path: str, max_age_s: Optional[float]) -> str:
+    def _cache_file(self, path: str) -> Path:
+        return self.cache / (re.sub(r"[^A-Za-z0-9_]+", "_", path.strip("/")) + ".txt")
+
+    def _get(self, path: str, max_age_s: Optional[float], referer: Optional[str] = None) -> str:
         from src.data_hub import net
 
         self.cache.mkdir(parents=True, exist_ok=True)
-        f = self.cache / (re.sub(r"[^A-Za-z0-9_]+", "_", path.strip("/")) + ".txt")
+        f = self._cache_file(path)
         if f.exists() and (max_age_s is None or time.time() - f.stat().st_mtime < max_age_s):
             return f.read_text(encoding="utf-8")
         wait = self.min_interval_s - (time.time() - self._last)
         if wait > 0:
             time.sleep(wait)
         r = net.get(f"{BASE}{path}", source="understat", headers={
-            "User-Agent": "Mozilla/5.0 (TacticalIntelligenceLab; uso academico)", "X-Requested-With": "XMLHttpRequest"})
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TacticalIntelligenceLab/1.0 (uso academico)",
+            "X-Requested-With": "XMLHttpRequest", "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Referer": referer or f"{BASE}/"})
         self._last = time.time()
         r.raise_for_status()
         f.write_text(r.text, encoding="utf-8")
@@ -74,19 +79,43 @@ class UnderstatProvider:
 
     # --------------------------------------------------------------- liga
     def league_data(self, league: str, season: int) -> Dict[str, Any]:
+        """
+        Rota JSON (/getLeagueData) e, como reserva, o JSON embutido no HTML antigo. Resposta sem partidas NUNCA fica
+        em cache (antes, uma página vazia de temporada passada ficava guardada para sempre e a fonte dava 0 partidas
+        em todas as sincronizações). O motivo de cada falha é devolvido em "erro".
+        """
         cur = season == season_start()
         age = 6 * 3600 if cur else None
-        try:
-            data = json.loads(self._get(f"/getLeagueData/{league}/{season}", age))
-            if isinstance(data, dict) and ("dates" in data or "datesData" in data):
-                return {"teams": data.get("teams") or data.get("teamsData") or {},
-                        "players": data.get("players") or data.get("playersData") or [],
-                        "dates": data.get("dates") or data.get("datesData") or []}
-        except Exception:
-            pass
-        html = self._get(f"/league/{league}/{season}", age)           # formato antigo (JSON embutido)
-        return {"teams": _embedded(html, "teamsData") or {}, "players": _embedded(html, "playersData") or [],
-                "dates": _embedded(html, "datesData") or []}
+        why = []
+        for attempt in range(2):                       # 2ª volta: ignora o cache (pode estar vazio de uma versão antiga)
+            path = f"/getLeagueData/{league}/{season}"
+            if attempt:
+                self._cache_file(path).unlink(missing_ok=True)
+            try:
+                data = json.loads(self._get(path, age, referer=f"{BASE}/league/{league}/{season}"))
+                if isinstance(data, dict) and (data.get("dates") or data.get("datesData")):
+                    return {"teams": data.get("teams") or data.get("teamsData") or {},
+                            "players": data.get("players") or data.get("playersData") or [],
+                            "dates": data.get("dates") or data.get("datesData") or []}
+                why.append(f"rota JSON sem partidas ({str(list(data)[:4]) if isinstance(data, dict) else type(data).__name__})")
+                self._cache_file(path).unlink(missing_ok=True)
+            except Exception as exc:
+                why.append(f"rota JSON: {str(exc)[:120]}")
+                self._cache_file(path).unlink(missing_ok=True)
+            hpath = f"/league/{league}/{season}"
+            if attempt:
+                self._cache_file(hpath).unlink(missing_ok=True)
+            try:
+                html = self._get(hpath, age)
+                dates = _embedded(html, "datesData") or []
+                if dates:
+                    return {"teams": _embedded(html, "teamsData") or {}, "players": _embedded(html, "playersData") or [],
+                            "dates": dates}
+                why.append("página sem os dados embutidos")
+                self._cache_file(hpath).unlink(missing_ok=True)
+            except Exception as exc:
+                why.append(f"página: {str(exc)[:120]}")
+        return {"teams": {}, "players": [], "dates": [], "erro": "; ".join(dict.fromkeys(why))}
 
     @staticmethod
     def matches_frame(dates: List[Dict[str, Any]], league: str, season: int) -> pd.DataFrame:
@@ -167,7 +196,8 @@ class UnderstatProvider:
                 if not p.empty:
                     lake.upsert("us_jogadores", p, ["understat_id", "temporada", "clube"], **prov)
                     tot["jogadores"] += len(p)
-                say(f"  understat {LEAGUES.get(lg, lg)} {y}/{y + 1}: {len(m)} partidas, {len(p)} jogadores")
+                say(f"  understat {LEAGUES.get(lg, lg)} {y}/{y + 1}: {len(m)} partidas, {len(p)} jogadores"
+                    + (f" — {d['erro']}" if d.get("erro") and m.empty else ""))
         # finalizações: só das partidas recentes que ainda não foram baixadas (cache permanente por partida)
         have = set(lake.read("us_finalizacoes", ["understat_id"])["understat_id"]) if lake.exists("us_finalizacoes") else set()
         allm = lake.read("us_partidas") if lake.exists("us_partidas") else pd.DataFrame()

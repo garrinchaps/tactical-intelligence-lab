@@ -125,12 +125,30 @@ class NeuralNetwork:
 
     def fit(self, X: np.ndarray, y: np.ndarray, epochs: int = 60, batch_size: int = 256,
             X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
-            class_weight_balanced: bool = False, verbose: bool = False) -> "NeuralNetwork":
-        X = self._standardize(np.asarray(X, dtype=float), fit=True)
+            class_weight_balanced: bool = False, verbose: bool = False, optimizer: str = "sgd",
+            X_stop: Optional[np.ndarray] = None, y_stop: Optional[np.ndarray] = None, patience: int = 0,
+            refit_scaler: bool = True) -> "NeuralNetwork":
+        """
+        optimizer="adam": Adam (β1 0,9 · β2 0,999) — converge em bem menos épocas que o SGD puro, com a mesma rede.
+        X_stop/y_stop + patience: parada antecipada numa fatia SEPARADA do treino (nunca a validação/teste):
+        guarda os pesos da melhor época e para depois de `patience` épocas sem melhora.
+        refit_scaler=False: mantém a padronização já aprendida (ajuste fino a partir de outra rede).
+        """
+        X = self._standardize(np.asarray(X, dtype=float), fit=refit_scaler or self.mu is None)
         y = np.asarray(y, dtype=float).reshape(-1)
         Xv = self._standardize(np.asarray(X_val, dtype=float)) if X_val is not None else None
+        Xs = self._standardize(np.asarray(X_stop, dtype=float)) if X_stop is not None else None
+        ys = np.asarray(y_stop, dtype=float) if y_stop is not None else None
         rng = np.random.default_rng(self.seed + 1)
         w_pos = (len(y) - y.sum()) / max(y.sum(), 1) if class_weight_balanced else 1.0
+        adam = optimizer == "adam"
+        if adam:
+            mW = [np.zeros_like(W) for W in self.weights]
+            vW = [np.zeros_like(W) for W in self.weights]
+            mb = [np.zeros_like(b) for b in self.biases]
+            vb = [np.zeros_like(b) for b in self.biases]
+            b1, b2, eps, step = 0.9, 0.999, 1e-8, 0
+        best, best_w, wait = np.inf, None, 0
         for epoch in range(epochs):
             order = rng.permutation(len(X))
             for start in range(0, len(X), batch_size):
@@ -143,14 +161,45 @@ class NeuralNetwork:
                     dW, db = self._weighted_backward(yb, Zs, A, out_w)
                 else:
                     dW, db = self.backward(yb, Zs, A)
-                for l in range(len(self.weights)):
-                    self.weights[l] -= self.learning_rate * dW[l]
-                    self.biases[l] -= self.learning_rate * db[l]
+                if adam:
+                    step += 1
+                    c1, c2 = 1 - b1 ** step, 1 - b2 ** step
+                    for l in range(len(self.weights)):
+                        mW[l] = b1 * mW[l] + (1 - b1) * dW[l]
+                        vW[l] = b2 * vW[l] + (1 - b2) * dW[l] ** 2
+                        mb[l] = b1 * mb[l] + (1 - b1) * db[l]
+                        vb[l] = b2 * vb[l] + (1 - b2) * db[l] ** 2
+                        self.weights[l] -= self.learning_rate * (mW[l] / c1) / (np.sqrt(vW[l] / c2) + eps)
+                        self.biases[l] -= self.learning_rate * (mb[l] / c1) / (np.sqrt(vb[l] / c2) + eps)
+                else:
+                    for l in range(len(self.weights)):
+                        self.weights[l] -= self.learning_rate * dW[l]
+                        self.biases[l] -= self.learning_rate * db[l]
             self.history["train_loss"].append(self.loss(self.forward(X)[0], y))
             if Xv is not None and y_val is not None:
                 self.history["val_loss"].append(self.loss(self.forward(Xv)[0], np.asarray(y_val, dtype=float)))
             if verbose:
                 print(f"época {epoch + 1}: perda treino {self.history['train_loss'][-1]:.4f}")
+            if Xs is not None and patience:
+                cur = self.loss(self.forward(Xs)[0], ys)
+                if cur < best - 1e-6:
+                    best, wait = cur, 0
+                    best_w = ([W.copy() for W in self.weights], [b.copy() for b in self.biases])
+                else:
+                    wait += 1
+                    if wait >= patience:
+                        break
+        if best_w is not None:
+            self.weights, self.biases = best_w
+        return self
+
+    def warm_start_from(self, other: "NeuralNetwork") -> "NeuralNetwork":
+        """Começa dos pesos (e da padronização) de outra rede com a mesma arquitetura — ajuste fino."""
+        if list(other.layer_sizes) != list(self.layer_sizes):
+            raise ValueError("arquiteturas diferentes: não dá para continuar o treino de outra rede")
+        self.weights = [W.copy() for W in other.weights]
+        self.biases = [b.copy() for b in other.biases]
+        self.mu, self.sigma = other.mu, other.sigma
         return self
 
     def _weighted_backward(self, y, Zs, A, w):

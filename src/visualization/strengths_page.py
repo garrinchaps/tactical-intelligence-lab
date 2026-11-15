@@ -77,7 +77,7 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
          f"as equipes da referência. Faixas: elite ≥ P{ELITE_PERCENTILE:.0f} · forte ≥ P{STRENGTH_PERCENTILE:.0f} · "
          f"fraco ≤ P{WEAKNESS_PERCENTILE:.0f} · alerta ≤ P{ALERT_PERCENTILE:.0f}. Com menos de {MIN_GROUP_SAMPLE} "
          "referências a métrica não recebe percentil (amostra insuficiente). A referência usa partidas com eventos do "
-         "banco local, sempre da mesma família de fonte (StatsBomb com StatsBomb, Wyscout com Wyscout).")
+         "banco local, sempre da mesma família de fonte (StatsBomb com StatsBomb, Wyscout com Wyscout, OpenPlay com OpenPlay).")
     a, b, c = st.columns([0.9, 2.0, 1.1])
     mode = a.radio("Analisar", ["Atleta", "Equipe"], horizontal=True)
     if mode == "Atleta":

@@ -316,7 +316,7 @@ def _club_vs_club() -> None:
     from src.ui.pages.clubs import _lake_team, _team_names, record, team_matches
     from src.ui.context import filter_by_team, get_service
 
-    names = _team_names(get_service().db.catalog_version())
+    names = _team_names(get_service().db.stable_version())
     pool = pd.DataFrame({"home_team_name": names, "away_team_name": names})
     a, b = st.columns(2)
     qa = a.text_input("Clube A", "Flamengo", key="cc_a")

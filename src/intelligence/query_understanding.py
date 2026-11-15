@@ -101,7 +101,9 @@ class QueryScope:
     metrics: List[str] = field(default_factory=list)
     needs_spatial: bool = False
     descriptors: List[str] = field(default_factory=list)
-    ask: Optional[str] = None           # goals | ranking | result | None
+    ask: Optional[str] = None           # goals | ranking | result | plan | profile | unavailable | None
+    goal_order: Optional[str] = None    # "1", "2", "3", "last", "winner" — "qual time fez o primeiro gol?"
+    attribute: Optional[str] = None     # profile: altura | idade | valor  ·  unavailable: o que foi pedido
     ranking_metric: Optional[str] = None
     team_named: bool = False            # a pergunta cita uma das equipes pelo nome
 
@@ -238,6 +240,33 @@ class QueryUnderstanding:
         if re.search(r"os dois times|ambas as equipes|ambos|comparar as equipes", t):
             sc.team_focus = "both"
 
+        # ---- perguntas sobre dados que a súmula/eventos não têm (perfil físico, tracking, contexto externo)
+        prof = re.search(r"\baltura|estatura|(jogador|atleta|goleiro|zagueiro|time|elenco|equipe) mais alto|"
+                         r"\bmais altos\b|\bidade|mais velh|mais nov[oa]s?\b|mais jove|"
+                         r"valor de mercado|mais car[oa]s?\b|mais valios", t)
+        unav = re.search(r"distancia percorrida|\bkms?\b|quilometr|\bcorreu\b|\bcorreram\b|velocidade|sprint|"
+                         r"aceleracao|batimento|frequencia cardiaca|\bpeso\b|\bpesa\b|salari|temperatura|chuva|"
+                         r"publico|torcedores|ingresso|lesao|lesionad|machucad|\bvento\b|gramado", t)
+        if prof:
+            sc.ask = "profile"
+            sc.attribute = ("altura" if re.search(r"altura|estatura|alt[oa]", prof.group(0)) else
+                            "idade" if re.search(r"idade|velh|nov|jove", prof.group(0)) else "valor")
+            return cls._finish(sc, t)
+        if unav:
+            sc.ask, sc.attribute = "unavailable", unav.group(0)
+            return cls._finish(sc, t)
+
+        # ---- ordem dos gols ("qual time fez o primeiro gol?", "quem abriu o placar?")
+        order = re.search(r"(primeir|1o|segund|2o|terceir|3o|ultim)\w* gol|abriu o placar|inaugurou o placar|"
+                          r"gol da vitoria|gol decisivo|gol do titulo|qual (time|equipe|clube|selecao) (fez|marcou|abriu)", t)
+        if order:
+            w = order.group(0)
+            sc.ask = "goals"
+            sc.goal_order = ("2" if re.match(r"segund|2o", w) else "3" if re.match(r"terceir|3o", w) else
+                             "last" if w.startswith("ultim") else "winner" if re.search(r"vitoria|decisivo|titulo", w)
+                             else "1")
+            return cls._finish(sc, t)
+
         # ---- fatos, rankings e planos
         plan_rx = (r"estrategi|tatica (para|a ser|ideal|melhor)|melhor tatica|como (anular|parar|neutralizar|marcar|"
                    r"conter|segurar|evitar|vencer|ganhar d|explorar|superar)|o que (o|a|deveria|devia|poderia)\b.*\b(fazer|ter feito|mudar)|"
@@ -262,11 +291,15 @@ class QueryUnderstanding:
                        r"o que .* fez para|motivo d\w* (vitoria|derrota)|resultado", t):
             sc.ask = "result"
 
+        return cls._finish(sc, t)
+
+    @staticmethod
+    def _finish(sc: QueryScope, t: str) -> QueryScope:
         # ---- métricas
         for key, kws in METRIC_KEYWORDS.items():
             if any(k in t for k in kws):
                 sc.metrics.append(key)
-        if sc.players and sc.ask != "ranking":
+        if sc.players and sc.ask not in ("ranking", "profile", "unavailable", "goals"):
             sc.category = "player" if sc.category != "full_report" else sc.category
             sc.descriptors.insert(0, " / ".join(sc.players))
 

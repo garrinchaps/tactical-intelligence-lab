@@ -29,8 +29,19 @@ def get_service() -> MatchDataService:
 
 
 @st.cache_data(show_spinner=False, max_entries=12, ttl=1800)
+def _bundle_parts(match_id: int) -> Dict[str, Any]:
+    """
+    O cache guarda só tipos simples (dict, listas, DataFrames). Guardar o próprio MatchBundle quebrava com
+    "UnserializableReturnValueError" quando o código era atualizado com o app aberto: o Streamlit recarrega o
+    módulo, a classe vira "outra" e o pickle recusa o objeto antigo.
+    """
+    b = get_service().load(int(match_id))
+    return {"match_id": int(b.match_id), "meta": dict(b.meta or {}), "level": str(b.level), "source": str(b.source),
+            "events": b.events, "boxscore": dict(b.boxscore or {}), "notes": list(b.notes or [])}
+
+
 def load_bundle(match_id: int) -> MatchBundle:
-    return get_service().load(int(match_id))
+    return MatchBundle(**_bundle_parts(int(match_id)))
 
 
 @st.cache_data(show_spinner=False, max_entries=12)
@@ -56,25 +67,45 @@ def only_real() -> bool:
         return True
 
 
+LEVEL_CHOICES = {"🟢 Lances": "EVENTS", "📊 Estatísticas": "BOXSCORE", "📄 Só placar": "RESULT"}
+DEFAULT_LEVELS = ("EVENTS", "BOXSCORE")
+
+
+def chosen_levels() -> Tuple[str, ...]:
+    """Níveis de dado escolhidos no topo (padrão: lances + estatísticas, ou seja, tudo que serve para analisar)."""
+    try:
+        lv = tuple(st.session_state.get("_levels") or DEFAULT_LEVELS)
+    except Exception:
+        lv = DEFAULT_LEVELS
+    return tuple(l for l in ("EVENTS", "BOXSCORE", "RESULT") if l in lv) or DEFAULT_LEVELS
+
+
 def analyzable_only() -> bool:
     """Padrão: só jogos com eventos ou estatísticas. 'Mostrar jogos só com placar' fica em Bastidores › Dados."""
     try:
-        return not bool(st.session_state.get("_show_score_only", False))
+        if st.session_state.get("_show_score_only", False):
+            return False
+        return "RESULT" not in chosen_levels()
     except Exception:
         return True
 
 
 def cached_catalog(where: str = "", params: tuple = (), include_score_only: Optional[bool] = None) -> pd.DataFrame:
     """Catálogo com cache (só é relido quando o banco muda). Por padrão, sem jogos só com placar."""
-    only = analyzable_only() if include_score_only is None else not include_score_only
     real = only_real()
     svc = get_service()
-    svc.finder.only_analyzable = only
     svc.finder.only_real = real
-    for cond, on in ((ANALYZABLE_SQL, only), (REAL_SQL, real)):
+    if include_score_only is None:                      # o que o usuário escolheu no topo
+        lv = chosen_levels()
+        svc.finder.levels = lv
+        svc.finder.only_analyzable = "RESULT" not in lv
+        cond = "data_level IN (" + ",".join(f"'{l}'" for l in lv) + ",'SIMULATED','UPLOAD')"
+    else:                                               # tela que precisa de tudo (campanha, retrospecto) ou só analisáveis
+        cond = None if include_score_only else ANALYZABLE_SQL
+    for c, on in ((cond, bool(cond)), (REAL_SQL, real)):
         if on:
-            where = f"({where}) AND {cond}" if where else cond
-    return _catalog_cached(svc.db.catalog_version(), where, tuple(params))
+            where = f"({where}) AND {c}" if where else c
+    return _catalog_cached(svc.db.stable_version(), where, tuple(params))
 
 
 def filter_by_team(cat: pd.DataFrame, team: str, threshold: float = 0.86) -> pd.DataFrame:

@@ -1,0 +1,10 @@
+﻿65 arquivo(s) em C:\dados\cbf
+
+extens├Áes: .json=65
+
+subpastas (top 15): results\processed=65
+
+[jogo completo] results\processed\CdB_2013_games.json
+
+
+[reconhecido] 65 arquivo(s) *_games.json ┬À results\processed\CdB_2013_games.json: 0 jogos, 0 com linha do tempo conferida com o placar

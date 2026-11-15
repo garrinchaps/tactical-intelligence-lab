@@ -74,6 +74,19 @@ monta `data/lake/` (Parquet) e as tabelas de mapeamento de IDs (`dim_teams`, `di
 
 Na barra lateral, a busca entende consultas como *"Argentina x França 2022"*, *"Leverkusen"*, *"Flamengo x Palmeiras ontem"*, *"Real Madrid x Barcelona da última rodada"* ou um ID. Ela procura no catálogo local e, se o jogo for recente, nas fontes online habilitadas. Quando a mesma partida existe em duas fontes, fica a mais rica (ex.: StatsBomb acima da Wyscout). Se a data pedida não existe, a busca sugere os confrontos reais entre as equipes.
 
+### Brasileirão com estatísticas completas
+
+Veja `docs/BRASILEIRAO.md`. Resumo: estatísticas de equipe 2015–2023 (Brasileirão Dataset), posse/passes/desarmes
+2018–hoje (ESPN, `--only espn_historico`) e **xG + números por jogador** pela API-Football
+(`python -m src.data_hub.sync --only estatisticas_brasil`, 20 jogos por requisição, dentro da cota diária).
+
+### 📋 Escalação e plano de jogo
+
+Menu **Escalação**: escolha o seu time e o adversário, a formação e quantos jogos recentes (1/3/5/10/20). O app monta o
+elenco atual (Transfermarkt + atletas que você cadastrar), dá a nota do laboratório (valor de mercado relativo à
+posição + minutos e participação em gols + nota externa), sugere a escalação provável, a melhor possível e a ajustada
+ao adversário, e escreve o plano: o que neutralizar, o que explorar e com qual ponto forte nosso.
+
 ## 🧠 Analista IA dinâmico
 
 1. **Entende a pergunta** (`src/intelligence/query_understanding.py`): se é sobre futebol ou não, e qual o recorte (minutos, tempo, lado do campo, terço, fase, atletas, métricas, equipe-sujeito).

@@ -118,6 +118,10 @@ def _is_simulated(match_id: int) -> bool:
     return any(lo <= int(match_id) <= hi for lo, hi in SIMULATED_ID_RANGES)
 
 
+MAIN_STATS = ("shots_total", "shots_on_target", "possession_pct", "passes_total", "corners", "fouls",
+              "yellow_cards", "xg", "saves", "offsides")
+
+
 class DataHubDB:
     """Wrapper fino sobre o SQLite com migração idempotente."""
 
@@ -191,12 +195,18 @@ class DataHubDB:
             conn.execute("PRAGMA user_version = 26")
 
     def reconcile_levels(self) -> int:
-        """Rebaixa para RESULT partidas marcadas BOXSCORE sem nenhuma estatística de equipe (roda após cada sync)."""
+        """
+        Rebaixa para RESULT partidas marcadas BOXSCORE sem nenhuma estatística de jogo de verdade (roda após cada
+        sync). Gols no intervalo e afins não contam: sem chutes, posse, passes, escanteios, faltas, cartões ou xG
+        a partida é "só placar" (ex.: temporadas antigas do football-data com só o placar do 1º tempo).
+        """
+        keys = ",".join(f"'{k}'" for k in MAIN_STATS)
         with self.connect() as conn:
             cur = conn.execute(
-                """UPDATE matches SET data_level = 'RESULT'
+                f"""UPDATE matches SET data_level = 'RESULT'
                    WHERE data_level = 'BOXSCORE'
-                     AND NOT EXISTS (SELECT 1 FROM match_team_stats s WHERE s.match_id = matches.match_id)""")
+                     AND NOT EXISTS (SELECT 1 FROM match_team_stats s WHERE s.match_id = matches.match_id
+                                     AND s.stat_key IN ({keys}))""")
             return cur.rowcount or 0
 
     def _seed_demo_catalog(self) -> None:
@@ -283,6 +293,8 @@ class DataHubDB:
                         values,
                     )
                     added += 1
+        if added or updated:
+            self._touched()
         return {"added": added, "updated": updated, "rejected": len(rejected)}
 
     def set_level(self, match_id: int, level: str) -> None:
@@ -322,6 +334,43 @@ class DataHubDB:
                 "SELECT COUNT(*), SUM(CASE WHEN data_level IN ('EVENTS','BOXSCORE') THEN 1 ELSE 0 END) FROM matches"
             ).fetchone()
         return f"{n}:{rich or 0}"
+
+    _ver_memo: Dict[str, Any] = {}
+
+    def stable_version(self, settle_s: float = 600.0, probe_s: float = 20.0, force: bool = False) -> str:
+        """
+        Versão do catálogo para a INTERFACE. Enquanto uma sincronização grava, o catálogo muda a cada segundo e,
+        com catalog_version() direto, toda tela relia ~300 mil partidas e reconstruía os índices a cada clique
+        (minutos por página). Aqui: o banco é consultado no máximo a cada `probe_s` e uma versão nova só é
+        adotada `settle_s` depois da anterior (ou quando force=True — botão "atualizar"). O app nunca fica preso
+        num catálogo velho: no pior caso, vê as partidas novas 10 minutos depois.
+        """
+        import time as _t
+
+        key = str(self.db_path)
+        m = DataHubDB._ver_memo.setdefault(key, {"adopted": None, "at": 0.0, "probed": 0.0, "latest": None})
+        now = _t.time()
+        if force or m["adopted"] is None or now - m["probed"] >= probe_s:
+            try:
+                m["latest"] = self.catalog_version()
+            except Exception:
+                m["latest"] = m["latest"] or m["adopted"] or "0:0"
+            m["probed"] = now
+        if force or m["adopted"] is None or (m["latest"] != m["adopted"] and now - m["at"] >= settle_s):
+            m["adopted"], m["at"] = m["latest"], now
+        return m["adopted"]
+
+    def _touched(self) -> None:
+        """Gravação feita pela própria tela (busca remota, upload, botão): a interface vê na hora. A atualização
+        automática (thread til-autosync) e as sincronizações em outro terminal seguem o ritmo de stable_version."""
+        import threading
+
+        if threading.current_thread().name != "til-autosync":
+            DataHubDB._ver_memo.pop(str(self.db_path), None)
+
+    def has_pending_update(self) -> bool:
+        m = DataHubDB._ver_memo.get(str(self.db_path)) or {}
+        return bool(m.get("latest") and m.get("adopted") and m["latest"] != m["adopted"])
 
     def level_counts(self) -> Dict[str, int]:
         with self.connect() as conn:

@@ -19,6 +19,7 @@ de WhoScored/Opta (Stats Perform) e que pode haver pedido de retirada pelos dono
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -72,6 +73,20 @@ TEAM_STATS = [
     ("red_cards", "red_cards", ("straight_red_cards",)),
 ]
 PCT_KEYS = {"possession_pct", "pass_accuracy_pct"}
+
+
+TOURNAMENTS = {"wc", "euro", "copa", "afcon", "cwc"}            # códigos de torneio: a temporada é o ano
+
+
+def season_label(v: Any, comp: Any = "") -> str:
+    """Código do arquivo → nome usado no resto da base: 1415 → 2014/2015 (ligas); afcon 2021 → 2021 (torneio)."""
+    txt = str(v if v is not None else "").strip()
+    if txt.endswith(".0"):
+        txt = txt[:-2]
+    if str(comp or "").lower() in TOURNAMENTS or not re.fullmatch(r"\d{4}", txt):
+        return txt
+    a, b = int(txt[:2]), int(txt[2:])
+    return f"20{txt[:2]}/20{txt[2:]}" if (a + 1) % 100 == b else txt
 
 
 def _labels() -> Dict[str, str]:
@@ -201,6 +216,7 @@ class OpenPlayProvider:
         c_as = find_col(M, "away_score", "away_goals", "ftag", contains=("away", "score"))
         c_c = find_col(M, "competition", "league", "competition_name", "tournament")
         c_s = find_col(M, "season", "season_name")
+        c_comp = find_col(M, "comp")
         if not all([c_id, c_d, c_h, c_a]):
             raise ValueError(f"tabela de jogos sem id/data/times reconhecíveis: {list(M.columns)[:20]}")
         c_ht_h, c_ht_a = find_col(M, "home_ht_score"), find_col(M, "away_ht_score")
@@ -231,7 +247,7 @@ class OpenPlayProvider:
             rec = {"match_id": internal, "home_team_name": str(r.get(c_h)), "away_team_name": str(r.get(c_a)),
                    "match_date": d, "home_score": to_int(r.get(c_hs)) if c_hs else None,
                    "away_score": to_int(r.get(c_as)) if c_as else None,
-                   "competition_name": str(r.get(c_c) or "") if c_c else "", "season_name": str(r.get(c_s) or "") if c_s else "",
+                   "competition_name": str(r.get(c_c) or "") if c_c else "", "season_name": season_label(r.get(c_s), r.get(c_comp)) if c_s else "",
                    "status": "FT", "data_source": "openplay", "data_level": level, "source_match_id": sid}
             out.append((rec, stats))
         return out

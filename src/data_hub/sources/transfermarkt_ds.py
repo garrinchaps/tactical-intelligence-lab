@@ -17,7 +17,9 @@ from typing import Callable, Dict, Optional
 import pandas as pd
 
 BASE = "https://pub-e682421888d945d684bcae8890b0ec20.r2.dev/data"
-FILES = ("competitions", "clubs", "players", "player_valuations", "games")
+FILES = ("competitions", "clubs", "players", "player_valuations", "games", "appearances", "game_lineups")
+# appearances (~1,7 mi linhas) e game_lineups (~2 mi): carreira jogo a jogo e escalações — usadas no planejador
+HEAVY = {"appearances", "game_lineups"}
 CACHE = Path("data/raw/transfermarkt")
 LICENSE = "transfermarkt-datasets (dados públicos do Transfermarkt compilados por dcaribou) — citar a fonte"
 
@@ -90,8 +92,29 @@ class TransfermarktDatasets:
                 "date": "data", "home_club_name": "mandante", "away_club_name": "visitante", "home_club_goals": "gols_mandante",
                 "away_club_goals": "gols_visitante", "stadium": "estadio", "attendance": "publico", "referee": "arbitro",
                 "home_club_formation": "formacao_mandante", "away_club_formation": "formacao_visitante",
-                "home_club_manager_name": "tecnico_mandante", "away_club_manager_name": "tecnico_visitante"}
+                "home_club_manager_name": "tecnico_mandante", "away_club_manager_name": "tecnico_visitante",
+                "home_club_id": "mandante_id", "away_club_id": "visitante_id"}
         return games[[k for k in keep if k in games.columns]].rename(columns=keep)
+
+    @staticmethod
+    def appearances_frame(a: pd.DataFrame) -> pd.DataFrame:
+        keep = {"game_id": "jogo_id", "player_id": "transfermarkt_id", "player_club_id": "clube_id", "date": "data",
+                "player_name": "nome", "competition_id": "competicao_id", "yellow_cards": "amarelos",
+                "red_cards": "vermelhos", "goals": "gols", "assists": "assistencias", "minutes_played": "minutos"}
+        out = a[[k for k in keep if k in a.columns]].rename(columns=keep)
+        if "data" in out:
+            out["data"] = out["data"].astype(str).str[:10]
+        return out
+
+    @staticmethod
+    def lineups_frame(l: pd.DataFrame) -> pd.DataFrame:
+        keep = {"game_id": "jogo_id", "date": "data", "player_id": "transfermarkt_id", "club_id": "clube_id",
+                "player_name": "nome", "type": "tipo", "position": "posicao", "number": "numero",
+                "team_captain": "capitao"}
+        out = l[[k for k in keep if k in l.columns]].rename(columns=keep)
+        if "data" in out:
+            out["data"] = out["data"].astype(str).str[:10]
+        return out
 
     # --------------------------------------------------------------------- sync
     def sync(self, lake, progress: Optional[Callable[[str], None]] = None, max_age_s: float = 24 * 3600) -> Dict[str, int]:
@@ -119,5 +142,11 @@ class TransfermarktDatasets:
             out["tabelas"] += 1
         if "competitions" in raw:
             lake.write("tm_competicoes", raw["competitions"], **prov)
+        if "appearances" in raw:
+            lake.write("tm_aparicoes", self.appearances_frame(raw.pop("appearances")), mirror_sqlite=False, **prov)
+            out["tabelas"] += 1
+        if "game_lineups" in raw:
+            lake.write("tm_escalacoes", self.lineups_frame(raw.pop("game_lineups")), mirror_sqlite=False, **prov)
+            out["tabelas"] += 1
         out["updated"] = out["tabelas"]
         return out
