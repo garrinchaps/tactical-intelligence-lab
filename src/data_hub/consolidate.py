@@ -90,3 +90,23 @@ def compare(db, match_id: int, meta: Optional[Dict[str, Any]] = None) -> pd.Data
                      "outras fontes": ", ".join(f"{s} {x:g}" for s, x in others.items()) or "—",
                      "diverge": bool(diverge), "stat_key": key, "side": side})
     return pd.DataFrame(rows).sort_values(["diverge", "stat_key", "side"], ascending=[False, True, True]).reset_index(drop=True)
+
+
+def record_divergences(db, match_id: int, table: Optional[pd.DataFrame] = None) -> int:
+    """
+    B7 — grava as divergências entre fontes (fonte primária, valor, valores das outras) em `source_divergences`.
+    Nunca altera o número exibido: a fonte primária continua valendo e a divergência fica anotada.
+    """
+    tab = compare(db, match_id) if table is None else table
+    if tab is None or tab.empty or not tab["diverge"].any():
+        return 0
+    d = tab[tab["diverge"]]
+    with db.connect() as conn:
+        conn.execute("CREATE TABLE IF NOT EXISTS source_divergences (match_id INTEGER, stat_key TEXT, side TEXT, "
+                     "fonte_primaria TEXT, valor REAL, outras TEXT, registrado_em TEXT DEFAULT (datetime('now')), "
+                     "PRIMARY KEY (match_id, stat_key, side))")
+        conn.executemany("INSERT OR REPLACE INTO source_divergences (match_id, stat_key, side, fonte_primaria, valor, outras) "
+                         "VALUES (?, ?, ?, ?, ?, ?)",
+                         [(int(match_id), r["stat_key"], r["side"], r["fonte escolhida"], float(r["valor"]),
+                           r["outras fontes"]) for r in d.to_dict("records")])
+    return int(len(d))

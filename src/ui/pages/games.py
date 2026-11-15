@@ -39,6 +39,22 @@ def render(current_context, match_bar=None) -> None:
         if st.button(_t("💬 Perguntar sobre este jogo"), key="game_ask", use_container_width=True, type="primary"):
             st.session_state["goto"] = "assistente"
             st.rerun()
+    try:                                              # B6: profundidade do dado desta partida (0 a 4)
+        from src.data_hub.depth import LABELS, badge, depth_for_matches, depth_of
+        from src.ui.context import get_service
+
+        dep = depth_for_matches(get_service().db, [int(ctx.match_id)]).get(int(ctx.match_id))
+        box = ctx.bundle.boxscore or {}
+        has_ind = any(getattr(box.get(k), "empty", True) is False for k in ("lineups", "player_stats"))
+        dep = max(dep or 0, depth_of(ctx.bundle.level, bool(box), has_ind))
+        st.caption(f"{badge(dep)} — " + {0: "só o placar: sem estatísticas para analisar.",
+                                         1: "estatísticas do time; sem escalação nem números por jogador.",
+                                         2: "escalação e números por jogador; sem lances com coordenadas.",
+                                         3: "todos os lances com coordenadas (análise completa).",
+                                         4: "inclui dados físicos de tracking."}[dep]
+                   + " Dado que não existe aparece como lacuna, nunca como zero.")
+    except Exception:
+        pass
     teams = [t for t in (h, a) if t]
     if teams:
         if st.session_state.get("game_focus") not in teams:   # outro jogo: o lado guardado não vale mais

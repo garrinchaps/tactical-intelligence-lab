@@ -200,6 +200,12 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
                          .rename(columns={"equipe": "time", "situacao": "situação"}))
 
 
+def ctx_db(ctx):
+    from src.ui.context import get_service
+
+    return get_service().db
+
+
 def _sources_panel(ctx: MatchContext) -> None:
     """A mesma partida em outras fontes: valor escolhido por precedência e divergências (nunca média)."""
     try:
@@ -211,6 +217,12 @@ def _sources_panel(ctx: MatchContext) -> None:
         return
     if tab.empty:
         return
+    try:                                              # B7: divergência registrada (nunca vira média)
+        from src.data_hub.consolidate import record_divergences
+
+        record_divergences(ctx_db(ctx), ctx.match_id, tab)
+    except Exception:
+        pass
     n_div = int(tab["diverge"].sum())
     srcs = sorted({x for x in tab["fonte escolhida"]} | {o.split(" ")[0] for v in tab["outras fontes"] if v != "—"
                                                         for o in v.split(", ")})

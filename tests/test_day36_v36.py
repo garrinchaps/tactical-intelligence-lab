@@ -568,3 +568,42 @@ def test_i18n_and_glossary():
     assert t("frase sem tradução", "en") == "frase sem tradução"                 # nunca some
     assert "causalidade" in GLOSSARY["r"] and "−1 a +1" in GLOSSARY["r"]
     assert {"xT", "xG", "PPDA", "Field Tilt", "r"} <= set(GLOSSARY)
+
+
+# ------------------------------------------------------------------ B7: divergência registrada
+def test_divergence_is_recorded_never_averaged(db):
+    from src.data_hub.consolidate import compare, record_divergences
+    from src.data_hub.registry import DataLevel
+
+    def m(mid, src):
+        return {"match_id": mid, "home_team_name": "Flamengo", "away_team_name": "Palmeiras", "match_date": "2024-06-15",
+                "home_score": 2, "away_score": 1, "competition_name": "x", "season_name": "2024", "status": "FT",
+                "data_source": src, "data_level": DataLevel.BOXSCORE}
+    db.upsert_matches([m(7_000_008_500, "brasileirao"), m(500_000_123, "espn")])
+    s = lambda v: {"team_name": "Flamengo", "stat_key": "shots_total", "stat_label": "Finalizações", "value": v}
+    db.save_boxscore(7_000_008_500, {"team_stats": [s(15)], "lineups": [], "timeline": []})
+    db.save_boxscore(500_000_123, {"team_stats": [s(19)], "lineups": [], "timeline": []})
+    assert record_divergences(db, 7_000_008_500) == 1
+    with db.connect() as c:
+        row = c.execute("SELECT fonte_primaria, valor, outras FROM source_divergences").fetchone()
+    assert row[0] == "brasileirao" and row[1] == 15 and "espn 19" in row[2]          # primária vale; nada de 17
+    assert compare(db, 7_000_008_500).iloc[0]["valor"] == 15
+
+
+def test_crest_never_breaks_and_uses_local_cache(tmp_path, monkeypatch):
+    import src.tools.cache_crests as C
+    import src.ui.crests as K
+
+    monkeypatch.setattr(C, "CREST_DIR", tmp_path)
+    K._local.cache_clear()
+    url = K.crest_url("Clube Inventado FC")
+    assert url.startswith("data:image/svg+xml")                          # sem escudo: monograma, nunca quebra
+    C.local_path("Cruzeiro").write_bytes(b"\x89PNG" + b"0" * 400)
+    K._local.cache_clear()
+    assert K.crest_url("Cruzeiro").startswith("data:image/png;base64,")   # cache local tem prioridade
+    import pandas as pd
+
+    cat = pd.DataFrame({"home_team_name": ["Cruzeiro", "Qarabag"], "away_team_name": ["Flamengo", "Sabah"],
+                        "competition_name": ["Brasileirão Série A", "Azerbaijan Premier League"],
+                        "match_date": ["2026-05-01", "2026-05-01"]})
+    assert C.priority_teams(cat) == ["Cruzeiro", "Flamengo"]             # Azerbaijão fora da prioridade

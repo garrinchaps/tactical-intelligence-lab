@@ -86,7 +86,25 @@ def _id_index() -> Dict[str, Dict[str, str]]:
         return {}
 
 
-def crest_url(name: str) -> str:
+@lru_cache(maxsize=4096)
+def _local(name: str) -> Optional[str]:
+    """Escudo do cache local (data/crests, criado por `python -m src.tools.cache_crests`) como data URI."""
+    try:
+        from src.tools.cache_crests import local_path
+
+        p = local_path(name)
+        if p.exists() and p.stat().st_size > 200:
+            return "data:image/png;base64," + base64.b64encode(p.read_bytes()).decode()
+    except Exception:
+        return None
+    return None
+
+
+def crest_url(name: str, use_local: bool = True) -> str:
+    if use_local:
+        loc = _local(name)
+        if loc:
+            return loc
     code = nation_code(name)
     if code:
         return f"https://flagcdn.com/w80/{code}.png"
