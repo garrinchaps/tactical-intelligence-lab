@@ -473,3 +473,30 @@ def test_player_resolver_needs_more_than_the_name():
         {"match_date": "2022-12-13", "home_team_name": "Argentina", "away_team_name": "Croatia", "acoes": 90}])
     m = merge_match_rows(rows)
     assert len(m) == 2 and m["acoes"].max() == 120                      # mesma partida conta uma vez
+
+
+# ------------------------------------------------------------------ C: notas
+def test_c6_defender_not_below_wasteful_striker():
+    from src.analytics.player_ratings import rate_row
+
+    zagueiro = {"minutos": 90, "posicao": "Center Back", "finalizacoes": 0, "passes": 50, "passes_certos": 45,
+                "passes_errados": 5, "perdas_de_posse": 5}
+    atacante = {"minutos": 90, "posicao": "Center Forward", "finalizacoes": 2, "finalizacoes_no_alvo": 0, "passes": 20,
+                "passes_certos": 12, "passes_errados": 8, "perdas_de_posse": 8}
+    assert rate_row(zagueiro)["nota"] >= rate_row(atacante)["nota"]
+
+
+def test_c2_peers_and_c4_minimum_sample():
+    import pandas as pd
+
+    from src.analytics.player_ratings import MIN_PEERS, normalize_by_peers, player_average
+
+    r = pd.DataFrame({"competicao": ["Liga"] * MIN_PEERS + ["Copa"] * 3, "setor": ["defesa"] * (MIN_PEERS + 3),
+                      "nota": [6.0] * MIN_PEERS + [8.0] * 3})
+    n = normalize_by_peers(r)
+    assert n.loc[n["competicao"] == "Liga", "nota"].eq(6.7).all()           # recentrado pelos pares
+    assert n.loc[n["competicao"] == "Copa", "nota"].eq(8.0).all()           # poucos pares: não mexe
+    avg = player_average(pd.DataFrame({"nota": [7.0, None], "minutos": [90, 5]}))
+    assert avg["media"] is None and "amostra insuficiente" in avg["aviso"] and avg["minutos"] == 90
+    avg = player_average(pd.DataFrame({"nota": [7.0, 8.0, 6.0], "minutos": [90, 90, 90]}))
+    assert avg["media"] == 7.0 and avg["jogos_com_nota"] == 3

@@ -103,6 +103,17 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
     except Exception:
         return None
     hit = r[r["jogador"].isin(names)] if not r.empty else r
+    if hit.empty and not r.empty:                    # nome completo no banco × nome comum na partida processada
+        from src.data_lake.ids import player_core
+
+        wanted = [player_core(n).split() for n in names]
+
+        def same(j):
+            t = player_core(j).split()
+            return any(t and w and t[0] == w[0] and (set(t) <= set(w) or set(w) <= set(t)) for w in wanted)
+        hit = r[r["jogador"].map(same)]
+        if len(hit) > 1:
+            return None                              # ambíguo: melhor sem nota do que nota de outro jogador
     if hit.empty:
         return None
     x = hit.iloc[0]
@@ -110,8 +121,6 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
 
 
 def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
-    from src.metrics.player_rating import average_rating
-
     key = "pl_ratings_" + "|".join(sorted(names))
     if st.button("🏅 Calcular a nota em cada jogo (até os 10 mais recentes)", key=key + "_go"):
         out = {}
@@ -124,14 +133,20 @@ def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
         st.session_state[key] = out
     got = st.session_state.get(key) or {}
     if got:
+        from src.analytics.player_ratings import player_average
+
         rows = pd.DataFrame([{"match_id": k, **v} for k, v in got.items() if v])
-        avg = average_rating(rows)
+        avg = player_average(rows) if not rows.empty else player_average(pd.DataFrame(columns=["nota", "minutos"]))
         skipped = sum(1 for v in got.values() if not v)
-        st.metric("Nota média (0–10)", "—" if avg["media"] is None else f"{avg['media']:.1f}",
+        k1, k2, k3 = st.columns(3)
+        k1.metric("Nota média (0–10)", "—" if avg["media"] is None else f"{avg['media']:.1f}",
                   help="Média só das partidas com lances do jogador e pelo menos 10 minutos em campo.")
-        st.caption(f"{avg['jogos_com_nota']} jogos com nota"
-                   + (f" · {avg.get('jogos_sem_nota', 0)} com menos de 10 min (fora da média)" if avg.get("jogos_sem_nota") else "")
-                   + (f" · {skipped} sem lances do jogador (fora da média)" if skipped else ""))
+        k2.metric("Minutos nesses jogos", f"{avg['minutos']}")
+        k3.metric("Jogos na média", f"{avg['jogos_com_nota']} (mínimo {avg['minimo']})")
+        if avg["aviso"]:
+            st.warning(avg["aviso"].capitalize() + (f" — média provisória {avg['media_bruta']:.1f}." if avg["media_bruta"] else "."))
+        st.caption((f"{skipped} jogo(s) sem lances do jogador ficaram fora da média (nunca contam como zero). " if skipped else "")
+                   + "A nota de cada jogo usa pesos do setor em que ele jogou.")
     return got
 
 
@@ -335,12 +350,14 @@ def _scout_tab(names: List[str]) -> None:
              "passes_certos_proprio_campo": ("passes_certos_proprio_campo", "passes_proprio_campo"),
              "duelos_ganhos": ("duelos_ganhos", "duelos"), "duelos_aereos_ganhos": ("duelos_aereos_ganhos", "duelos_aereos"),
              "finalizacoes_no_gol": ("finalizacoes_no_gol", "finalizacoes")}
-    cols = st.columns(len(SCOUT_GROUPS))
-    for col, (group, items) in zip(cols, SCOUT_GROUPS.items()):
+    tab_names = {"Atacando": "⚽ Ofensivo", "Passe": "🎯 Passes", "Defendendo": "🛡️ Defensivo", "Outros": "⚔️ Duelos e outros"}
+    order = ["Defendendo", "Atacando", "Passe", "Outros"]                 # C5: abas Defensivo, Ofensivo, Passes
+    tabs = st.tabs([tab_names[g] for g in order if g in SCOUT_GROUPS])
+    for tab, group in zip(tabs, [g for g in order if g in SCOUT_GROUPS]):
+        items = SCOUT_GROUPS[group]
         rows = [{"Indicador": lab, "Por 90": f"{per(key):.2f}" + (pct(*pairs[key]) if key in pairs else ""),
                  "Total": f"{sc[key].sum():.2f}" if key == "xg" else int(sc[key].sum())} for key, lab in items]
-        with col:
-            st.markdown(f"**{group}**")
+        with tab:
             comparison_table(pd.DataFrame(rows))
     st.caption("Calculado dos lances de cada jogo na base (período normal + prorrogação; sem disputa de pênaltis). "
                "Minutos estimados pelo intervalo entre a primeira e a última ação do atleta em cada jogo. "
