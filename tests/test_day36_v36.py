@@ -500,3 +500,42 @@ def test_c2_peers_and_c4_minimum_sample():
     assert avg["media"] is None and "amostra insuficiente" in avg["aviso"] and avg["minutos"] == 90
     avg = player_average(pd.DataFrame({"nota": [7.0, 8.0, 6.0], "minutos": [90, 90, 90]}))
     assert avg["media"] == 7.0 and avg["jogos_com_nota"] == 3
+
+
+# ------------------------------------------------------------------ D/B6: profundidade e diagnóstico
+def test_depth_levels(db):
+    from src.data_hub.depth import depth_for_matches, depth_of
+    from src.data_hub.registry import DataLevel
+
+    assert depth_of("RESULT") == 0 and depth_of("BOXSCORE", True) == 1 and depth_of("BOXSCORE", True, True) == 2
+    assert depth_of("EVENTS") == 3 and depth_of("EVENTS", has_tracking=True) == 4
+    base = {"home_team_name": "A", "away_team_name": "B", "match_date": "2026-10-01", "home_score": 1, "away_score": 0,
+            "competition_name": "L", "season_name": "2026", "status": "FT", "data_source": "espn"}
+    db.upsert_matches([{**base, "match_id": 1, "data_level": DataLevel.RESULT},
+                       {**base, "match_id": 2, "data_level": DataLevel.BOXSCORE},
+                       {**base, "match_id": 3, "data_level": DataLevel.BOXSCORE}])
+    db.save_boxscore(2, {"team_stats": [{"team_name": "A", "stat_key": "shots_total", "stat_label": "x", "value": 5}],
+                         "lineups": [], "timeline": []})
+    db.save_boxscore(3, {"team_stats": [{"team_name": "A", "stat_key": "shots_total", "stat_label": "x", "value": 5}],
+                         "lineups": [{"team_name": "A", "player_name": "J", "shirt_number": "9", "position": "F",
+                                      "is_starter": 1, "formation": "", "coach": ""}], "timeline": []})
+    assert depth_for_matches(db, [1, 2, 3]) == {1: 0, 2: 1, 3: 2}
+
+
+def test_rival_diagnosis_has_two_and_two_with_origin():
+    import pandas as pd
+
+    from src.squad.planner import rival_diagnosis, team_profile
+
+    m = pd.DataFrame([{"match_id": i, "match_date": f"2026-10-0{i}", "home_team_name": "Rival", "away_team_name": f"X{i}",
+                       "home_score": 1, "away_score": 1, "data_level": "EVENTS"} for i in range(1, 6)])
+    vals = {"crosses_total": 30, "shots_total": 20, "pass_accuracy_pct": 70, "fouls": 20, "possession_pct": 50}
+    s = pd.DataFrame([{"match_id": i, "team_name": "Rival", "stat_key": k, "value": v + (5 if i == 3 else 0)}
+                      for i in range(1, 6) for k, v in vals.items()] +
+                     [{"match_id": i, "team_name": f"X{i}", "stat_key": "shots_total", "value": 6} for i in range(1, 6)])
+    base = {"crosses_total": 15, "shots_total": 12, "pass_accuracy_pct": 82, "fouls": 12, "possession_pct": 50}
+    dg = rival_diagnosis(team_profile(m, s, ["Rival"], base, 5))
+    assert dg["suficiente"] and len(dg["fortalezas"]) >= 2 and len(dg["vulnerabilidades"]) >= 2
+    assert all("contra X" in d["origem"] for d in dg["fortalezas"] + dg["vulnerabilidades"])
+    assert not any("zona 14" in d["texto"].lower() for d in dg["fortalezas"])
+    assert rival_diagnosis({"n": 0, "a_favor": {}, "contra": {}})["aviso"].startswith("base insuficiente")

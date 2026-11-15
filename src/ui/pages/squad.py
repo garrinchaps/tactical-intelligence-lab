@@ -130,11 +130,25 @@ def _profile(team: str, n: int, version: str) -> Dict[str, Any]:
         D.ensure_events(svc, m.head(n).loc[lambda x: x["data_level"] == "EVENTS", "match_id"].tolist(), limit=n)
     if m.empty:
         return {"n": 0, "jogos": [], "a_favor": {}, "contra": {}, "corredores": {}}
+    # D5: só jogos com profundidade ≥ 2 (escalação/números individuais ou lances com coordenadas)
+    from src.data_hub.depth import depth_for_matches
+
+    all_ids = [int(x) for ids in m["ids"] for x in (ids if isinstance(ids, list) else [ids])] if "ids" in m else \
+        m["match_id"].astype(int).tolist()
+    dep = depth_for_matches(db, all_ids)
+    m = m.assign(profundidade=[max(dep.get(int(x), 0) for x in (ids if isinstance(ids, list) else [mid]))
+                               for ids, mid in zip(m.get("ids", m["match_id"]), m["match_id"])])
+    shallow = int((m["profundidade"] < 2).sum())
+    m = m[m["profundidade"] >= 2]
+    if m.empty:
+        return {"n": 0, "jogos": [], "a_favor": {}, "contra": {}, "corredores": {}, "rasos": shallow}
     st_ = D.merged_stats(db, m, names)
     comps = m["competition_name"].dropna().unique().tolist()
     base = D.baseline(db, comps, (pd.to_datetime(m["match_date"].min()) - pd.Timedelta(days=60)).strftime("%Y-%m-%d"),
                       str(m["match_date"].max()))
     prof = team_profile(m, st_, [names[0]] if not st_.empty else names, base, n)
+    prof["rasos"] = shallow
+    prof["criterio"] = "jogos recentes com escalação/números individuais ou lances (nível ≥ 2); " + prof.get("criterio", "")
     used = {g["match_id"] for g in prof["jogos"]}
     ev_ids = m.loc[(m["data_level"] == "EVENTS") & m["match_id"].isin(used), "match_id"].tolist()
     prof["corredores"] = D.attack_corridors(db, ev_ids, names)
@@ -332,14 +346,34 @@ def render(_ctx=None) -> None:
         if not rival:
             empty_state("Escolha o adversário", "O plano compara os últimos jogos dos dois times.", "🎯")
         elif not theirs or not theirs.get("n"):
-            empty_state(f"Sem jogos recentes com dado completo de {rival}", "", "🎯",
-                        "O plano usa só jogos recentes com lances ou estatísticas completas (≥ 5 indicadores). "
+            empty_state(f"Base insuficiente para diagnóstico de {rival}", "", "🎯",
+                        "O plano usa só jogos recentes com escalação/números individuais ou lances (nível 2 ou mais). "
                         "Sincronize a liga do adversário.")
         else:
             st.markdown(f"#### {team} x {rival} — últimos {theirs['n']} jogo(s) do rival e {mine.get('n', 0)} nossos")
-            skip = (theirs.get("descartados_por_dado_incompleto") or 0) + (mine.get("descartados_por_dado_incompleto") or 0)
+            skip = sum((x.get("descartados_por_dado_incompleto") or 0) + (x.get("rasos") or 0) for x in (theirs, mine))
             st.caption("Critério: " + (theirs.get("criterio") or "") +
                        (f". {skip} jogo(s) recente(s) com dado incompleto ficaram de fora." if skip else "."))
+            from src.squad.planner import rival_diagnosis
+
+            dg = rival_diagnosis(theirs)
+            st.markdown(f"##### 🔍 Diagnóstico de {rival}")
+            if not dg["suficiente"]:
+                note("Base insuficiente para diagnóstico", dg["aviso"].capitalize() + ".", "warn")
+            cards = st.columns(2)
+            for col, (title, items, color) in zip(cards, ((f"💪 Onde {rival} é forte", dg["fortalezas"], "#EF4444"),
+                                                         (f"🎯 Onde {rival} pode ser explorado", dg["vulnerabilidades"], "#22C55E"))):
+                with col:
+                    st.markdown(f"**{title}**")
+                    for d in items or []:
+                        st.markdown(
+                            f'<div class="fm-card" style="border-left:4px solid {color};border-radius:14px;padding:.6rem .9rem;'
+                            f'margin-bottom:.5rem"><b>{d["texto"].capitalize()}</b><br><span style="color:#94A3B8;'
+                            f'font-size:.85rem">{d["rotulo"]}: {d["media"]} por jogo (média das mesmas competições: '
+                            f'{d["referencia"]}, {d["dif_pct"]:+.0f}%) em {d["jogos"]} jogos · onde mais apareceu: '
+                            f'{d["origem"]}</span></div>', unsafe_allow_html=True)
+                    if not items:
+                        st.caption("Nada claro o bastante nos jogos recentes.")
             st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
             x, y = st.columns(2)
             with x:

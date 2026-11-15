@@ -33,13 +33,15 @@ def html(team: str, formation: str, xi: List[Dict[str, Any]], bench: List[Dict[s
     data = json.dumps({"team": team, "formation": formation, "players": players, "bench": reserves, "forms": forms,
                        "tips": tips or []}, ensure_ascii=False)
     return """
-<div id="fm" style="font-family:Inter,system-ui,sans-serif;color:#E2E8F0;background:#090D16;border:1px solid #1E2A44;
+<div id="fm" style="resize:horizontal;overflow:auto;max-width:100%;font-family:Inter,system-ui,sans-serif;color:#E2E8F0;background:#090D16;border:1px solid #1E2A44;
      border-radius:12px;padding:10px">
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
     <b id="fm_t"></b>
     <select id="fm_f" style="background:#0F172A;color:#E2E8F0;border:1px solid #1E2A44;border-radius:6px;padding:4px"></select>
     <button id="fm_r" style="background:#0F172A;color:#E2E8F0;border:1px solid #1E2A44;border-radius:6px;padding:4px 8px">↺ Posições da formação</button>
     <button id="fm_c" style="background:#0F172A;color:#22D3EE;border:1px solid #1E2A44;border-radius:6px;padding:4px 8px">📋 Copiar escalação</button>
+    <button id="fm_save" style="background:#0F172A;color:#E2E8F0;border:1px solid #1E2A44;border-radius:6px;padding:4px 8px">💾 Salvar como formação customizada</button>
+    <label style="font-size:12px;color:#94A3B8">Tamanho <input id="fm_z" type="range" min="50" max="100" value="100" style="vertical-align:middle"></label>
     <span id="fm_msg" style="color:#94A3B8;font-size:12px"></span>
   </div>
   <svg id="fm_s" viewBox="-2 -2 124 84" style="width:100%;max-height:%%H%%px;touch-action:none;background:#0B3D2E;border-radius:8px">
@@ -68,6 +70,9 @@ let BENCH = D.bench.map(b => b.id).filter(id => XI.indexOf(id) < 0).concat(D.pla
 const svg = document.getElementById("fm_s"), G = document.getElementById("fm_p");
 document.getElementById("fm_t").textContent = D.team;
 const sel = document.getElementById("fm_f");
+let custom = null;
+try { custom = JSON.parse(localStorage.getItem("til_fm_custom") || "null"); } catch (e) { custom = null; }
+if (custom && custom.length === D.players.length) D.forms["Customizada"] = custom;
 Object.keys(D.forms).forEach(f => { const o = document.createElement("option"); o.value = f; o.textContent = f; if (f === form) o.selected = true; sel.appendChild(o); });
 function base(){ return D.forms[form].map(s => [s[0], s[1]]); }
 if (!pos) pos = base();
@@ -111,6 +116,14 @@ svg.addEventListener("drop", ev => { ev.preventDefault(); const id = ev.dataTran
   const [x, y] = pt(ev); let best = 0, bd = 1e9; pos.forEach((p, i) => { const d = (p[0] - x) ** 2 + (p[1] - y) ** 2; if (d < bd) { bd = d; best = i; } }); swap(id, best); });
 G.addEventListener("click", ev => { const g = ev.target.closest("g[data-i]"); if (g && window._fmPick) { swap(window._fmPick, +g.dataset.i); window._fmPick = null; } });
 sel.addEventListener("change", () => { form = sel.value; pos = base(); save(); draw(); });
+document.getElementById("fm_save").addEventListener("click", () => {
+  const c = pos.map((p, i) => [p[0], p[1], D.forms[form][i][2]]);
+  D.forms["Customizada"] = c;
+  try { localStorage.setItem("til_fm_custom", JSON.stringify(c)); } catch (e) {}
+  if (![...sel.options].some(o => o.value === "Customizada")) { const o = document.createElement("option"); o.value = o.textContent = "Customizada"; sel.appendChild(o); }
+  sel.value = "Customizada"; form = "Customizada"; save();
+  document.getElementById("fm_msg").textContent = "Formação customizada salva (fica neste navegador)."; });
+document.getElementById("fm_z").addEventListener("input", ev => { document.getElementById("fm").style.width = ev.target.value + "%"; });
 document.getElementById("fm_r").addEventListener("click", () => { pos = base(); save(); draw(); });
 document.getElementById("fm_c").addEventListener("click", () => {
   const txt = D.team + " (" + form + "): " + XI.map((id, i) => D.forms[form][i][2] + " " + all[id].nome).join(", ");
@@ -130,6 +143,15 @@ ZONES = {
     "pass_accuracy_pct": ((74, 46), (46, 34)), "dribbles_completed": ((88, 60), (32, 20)),
     "aerials_won": ((98, 40), (22, 40)), "tackles_won": ((70, 60), (50, 20)), "interceptions": ((78, 20), (42, 60)),
     "fouls": ((84, 52), (36, 28)), "yellow_cards": ((80, 66), (40, 14)),
+}
+
+
+PLACE = {   # onde acontece, em linguagem de futebol (D3)
+    "crosses_total": "pelos corredores", "corners": "na bola parada", "shots_total": "na entrada da área",
+    "shots_on_target": "na finalização", "xg": "dentro da área", "big_chances": "nas costas da zaga", "goals": "na área",
+    "possession_pct": "no meio-campo, com a bola", "passes_total": "na troca de passes", "pass_accuracy_pct": "na saída de bola",
+    "dribbles_completed": "no 1x1 pelos lados", "aerials_won": "no jogo aéreo", "tackles_won": "na disputa do meio-campo",
+    "interceptions": "nas linhas de passe", "fouls": "nas faltas perto da área", "yellow_cards": "na disciplina",
 }
 
 
@@ -153,21 +175,21 @@ def pitch_tips(plan: Dict[str, Any] | None, rival_corr: Dict[str, Any] | None = 
         out.append({"x": x, "y": y + 5 * n, "marca": mark, "cor": color, "texto": text})
 
     for i, d in enumerate(plan.get("explorar") or [], 1):
-        put(d["chave"], "rival", f"E{i}", "#22C55E", f"Explorar: {d['acao']} (rival {d['rotulo'].lower()} {d['media']}, "
+        put(d["chave"], "rival", f"E{i}", "#22C55E", f"Explorar {PLACE.get(d['chave'], '')}: {d['acao']} (rival {d['rotulo'].lower()} {d['media']}, "
                                                       f"{d['dif_pct']:+.0f}% vs. média)")
     for i, d in enumerate(plan.get("neutralizar") or [], 1):
-        put(d["chave"], "nosso", f"N{i}", "#EF4444", f"Neutralizar: {d['acao']} (rival {d['rotulo'].lower()} {d['media']}, "
+        put(d["chave"], "nosso", f"N{i}", "#EF4444", f"Neutralizar {PLACE.get(d['chave'], '')}: {d['acao']} (rival {d['rotulo'].lower()} {d['media']}, "
                                                      f"{d['dif_pct']:+.0f}%)")
     for i, d in enumerate((plan.get("nossos_fortes") or [])[:3], 1):
-        put(d["chave"], "rival", f"F{i}", "#22D3EE", f"Nossa força: {d['rotulo']} {d['media']} ({d['dif_pct']:+.0f}% vs. média)")
+        put(d["chave"], "rival", f"F{i}", "#22D3EE", f"Nossa força {PLACE.get(d['chave'], '')}: {d['rotulo']} {d['media']} ({d['dif_pct']:+.0f}% vs. média)")
     for i, d in enumerate((plan.get("nossos_fracos") or [])[:3], 1):
-        put(d["chave"], "nosso", f"C{i}", "#F59E0B", f"Cuidado (nosso ponto fraco): {d['rotulo']} {d['media']} "
+        put(d["chave"], "nosso", f"C{i}", "#F59E0B", f"Cuidado {PLACE.get(d['chave'], '')} (nosso ponto fraco): {d['rotulo']} {d['media']} "
                                                      f"({d['dif_pct']:+.0f}% vs. média)")
     rc = rival_corr or {}
     if rc.get("ataca_por"):
         side, pct = max(rc["ataca_por"].items(), key=lambda kv: kv[1])
         y = {"esquerda": 70, "centro": 40, "direita": 10}[side]
-        out.append({"x": 30, "y": y, "marca": "⛔", "cor": "#EF4444", "texto": f"O rival chega mais por aqui ({pct:.0f}% das chegadas)"})
+        out.append({"x": 30, "y": y, "marca": "⛔", "cor": "#EF4444", "texto": f"O rival chega mais pelo corredor {'esquerdo' if y == 70 else 'direito' if y == 10 else 'central'} da nossa defesa ({pct:.0f}% das chegadas)"})
     if rc.get("sofre_por"):
         side, pct = max(rc["sofre_por"].items(), key=lambda kv: kv[1])
         y = {"esquerda": 12, "centro": 40, "direita": 68}[side]

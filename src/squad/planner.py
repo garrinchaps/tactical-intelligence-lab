@@ -351,20 +351,24 @@ def team_profile(matches: pd.DataFrame, stats: pd.DataFrame, team_names: Sequenc
                            "descartados_por_dado_incompleto": skipped,
                            "criterio": f"últimos jogos com lances ou ≥ {min_stat_keys} estatísticas no jogo, "
                                        f"até {RECENT_DAYS} dias antes do mais recente"}
+    def per_game(frame, key):
+        vals = pd.to_numeric(frame[key], errors="coerce") if key in frame else pd.Series(dtype=float)
+        return [{"match_id": g["match_id"], "data": g["data"], "adversario": g["adversario"], "placar": g["placar"],
+                 "valor": round(float(v), 2)} for g, v in zip(games, vals) if pd.notna(v)]
     for key, lab, up in FOR_METRICS:
         if key in F and F[key].notna().sum():
             v = float(pd.to_numeric(F[key], errors="coerce").mean())
             b = (baseline or {}).get(key)
             out["a_favor"][key] = {"rotulo": lab, "media": round(v, 2), "referencia": round(b, 2) if b else None,
                                    "dif_pct": round((v - b) / b * 100, 0) if b else None, "maior_melhor": up,
-                                   "jogos": int(F[key].notna().sum())}
+                                   "jogos": int(F[key].notna().sum()), "por_jogo": per_game(F, key)}
     for key, lab, up in AGAINST_METRICS:
         if key in A and A[key].notna().sum():
             v = float(pd.to_numeric(A[key], errors="coerce").mean())
             b = (baseline or {}).get(key)
             out["contra"][key] = {"rotulo": lab, "media": round(v, 2), "referencia": round(b, 2) if b else None,
                                   "dif_pct": round((v - b) / b * 100, 0) if b else None, "maior_melhor": up,
-                                  "jogos": int(A[key].notna().sum())}
+                                  "jogos": int(A[key].notna().sum()), "por_jogo": per_game(A, key)}
     return out
 
 
@@ -383,6 +387,59 @@ def _traits(profile: Dict[str, Any], threshold: float = 12.0) -> Tuple[List[Dict
                 bad.append(item)
     key = lambda d: -abs(d["dif_pct"])
     return sorted(good, key=key), sorted(bad, key=key)
+
+
+# leitura em linguagem de futebol (D3): sem "zona 14" nem "setor B3"
+TRAIT_TEXT = {
+    ("a_favor", "crosses_total"): ("vive de cruzamento pelos corredores", "quase não cruza: joga por dentro"),
+    ("a_favor", "possession_pct"): ("gosta de ficar com a bola e empurrar o rival para o bloco baixo",
+                                    "abre mão da bola: bloco baixo e saída rápida"),
+    ("a_favor", "shots_total"): ("finaliza muito, inclusive de fora da área", "finaliza pouco"),
+    ("a_favor", "shots_on_target"): ("acerta o gol com frequência", "erra muito o alvo"),
+    ("a_favor", "xg"): ("cria chances claras, com homem entre linhas chegando à área", "cria pouco perigo de verdade"),
+    ("a_favor", "dribbles_completed"): ("ganha no 1x1 pelos lados", "quase não dribla: depende do passe"),
+    ("a_favor", "corners"): ("força muitos escanteios", "chega pouco à linha de fundo"),
+    ("a_favor", "aerials_won"): ("domina o jogo aéreo", "perde as bolas pelo alto"),
+    ("a_favor", "tackles_won"): ("desarma bem no meio-campo", "desarma pouco: a marcação chega atrasada"),
+    ("a_favor", "interceptions"): ("lê bem as linhas de passe", "intercepta pouco"),
+    ("a_favor", "pass_accuracy_pct"): ("troca passes com precisão desde a saída", "erra passes na saída de bola"),
+    ("a_favor", "passes_total"): ("toca muito a bola", "troca poucos passes, jogo direto"),
+    ("a_favor", "fouls"): ("faz poucas faltas", "comete muitas faltas"),
+    ("a_favor", "yellow_cards"): ("é disciplinado", "leva muitos amarelos"),
+    ("a_favor", "goals"): ("marca muitos gols", "marca pouco"),
+    ("a_favor", "big_chances"): ("cria grandes chances", "quase não cria grandes chances"),
+    ("contra", "shots_total"): ("cede poucas finalizações", "deixa o rival finalizar muito"),
+    ("contra", "shots_on_target"): ("raramente leva chute no gol", "o goleiro é muito exigido"),
+    ("contra", "xg"): ("concede poucas chances claras", "concede chances claras, com espaço entre zagueiro e lateral"),
+    ("contra", "crosses_total"): ("não deixa cruzar", "deixa cruzar à vontade pelos corredores"),
+    ("contra", "corners"): ("cede poucos escanteios", "cede muitos escanteios"),
+    ("contra", "goals"): ("sofre poucos gols", "sofre muitos gols"),
+    ("contra", "big_chances"): ("cede poucas grandes chances", "cede grandes chances"),
+}
+
+
+def rival_diagnosis(profile: Dict[str, Any], min_each: int = 2) -> Dict[str, Any]:
+    """
+    D4 — diagnóstico do rival com pelo menos 2 fortalezas e 2 vulnerabilidades, cada uma com o número que a sustenta
+    (média vs referência) e a partida de origem (o jogo em que aquilo mais apareceu). Sem 2+2, declara base insuficiente.
+    """
+    good, bad = _traits(profile, threshold=8.0)
+
+    def item(d, strong):
+        pj = d.get("por_jogo") or []
+        better_high = d["maior_melhor"] == strong
+        g = (max if better_high else min)(pj, key=lambda x: x["valor"]) if pj else None
+        txt = TRAIT_TEXT.get((d["lado"], d["chave"]), (d["rotulo"], d["rotulo"]))[0 if strong else 1]
+        return {"texto": txt, "rotulo": d["rotulo"], "media": d["media"], "referencia": d["referencia"],
+                "dif_pct": d["dif_pct"], "jogos": d["jogos"],
+                "origem": (f"{g['data']} contra {g['adversario']} ({g['placar']}): {d['rotulo'].lower()} {g['valor']}"
+                           if g else "—"), "match_id": g["match_id"] if g else None}
+    fortes = [item(d, True) for d in good[:3]]
+    fracos = [item(d, False) for d in bad[:3]]
+    ok = len(fortes) >= min_each and len(fracos) >= min_each
+    return {"fortalezas": fortes, "vulnerabilidades": fracos, "suficiente": ok, "jogos": profile.get("n", 0),
+            "aviso": "" if ok else "base insuficiente para diagnóstico (são precisos 2 pontos fortes e 2 fracos "
+                                   "claros em jogos recentes com escalação ou lances)"}
 
 
 # regras de jogo: (lado, chave) → (como neutralizar se é força do rival, como explorar se é fraqueza do rival)
