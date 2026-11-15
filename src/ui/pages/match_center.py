@@ -71,6 +71,9 @@ def render_events(ctx: MatchContext) -> None:
                extra_line=("Pênaltis: " + " x ".join(f"{t} {v}" for t, v in pen.items())) if pen else "")
 
     st.markdown("##### Indicadores-chave")
+    from src.ui.glossary import what_is
+
+    what_is(["xG", "xT", "PPDA", "Field Tilt"], key="mc_gloss")
     c = st.columns(6)
     with c[0]:
         metric_card("PPDA", d_org["ppda"], ctx.prov("ppda", "PPDA", d_org["ppda"],

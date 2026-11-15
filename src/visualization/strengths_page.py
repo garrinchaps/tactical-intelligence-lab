@@ -82,6 +82,7 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
     mode = a.radio("Analisar", ["Atleta", "Equipe"], horizontal=True)
     if mode == "Atleta":
         pl = df_events.loc[df_events["team_name"].notna(), ["player_name", "team_name"]].dropna().drop_duplicates()
+        pl = pl[~pl["player_name"].astype(str).str.lower().isin(["não identificado", "nao identificado", "unknown"])]
         options = [f"{r.player_name} — {r.team_name}" for r in pl.itertuples()]
         idx = next((i for i, o in enumerate(options) if o.endswith(f"— {target_team}")), 0)
         chosen = b.selectbox("Atleta", options, index=idx) if options else None
@@ -123,21 +124,28 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
     if an["evidence_grade"] == "LIMITADA":
         note("Base pequena", "Pouco tempo em campo ou poucos jogos para comparar: leia como indicação.", "warn")
 
-    s, w = st.columns(2)
-    with s:
-        st.markdown("#### 🟢 Pontos fortes")
-        comparison_table(_items_df(an["strengths"]))
-    with w:
-        st.markdown("#### 🔴 Pontos fracos")
-        comparison_table(_items_df(an["weaknesses"]))
-    r, t = st.columns([1.1, 1.0])
-    r.plotly_chart(radar(an), use_container_width=True)
-    with t:
-        st.markdown("#### 🧠 Interpretação")
-        res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)
-        st.caption(f"Motor: {res['engine_used']}" + (f" · guard: {res['guard_outcome']}" if res.get("guard_outcome") else ""))
-        st.markdown(res["report_markdown"])
-    with st.expander("Detalhes técnicos (percentis, faixas e tamanho da amostra)"):
+    from src.ui.components import metric_bars
+    from src.ui.glossary import what_is
+
+    what_is(["Percentil", "xT", "PPDA", "Field Tilt", "xG"], key=f"sw_gloss_{entity}")
+    tab1, tab2, tab3 = st.tabs(["🟢🔴 Fortes e fracos", "🧠 Gráfico e interpretação", "🔬 Métricas avançadas"])
+    with tab1:
+        s, w = st.columns(2)
+        with s:
+            st.markdown("#### 🟢 O que funcionou")
+            metric_bars(an["strengths"], "forte", "Nada muito acima do normal neste jogo.")
+        with w:
+            st.markdown("#### 🔴 O que precisa melhorar")
+            metric_bars(an["weaknesses"], "fraco", "Nada muito abaixo do normal neste jogo.")
+    with tab2:
+        r, t = st.columns([1.1, 1.0])
+        r.plotly_chart(radar(an), use_container_width=True)
+        with t:
+            st.markdown("#### 🧠 Interpretação")
+            res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)
+            st.caption(f"Motor: {res['engine_used']}" + (f" · guard: {res['guard_outcome']}" if res.get("guard_outcome") else ""))
+            st.markdown(res["report_markdown"])
+    with tab3:
         st.caption(_how)
         comparison_table(_items_df(an["strengths"] + an["neutral"] + an["weaknesses"], technical=True))
         if an.get("insufficient"):

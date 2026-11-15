@@ -67,7 +67,9 @@ def back() -> None:
 
 
 def back_button(label: str = "← Voltar", key: str = "nav_back") -> None:
-    if st.button(label, key=key, type="secondary"):
+    from src.ui.i18n import t
+
+    if st.button(t(label), key=key, type="secondary"):
         back()
 
 

@@ -557,3 +557,14 @@ def test_says_no_data_when_source_lacks_it(match):
         pytest.skip("fonte do teste registra pressões")
     md = _ask(match, "quem fez mais pressões?")["report_markdown"]
     assert "Não tenho esse dado" in md and "zero" in md
+
+
+# ------------------------------------------------------------------ F: idioma e glossário
+def test_i18n_and_glossary():
+    from src.ui.glossary import GLOSSARY
+    from src.ui.i18n import t
+
+    assert t("Buscar", "en") == "Search" and t("Buscar", "es") == "Buscar" and t("Buscar", "pt") == "Buscar"
+    assert t("frase sem tradução", "en") == "frase sem tradução"                 # nunca some
+    assert "causalidade" in GLOSSARY["r"] and "−1 a +1" in GLOSSARY["r"]
+    assert {"xT", "xG", "PPDA", "Field Tilt", "r"} <= set(GLOSSARY)

@@ -18,6 +18,7 @@ import streamlit as st
 
 from src.canonical.provenance import MissingProvenanceError, ProvenanceRecord, ProvenanceRegistry, strict_mode
 from src.data_hub.registry import BADGES, COLORS, LEVEL_DESCRIPTIONS
+from src.ui.i18n import t
 from src.ui.theme import PALETTE, TIER_COLORS, TIER_LABELS
 
 
@@ -57,8 +58,8 @@ def page_header(title: str, subtitle: str = "", ctx=None) -> None:
                  f'<span class="til-chip tier" style="border-color:{TIER_COLORS[tier]};color:{TIER_COLORS[tier]}">'
                  f'tier {TIER_LABELS[tier]}</span>'
                  f'<span class="til-chip">🎯 foco: {_esc(ctx.target_team)}</span></div>')
-    st.markdown(f'<div class="til-header"><div class="title">{_esc(title)}</div>'
-                f'<div class="sub">{_esc(subtitle)}</div>{chips}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="til-header"><div class="title">{_esc(t(title))}</div>'
+                f'<div class="sub">{_esc(t(subtitle))}</div>{chips}</div>', unsafe_allow_html=True)
 
 
 def level_banner(level: str, source_label: str = "") -> None:
@@ -71,8 +72,8 @@ def level_banner(level: str, source_label: str = "") -> None:
 
 def empty_state(title: str, message: str = "", icon: str = "🗂️", hint: str = "", error: bool = False) -> None:
     cls = "til-empty error" if error else "til-empty"
-    st.markdown(f'<div class="{cls}"><div class="i">{icon}</div><div class="t">{_esc(title)}</div>'
-                f'<div class="m">{_esc(message)}</div>' + (f'<div class="h">💡 {_esc(hint)}</div>' if hint else "")
+    st.markdown(f'<div class="{cls}"><div class="i">{icon}</div><div class="t">{_esc(t(title))}</div>'
+                f'<div class="m">{_esc(t(message))}</div>' + (f'<div class="h">💡 {_esc(t(hint))}</div>' if hint else "")
                 + "</div>", unsafe_allow_html=True)
 
 
@@ -99,7 +100,7 @@ def metric_card(label: str, value, prov: Optional[ProvenanceRecord], badge_text:
     prov = _check(prov, label)
     badge = f'<span class="badge {status}">{_esc(badge_text)}</span>' if badge_text else ""
     unit_html = f'<span class="unit">{_esc(unit)}</span>' if unit else ""
-    st.markdown(f'<div class="til-card"><div class="label">{_esc(label)}</div><div class="value">{_esc(value)}{unit_html}</div>'
+    st.markdown(f'<div class="til-card"><div class="label">{_esc(t(label))}</div><div class="value">{_esc(value)}{unit_html}</div>'
                 f'{badge}{provenance_line(prov)}</div>', unsafe_allow_html=True)
 
 
@@ -148,7 +149,7 @@ def scoreboard(home: str, away: str, score: str, meta_text: str = "", home_goals
 
 
 def note(title: str, body: str, kind: str = "") -> None:
-    st.markdown(f'<div class="til-note {kind}"><div class="h">{_esc(title)}</div>{_esc(body)}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="til-note {kind}"><div class="h">{_esc(t(title))}</div>{_esc(t(body))}</div>', unsafe_allow_html=True)
 
 
 def zebra(df: pd.DataFrame):
@@ -203,6 +204,33 @@ def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "joga
                 nav.open_view("time", name=name)
 
 
+def metric_bars(items: List[dict], kind: str = "forte", empty_text: str = "") -> None:
+    """
+    F3 — cartões em vez de tabela: valor no jogo × jogo típico, barra com o percentil e uma frase simples.
+    O primeiro do ranking ganha destaque. `items` = itens do StrengthsWeaknessesEngine (label, value, percentile...).
+    """
+    if not items:
+        st.caption(empty_text or "Nada fora do normal neste jogo.")
+        return
+    color = "#22D3EE" if kind == "forte" else "#EF4444"
+    html_rows = []
+    for i, d in enumerate(items[:6]):
+        p = d.get("percentile")
+        pct = 0 if p is None else max(0, min(100, float(p)))
+        top = i == 0
+        phrase = (f"melhor que {pct:.0f}% dos jogos da referência" if p is not None else "sem referência suficiente")
+        html_rows.append(
+            f'<div style="background:#0F1626;border:1px solid {"" + color if top else "#1E2A44"};border-radius:14px;'
+            f'padding:{"14px" if top else "10px"} 14px;margin-bottom:8px;box-shadow:0 4px 14px rgba(0,0,0,.25)">'
+            f'<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'
+            f'<span style="font-weight:600;font-size:{"1.05rem" if top else ".95rem"}">{("🏆 " if kind == "forte" else "⚠️ ") if top else ""}{_esc(t(d["label"]))}</span>'
+            f'<span style="font-size:{"1.35rem" if top else "1.1rem"};font-weight:700;color:{color}">{_esc(d["value"])}</span></div>'
+            f'<div style="height:8px;background:#1E2A44;border-radius:6px;margin:8px 0 4px">'
+            f'<div style="width:{pct:.0f}%;height:8px;background:{color};border-radius:6px"></div></div>'
+            f'<div style="color:#94A3B8;font-size:.8rem">{phrase} · jogo típico: {_esc(d.get("reference_median", "—"))}</div></div>')
+    st.markdown("".join(html_rows), unsafe_allow_html=True)
+
+
 def entity_chips(players: List[str], teams: List[str], key: str) -> None:
     """Botões pequenos para abrir as páginas dos jogadores/times citados (ex.: numa resposta do Assistente)."""
     from src.ui import nav
@@ -238,8 +266,8 @@ def provenance_panel(registry: ProvenanceRegistry) -> None:
 
 
 def hero(kicker: str, title: str, subtitle: str = "") -> None:
-    st.markdown(f'<div class="til-hero"><div class="k">{_esc(kicker)}</div><div class="t">{_esc(title)}</div>'
-                f'<div class="s">{_esc(subtitle)}</div></div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="til-hero"><div class="k">{_esc(t(kicker))}</div><div class="t">{_esc(t(title))}</div>'
+                f'<div class="s">{_esc(t(subtitle))}</div></div>', unsafe_allow_html=True)
 
 
 def _score_of(m) -> str:

@@ -126,9 +126,12 @@ def _stats_table(ctx: MatchContext) -> None:
     from src.metrics.player_rating import CATEGORIES
 
     a, b, c = st.columns([1.4, 1.2, 1])
-    who = a.radio("Atletas de", [ctx.target_team, ctx.opponent, "Ambas as equipes"], horizontal=True, key="ps_team")
-    cat = b.radio("Mostrar", ["Nota", *CATEGORIES, "Tudo"], horizontal=True, key="ps_cat")
-    mode = c.radio("Valores", ["Totais", "Por 90 minutos"], horizontal=True, key="ps_mode")
+    from src.ui.i18n import t
+
+    who = a.radio(t("Atletas de"), [ctx.target_team, ctx.opponent, "Ambas as equipes"], horizontal=True, key="ps_team",
+                  format_func=t)
+    cat = b.radio(t("Mostrar"), ["Nota", *CATEGORIES, "Tudo"], horizontal=True, key="ps_cat", format_func=t)
+    mode = c.radio(t("Valores"), ["Totais", "Por 90 minutos"], horizontal=True, key="ps_mode", format_func=t)
     from src.ui.context import match_ratings
 
     s = match_ratings(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
@@ -182,7 +185,9 @@ def render(ctx: MatchContext) -> None:
                        "Escolha uma partida ✅ (eventos) para o scout completo.", "👤", ctx.bundle.level)
         return
     players_df = PlayerTacticalEvaluator.evaluate_team_players(ctx.df, ctx.target_team)
-    t0, t1, t2 = st.tabs(["📋 Estatísticas individuais", "🧩 Elenco & substituições", "🕵️ Dossiê & comparador"])
+    from src.ui.i18n import t as _t
+
+    t0, t1, t2 = st.tabs([_t(x) for x in ("📋 Estatísticas individuais", "🧩 Elenco & substituições", "🕵️ Dossiê & comparador")])
     with t0:
         try:
             _stats_table(ctx)

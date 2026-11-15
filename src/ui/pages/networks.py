@@ -33,7 +33,9 @@ def render(ctx: MatchContext) -> None:
     team, df = ctx.target_team, ctx.df
     starters, came_in = lineup_split(df, team)
     a, b = st.columns([2, 1])
-    view = a.radio("Quem aparece no campinho", list(VIEWS), format_func=VIEWS.get, horizontal=True,
+    from src.ui.i18n import t
+
+    view = a.radio(t("Quem aparece no campinho"), list(VIEWS), format_func=lambda k: t(VIEWS[k]), horizontal=True,
                    help="Com as trocas, o campinho chegava a ter 16 jogadores. Por padrão mostramos só o XI que "
                         "começou; na última opção, quem entrou aparece com bolinha vazada.")
     min_pass = int(b.number_input("Ligação só aparece com pelo menos … passes", min_value=1, max_value=10, value=2))
@@ -80,6 +82,9 @@ def render(ctx: MatchContext) -> None:
         metric_card("Ameaça criada (xT)", f"+{v}", ctx.prov("xt", "Ameaça criada", v,
                                                           "soma do quanto cada passe e condução aproximou a bola do gol "
                                                           "(grade 12×8)"), "", "pos", unit="xT")
+    from src.ui.glossary import what_is
+
+    what_is(["xT"], key="net_gloss")
     subs_set = set(came_in) if view == "all" else set()
     l, r = st.columns(2)
     with l:

@@ -34,7 +34,9 @@ def render(current_context, match_bar=None) -> None:
             if comp:
                 nav.link(f"🏆 {comp}", "competicao", key="game_comp", name=comp, season=season)
     with top[2]:
-        if st.button("💬 Perguntar sobre este jogo", key="game_ask", use_container_width=True, type="primary"):
+        from src.ui.i18n import t as _t
+
+        if st.button(_t("💬 Perguntar sobre este jogo"), key="game_ask", use_container_width=True, type="primary"):
             st.session_state["goto"] = "assistente"
             st.rerun()
     teams = [t for t in (h, a) if t]
@@ -42,7 +44,9 @@ def render(current_context, match_bar=None) -> None:
         if st.session_state.get("game_focus") not in teams:   # outro jogo: o lado guardado não vale mais
             st.session_state["game_focus"] = ctx.target_team if ctx.target_team in teams else teams[0]
         st.radio("Analisar pelo lado de", teams, horizontal=True, key="game_focus", format_func=pt)
-    sec = st.radio("Seção", SECTIONS, horizontal=True, key="games_section", label_visibility="collapsed")
+    from src.ui.i18n import t
+
+    sec = st.radio("Seção", SECTIONS, horizontal=True, key="games_section", label_visibility="collapsed", format_func=t)
     from src.ui.pages import compare, match_center, networks, players, strengths
 
     if sec == SECTIONS[0]:

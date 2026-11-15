@@ -103,6 +103,10 @@ T: Dict[str, tuple] = {
     "Defesa": ("Defence", "Defensa"), "Duelos e erros": ("Duels & errors", "Duelos y errores"), "Tudo": ("All", "Todo"),
     "Valores": ("Values", "Valores"), "Totais": ("Totals", "Totales"), "Por 90 minutos": ("Per 90 minutes", "Por 90 minutos"),
     "Ordenar por": ("Sort by", "Ordenar por"),
+    "Os 11 em campo num minuto": ("The 11 on the pitch at a given minute", "Los 11 en el campo en un minuto"),
+    "Minuto do recorte": ("Minute", "Minuto"), "👤 Jogadores": ("👤 Players", "👤 Jugadores"),
+    "Equipe em foco": ("Team in focus", "Equipo en foco"),
+    "🏅 Nota (0–10)": ("🏅 Rating (0–10)", "🏅 Nota (0–10)"),
     # estados comuns
     "Nenhum jogador com esse nome.": ("No player with that name.", "Ningún jugador con ese nombre."),
     "Nenhum jogador escolhido": ("No player selected", "Ningún jugador elegido"),

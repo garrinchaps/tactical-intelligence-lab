@@ -25,6 +25,7 @@ from src.ui import theme  # noqa: E402
 from src.ui.components import empty_state, error_state, match_strip  # noqa: E402
 from src.ui.context import build_context, get_service, load_bundle, teams_of  # noqa: E402
 from src.ui import nav  # noqa: E402
+from src.ui.i18n import LANGS, t  # noqa: E402
 from src.ui.pages import (ai_analyst, assistant, catalog, clubs, compare, competition, games, lab,  # noqa: E402
                           ml_inspection, neural, players_search, search_all, squad)
 
@@ -69,7 +70,7 @@ def match_bar() -> None:
                 st.session_state["team_focus"] = st.radio("Equipe em foco", teams, index=teams.index(cur) if cur in teams else 0,
                                                           horizontal=True, key="team_focus_radio", label_visibility="collapsed")
     with c:
-        if st.button("🏟️ Abrir o jogo", use_container_width=True, key="bar_open_game",
+        if st.button(t("🏟️ Abrir o jogo"), use_container_width=True, key="bar_open_game",
                      help="Tela do jogo com todas as seções. Para trocar de jogo, cite-o na pergunta ou use a busca."):
             nav.open_view("jogo", match_id=int(st.session_state["match_id"]))
 
@@ -143,12 +144,16 @@ def top_bar(focused: bool = False) -> None:
     cols = st.columns([2.3] + [1.15] * len(MAIN) + [1.35])
     _logo(cols[0])
     for col, page in zip(cols[1:], MAIN):
-        col.page_link(page, label=page.title, icon=page.icon, use_container_width=True)
-    with cols[-1].popover("⚙️ Bastidores", use_container_width=True):
-        st.caption("Como tudo foi feito — separado do programa.")
+        col.page_link(page, label=t(page.title), icon=page.icon, use_container_width=True)
+    with cols[-1].popover(t("⚙️ Bastidores"), use_container_width=True):
+        st.caption(t("Como tudo foi feito — separado do programa."))
         for page in BACKSTAGE:
-            st.page_link(page, label=page.title, icon=page.icon)
-    q1, q4, q3, q2 = st.columns([5, 2.6, 1.4, 1])
+            st.page_link(page, label=t(page.title), icon=page.icon)
+    q1, q4, q3, q5, q2 = st.columns([5, 2.6, 1.4, 1.2, 1])
+    st.session_state.setdefault("w_lang", st.session_state.get("_lang", "pt"))
+    q5.selectbox(t("Idioma"), list(LANGS), format_func=LANGS.get, key="w_lang", label_visibility="collapsed",
+                 on_change=lambda: st.session_state.__setitem__("_lang", st.session_state["w_lang"]),
+                 help="Idioma da interface (as respostas do Assistente continuam em português).")
     from src.ui.context import DEFAULT_LEVELS, LEVEL_CHOICES
 
     inv = {v: k for k, v in LEVEL_CHOICES.items()}
@@ -158,19 +163,19 @@ def top_bar(focused: bool = False) -> None:
         picked = [LEVEL_CHOICES[k] for k in st.session_state.get("w_levels") or []]
         st.session_state["_levels"] = tuple(picked) or DEFAULT_LEVELS
 
-    q4.multiselect("Nível de dado", list(LEVEL_CHOICES), key="w_levels", on_change=_set_levels,
-                   label_visibility="collapsed", placeholder="Nível de dado",
+    q4.multiselect(t("Nível de dado"), list(LEVEL_CHOICES), key="w_levels", on_change=_set_levels, format_func=t,
+                   label_visibility="collapsed", placeholder=t("Nível de dado"),
                    help="Que jogos aparecem na busca, no Assistente e nas listas: 🟢 com lances e coordenadas, "
                         "📊 com estatísticas da partida, 📄 só com o placar. Marque os três para ver tudo.")
     st.session_state.setdefault("w_only_real", bool(st.session_state.get("_only_real", True)))
-    q3.toggle("Só partidas reais", key="w_only_real",
+    q3.toggle(t("Só partidas reais"), key="w_only_real",
               on_change=lambda: st.session_state.__setitem__("_only_real", st.session_state["w_only_real"]),
               help="Ligado: só jogos que aconteceram de verdade (sem simulações nem arquivos enviados).")
     if "global_q" not in st.session_state:               # a caixa some nas telas de foco; ao voltar, a busca reaparece
         st.session_state["global_q"] = st.session_state.get("_last_q", "")
-    q = q1.text_input("Busca", placeholder="🔎  Jogo, time, jogador ou competição — ex.: Brasil x Croácia, Leverkusen, "
-                      "Messi, Premier League", label_visibility="collapsed", key="global_q", on_change=_go_search)
-    if (q2.button("Buscar", type="primary", use_container_width=True) or st.session_state.pop("_do_search", False)) \
+    q = q1.text_input("Busca", placeholder=t("🔎  Jogo, time, jogador ou competição — ex.: Brasil x Croácia, Leverkusen, "
+                      "Messi, Premier League"), label_visibility="collapsed", key="global_q", on_change=_go_search)
+    if (q2.button(t("Buscar"), type="primary", use_container_width=True) or st.session_state.pop("_do_search", False)) \
             and q.strip():
         st.session_state["_last_q"] = q.strip()
         nav.open_view("buscar", q=q.strip())

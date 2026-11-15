@@ -474,7 +474,9 @@ def _any_players() -> None:
         pa, na = _player_pick("Jogador A", "cmpA")
     with b:
         pb, nb = _player_pick("Jogador B", "cmpB")
-    recorte = st.radio("Recorte", list(RECORTES), horizontal=True, key="cmp_any_cut", index=1)
+    from src.ui.i18n import t
+
+    recorte = st.radio(t("Recorte"), list(RECORTES), horizontal=True, key="cmp_any_cut", index=1, format_func=t)
     if not (pa and pb):
         empty_state("Escolha os dois jogadores", "Digite pelo menos 3 letras de cada nome.", "👥")
         return
@@ -517,9 +519,12 @@ def render_page(current_context, match_bar) -> None:
     hero("Comparar", "Lado a lado", "Jogador × jogador, jogo × jogo, clube × clube, a equipe contra ela mesma ou as duas "
          "equipes da partida aberta.")
     modes = ["👥 Jogador × jogador", "🏟️ Jogo × jogo", "🛡️ Clube × clube", "📅 Equipe × ela mesma", "⚔️ Duas equipes da partida"]
-    pick = st.radio("Modo", modes, horizontal=True, key="cmp_page_mode", label_visibility="collapsed")
+    from src.ui.i18n import t
+
+    pick = st.radio("Modo", modes, horizontal=True, key="cmp_page_mode", label_visibility="collapsed", format_func=t)
     if pick == modes[0]:
-        src = st.radio("Jogadores", ["De qualquer jogo da base", "Da partida aberta"], horizontal=True, key="cmp_any_src")
+        src = st.radio("Jogadores", ["De qualquer jogo da base", "Da partida aberta"], horizontal=True, key="cmp_any_src",
+                       format_func=t)
         if src == "De qualquer jogo da base":
             try:
                 _any_players()

@@ -149,11 +149,11 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
   border: 1px solid {P['border']}; color: {P['text']}; background: rgba(17,26,46,0.9); }}
 .til-chip.tier {{ border-width: 1.5px; }}
 /* cartões de métrica */
-.til-card {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); box-shadow: 0 4px 20px rgba(0,0,0,.6); border: 1px solid {P['border']};
-  border-radius: 18px; padding: 14px 16px; margin-bottom: 12px; min-height: 118px; position: relative; overflow: hidden; }}
+.til-card {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); box-shadow: 0 6px 18px rgba(0,0,0,.32); border: 1px solid {P['border']};
+  border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; min-height: 118px; position: relative; overflow: hidden; }}
 .til-card::after {{ content: ""; position: absolute; left: 16px; right: 16px; top: 0; height: 2px; background: var(--til-grad); opacity: .55; }}
-.til-card .label {{ color: {P['muted']}; font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }}
-.til-card .value {{ font-family: 'Space Grotesk', sans-serif; color: {P['text']}; font-size: 1.9rem; font-weight: 700; line-height: 1.15; margin: 4px 0; }}
+.til-card .label {{ color: {P['muted']}; font-size: 0.78rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }}
+.til-card .value {{ font-family: 'Space Grotesk', sans-serif; color: {P['text']}; font-size: clamp(1.6rem, 2.4vw, 2.2rem); font-weight: 700; line-height: 1.15; margin: 4px 0; }}
 .til-card .unit {{ color: {P['muted']}; font-size: 0.85rem; font-weight: 600; margin-left: 4px; }}
 .til-card .badge {{ display: inline-block; font-size: 0.72rem; font-weight: 800; padding: 2px 8px; border-radius: 999px; }}
 .til-card .badge.pos {{ color: {P['success']}; background: rgba(34,197,94,0.12); }}
