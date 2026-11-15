@@ -136,3 +136,53 @@ def test_generic_questions_are_logged_for_learning(match):
     _ask(match, "qual foi o lance mais bonito do jogo?")
     rows = D.read_generic_fallbacks()
     assert rows and rows[0]["pergunta"] == "qual foi o lance mais bonito do jogo?"
+
+
+# ------------------------------------------------------------------ rede neural: experimentos controlados
+def test_l2_gradient_matches_loss():
+    import numpy as np
+
+    from src.machine_learning.neural_net import NeuralNetwork
+
+    rng = np.random.default_rng(0)
+    X, y = rng.normal(size=(40, 5)), (rng.random(40) > 0.6).astype(float)
+    net = NeuralNetwork([5, 4, 1], learning_rate=0.01, l2=0.1, seed=1)
+    net.mu, net.sigma = np.zeros((1, 5)), np.ones((1, 5))
+    chk = net.gradient_check(X, y)
+    assert chk["max_relative_error"] < 1e-4                           # λ·W agora bate com (λ/2)·Σ‖W‖²
+
+
+def test_experiments_follow_the_plan(tmp_path, monkeypatch):
+    import src.machine_learning.model_registry as R
+
+    assert R.EXPERIMENT_ORDER[0] == "B" and R.EXPERIMENTS["B"]["hidden"] == [32, 16]
+    assert R.EXPERIMENTS["D"] == {"hidden": [64, 32, 16], "learning_rate": 0.0005, "l2": 0.001}
+    data = R.DangerModelRegistry.dataset()
+    keep = sorted(data["match_id"].unique())[:24]
+    data = data[data["match_id"].isin(keep)]
+    monkeypatch.setattr(R, "EXP_EPOCHS", 3)
+    seen = []
+    orig = R.DangerModelRegistry.train_round
+
+    def spy(self, *a, **k):
+        seen.append((a, k))
+        return orig(self, *a, **k)
+    monkeypatch.setattr(R.DangerModelRegistry, "train_round", spy)
+    reg = R.DangerModelRegistry(root=tmp_path / "reg")
+    reg.train_round(data, [32], 0.001, 2, 1e-4, 256, seed=1, origin="campeão de teste", cv_folds=0)
+    out = reg.run_experiments(data, ["B"], attempts=2)
+    assert len(out) == 2 and all(r["experimento"] == "B" for r in out)
+    a, k = seen[-1]
+    assert a[1] == [32, 16] and a[3] == 3 and a[5] == 256
+    assert k["patience"] == 10 and k["warm_start"] is False and k["optimizer"] == "adam"
+    assert reg.champion_info()["version"] == 1 or out[-1]["promoted"] or out[0]["promoted"]
+
+
+def test_feature_report_and_class_balance():
+    import src.machine_learning.model_registry as R
+
+    data = R.DangerModelRegistry.dataset()
+    rep = R.feature_report(data)
+    assert len(rep) == 14 and set(rep.columns) >= {"variavel", "auc_sozinha", "alerta"}
+    bal = R.class_balance(data)
+    assert 0 < bal["positivas_pct"] < 100

@@ -86,7 +86,9 @@ class NeuralNetwork:
         eps = 1e-12
         y = y.reshape(-1, 1)
         bce = -np.mean(y * np.log(y_hat + eps) + (1 - y) * np.log(1 - y_hat + eps))
-        reg = 0.5 * self.l2 * sum(float(np.sum(W * W)) for W in self.weights) / max(len(y), 1)
+        # L2 padrão: perda média + (λ/2)·Σ‖W‖² → gradiente λ·W (v36: antes era dividido pelo tamanho do lote,
+        # o que deixava λ ~256× mais fraco do que o valor escolhido na tela)
+        reg = 0.5 * self.l2 * sum(float(np.sum(W * W)) for W in self.weights)
         return float(bce + reg)
 
     # ------------------------------------------------------------ forward
@@ -109,7 +111,7 @@ class NeuralNetwork:
         db = [np.zeros_like(b) for b in self.biases]
         dZ = A[-1] - y                                    # sigmoide + BCE
         for l in range(len(self.weights) - 1, -1, -1):
-            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l] / m
+            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l]
             db[l] = dZ.sum(axis=0, keepdims=True) / m
             if l > 0:
                 dA_prev = dZ @ self.weights[l].T
@@ -209,7 +211,7 @@ class NeuralNetwork:
         db = [np.zeros_like(b) for b in self.biases]
         dZ = (A[-1] - y) * w
         for l in range(len(self.weights) - 1, -1, -1):
-            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l] / m
+            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l]
             db[l] = dZ.sum(axis=0, keepdims=True) / m
             if l > 0:
                 dZ = (dZ @ self.weights[l].T) * self.relu_grad(Zs[l - 1])

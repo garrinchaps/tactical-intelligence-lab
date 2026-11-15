@@ -129,10 +129,12 @@ def render(ctx=None) -> None:
         st.markdown(r"""
 - **Inicialização de He:** $W \sim \mathcal{N}(0, \sqrt{2/n_{entrada}})$ — mantém a variância das ativações com ReLU; vieses = 0.
 - **Forward:** $Z_l = A_{l-1}W_l + b_l$; $A_l = \mathrm{ReLU}(Z_l)$ nas ocultas e $\sigma(Z_L)$ na saída.
-- **Perda:** entropia cruzada binária $-\frac{1}{m}\sum y\log\hat y + (1-y)\log(1-\hat y)$ + $\frac{\lambda}{2m}\sum\|W\|^2$.
-- **Backpropagation:** $dZ_L = \hat y - y$; $dW_l = A_{l-1}^\top dZ_l/m + \lambda W_l/m$; $db_l = \sum dZ_l/m$;
+- **Perda:** entropia cruzada binária $-\frac{1}{m}\sum y\log\hat y + (1-y)\log(1-\hat y)$ + $\frac{\lambda}{2}\sum\|W\|^2$.
+- **Backpropagation:** $dZ_L = \hat y - y$; $dW_l = A_{l-1}^\top dZ_l/m + \lambda W_l$; $db_l = \sum dZ_l/m$;
   $dZ_{l-1} = (dZ_l W_l^\top)\odot \mathbb{1}[Z_{l-1}>0]$.
-- **Atualização:** $W \leftarrow W - \eta\, dW$ em mini-lotes.
+- **Atualização:** Adam ($\beta_1$ 0,9 · $\beta_2$ 0,999) em mini-lotes; parada antecipada numa fatia de partidas do
+  próprio treino (guarda a melhor época).
+- **Padronização:** média e desvio calculados só com o treino (em cada dobra do GroupKFold, só com o treino da dobra).
 - **Verificação:** o teste `test_gradient_check` compara o gradiente analítico com diferenças centrais
   $(L(w+\varepsilon)-L(w-\varepsilon))/2\varepsilon$.
 """)
@@ -146,7 +148,7 @@ def render(ctx=None) -> None:
     hidden_txt = a.text_input("Neurônios por camada oculta", "32, 16", help="ex.: 32, 16  ou  8")
     lr = b.select_slider("Taxa de aprendizado (η, Adam)", [0.001, 0.003, 0.005, 0.01, 0.02, 0.05], value=0.01,
                          help="Otimizador Adam: converge em poucas épocas; a parada antecipada guarda a melhor época.")
-    epochs = c.slider("Épocas", 5, 80, 30)
+    epochs = c.slider("Épocas (máximo)", 5, 100, 30, help="A parada antecipada interrompe antes se a rede parar de melhorar.")
     l2 = d.select_slider("Regularização L2 (λ)", [0.0, 1e-4, 1e-3, 1e-2], value=1e-3)
     batch = e.select_slider("Tamanho do lote", [64, 128, 256, 512], value=256)
     try:
@@ -166,10 +168,27 @@ def render(ctx=None) -> None:
     use_proxy = t2.toggle("Incluir também as sem 360 (densidade de adversários estimada pelos eventos)", value=False,
                           help="Muito mais partidas (OpenPlay, Wyscout, StatsBomb sem 360), com uma das variáveis "
                                "estimada. O teste continua só com 360 medido, então a promoção mostra se ajudou.")
-    c1, c2 = st.columns([1, 1])
-    train_now = c1.button("▶ Treinar nova versão (desafiante)", type="primary", use_container_width=True)
-    search_now = c2.button("🎲 Busca automática de hiperparâmetros (3 tentativas)", use_container_width=True)
-    if train_now or search_now:
+    from src.machine_learning.model_registry import (EXP_BATCH, EXP_EPOCHS, EXP_PATIENCE, EXPERIMENT_ORDER,
+                                                     EXPERIMENTS, class_balance, feature_report)
+
+    st.markdown("#### 🧪 Experimentos controlados")
+    st.caption(f"Todos com Adam, até {EXP_EPOCHS} épocas, lote {EXP_BATCH}, parada antecipada com paciência "
+               f"{EXP_PATIENCE}, inicialização He e treino do zero. O campeão só é trocado com superioridade estatística.")
+    st.dataframe(__import__("pandas").DataFrame([
+        {"experimento": k, "arquitetura": " → ".join(map(str, [len(FEATURES), *v["hidden"], 1])),
+         "η": v["learning_rate"], "λ": v["l2"]} for k, v in EXPERIMENTS.items()]), hide_index=True, use_container_width=True)
+    x1, x2 = st.columns([2, 1])
+    exp_pick = x1.multiselect("Experimentos a rodar (na ordem)", EXPERIMENT_ORDER, default=["B"])
+    attempts = x2.number_input("Tentativas por clique", 1, 10, 1,
+                               help="Quantas sementes diferentes treinar de uma vez (vale para todos os botões). "
+                                    "Cada tentativa é registrada e julgada sozinha.")
+    c1, c2, c3 = st.columns([1, 1, 1])
+    exp_now = c1.button("🧪 Rodar experimentos", type="primary", use_container_width=True, disabled=not exp_pick)
+    train_now = c2.button("▶ Treinar com os hiperparâmetros acima", use_container_width=True)
+    search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", use_container_width=True)
+    st.caption("Treinos longos travam esta aba enquanto rodam. Para vários experimentos, prefira o terminal: "
+               "`python -m src.machine_learning.model_registry --treinar --experimentos B,A,C,D`")
+    if train_now or search_now or exp_now:
         with st.spinner("Montando o conjunto de treino (amostra + protocolo + banco)..."):
             from src.ui.context import get_service
 
@@ -177,13 +196,31 @@ def render(ctx=None) -> None:
                                                include_proxy=use_proxy)
         st.caption(f"Conjunto: {full['match_id'].nunique()} partidas · {len(full):,} ações".replace(",", "."))
         with st.spinner("Treinando (forward → perda → backpropagation → atualização) e comparando com o campeão..."):
-            if train_now:
-                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch)]
+            if exp_now:
+                rounds = reg.run_experiments(full, exp_pick, attempts=int(attempts))
+            elif train_now:
+                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch, seed=int(__import__("time").time()) + k)
+                          for k in range(int(attempts))]
             else:
-                rounds = reg.auto_search(full, trials=3, epochs=epochs)
+                rounds = reg.auto_search(full, trials=int(attempts), epochs=epochs)
+        st.session_state["nn_data_diag"] = {"bal": class_balance(full), "feat": feature_report(full)}
         last = rounds[-1]
         st.session_state["nn_live"] = {"net": last["net"], "auc": last["val_auc"], "rounds": rounds,
                                        "n_tr": last["n_samples_train"], "m_tr": last["n_matches_train"]}
+    with st.expander("🔬 Conferência dos dados de treino (classes e as 14 variáveis)"):
+        diag = st.session_state.get("nn_data_diag")
+        if diag is None and st.button("Conferir agora (usa a amostra local, ~2 s)", key="nn_diag"):
+            diag = {"bal": class_balance(data), "feat": feature_report(data)}
+            st.session_state["nn_data_diag"] = diag
+        if diag:
+            b = diag["bal"]
+            st.markdown(f"**Classes:** {b.get('positivas_pct')}% das {b.get('acoes', 0):,} ações terminam em finalização "
+                        f"({b.get('partidas')} partidas). Ponderar as classes (peso ≈ {b.get('peso_que_equilibraria')}) "
+                        "deixaria a rede descalibrada e pioraria a log-loss, que é o critério de promoção — por isso fica "
+                        "desligado; a AUC já não depende do desequilíbrio.".replace(",", "."))
+            st.dataframe(diag["feat"], hide_index=True, use_container_width=True)
+            st.caption("AUC sozinha: 0,5 = a variável sozinha não separa jogadas perigosas; longe de 0,5 (para cima ou para baixo) = tem sinal. "
+                       "Alerta “redundante” = quase igual a outra variável (|r| > 0,95).")
     live = st.session_state.get("nn_live")
     if live:
         for r in live["rounds"]:
@@ -244,6 +281,7 @@ def render(ctx=None) -> None:
         else:
             st.caption("Neurônio de saída: não tem filhos.")
     _versions_and_usage(ctx, reg, live)
+    _assistant_misses()
     if ctx is not None:
         provenance_panel(ctx.registry)
 
@@ -265,11 +303,12 @@ def _versions_and_usage(ctx, reg, live) -> None:
                             "n_samples_train", "val_auc", "val_logloss", "cv_logloss_std", "test_gain", "gain_ci_low",
                             "promoted", "reason"]].rename(columns={
             "created": "criada", "origin": "origem", "hidden": "ocultas", "learning_rate": "η", "n_matches_train": "partidas",
-            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (teste)", "cv_logloss_std": "σ dobras/sementes",
+            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (teste)", "cv_logloss_std": "desvio da perda entre dobras",
             "test_gain": "ganho", "gain_ci_low": "IC95% inferior", "promoted": "promovida", "reason": "decisão"}),
-            "Promoção rigorosa: validação GroupKFold por partida (5 dobras × 2 sementes) mede a variação σ; a nova versão "
-            "só vira campeã se, no teste isolado (partidas que nunca treinam), o ganho de perda sobre o campeão for maior "
-            "que σ e o IC 95% do bootstrap por partida ficar acima de zero. Todas as tentativas ficam registradas.")
+            "Promoção rigorosa: a nova versão só vira campeã se, no teste isolado (partidas que nunca treinam), "
+            "o IC 95% do bootstrap pareado por partida do ganho de perda ficar acima de zero, o ganho for ≥ 0,0005, "
+            "a AUC não cair mais que 0,005 em relação ao campeão e o desvio da AUC entre as dobras do GroupKFold por "
+            "partida (3 dobras) for ≤ 0,05. Todas as tentativas ficam registradas.")
     with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
         if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
             with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):
@@ -307,3 +346,18 @@ def _versions_and_usage(ctx, reg, live) -> None:
                 comparison_table(top.rename(columns={"acoes_perigosas": "ações perigosas", "maior_chance_pct": "maior chance (%)"}))
     if challenger is not None:
         st.caption("Se o desafiante for promovido, a coluna da direita passa a ser a resposta do Analista IA.")
+
+
+def _assistant_misses() -> None:
+    """Perguntas que o Assistente não soube direcionar: viram casos de teste da próxima versão."""
+    from src.intelligence.dynamic_analyst import read_generic_fallbacks
+
+    rows = read_generic_fallbacks(last=40)
+    with st.expander(f"💬 Perguntas que o Assistente respondeu só com o panorama ({len(rows)})"):
+        if not rows:
+            st.caption("Nenhuma até agora. Quando uma pergunta com alvo cair no resumo geral, ela aparece aqui para "
+                       "virar caso de teste.")
+            return
+        st.dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, use_container_width=True)
+        st.caption("Arquivo local data/assistente_sem_alvo.jsonl (não vai para o GitHub). Mande essas perguntas na "
+                   "próxima sessão para eu ensinar o Assistente a respondê-las.")

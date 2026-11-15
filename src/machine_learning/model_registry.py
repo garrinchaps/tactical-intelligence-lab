@@ -37,6 +37,17 @@ MAX_CV_AUC_STD = 0.05           # estabilidade: AUC das dobras do GroupKFold nã
 MAX_AUC_DROP = 0.005            # e a AUC no teste isolado não pode cair mais que isso em relação ao campeão
 VAL_FRACTION = 0.25
 
+# v36 — os 4 experimentos controlados pedidos pelo usuário (todos: Adam, até 100 épocas, lote 256, parada
+# antecipada com paciência 10, inicialização He nas camadas ReLU, treino do zero — sem herdar pesos do campeão).
+EXPERIMENTS: Dict[str, Dict[str, Any]] = {
+    "A": {"hidden": [32], "learning_rate": 0.001, "l2": 0.0001},
+    "B": {"hidden": [32, 16], "learning_rate": 0.001, "l2": 0.0001},
+    "C": {"hidden": [32, 16, 8], "learning_rate": 0.001, "l2": 0.001},
+    "D": {"hidden": [64, 32, 16], "learning_rate": 0.0005, "l2": 0.001},
+}
+EXPERIMENT_ORDER = ["B", "A", "C", "D"]          # começar pelo B
+EXP_EPOCHS, EXP_BATCH, EXP_PATIENCE = 100, 256, 10
+
 
 @dataclass
 class Version:
@@ -190,8 +201,13 @@ class DangerModelRegistry:
     # ------------------------------------------------- validação agrupada
     @staticmethod
     def group_cv(train: pd.DataFrame, hidden: List[int], learning_rate: float, epochs: int, l2: float,
-                 batch_size: int, folds: int = 5, seeds=(11, 23), optimizer: str = "sgd") -> Dict[str, Any]:
-        """GroupKFold por match_id (nenhuma partida aparece no treino e na validação da mesma dobra) × sementes."""
+                 batch_size: int, folds: int = 5, seeds=(11, 23), optimizer: str = "sgd",
+                 patience: int = 0) -> Dict[str, Any]:
+        """
+        GroupKFold por match_id (nenhuma partida aparece no treino e na validação da mesma dobra) × sementes.
+        A padronização é ajustada só com o treino de cada dobra (fit dentro de `NeuralNetwork.fit`).
+        Com `patience`, cada dobra separa ~10% das SUAS partidas de treino para a parada antecipada.
+        """
         from sklearn.model_selection import GroupKFold
 
         groups = train["match_id"].to_numpy()
@@ -205,7 +221,16 @@ class DangerModelRegistry:
                 if len(np.unique(y[va])) < 2:
                     continue
                 net = NeuralNetwork([len(FEATURES), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=int(sd))
-                net.fit(X[tr], y[tr], epochs=epochs, batch_size=batch_size, optimizer=optimizer)
+                fit_i, stop_i = tr, None
+                if patience:
+                    gids = np.unique(groups[tr])
+                    if len(gids) > 9:
+                        pick = set(np.random.default_rng(int(sd)).choice(gids, max(1, len(gids) // 10), replace=False))
+                        mask = np.isin(groups[tr], list(pick))
+                        fit_i, stop_i = tr[~mask], tr[mask]
+                net.fit(X[fit_i], y[fit_i], epochs=epochs, batch_size=batch_size, optimizer=optimizer,
+                        X_stop=X[stop_i] if stop_i is not None else None, y_stop=y[stop_i] if stop_i is not None else None,
+                        patience=patience if stop_i is not None else 0)
                 pr = np.clip(net.predict_proba(X[va]), 1e-6, 1 - 1e-6)
                 ll.append(float(log_loss(y[va], pr)))
                 auc.append(float(roc_auc_score(y[va], pr)))
@@ -236,7 +261,8 @@ class DangerModelRegistry:
     def train_round(self, data: pd.DataFrame, hidden: List[int], learning_rate: float = 0.01, epochs: int = 30,
                     l2: float = 1e-3, batch_size: int = 256, seed: Optional[int] = None,
                     origin: str = "treino", cv_folds: int = 3, cv_seeds=(11,), optimizer: str = "adam",
-                    warm_start: Optional[bool] = None, patience: int = 4,
+                    warm_start: Optional[bool] = None, patience: int = 4, cv_epochs: Optional[int] = None,
+                    class_weight_balanced: bool = False,
                     progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
         Treina um desafiante e decide a promoção:
@@ -256,8 +282,9 @@ class DangerModelRegistry:
         train, val = self.split(data)
         seed = int(seed if seed is not None else time.time()) % 100_000
         say(f"validação cruzada agrupada ({cv_folds} dobras por partida)…")
-        cv = self.group_cv(train, hidden, learning_rate, max(4, min(epochs, 12)), l2, batch_size, cv_folds, cv_seeds,
-                           optimizer=optimizer) if cv_folds else {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
+        cv = self.group_cv(train, hidden, learning_rate, cv_epochs or max(4, min(epochs, 12)), l2, batch_size, cv_folds,
+                           cv_seeds, optimizer=optimizer, patience=patience if cv_epochs else 0) \
+            if cv_folds else {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
         cv_mean = round(float(np.mean(cv["logloss"])), 5) if cv["logloss"] else None
         cv_std = round(float(np.std(cv["logloss"], ddof=1)), 5) if len(cv["logloss"]) > 1 else None
         cv_auc_std = round(float(np.std(cv["auc"], ddof=1)), 4) if len(cv["auc"]) > 1 else None
@@ -277,7 +304,7 @@ class DangerModelRegistry:
         say("treino final" + (" (ajuste fino a partir do campeão)" if warm else "") + "…")
         net.fit(fit_part[FEATURES].to_numpy(float), fit_part["target"].to_numpy(int), epochs=epochs,
                 batch_size=batch_size, X_val=val[FEATURES].to_numpy(float), y_val=val["target"].to_numpy(int),
-                optimizer=optimizer, refit_scaler=not warm,
+                optimizer=optimizer, refit_scaler=not warm, class_weight_balanced=class_weight_balanced,
                 X_stop=stop_part[FEATURES].to_numpy(float) if stop_part is not None else None,
                 y_stop=stop_part["target"].to_numpy(int) if stop_part is not None else None,
                 patience=patience if stop_part is not None else 0)
@@ -351,6 +378,72 @@ class DangerModelRegistry:
             if progress:
                 progress(f"tentativa {i + 1}/{trials}: {hidden}, η={lr}, λ={l2} → {'PROMOVIDA' if r['promoted'] else 'rejeitada'}")
         return out
+
+
+    def run_experiments(self, data: pd.DataFrame, names: Optional[List[str]] = None, attempts: int = 1,
+                        progress: Optional[Callable[[str], None]] = None) -> List[Dict[str, Any]]:
+        """
+        Experimentos controlados A–D (ver EXPERIMENTS), na ordem pedida (B primeiro). `attempts` = quantas sementes
+        por experimento neste clique. Cada tentativa passa pelo mesmo critério de promoção do `train_round`; o
+        campeão (v002) só é trocado se houver superioridade estatística.
+        """
+        say = progress or (lambda m: None)
+        names = [n for n in (names or EXPERIMENT_ORDER) if n in EXPERIMENTS]
+        out = []
+        base = int(time.time()) % 10_000
+        for name in names:
+            cfg = EXPERIMENTS[name]
+            for k in range(max(1, int(attempts))):
+                say(f"experimento {name} {cfg['hidden']} · tentativa {k + 1}/{attempts}…")
+                r = self.train_round(data, cfg["hidden"], cfg["learning_rate"], EXP_EPOCHS, cfg["l2"], EXP_BATCH,
+                                     seed=base + 97 * k + ord(name), origin=f"experimento {name}", cv_folds=3,
+                                     cv_seeds=(11,), optimizer="adam", warm_start=False, patience=EXP_PATIENCE,
+                                     cv_epochs=30, progress=progress)
+                r["experimento"] = name
+                out.append(r)
+                say(f"  {name}: v{r['version']:03d} → {'PROMOVIDA' if r['promoted'] else 'rejeitada'} "
+                    f"({r['epochs_run']} épocas, AUC {r['val_auc']:.4f})")
+        return out
+
+
+def feature_report(data: pd.DataFrame) -> pd.DataFrame:
+    """
+    Qualidade das 14 variáveis: faltantes, se é quase constante, AUC sozinha (0,5 = não separa nada; abaixo de 0,5
+    separa ao contrário) e a variável mais correlacionada (|r| > 0,95 = redundante).
+    """
+    rows = []
+    if data is None or data.empty:
+        return pd.DataFrame()
+    y = data["target"].to_numpy(int)
+    num = data[FEATURES].apply(pd.to_numeric, errors="coerce")
+    corr = num.corr().abs()
+    for f in FEATURES:
+        x = num[f]
+        miss = float(x.isna().mean())
+        xv = x.fillna(x.median())
+        uniq = int(xv.nunique())
+        try:
+            auc = float(roc_auc_score(y, xv)) if uniq > 1 and len(np.unique(y)) > 1 else None
+        except Exception:
+            auc = None
+        c = corr[f].drop(f).sort_values(ascending=False)
+        rows.append({"variavel": f, "faltantes_pct": round(100 * miss, 2), "valores_distintos": uniq,
+                     "desvio": round(float(xv.std()), 4), "auc_sozinha": None if auc is None else round(auc, 4),
+                     "mais_parecida": c.index[0] if len(c) else "", "correlacao": round(float(c.iloc[0]), 3) if len(c) else None,
+                     "alerta": ("constante" if uniq <= 1 else "faltantes > 20%" if miss > 0.2 else
+                                "redundante" if len(c) and c.iloc[0] > 0.95 else
+                                "quase sem sinal" if auc is not None and abs(auc - 0.5) < 0.01 else "")})
+    return pd.DataFrame(rows)
+
+
+def class_balance(data: pd.DataFrame) -> Dict[str, Any]:
+    """Proporção de ações que terminam em finalização (classe positiva). Ponderar classes piora a log-loss
+    (calibração), que é o critério de promoção — por isso o balanceamento fica desligado por padrão."""
+    if data is None or data.empty:
+        return {}
+    pos = float(data["target"].mean())
+    return {"positivas_pct": round(100 * pos, 2), "acoes": int(len(data)), "partidas": int(data["match_id"].nunique()),
+            "peso_que_equilibraria": round((1 - pos) / max(pos, 1e-9), 2)}
 
 
 # ---------------------------------------------------------------- uso nas respostas
@@ -482,6 +575,7 @@ def main() -> None:
     Treino pelo terminal (mesmo critério de promoção da tela Bastidores):
         python -m src.machine_learning.model_registry --treinar               ajuste fino do campeão + 2 arquiteturas
         python -m src.machine_learning.model_registry --treinar --tentativas 5 --com-estimadas
+        python -m src.machine_learning.model_registry --treinar --experimentos B          (v36: A/B/C/D controlados)
     """
     import argparse
 
@@ -497,6 +591,7 @@ def main() -> None:
     ap.add_argument("--epocas", type=int, default=30)
     ap.add_argument("--partidas-novas", type=int, default=200, help="partidas do banco preparadas nesta rodada")
     ap.add_argument("--com-estimadas", action="store_true", help="inclui partidas sem 360 (densidade estimada)")
+    ap.add_argument("--experimentos", default="", help="ex.: B ou B,A,C,D — experimentos controlados (v36)")
     args = ap.parse_args()
     if not args.treinar:
         ap.print_help()
@@ -510,6 +605,16 @@ def main() -> None:
     print(f"conjunto: {data['match_id'].nunique()} partidas, {len(data)} ações", flush=True)
     champion_cached()                                   # garante a v001 antes de comparar
     reg = DangerModelRegistry()
+    if args.experimentos:
+        bal = class_balance(data)
+        print(f"classes: {bal.get('positivas_pct')}% das ações terminam em finalização", flush=True)
+        names = [x.strip().upper() for x in args.experimentos.split(",") if x.strip()]
+        for r in reg.run_experiments(data, names, attempts=max(1, args.tentativas if args.tentativas != 3 else 1),
+                                     progress=say):
+            print(f"  {r['experimento']} v{r['version']:03d}: {r['reason']}", flush=True)
+        ci = reg.champion_info() or {}
+        print(f"campeão atual: v{ci.get('version', 0):03d} (AUC {ci.get('val_auc')}, perda {ci.get('val_logloss')})")
+        return
     for r in reg.auto_search(data, trials=args.tentativas, epochs=args.epocas, progress=say):
         print(f"  v{r['version']:03d}: {r['reason']}", flush=True)
     ci = reg.champion_info() or {}
