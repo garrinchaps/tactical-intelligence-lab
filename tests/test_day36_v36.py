@@ -539,3 +539,21 @@ def test_rival_diagnosis_has_two_and_two_with_origin():
     assert all("contra X" in d["origem"] for d in dg["fortalezas"] + dg["vulnerabilidades"])
     assert not any("zona 14" in d["texto"].lower() for d in dg["fortalezas"])
     assert rival_diagnosis({"n": 0, "a_favor": {}, "contra": {}})["aviso"].startswith("base insuficiente")
+
+
+# ------------------------------------------------------------------ E: analista
+def test_latency_is_measured_and_logged(match, tmp_path, monkeypatch):
+    import src.intelligence.dynamic_analyst as D
+
+    monkeypatch.setattr(D, "LATENCY_PATH", str(tmp_path / "lat.jsonl"))
+    r = _ask(match, "quem fez mais passes?")
+    assert isinstance(r["latency_s"], float) and r["latency_s"] < D.LATENCY_GOAL_S
+    assert D.read_latency()[-1]["pergunta"] == "quem fez mais passes?"
+
+
+def test_says_no_data_when_source_lacks_it(match):
+    df = match[0]
+    if (df["type_name"] == "Pressure").any():
+        pytest.skip("fonte do teste registra pressões")
+    md = _ask(match, "quem fez mais pressões?")["report_markdown"]
+    assert "Não tenho esse dado" in md and "zero" in md

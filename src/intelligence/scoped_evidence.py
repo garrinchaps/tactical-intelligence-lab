@@ -316,6 +316,16 @@ class ScopedEvidenceBuilder:
         scope_team = None
         if sc.team_named and sc.team_focus in ("target", "opponent"):
             scope_team = team
+        # E5: se a fonte nem registra esse tipo de lance, a resposta é "não tenho esse dado", não "ninguém fez"
+        need = {"pressoes": ("Pressure",), "erros_diretos": ("Error",), "conducoes": ("Carry",),
+                "xg": None, "faltas_sofridas": ("Foul Won",)}.get(metric)
+        if metric == "xg" and ("shot_statsbomb_xg" not in df or pd.to_numeric(df["shot_statsbomb_xg"], errors="coerce").notna().sum() == 0) \
+                and (df["type_name"] == "Shot").any():
+            return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0,
+                    "sem_dado": "esta fonte"}
+        if need and not df["type_name"].isin(need).any():
+            return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0,
+                    "sem_dado": "esta fonte"}
         st = player_match_stats(w, scope_team)
         if st.empty:
             return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0}

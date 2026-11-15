@@ -352,6 +352,14 @@ def _assistant_misses() -> None:
     """Perguntas que o Assistente não soube direcionar: viram casos de teste da próxima versão."""
     from src.intelligence.dynamic_analyst import read_generic_fallbacks
 
+    from src.intelligence.dynamic_analyst import LATENCY_GOAL_S, read_latency
+
+    lat = read_latency()
+    if lat:
+        secs = pd.Series([r["segundos"] for r in lat])
+        st.markdown(f"**⏱️ Tempo de resposta do Assistente** (últimas {len(lat)} perguntas): mediana "
+                    f"{secs.median():.1f} s · 90% abaixo de {secs.quantile(0.9):.1f} s · meta < {LATENCY_GOAL_S:.0f} s · "
+                    f"{int((secs > LATENCY_GOAL_S).sum())} acima da meta.")
     rows = read_generic_fallbacks(last=40)
     with st.expander(f"💬 Perguntas que o Assistente respondeu só com o panorama ({len(rows)})"):
         if not rows:

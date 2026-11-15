@@ -90,6 +90,32 @@ def log_generic_fallback(query: str, sc: Any, path: Optional[str] = None) -> Non
         pass
 
 
+LATENCY_PATH = "data/assistente_latencia.jsonl"
+LATENCY_GOAL_S = 8.0
+
+
+def log_latency(query: str, seconds: float, engine: str, ask: Optional[str], path: Optional[str] = None) -> None:
+    import datetime
+    import os
+
+    path = path or LATENCY_PATH
+    try:
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps({"quando": datetime.datetime.now().isoformat(timespec="seconds"), "segundos": seconds,
+                                 "motor": engine, "tipo": ask, "pergunta": query[:200]}, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+def read_latency(path: Optional[str] = None, last: int = 200) -> List[Dict[str, Any]]:
+    try:
+        with open(path or LATENCY_PATH, encoding="utf-8") as fh:
+            return [json.loads(x) for x in fh if x.strip()][-last:]
+    except Exception:
+        return []
+
+
 def read_generic_fallbacks(path: Optional[str] = None, last: int = 50) -> List[Dict[str, Any]]:
     try:
         with open(path or MISSES_PATH, encoding="utf-8") as fh:
@@ -200,6 +226,10 @@ class LocalScopedWriter:
                 continue
             if key == "ranking":
                 lid = b["lideres"]
+                if b.get("sem_dado"):
+                    out.append(f"**Não tenho esse dado nesta partida.** A fonte ({b['sem_dado']}) não registra "
+                               f"{b['metrica'].lower()} — por isso não dá para fazer esse ranking, nem dizer que foi zero.")
+                    continue
                 if not lid:
                     out.append(f"Nenhum atleta registrou {b['metrica'].lower()} no recorte.")
                     continue
@@ -970,7 +1000,18 @@ class DynamicTacticalAnalyst:
                            f"Liberados para a chave: {', '.join(found[:8]) or 'nenhum (a chave não lista modelos)'}. "
                            f"Último erro: {str(last)[:160] if last else '—'}")
 
-    def answer(
+    def answer(self, query: str, *args, **kwargs) -> Dict[str, Any]:
+        """E1: mede o tempo de cada resposta e registra em data/assistente_latencia.jsonl (meta: < 8 s com cache)."""
+        import time as _time
+
+        t0 = _time.perf_counter()
+        res = self._answer(query, *args, **kwargs)
+        secs = round(_time.perf_counter() - t0, 2)
+        res["latency_s"] = secs
+        log_latency(query, secs, res.get("engine_used", ""), (res.get("scope") or {}).get("ask"))
+        return res
+
+    def _answer(
         self,
         query: str,
         target_team: str,

@@ -38,7 +38,9 @@ def _meta_line(res) -> str:
     tot = n.get("exato", 0) + n.get("derivado", 0)
     eng = "Gemini" if str(res.get("engine_used", "")).upper().startswith("GEMINI") else "analista local"
     hidden = f" · {n['ocultadas']} trecho(s) cortado(s) por falta de origem" if n.get("ocultadas") else ""
-    return f"✔ {tot} números conferidos com os dados da partida · redigido pelo {eng}{hidden}"
+    lat = res.get("latency_s")
+    speed = f" · respondido em {lat:.1f} s" if isinstance(lat, (int, float)) else ""
+    return f"✔ {tot} números conferidos com os dados da partida · redigido pelo {eng}{hidden}{speed}"
 
 
 def _audit_panel(h) -> None:
