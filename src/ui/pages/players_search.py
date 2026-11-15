@@ -36,9 +36,14 @@ def player_index(version: str) -> pd.DataFrame:
 
         lake = Lake(sqlite_path=None)
         if lake.exists("tm_jogadores"):
-            tm = lake.read("tm_jogadores", ["nome", "clube", "ultima_temporada"])
+            cols = ["nome", "clube", "ultima_temporada"]
+            try:
+                tm = lake.read("tm_jogadores", cols + ["nascimento"])
+            except Exception:
+                tm = lake.read("tm_jogadores", cols)
             tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= 2015]
-            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Transfermarkt", "jogos": None} for r in tm.itertuples()]
+            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Transfermarkt", "jogos": None,
+                      "nascimento": str(getattr(r, "nascimento", "") or "")[:10]} for r in tm.itertuples()]
         if lake.exists("us_jogadores"):
             us = lake.read("us_jogadores", ["nome", "clube"]).drop_duplicates()
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Understat", "jogos": None} for r in us.itertuples()]
@@ -46,7 +51,13 @@ def player_index(version: str) -> pd.DataFrame:
         pass
     df = pd.DataFrame(rows)
     if not df.empty:
+        from src.data_lake.ids import unify_people
+
         df["core"] = df["nome"].map(_norm)
+        df = df[df["core"] != ""].copy()
+        if "nascimento" not in df:
+            df["nascimento"] = ""
+        df["pessoa"] = unify_people(df)            # v36: o mesmo atleta em várias fontes/nomes vira uma linha só
     return df
 
 
@@ -128,12 +139,17 @@ def render(_ctx=None) -> None:
         return
     idx = player_index(get_service().db.stable_version())
     core = core or _norm(given)
-    hit = idx[idx["core"] == core] if not idx.empty else idx
+    if not idx.empty:
+        person = core if core in set(idx["pessoa"]) else next(iter(idx.loc[idx["core"] == core, "pessoa"]), core)
+        hit = idx[idx["pessoa"] == person]
+    else:
+        hit = idx
     if hit.empty:
         empty_state("Jogador sem dados na base", "", "👤", "Abra partidas com eventos ou sincronize Transfermarkt/Understat.")
         return
     p = {"core": core, "nome": min(hit["nome"], key=len), "nome_longo": max(hit["nome"], key=len),
-         "clube": next((x for x in hit["clube"] if isinstance(x, str) and x), ""),
+         "clube": next((x for x in list(hit.loc[hit["fonte"] == "Transfermarkt", "clube"]) + list(hit["clube"])
+                        if isinstance(x, str) and x), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'

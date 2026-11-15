@@ -102,10 +102,17 @@ def find_players(q: str, version: str, n: int = 8) -> pd.DataFrame:
     hit = idx[idx["core"].str.contains(core, regex=False) | idx["nome"].str.lower().str.contains(q.strip().lower(), regex=False)]
     if hit.empty:
         return hit
-    g = hit.groupby("core").agg(nome=("nome", lambda s: min(s, key=len)),
+    hit = idx[idx["pessoa"].isin(set(hit["pessoa"]))] if "pessoa" in idx else hit   # todas as grafias da pessoa
+    g = hit.groupby(hit["pessoa"] if "pessoa" in hit else hit["core"]).agg(
+                                nome=("nome", lambda s: min(s, key=len)),
                                 clube=("clube", lambda s: next((x for x in s if isinstance(x, str) and x), "")),
                                 fontes=("fonte", lambda s: ", ".join(sorted(set(s)))),
                                 jogos=("jogos", "sum")).reset_index()
+    g = g.rename(columns={g.columns[0]: "core"})
+    tm = hit[hit["fonte"] == "Transfermarkt"].dropna(subset=["clube"])
+    if not tm.empty and "pessoa" in tm:                # clube atual = o do Transfermarkt (seleção/histórico ficam atrás)
+        cur = tm.groupby("pessoa")["clube"].first()
+        g["clube"] = [cur.get(c, cl) for c, cl in zip(g["core"], g["clube"])]
     return g.sort_values("jogos", ascending=False).head(n)
 
 

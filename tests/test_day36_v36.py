@@ -274,3 +274,31 @@ def test_club_page_respects_top_level_filter():
 
     src = inspect.getsource(C.render)
     assert "team_matches(names, include_score_only=None)" in src          # nível do topo, não "tudo analisável"
+
+
+# ------------------------------------------------------------------ atletas duplicados
+def test_unify_people_merges_same_athlete_and_keeps_homonyms_apart():
+    import pandas as pd
+
+    from src.data_lake.ids import player_core, unify_people
+
+    rows = pd.DataFrame([
+        {"nome": "Lionel Andrés Messi Cuccittini", "clube": "Argentina", "fonte": "eventos", "nascimento": ""},
+        {"nome": "Lionel Messi", "clube": "Inter Miami", "fonte": "Transfermarkt", "nascimento": "1987-06-24"},
+        {"nome": "L. Messi", "clube": "Barcelona", "fonte": "eventos", "nascimento": ""},
+        {"nome": "Kylian Mbappé Lottin", "clube": "France", "fonte": "eventos", "nascimento": ""},
+        {"nome": "Kylian Mbappé", "clube": "Real Madrid", "fonte": "Transfermarkt", "nascimento": "1998-12-20"},
+        # homônimos: mesmo nome, nascimentos diferentes → não juntar
+        {"nome": "Danilo", "clube": "Flamengo", "fonte": "Transfermarkt", "nascimento": "1991-07-15"},
+        {"nome": "Danilo", "clube": "Botafogo", "fonte": "Transfermarkt", "nascimento": "2001-04-29"},
+        # curto ambíguo: dois longos possíveis → não juntar
+        {"nome": "Gabriel Silva", "clube": "A", "fonte": "Transfermarkt", "nascimento": ""},
+        {"nome": "Gabriel Souza Silva", "clube": "B", "fonte": "eventos", "nascimento": ""},
+        {"nome": "Gabriel Lima Silva", "clube": "C", "fonte": "eventos", "nascimento": ""},
+    ])
+    rows["core"] = rows["nome"].map(player_core)
+    p = unify_people(rows).tolist()
+    assert p[0] == p[1] == p[2]                                         # Messi: 3 grafias, 1 pessoa
+    assert p[3] == p[4] and p[3] != p[0]
+    assert p[5] != p[6]                                                 # dois Danilos diferentes
+    assert len({p[7], p[8], p[9]}) == 3                                 # ambíguo: não junta

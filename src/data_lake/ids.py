@@ -213,3 +213,80 @@ def resolve_players(records: Iterable[Dict[str, object]]) -> Tuple[pd.DataFrame,
             d[f"{src}_id"] = ";".join(sorted(set(map(str, v)))) if not v.empty else ""
         dims.append(d)
     return pd.DataFrame(dims), ids
+
+
+def unify_people(idx: pd.DataFrame) -> pd.Series:
+    """
+    v36 — junta o MESMO atleta que aparece com nomes diferentes em fontes diferentes:
+    "Lionel Andrés Messi Cuccittini" (StatsBomb) = "Lionel Messi" (Transfermarkt) = "L. Messi" (Wyscout).
+    Recebe linhas com `nome`, `core` (player_core) e, se houver, `nascimento`. Devolve a chave da pessoa por linha.
+
+    Regras (na dúvida, NÃO junta):
+    * mesmo core e no máximo uma data de nascimento conhecida → mesma pessoa;
+    * mesmo core com datas de nascimento diferentes → pessoas diferentes (homônimos); linhas sem data ficam à parte;
+    * nome curto contido no longo (mesmo primeiro nome e mesmo último sobrenome do curto) ou abreviado ("L. Messi")
+      → junta só se houver UM único candidato e as datas de nascimento (quando as duas existem) baterem.
+    """
+    if idx is None or idx.empty:
+        return pd.Series(dtype=str)
+    dob = idx["nascimento"].fillna("").astype(str).str[:10] if "nascimento" in idx else pd.Series("", index=idx.index)
+    dob = dob.where(dob.str.len() >= 8, "")
+    core = idx["core"].astype(str)
+    key = core.copy()
+    # 1) homônimos: mesmo core, nascimentos diferentes → separa por nascimento (sem data: "|?", não junta com ninguém)
+    n_dob = dob[dob != ""].groupby(core[dob != ""]).nunique()
+    multi = set(n_dob[n_dob > 1].index)
+    if multi:
+        m = core.isin(multi)
+        key[m] = core[m] + "|" + dob[m].replace("", "?")
+    tab = pd.DataFrame({"key": key, "dob": dob})
+    dobs = tab[tab["dob"] != ""].groupby("key")["dob"].agg(lambda x: x.iloc[0] if x.nunique() == 1 else "")
+    people = {k: {"toks": k.split("|")[0].split(), "dob": dobs.get(k, "")} for k in tab["key"].unique()}
+
+    def compatible(a, b) -> bool:
+        da, db = people[a]["dob"], people[b]["dob"]
+        return not (da and db and da != db)
+
+    # índices (evita comparar todos com todos: a base tem ~80 mil nomes)
+    by_first_tok: Dict[Tuple[str, str], List[str]] = {}
+    by_first_last: Dict[Tuple[str, str], List[str]] = {}
+    by_ini_last: Dict[Tuple[str, str], List[str]] = {}
+    for b, info in people.items():
+        tb = info["toks"]
+        if len(tb) < 2 or "|?" in b:
+            continue
+        for t in set(tb[1:]):
+            by_first_tok.setdefault((tb[0], t), []).append(b)
+        by_first_last.setdefault((tb[0], tb[-1]), []).append(b)
+        by_ini_last.setdefault((tb[0][0], tb[-1]), []).append(b)
+    # 2) curto ⊂ longo (mesma pessoa com nome completo)
+    parent = {k: k for k in people}
+    for a in sorted(people, key=lambda k: len(people[k]["toks"])):
+        ta = people[a]["toks"]
+        if len(ta) < 2 or "|?" in a:
+            continue
+        sa = set(ta)
+        cands = [b for b in by_first_tok.get((ta[0], ta[-1]), [])
+                 if b != a and len(people[b]["toks"]) > len(ta) and sa <= set(people[b]["toks"])]
+        rivals = [b for b in by_first_last.get((ta[0], ta[-1]), []) if b != a and len(people[b]["toks"]) == len(ta)]
+        if len(cands) == 1 and not rivals and compatible(a, cands[0]):
+            parent[cands[0]] = a
+    # 3) abreviado: "l messi" (inicial + sobrenome) → nome completo com essa inicial e esse sobrenome
+    abbr = idx["nome"].astype(str).str.match(r"^\s*[A-Za-z]\.?\s+\S+\s*$")
+    for k, nome in zip(key[abbr], idx.loc[abbr, "nome"]):
+        toks = [t for t in re.split(r"[\s\-\.]+", norm(nome)) if t]
+        if len(toks) == 2 and len(toks[0]) == 1:
+            ini, last = toks
+            cands = {parent.get(b, b) for b in by_ini_last.get((ini, last), []) if b != k}
+            if len(cands) == 1:
+                c = next(iter(cands))
+                if compatible(k, c):
+                    parent[k] = c
+
+    def root(k):
+        seen = set()
+        while parent[k] != k and k not in seen:
+            seen.add(k)
+            k = parent[k]
+        return k
+    return key.map(lambda k: root(k) if k in parent else k)
