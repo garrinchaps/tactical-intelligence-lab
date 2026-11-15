@@ -89,7 +89,8 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
 - **OpenPlay** release `data-v0.1.0` (139 arquivos, 0,94 GB) — 26.547 jogos com lances (eventos convertidos ao abrir).
 - **CBF / BrazilianFootball**: `C:\dados\cbf\results\processed\*_games.json` (65 arquivos).
 - **Transfermarkt (dcaribou)**: competições, clubes, 50 mil jogadores, 656 mil valores, 89 mil jogos — e na v35
-  passa a baixar `appearances` e `game_lineups`.
+  passa a baixar `appearances` e `game_lineups`. Na v36 passa a baixar também `transfers` (`tm_transferencias`,
+  base do vínculo jogador-clube) — conferir se o usuário já rodou `--only transfermarkt` depois da v36.
 - **football-data.co.uk** (1993–hoje, 22 divisões + BRA/ARG/USA/MEX/JPN/CHN/AUT/DNK/FIN/IRL/NOR/POL/ROU/RUS/SWE/SWZ),
   **openfootball** (cópia git local), **seleções (intl)**, **Brasileirão Dataset (adaoduque)**, **open-matchday**,
   **Simonetti** (wc_data_*), **Wyscout** (5 ligas 17/18 + Copas).
@@ -108,7 +109,7 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
 
 ## 7. Pedidos do usuário (v36) — estado
 
-Feito na sessão de 15/11/2026 (branch `claude/gifted-knuth-q93cbz`, testes: 216 verdes):
+Feito na sessão 1 (15/11/2026, branch `claude/gifted-knuth-q93cbz`, 216 testes verdes):
 1. ✅ Assistente: perguntas com alvo têm resposta própria — ranking de xG/perigo (xT + xG, rede neural como 2ª
    opinião), "fulano jogou?" (`presence`), erros do jogador separados por tipo (`errors`), maior falha tática e
    ponto forte da equipe (`weakness`/`strength`). Perguntas de fato não esperam o Gemini (mais rápido). Perguntas
@@ -135,12 +136,33 @@ Feito na sessão de 15/11/2026 (branch `claude/gifted-knuth-q93cbz`, testes: 216
    posições ficam no navegador, não voltam ao Python); marcas E/N/F/C no campo; expectativa só com jogos recentes
    (≤ 400 dias) com lances ou ≥ 5 estatísticas.
 
-Pendente (próximas sessões):
-10. ❌ Tradução da interface (inglês/espanhol, padrão português).
-11. ❌ Cobertura v36 (Brasil profundo, América do Sul, Europa, outros) + painel de fontes com saúde/cota. A sessão na
-    nuvem não alcança sites externos (ESPN etc. bloqueados), então fontes novas precisam ser validadas no PC.
-- Conferir no PC: ESPN histórico com a correção; Understat; rodar os experimentos B, A, C, D.
+Lista A–J do usuário (sessão 2, 16/11/2026) — 233 testes verdes:
+- ✅ A1 ESPN em janelas 7 → 3 → 1 dia (400 = janela recusada, contada em `janelas_falhas`) · A2 rede de passes com
+  os 11 em campo num minuto (`on_field`) · A3/A4 (presença/falha tática) · A5 filtro de nível na consulta SQL.
+- ✅ B2 `sync_policy.py`: incremental por competição, ao vivo a cada 1 min (só ligas com jogo rolando; varredura a
+  cada 15 min), encerrada consolidada e congelada (`frozen_matches`), fixtures a cada 3 h · B3 `src/squad/tenure.py`
+  (transferências + jogos, empréstimo/retorno, UNKNOWN fora do elenco) · B4 `src/data_hub/player_resolver.py`
+  (nunca só o nome; `player_merge_candidates`) · B5 `python -m src.tools.cache_crests` (data/crests) + monograma ·
+  B6 `src/data_hub/depth.py` (nível 0–4, selo na página do jogo) · B7 `source_divergences`.
+- ✅ C `src/analytics/player_ratings.py` (pares por setor/competição com n ≥ 20, média com n mínimo 3 e minutos,
+  abas Defensivo/Ofensivo/Passes, teste zagueiro × atacante).
+- ✅ D campinho com tamanho ajustável e formação customizada; marcas em linguagem de futebol; diagnóstico do rival
+  (2 fortes + 2 fracos com dado e jogo de origem; só jogos nível ≥ 2, senão "base insuficiente").
+- ✅ E1 latência medida (`data/assistente_latencia.jsonl`, painel em Bastidores, meta < 8 s) · E5 "não tenho esse
+  dado" · E3/E4 intocados.
+- ✅ F1 cartões 14px · F2 idioma PT/EN/ES (`src/ui/i18n.py`) · F3 Fortes e fracos em cartões com barra · F4
+  "o que é isto?" (`src/ui/glossary.py`) · F8 comparar qualquer jogador.
+- ✅ G painel de fontes (aba 🩺 em Dados & Fontes, `src/data_hub/health.py`, ações em segundo plano).
+
+Pendente / limitações honestas:
+- B1: muitas ligas novas da ESPN estão marcadas "(a validar)" — códigos não conferidos (a nuvem não alcança a ESPN).
+  Ao vivo só existe pela ESPN. Cobertura de estaduais além de SP/RJ/MG/RS, Série D, feminino e base depende de
+  fontes ainda não integradas (avaliar OpenLigaDB, football-data.org, RSSSF, MinuteLab no PC).
+- F: tradução cobre menus, títulos e textos principais (o resto e as respostas do Assistente seguem em português);
+  F5 (gráficos só com dado real) não foi auditado tela a tela; F6 sub-abas só em Fortes e fracos; F7 só nas tabelas.
+- C2 só age quando há ≥ 20 atuações do mesmo setor e competição no conjunto avaliado.
 - Recalibrar `EXPECTED_PER90` da nota com mais partidas (hoje 3 jogos).
+- Conferir no PC: ESPN (`--only espn_historico --desde 2019`), Understat, experimentos B/A/C/D da rede.
 
 ## 8. Ao final de cada sessão
 
