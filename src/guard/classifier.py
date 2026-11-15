@@ -90,6 +90,11 @@ class NumberClassifier:
                         ops = {"|a−b|": np.abs(a - b)}
                     else:
                         ops = {"a−b": a - b, "|a−b|": np.abs(a - b), "a+b": a + b}
+                        if m.decimals == 0:
+                            # número inteiro no texto (ex.: "987 perdas") só deriva de dois INTEIROS:
+                            # 39,23 + 948 = 987,23 "arredondado" não é contagem nenhuma
+                            ints = (a == np.round(a)) & (b == np.round(b))
+                            ops = {k: np.where(ints, v, np.nan) for k, v in ops.items()}
                 for name, res in ops.items():
                     mask = np.abs(res - c) <= tol
                     np.fill_diagonal(mask, False)

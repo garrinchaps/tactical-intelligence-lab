@@ -708,3 +708,12 @@ def test_level_filter_goes_into_the_sql(monkeypatch):
     C.cached_catalog()
     w = seen["where"]
     assert "data_level IN ('EVENTS'" in w and "BOXSCORE" not in w and "'RESULT'" not in w
+
+
+def test_guard_count_never_derives_from_a_decimal():
+    from src.reports.report_builder import NumericHallucinationGuard as G
+
+    ev = {"metadata": {"match_player_roster": ["Matheus Pereira"]},
+          "blocos": {"x": {"eventos": 948, "xt": 39.23, "passes": 51}}}
+    assert not G.audit_text_numbers("O Matheus Pereira cometeu 987 perdas de posse.", ev)["is_grounded"]  # 948 + 39,23
+    assert G.audit_text_numbers("Foram 999 ações no total.", ev)["is_grounded"]                         # 948 + 51

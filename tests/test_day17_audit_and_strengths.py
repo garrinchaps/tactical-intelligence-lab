@@ -87,7 +87,9 @@ def test_guard_catches_invented_integers_and_players(simulated_match):
     import re as _re
 
     present = set(_re.findall(r"\d+", _json.dumps(evidence, default=str)))
-    fake = next(str(n) for n in range(977, 10_000) if str(n) not in present)   # nº garantidamente ausente
+    # nº garantidamente ausente e longe de qualquer soma/diferença de contagens do jogo (o gerador simulado não é
+    # 100% determinístico: um nº baixo podia coincidir com a+b legítimo e o teste oscilava)
+    fake = next(str(n) for n in range(97_701, 99_999) if str(n) not in present)
     fake_count = f"O Matheus Pereira cometeu {fake} perdas de posse."
     audit = NumericHallucinationGuard.audit_text_numbers(fake_count, evidence)
     assert audit["is_grounded"] is False
