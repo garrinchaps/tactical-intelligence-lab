@@ -109,8 +109,9 @@ def build_reference(db, limit: int = 400, path: Path = REF_PATH) -> int:
     """Régua: atuações (≥ 30 min) dos jogos mais recentes com estatísticas por jogador da FotMob."""
     with db.connect() as conn:
         ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT s.match_id FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
-            "WHERE m.data_source = 'fotmob' ORDER BY m.match_date DESC LIMIT ?", (int(limit),)).fetchall()]
+            "SELECT s.match_id FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+            "WHERE m.data_source = 'fotmob' GROUP BY s.match_id "
+            "ORDER BY MAX(m.match_date) DESC LIMIT ?", (int(limit),)).fetchall()]
         if not ids:
             return 0
         ph = ",".join("?" * len(ids))
