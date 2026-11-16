@@ -540,13 +540,13 @@ class OpenPlayProvider:
 
     def pending_match_ids(self, limit: Optional[int] = None) -> List[int]:
         """IDs OpenPlay com evento no catálogo, ainda não convertidos/cacheados no banco."""
-        if self.db is None:
+        if self.db is None or (limit is not None and int(limit) <= 0):
             return []
         with self.db.connect() as conn:
             rows = conn.execute(
                 "SELECT m.match_id FROM matches m LEFT JOIN events e ON e.match_id = m.match_id "
                 "WHERE m.data_source = 'openplay' AND m.data_level = 'EVENTS' "
-                "GROUP BY m.match_id HAVING COUNT(e.event_id) = 0 ORDER BY m.match_date DESC"
+                "GROUP BY m.match_id HAVING COUNT(e.match_id) = 0 ORDER BY m.match_date DESC"
             ).fetchall()
         now = time.time()
         out = []
@@ -563,6 +563,14 @@ class OpenPlayProvider:
                 break
         return out
 
+    def catalog_count(self) -> int:
+        """Quantidade de partidas OpenPlay catalogadas com eventos, já cacheadas ou não."""
+        if self.db is None:
+            return 0
+        with self.db.connect() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM matches WHERE data_source='openplay' AND data_level='EVENTS'").fetchone()
+        return int(row[0] or 0)
+
     def pending_count(self) -> int:
         if self.db is None:
             return 0
@@ -570,7 +578,7 @@ class OpenPlayProvider:
             row = conn.execute(
                 "SELECT COUNT(*) FROM matches m LEFT JOIN events e ON e.match_id = m.match_id "
                 "WHERE m.data_source = 'openplay' AND m.data_level = 'EVENTS' "
-                "GROUP BY m.match_id HAVING COUNT(e.event_id) = 0"
+                "GROUP BY m.match_id HAVING COUNT(e.match_id) = 0"
             ).fetchall()
         return len(row)
 
