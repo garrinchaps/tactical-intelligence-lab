@@ -22,7 +22,7 @@ from src.ui import charts
 from src.ui.components import comparison_table, empty_state, error_state, kpi, note, page_header, provenance_panel
 from src.ui.context import MatchContext, get_service, load_bundle, processed_events
 
-MAX_MATCHES = 10
+MAX_MATCHES = 40
 MIN_MINUTES_PER90 = 90       # abaixo disso, valores por 90 min ficam instáveis
 RADAR_KEYS = ["passes", "passes_progressivos", "passes_decisivos", "finalizacoes", "xg", "xt", "dribles",
               "desarmes", "interceptacoes", "recuperacoes"]
@@ -65,6 +65,7 @@ def _options(found: pd.DataFrame, current: int, n_default: int):
     return opts, (cur + local + other)[:n_default]
 
 
+@st.cache_data(show_spinner=False, ttl=900, max_entries=32)
 def _load_processed(match_ids: List[int]) -> Dict[int, pd.DataFrame]:
     out: Dict[int, pd.DataFrame] = {}
     prog = st.progress(0.0, text="Carregando partidas...")
