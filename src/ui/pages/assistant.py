@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.ui.components import styled_dataframe
+
 from src.data_hub.registry import BADGES
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
 from src.ui.components import hero, note, result_card_html
@@ -53,7 +55,7 @@ def _audit_panel(h) -> None:
 
             st.caption("EXATO = o número está nos dados · DERIVADO = calculado a partir deles. "
                        "Frases com número sem origem nos dados são cortadas antes de aparecer.")
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            styled_dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         if h.get("llm_error"):
             st.caption(f"Gemini indisponível nesta resposta: {h['llm_error']}")
 
