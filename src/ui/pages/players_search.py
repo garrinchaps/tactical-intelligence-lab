@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.ui.components import comparison_table, empty_state, hero
 from src.ui.crests import crest_img
 
@@ -244,7 +246,7 @@ def render(_ctx=None) -> None:
                 if not v.empty:
                     from src.ui import charts
 
-                    st.plotly_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
+                    render_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
                                                  "Valor de mercado ao longo do tempo (€ mi, Transfermarkt)", "€ mi"),
                                     use_container_width=True)
     with t3:
