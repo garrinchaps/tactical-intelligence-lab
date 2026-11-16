@@ -161,6 +161,22 @@ def build(db, sc, meta: Dict[str, Any], target_team: str, opp: str) -> Optional[
         ask = "ranking"                               # físico: a FotMob tem em algumas ligas — procura antes de negar
     if ask == "ranking" or (ask is None and re.search(r"\bquem\b.*\b(mais|menos)\b", q)):
         key, lab = next(((k, l) for rx, k, l in PSTATS if re.search(rx, q)), ("_rating", "Nota da FotMob"))
+        if key == "_xgot":
+            if S.empty or "xgot" not in S:
+                out["ranking"] = {"metrica": lab, "sem_dado": True}
+                return out
+            shots = S.copy()
+            shots["xgot"] = pd.to_numeric(shots["xgot"], errors="coerce")
+            shots = shots.dropna(subset=["xgot", "player_name"])
+            if sc.team_named and sc.team_focus != "both":
+                shots = shots[shots["team_name"] == me]
+            asc = bool(re.search(r"\bmenos\b|\bpior", q))
+            leaders = (shots.groupby(["player_name", "team_name"], dropna=True)["xgot"].sum()
+                       .sort_values(ascending=asc).head(5))
+            out["ranking"] = {"metrica": lab, "ordem": "asc" if asc else "desc",
+                              "lideres": [{"jogador": name, "equipe": team, "valor": round(float(value), 2)}
+                                          for (name, team), value in leaders.items()]}
+            return out
         if key not in P or P[key].dropna().empty:
             out["ranking"] = {"metrica": lab, "sem_dado": True, "onde_existe": "Premier League (dado físico da liga)"}
             return out
