@@ -128,6 +128,12 @@ def _openplay_prefetch_loop() -> None:
             batch, interval, min_free_gb = 250, 900, 3
         while enabled() and openplay_prefetch_enabled():
             try:
+                catalog_total = provider.catalog_count()
+                if catalog_total == 0:
+                    _OPENPLAY["pending"] = None
+                    _OPENPLAY["phase"] = "aguardando catálogo OpenPlay"
+                    time.sleep(min(interval, 300))
+                    continue
                 db_dir = Path(getattr(svc.db, "db_path", "database")).resolve().parent
                 free_gb = shutil.disk_usage(db_dir).free / (1024 ** 3)
                 if free_gb < min_free_gb:
