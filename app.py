@@ -136,7 +136,15 @@ def _go_search() -> None:
 
 
 def top_bar(focused: bool = False) -> None:
-    """Logo + pílulas + Bastidores + UMA caixa de busca. Em telas de jogo/time/jogador/competição: só o logo."""
+    """Navegação global, busca, histórico rápido e modo de foco."""
+    if st.session_state.get("til_focus_mode"):
+        a, b = st.columns([8, 1])
+        _logo(a)
+        if b.button("✕ Sair do foco", use_container_width=True, key="til_focus_exit"):
+            st.session_state["til_focus_mode"] = False
+            st.rerun()
+        st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
+        return
     if focused:
         _logo(st.columns([3, 7])[0])
         st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
@@ -180,11 +188,34 @@ def top_bar(focused: bool = False) -> None:
         st.session_state["_last_q"] = q.strip()
         nav.open_view("buscar", q=q.strip())
     st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
+    recent_ids = st.session_state.get("recent_match_ids", [])
+    if recent_ids:
+        recent_labels = {}
+        for mid in recent_ids[:5]:
+            try:
+                meta = load_bundle(int(mid)).meta or {}
+                recent_labels[f"{str(meta.get('match_date') or '')[:10]} · {meta.get('home_team_name', '?')} x "
+                              f"{meta.get('away_team_name', '?')}"] = int(mid)
+            except Exception:
+                continue
+        if recent_labels:
+            ra, rb = st.columns([5, 1])
+            label = ra.selectbox("Partidas recentes", list(recent_labels), key="til_recent_match",
+                                 label_visibility="collapsed", help="Últimas cinco partidas abertas nesta sessão.")
+            if rb.button("Reabrir", key="til_recent_open", use_container_width=True):
+                nav.open_view("jogo", match_id=recent_labels[label])
+    if st.button("⛶ Foco tático", key="til_focus_enter", help="Oculta navegação e busca para ampliar a área de análise."):
+        st.session_state["til_focus_mode"] = True
+        st.rerun()
 
 
 def main() -> None:
     theme.inject_theme()
     st.session_state.setdefault("match_id", DEFAULT_MATCH_ID)
+    recent = st.session_state.setdefault("recent_match_ids", [])
+    current_mid = int(st.session_state["match_id"])
+    recent = [current_mid] + [int(x) for x in recent if int(x) != current_mid]
+    st.session_state["recent_match_ids"] = recent[:5]
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
     nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3], **VIEWS})
