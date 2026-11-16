@@ -186,27 +186,43 @@ def render(ctx=None) -> None:
     exp_now = c1.button("🧪 Rodar experimentos", type="primary", use_container_width=True, disabled=not exp_pick)
     train_now = c2.button("▶ Treinar com os hiperparâmetros acima", use_container_width=True)
     search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", use_container_width=True)
-    st.caption("Treinos longos travam esta aba enquanto rodam. Para vários experimentos, prefira o terminal: "
-               "`python -m src.machine_learning.model_registry --treinar --experimentos B,A,C,D`")
-    if train_now or search_now or exp_now:
-        with st.spinner("Montando o conjunto de treino (amostra + protocolo + banco)..."):
-            from src.ui.context import get_service
+    st.caption("O treino roda em segundo plano (processo separado): a tela não trava e você pode continuar usando o app. "
+               "Pelo terminal também funciona: `python -m src.machine_learning.model_registry --treinar --experimentos B,A,C,D`")
+    from src.machine_learning import train_job
 
-            full = DangerModelRegistry.dataset((lambda: db_rows(get_service().db, max_new=40)) if use_db else None,
-                                               include_proxy=use_proxy)
-        st.caption(f"Conjunto: {full['match_id'].nunique()} partidas · {len(full):,} ações".replace(",", "."))
-        with st.spinner("Treinando (forward → perda → backpropagation → atualização) e comparando com o campeão..."):
-            if exp_now:
-                rounds = reg.run_experiments(full, exp_pick, attempts=int(attempts))
-            elif train_now:
-                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch, seed=int(__import__("time").time()) + k)
-                          for k in range(int(attempts))]
-            else:
-                rounds = reg.auto_search(full, trials=int(attempts), epochs=epochs)
-        st.session_state["nn_data_diag"] = {"bal": class_balance(full), "feat": feature_report(full)}
-        last = rounds[-1]
-        st.session_state["nn_live"] = {"net": last["net"], "auc": last["val_auc"], "rounds": rounds,
-                                       "n_tr": last["n_samples_train"], "m_tr": last["n_matches_train"]}
+    if train_now or search_now or exp_now:
+        common = ["--tentativas", str(int(attempts)), "--partidas-novas", "40"] + ([] if use_db else ["--sem-banco"]) \
+            + (["--com-estimadas"] if use_proxy else [])
+        if exp_now:
+            args = ["--experimentos", ",".join(exp_pick)] + common
+        elif train_now:
+            args = ["--ocultas", ",".join(map(str, hidden)), "--eta", str(lr), "--l2", str(l2), "--lote", str(batch),
+                    "--epocas", str(epochs)] + common
+        else:
+            args = ["--epocas", str(epochs)] + common
+        if train_job.start(args):
+            st.toast("Treino iniciado em segundo plano — pode continuar usando o app.")
+        else:
+            st.warning("Já existe um treino rodando. Espere terminar ou pare o atual.")
+    job = train_job.state()
+    if job:
+        status = {"rodando": "🔄 treinando em segundo plano", "concluido": "✅ concluído", "erro": "⚠️ parou com erro",
+                  "interrompido": "⏹ interrompido"}.get(job.get("status"), job.get("status"))
+        with st.container(border=True):
+            c1, c2, c3 = st.columns([3, 1, 1])
+            c1.markdown(f"**Treino:** {status} · {job.get('etapa', '')[:120]}")
+            if job.get("status") == "rodando":
+                c2.button("🔄 Atualizar", key="nn_refresh", use_container_width=True)
+                if c3.button("⏹ Parar", key="nn_stop", use_container_width=True):
+                    train_job.stop()
+                    st.rerun()
+            for r in job.get("resultados") or []:
+                (st.success if r.get("promoted") else st.info)(
+                    f"v{r['version']:03d} {'PROMOVIDA — agora é ela que o Analista IA usa' if r.get('promoted') else 'rejeitada'}"
+                    f"{' · experimento ' + r['experimento'] if r.get('experimento') else ''}: {r.get('reason')}")
+            with st.expander("Registro do treino"):
+                st.code("\n".join(job.get("log") or []) or "(sem mensagens ainda)")
+    live = None
     with st.expander("🔬 Conferência dos dados de treino (classes e as 14 variáveis)"):
         diag = st.session_state.get("nn_data_diag")
         if diag is None and st.button("Conferir agora (usa a amostra local, ~2 s)", key="nn_diag"):
@@ -221,12 +237,6 @@ def render(ctx=None) -> None:
             st.dataframe(diag["feat"], hide_index=True, use_container_width=True)
             st.caption("AUC sozinha: 0,5 = a variável sozinha não separa jogadas perigosas; longe de 0,5 (para cima ou para baixo) = tem sinal. "
                        "Alerta “redundante” = quase igual a outra variável (|r| > 0,95).")
-    live = st.session_state.get("nn_live")
-    if live:
-        for r in live["rounds"]:
-            (st.success if r["promoted"] else st.info)(
-                f"v{r['version']:03d} {'PROMOVIDA — agora é ela que o Analista IA usa' if r['promoted'] else 'rejeitada'}: "
-                f"{r['reason']}. Treino: {r['n_matches_train']} partidas, {r['n_samples_train']} ações.")
     net = live["net"] if live else reg.champion()
     if net is None:
         empty_state("Clique em “Treinar nova versão”.", icon="▶")

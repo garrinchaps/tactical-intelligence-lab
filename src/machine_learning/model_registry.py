@@ -592,33 +592,63 @@ def main() -> None:
     ap.add_argument("--partidas-novas", type=int, default=200, help="partidas do banco preparadas nesta rodada")
     ap.add_argument("--com-estimadas", action="store_true", help="inclui partidas sem 360 (densidade estimada)")
     ap.add_argument("--experimentos", default="", help="ex.: B ou B,A,C,D — experimentos controlados (v36)")
+    ap.add_argument("--ocultas", default="", help="treino manual: neurônios por camada, ex.: 32,16")
+    ap.add_argument("--eta", type=float, default=0.001)
+    ap.add_argument("--l2", type=float, default=1e-4)
+    ap.add_argument("--lote", type=int, default=256)
+    ap.add_argument("--sem-banco", action="store_true", help="só a amostra local + protocolo (sem preparar partidas do banco)")
+    ap.add_argument("--estado", default="", help="arquivo JSON de andamento (usado pela tela Bastidores)")
     args = ap.parse_args()
     if not args.treinar:
         ap.print_help()
         return
-    from src.data_hub.service import MatchDataService
+    state_path = Path(args.estado) if args.estado else None
+    state = {"status": "rodando", "inicio": time.strftime("%Y-%m-%d %H:%M:%S"), "etapa": "preparando o conjunto",
+             "log": [], "resultados": []}
 
-    db = MatchDataService().db
-    say = lambda m: print(m, flush=True)
-    data = DangerModelRegistry.dataset(lambda: db_rows(db, max_new=args.partidas_novas, progress=say),
-                                       include_proxy=args.com_estimadas)
-    print(f"conjunto: {data['match_id'].nunique()} partidas, {len(data)} ações", flush=True)
-    champion_cached()                                   # garante a v001 antes de comparar
-    reg = DangerModelRegistry()
-    if args.experimentos:
-        bal = class_balance(data)
-        print(f"classes: {bal.get('positivas_pct')}% das ações terminam em finalização", flush=True)
-        names = [x.strip().upper() for x in args.experimentos.split(",") if x.strip()]
-        for r in reg.run_experiments(data, names, attempts=max(1, args.tentativas if args.tentativas != 3 else 1),
-                                     progress=say):
-            print(f"  {r['experimento']} v{r['version']:03d}: {r['reason']}", flush=True)
+    def say(m: str) -> None:
+        print(m, flush=True)
+        if state_path:
+            state["log"] = (state["log"] + [str(m)])[-40:]
+            state["etapa"] = str(m)[:160]
+            state_path.write_text(json.dumps(state, ensure_ascii=False, default=str), encoding="utf-8")
+    try:
+        from src.data_hub.service import MatchDataService
+
+        db = MatchDataService().db
+        data = DangerModelRegistry.dataset(None if args.sem_banco else (lambda: db_rows(db, max_new=args.partidas_novas,
+                                                                                         progress=say)),
+                                           include_proxy=args.com_estimadas)
+        say(f"conjunto: {data['match_id'].nunique()} partidas, {len(data)} ações")
+        champion_cached()                                   # garante a v001 antes de comparar
+        reg = DangerModelRegistry()
+        if args.experimentos:
+            bal = class_balance(data)
+            say(f"classes: {bal.get('positivas_pct')}% das ações terminam em finalização")
+            names = [x.strip().upper() for x in args.experimentos.split(",") if x.strip()]
+            rounds = reg.run_experiments(data, names, attempts=max(1, args.tentativas if args.tentativas != 3 else 1),
+                                         progress=say)
+        elif args.ocultas:
+            hidden = [int(h) for h in args.ocultas.replace(";", ",").split(",") if h.strip()]
+            rounds = [reg.train_round(data, hidden, args.eta, args.epocas, args.l2, args.lote,
+                                      seed=int(time.time()) + k, progress=say) for k in range(max(1, args.tentativas))]
+        else:
+            rounds = reg.auto_search(data, trials=args.tentativas, epochs=args.epocas, progress=say)
+        for r in rounds:
+            say(f"  v{r['version']:03d} {'PROMOVIDA' if r['promoted'] else 'rejeitada'}: {r['reason']}")
+            state["resultados"].append({k: r.get(k) for k in ("version", "promoted", "reason", "val_auc", "val_logloss",
+                                                              "hidden", "experimento", "epochs_run", "seconds")})
         ci = reg.champion_info() or {}
-        print(f"campeão atual: v{ci.get('version', 0):03d} (AUC {ci.get('val_auc')}, perda {ci.get('val_logloss')})")
-        return
-    for r in reg.auto_search(data, trials=args.tentativas, epochs=args.epocas, progress=say):
-        print(f"  v{r['version']:03d}: {r['reason']}", flush=True)
-    ci = reg.champion_info() or {}
-    print(f"campeão atual: v{ci.get('version', 0):03d} (AUC {ci.get('val_auc')}, perda {ci.get('val_logloss')})")
+        say(f"campeão atual: v{ci.get('version', 0):03d} (AUC {ci.get('val_auc')}, perda {ci.get('val_logloss')})")
+        state["status"] = "concluido"
+    except Exception as exc:
+        state["status"] = "erro"
+        say(f"erro: {type(exc).__name__}: {exc}")
+        raise
+    finally:
+        state["fim"] = time.strftime("%Y-%m-%d %H:%M:%S")
+        if state_path:
+            state_path.write_text(json.dumps(state, ensure_ascii=False, default=str), encoding="utf-8")
 
 
 if __name__ == "__main__":
