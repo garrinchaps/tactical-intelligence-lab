@@ -164,15 +164,18 @@ def season_usage(appearances: Optional[pd.DataFrame], player_ids: Iterable[Any],
 
 
 def lab_rating(squad: pd.DataFrame, reference: Optional[pd.DataFrame] = None,
-               usage: Optional[pd.DataFrame] = None, external: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+               usage: Optional[pd.DataFrame] = None, external: Optional[pd.DataFrame] = None,
+               player_performance: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     Nota do laboratório (0–100) — uma estimativa declarada, não a nota de um olheiro:
       valor   — percentil do valor de mercado (escala log) entre atletas da MESMA função na referência (peso 0,55);
       uso     — percentil dos minutos na temporada no próprio elenco + participação em gols por 90 para meias e
-                atacantes (peso 0,30);
-      externa — nota de fonte externa (ex.: Simonetti) já em 0–100, quando o nome bate (peso 0,15, ou mais
+                atacantes (peso 0,20);
+      estatística — nota de desempenho 2.0 por posição, quando há amostra confiável (peso 0,35);
+      externa — nota de fonte externa (ex.: Simonetti) já em 0–100, quando o nome bate (peso 0,10, ou mais
                 quando é a única base);
-      manual  — nota digitada por você ao adicionar o atleta substitui tudo.
+      manual  — nota digitada por você ao adicionar o atleta substitui tudo. Sem estatística individual suficiente,
+                os pesos disponíveis são renormalizados e o cálculo anterior continua funcionando.
     """
     df = squad.copy()
     ref = reference if reference is not None and not reference.empty else df
@@ -201,12 +204,22 @@ def lab_rating(squad: pd.DataFrame, reference: Optional[pd.DataFrame] = None,
         df["minutos_temporada"] = mins
         df["gols_temporada"] = u.map(lambda d: d.get("gols"))
         df["assist_temporada"] = u.map(lambda d: d.get("assistencias"))
-    if external is not None and not external.empty:
-        from src.data_lake.ids import player_core
+    from src.data_lake.ids import player_core
 
+    if external is not None and not external.empty:
         ext = external.assign(_c=external["nome"].map(player_core)).drop_duplicates("_c").set_index("_c")["nota"]
         comps["externa"] = df["nome"].map(player_core).map(ext).astype(float)
-    weights = {"valor": 0.55, "uso": 0.30, "externa": 0.15}
+    if player_performance is not None and not player_performance.empty:
+        name_col = "nome" if "nome" in player_performance else "jogador" if "jogador" in player_performance else None
+        score_col = "qualidade" if "qualidade" in player_performance else "desempenho" if "desempenho" in player_performance else None
+        if name_col and score_col:
+            perf = player_performance[[name_col, score_col]].copy()
+            perf["_core"] = perf[name_col].map(player_core)
+            perf[score_col] = pd.to_numeric(perf[score_col], errors="coerce")
+            perf = perf.dropna(subset=["_core", score_col]).drop_duplicates("_core", keep="last")
+            score_map = (perf.set_index("_core")[score_col] * 10).to_dict()
+            comps["desempenho"] = df["nome"].map(player_core).map(score_map).astype(float)
+    weights = {"valor": 0.35, "uso": 0.20, "externa": 0.10, "desempenho": 0.35}
     num = pd.Series(0.0, index=df.index)
     den = pd.Series(0.0, index=df.index)
     used: List[List[str]] = [[] for _ in range(len(df))]
