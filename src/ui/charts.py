@@ -52,6 +52,31 @@ def pitch(fig: Optional[go.Figure] = None, title: str = "", height: int = 460) -
     return _layout(fig, title, height)
 
 
+def pitch_vertical(title: str = "", height: int = 640) -> go.Figure:
+    """Campo EM PÉ (80 de largura × 120 de altura), atacando para CIMA — melhor em meia tela (escalações).
+    Converta coordenadas StatsBomb com (x_v, y_v) = (y, x): o lado esquerdo do time fica à esquerda."""
+    fig = go.Figure()
+    line = dict(color=P["pitch_line"], width=1.6)
+    stripes = [dict(type="rect", x0=0, y0=y, x1=80, y1=y + 10, line=dict(width=0), fillcolor="rgba(255,255,255,0.025)",
+                    layer="below") for y in range(0, 120, 20)]
+    shapes = [
+        dict(type="rect", x0=0, y0=0, x1=80, y1=120, line=line, fillcolor=P["pitch"], layer="below"), *stripes,
+        dict(type="line", x0=0, y0=60, x1=80, y1=60, line=line, layer="below"),
+        dict(type="circle", x0=30, y0=50, x1=50, y1=70, line=line, layer="below"),
+        dict(type="rect", x0=18, y0=0, x1=62, y1=18, line=line, layer="below"),
+        dict(type="rect", x0=18, y0=102, x1=62, y1=120, line=line, layer="below"),
+        dict(type="rect", x0=30, y0=0, x1=50, y1=6, line=line, layer="below"),
+        dict(type="rect", x0=30, y0=114, x1=50, y1=120, line=line, layer="below"),
+    ]
+    fig.update_layout(shapes=shapes)
+    fig.update_xaxes(range=[-3, 83], showgrid=False, zeroline=False, showticklabels=False, title=None)
+    fig.update_yaxes(range=[-4, 124], showgrid=False, zeroline=False, showticklabels=False, title=None,
+                     scaleanchor="x", scaleratio=1)
+    fig = _layout(fig, title, height)
+    fig.update_layout(margin=dict(l=6, r=6, t=40 if title else 8, b=6), plot_bgcolor="rgba(0,0,0,0)")
+    return fig
+
+
 def pass_network(net: Dict[str, Any], title: str, subs: Optional[set] = None) -> go.Figure:
     """`subs` = quem entrou no decorrer do jogo: aparece com bolinha vazada âmbar, separado dos titulares."""
     nodes, edges = net.get("nodes_df", pd.DataFrame()), net.get("edges_df", pd.DataFrame())

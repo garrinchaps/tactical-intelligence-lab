@@ -157,8 +157,47 @@ def _profile(team: str, n: int, version: str) -> Dict[str, Any]:
 
 
 # ------------------------------------------------------------------------------------------------ campinho
-def _pitch(xi: List[Dict[str, Any]], plan: Optional[Dict[str, Any]], rival_corr: Dict[str, Any], title: str) -> go.Figure:
+ROLE_SHORT = {"GK": "GOL", "CB": "ZAG", "LB": "LE", "RB": "LD", "LWB": "ALE", "RWB": "ALD", "DM": "VOL", "CM": "MC",
+              "AM": "MEI", "LM": "ME", "RM": "MD", "LW": "PE", "RW": "PD", "ST": "CA"}
+
+
+def draw_players(fig: go.Figure, xi: List[Dict[str, Any]], team_color: str = "#3B82F6", vertical: bool = False) -> None:
+    """
+    Jogadores no estilo cartão (FM/FC): círculo na cor do time com a nota dentro, ANEL pela adequação à vaga
+    (verde = posição dele, âmbar = adaptado, vermelho = improvisado), sigla da vaga em cima e nome numa etiqueta escura.
+    """
+    ring = lambda e: "#22C55E" if (e or 0) >= 0.85 else ("#F59E0B" if (e or 0) >= 0.6 else "#EF4444")
+    for p in xi:
+        x, y = (p["y"], p["x"]) if vertical else (p["x"], p["y"])
+        up = 1 if vertical else -1                     # "acima" do círculo: +y no campo em pé, −y no deitado (eixo invertido)
+        nota = p.get("qualidade", p.get("nota"))
+        hover = (f"<b>{p.get('jogador') or 'vaga livre'}</b><br>{p['papel_pt']}"
+                 + (f" · origem: {p.get('papel_natural')}" if p.get("papel_natural") else "")
+                 + (f"<br>qualidade {nota} · fase {p.get('fase')}" if nota is not None else "")
+                 + (f"<br>chance de começar {p.get('prob_titular')}%" if p.get("prob_titular") is not None else "")
+                 + (f"<br>encaixe na vaga {p.get('encaixe')}" if p.get("encaixe") is not None else ""))
+        fig.add_trace(go.Scatter(x=[x], y=[y], mode="markers", showlegend=False, hovertext=[hover], hoverinfo="text",
+                                 marker=dict(size=34 if vertical else 40, color=team_color if p.get("jogador") else "#1E2A44",
+                                             line=dict(color=ring(p.get("encaixe")) if p.get("jogador") else "#64748B",
+                                                       width=3.5))))
+        txt = f"{float(nota):.1f}" if nota is not None and p.get("jogador") else ("?" if not p.get("jogador") else "–")
+        fig.add_annotation(x=x, y=y, text=f"<b>{txt}</b>", showarrow=False, font=dict(color="#FFFFFF", size=12))
+        fig.add_annotation(x=x, y=y + up * 6.2, text=ROLE_SHORT.get(p["papel"], p["papel"]), showarrow=False,
+                           font=dict(color="#94A3B8", size=9))
+        name = (p.get("jogador") or "vaga").split(" ")
+        short = name[-1] if len(name[-1]) > 3 or len(name) == 1 else " ".join(name[-2:])
+        fig.add_annotation(x=x, y=y - up * 6.8, text=f"<b>{short}</b>", showarrow=False, font=dict(color="#F5F7FB", size=11),
+                           bgcolor="rgba(9,13,22,0.88)", bordercolor="#1E2A44", borderpad=3, borderwidth=1)
+
+
+def _pitch(xi: List[Dict[str, Any]], plan: Optional[Dict[str, Any]], rival_corr: Dict[str, Any], title: str,
+           team_color: str = "#3B82F6", vertical: bool = False) -> go.Figure:
     from src.ui import charts
+
+    if vertical:                                      # meia tela: campo em pé, atacando para cima
+        fig = charts.pitch_vertical(title=title)
+        draw_players(fig, xi, team_color, vertical=True)
+        return fig
 
     fig = charts.pitch(title=title, height=560)
     # neutralizar: corredor por onde o rival mais chega ao último terço (visto do nosso campo de defesa)
@@ -182,21 +221,7 @@ def _pitch(xi: List[Dict[str, Any]], plan: Optional[Dict[str, Any]], rival_corr:
         fig.add_trace(go.Scatter(x=[t["x"]], y=[t["y"]], mode="markers+text", text=[t["marca"]], showlegend=False,
                                  marker=dict(size=20, color=t["cor"], opacity=0.85, line=dict(color="#090D16", width=1)),
                                  textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
-    xs = [p["x"] for p in xi]
-    ys = [p["y"] for p in xi]
-    labels = [(p["jogador"] or "—").split(" ")[-1] if p["jogador"] else "vaga" for p in xi]
-    hover = [f"{p['papel_pt']}: {p['jogador'] or '—'}<br>nota {p['nota'] if p['nota'] is not None else '—'}"
-             f" · encaixe {p['encaixe'] if p['encaixe'] is not None else '—'} (origem: {p['papel_natural'] or '—'})"
-             for p in xi]
-    colors = [P["primary"] if (p["encaixe"] or 0) >= 0.85 else (P["warning"] if (p["encaixe"] or 0) >= 0.6 else P["danger"])
-              for p in xi]
-    fig.add_trace(go.Scatter(x=xs, y=ys, mode="markers+text", text=labels, textposition="bottom center",
-                             marker=dict(size=30, color=colors, line=dict(color="#E2E8F0", width=2)),
-                             textfont=dict(color="#F5F7FB", size=12), hovertext=hover, hoverinfo="text",
-                             showlegend=False))
-    fig.add_trace(go.Scatter(x=xs, y=ys, mode="text", showlegend=False, hoverinfo="skip",
-                             text=[f"{int(p['nota'])}" if p.get("nota") is not None else "" for p in xi],
-                             textfont=dict(color="#FFFFFF", size=11)))
+    draw_players(fig, xi, team_color)
     return fig
 
 
@@ -274,20 +299,51 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
     st.markdown("".join(rows), unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False, ttl=1800)
+def _teams_with_lineups(days: int = 400) -> List[str]:
+    """Times com escalação na base no último ano (adversários possíveis do jogo hipotético)."""
+    from src.ui.context import get_service
+
+    try:
+        with get_service().db.connect() as conn:
+            rows = conn.execute("SELECT DISTINCT l.team_name FROM match_lineups l JOIN matches m ON m.match_id = l.match_id "
+                                "WHERE m.match_date >= date('now', ?) ORDER BY l.team_name", (f"-{int(days)} days",)).fetchall()
+    except Exception:
+        return []
+    return [r[0] for r in rows if r[0]]
+
+
 def _next_match_tab(team: str, version: str, n: int) -> None:
     from src.squad import matchday as M
     from src.ui.context import get_service
 
     me = _matchday(team, version, n)
     fx = M.next_fixtures(get_service().db, me["names"])
-    if fx.empty:
-        empty_state("Sem próximos jogos no calendário", "O calendário vem da ESPN (temporada atual).", "📅",
-                    "python -m src.data_hub.sync --only espn_temporada")
-        return
-    labels = [f"{r.kickoff[:10]} {r.kickoff[11:16]} · {r.home} x {r.away} · {r.competition}" for r in fx.itertuples()]
-    lab = st.selectbox("Próximo jogo", labels, key=f"nx_pick_{team}")
-    f = fx.iloc[labels.index(lab)]
-    rival = f["away"] if f["home"] in me["names"] else f["home"]
+    kind = st.radio("Jogo", ["📅 Próximo jogo do calendário", "🧪 Jogo hipotético (qualquer adversário)"], horizontal=True,
+                    key=f"nx_kind_{team}", index=0 if not fx.empty else 1)
+    pv: Dict[str, Any] = {}
+    if kind.startswith("📅"):
+        if fx.empty:
+            empty_state("Sem próximos jogos no calendário", "O calendário vem da ESPN (temporada atual). Use o jogo "
+                        "hipotético para montar contra qualquer adversário.", "📅",
+                        "python -m src.data_hub.sync --only espn_temporada")
+            return
+        labels = [f"{r.kickoff[:10]} {r.kickoff[11:16]} · {r.home} x {r.away} · {r.competition}" for r in fx.itertuples()]
+        lab = st.selectbox("Próximo jogo", labels, key=f"nx_pick_{team}")
+        f = fx.iloc[labels.index(lab)]
+        rival = f["away"] if f["home"] in me["names"] else f["home"]
+    else:
+        opts = [t for t in _teams_with_lineups() if t not in me["names"]]
+        if not opts:
+            empty_state("Sem adversários com escalação na base", "Baixe resumos de jogos recentes.", "🧪",
+                        "python -m src.data_hub.sync --only espn_resumos")
+            return
+        q = st.text_input("Adversário hipotético (digite para filtrar)", key=f"nx_hq_{team}")
+        flt = [t for t in opts if q.strip().lower() in t.lower()] if q.strip() else opts
+        rival = st.selectbox("Adversário", flt or opts, key=f"nx_hyp_{team}")
+        st.caption("Jogo hipotético: mesma leitura do próximo jogo (provável, desfalques, fragilidades e plano), sem "
+                   "escalação oficial nem notícias, que só existem para jogos marcados.")
+        f = None
     rv = _matchday(rival, version, n)
     a, b = me["info"], rv["info"]
     if (a["jogadores"] is None or a["jogadores"].empty) or (b["jogadores"] is None or b["jogadores"].empty):
@@ -296,7 +352,8 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     st.caption(f"Base: últimos {len(a['jogos'])} jogos de {team} e {len(b['jogos'])} de {rival} com escalação · "
                f"elenco: {a['fonte_elenco']} / {b['fonte_elenco']}. Provável = quem tem começado jogando, sem lesionados "
                "e suspensos — a escalação oficial só sai cerca de 1 h antes do jogo.")
-    pv = _preview(int(f["match_id"]), str(f["league"]), tuple(me["names"] + rv["names"]))
+    if f is not None:
+        pv = _preview(int(f["match_id"]), str(f["league"]), tuple(me["names"] + rv["names"]))
     off = pv.get("oficial") or {}
     off_me = next((v for k, v in off.items() if k in me["names"]), None)
     off_rv = next((v for k, v in off.items() if k in rv["names"]), None)
@@ -307,7 +364,9 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     weak = M.sector_weaknesses(b, rival)
     with c2:
         st.markdown(f"#### 🔴 {rival} provável ({fr})")
-        st.plotly_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})"), use_container_width=True, key="nx_pitch_r")
+        st.plotly_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
+                        use_container_width=True, key="nx_pitch_r")
+        st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
         if len(out):
             st.markdown("**Desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
@@ -327,9 +386,9 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         tips = M.weakness_tips(weak, b)
         from src.ui.drag_pitch import pitch_tips  # noqa: F401  (mesmo estilo de marcas do campinho principal)
 
-        fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})")
+        fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})", vertical=True)
         for t in tips:
-            fig.add_trace(go.Scatter(x=[t["x"]], y=[t["y"]], mode="markers+text", text=[t["marca"]], showlegend=False,
+            fig.add_trace(go.Scatter(x=[t["y"]], y=[t["x"]], mode="markers+text", text=[t["marca"]], showlegend=False,
                                      marker=dict(size=22, color=t["cor"], line=dict(color="#090D16", width=1)),
                                      textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
         st.plotly_chart(fig, use_container_width=True, key="nx_pitch_m")
