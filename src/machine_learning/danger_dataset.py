@@ -29,7 +29,9 @@ RADIUS_YD = 5.0 * YD_PER_M
 THIRDS = [("def", 0, 40), ("mid", 40, 80), ("att", 80, 121)]
 LANES = [("esq", 0, 26.67), ("cen", 26.67, 53.33), ("dir", 53.33, 81)]
 ZONE_COLS = [f"zone_{t}_{l}" for t, _, _ in THIRDS for l, _, _ in LANES]
-FEATURES = ["dist_to_goal_m", "angle_to_goal_deg", "opp_density_5m", "passes_so_far", "score_diff"] + ZONE_COLS
+LEGACY_FEATURES = ["dist_to_goal_m", "angle_to_goal_deg", "opp_density_5m", "passes_so_far", "score_diff"] + ZONE_COLS
+# A origem da densidade é explícita: o modelo não deve tratar tracking 360 e proxy temporal como medições iguais.
+FEATURES = LEGACY_FEATURES + ["density_is_360"]
 BASELINE_FEATURES = ["dist_to_goal_m", "angle_to_goal_deg", "passes_so_far"]
 
 
@@ -117,6 +119,7 @@ def build_match_rows(df: pd.DataFrame, freeze: Optional[Dict[str, np.ndarray]] =
         dens[k] = cnt
     act["opp_density_5m"] = dens
     act["density_source"] = src
+    act["density_is_360"] = (src == "statsbomb_360").astype(float)
     for col, vals in _zone_onehot(x, y).items():
         act[col] = vals
     keep = ["match_id", "team_name", "event_id", "minute", "density_source", "target"] + FEATURES
