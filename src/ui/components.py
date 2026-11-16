@@ -298,10 +298,30 @@ def render_chart(figure, *args, **kwargs):
         return st.plotly_chart(figure, *args, **kwargs)
 
 
+def _markdown_table(df: pd.DataFrame, limit: int = 100) -> str:
+    view = df.reset_index(drop=True).head(limit).copy()
+    headers = [str(x).replace("|", "\\|").replace("\\n", " ") for x in view.columns]
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in view.itertuples(index=False, name=None):
+        vals = []
+        for value in row:
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                value = "—"
+            vals.append(str(value).replace("|", "\\|").replace("\\n", " "))
+        lines.append("| " + " | ".join(vals) + " |")
+    if len(df) > limit:
+        lines.append(f"\n_Exibindo {limit} de {len(df)} linhas._")
+    return "\\n".join(lines)
+
+
 def comparison_table(df: pd.DataFrame, caption: str = "") -> None:
-    styled_dataframe(df.reset_index(drop=True))
+    view = df.reset_index(drop=True)
+    styled_dataframe(view)
     if caption:
         st.caption(caption)
+    if not view.empty:
+        with st.expander("📋 Copiar para relatório (Markdown)", expanded=False):
+            st.code(_markdown_table(view), language="markdown")
 
 
 def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "jogador", caption: str = "",
