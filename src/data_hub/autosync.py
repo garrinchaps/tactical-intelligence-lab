@@ -61,6 +61,11 @@ def due(db, now: Optional[datetime] = None) -> List[str]:
     d = _last_ok(db, DAILY)
     if d is None or now - d >= timedelta(hours=24):
         out += DAILY
+        import os
+
+        # FotMob só no automático se você ligar de propósito (ENABLE_FOTMOB=true no .env)
+        if os.getenv("ENABLE_FOTMOB", "").strip().lower() in ("1", "true", "sim", "yes"):
+            out += ["fotmob_temporada", "fotmob_recentes"]
     return out
 
 

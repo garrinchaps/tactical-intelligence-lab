@@ -57,3 +57,75 @@ def test_generic_only_player_keeps_sector_but_not_exact_fit():
     starts = pd.DataFrame({"data": ["2026-01-01", "2026-01-08"], "papel": [None, None], "papel_generico": ["F?", "F?"]})
     roles, main, origem = player_roles(starts, tm_role="RW")
     assert main == "RW" and "Transfermarkt" in origem
+
+
+# ------------------------------------------------------------------ FotMob
+def _p(name, pid, x, y, starter=True):
+    return {"id": pid, "name": name, "positionId": pid, "usualPlayingPositionId": 1, "shirtNumber": "1",
+            "horizontalLayout": {"x": x, "y": y}, "performance": {"rating": 7.1, "events": [{"type": "yellowCard", "time": 30}]}}
+
+
+def test_fotmob_layout_role_reads_exact_position():
+    from src.data_hub.sources.fotmob import layout_role
+
+    f = "4-2-3-1"
+    assert layout_role(_p("gk", 11, .10, .5), f) == "GK"
+    assert layout_role(_p("rb", 32, .29, .88), f) == "RB" and layout_role(_p("lb", 38, .29, .12), f) == "LB"
+    assert layout_role(_p("cb", 34, .29, .62), f) == "CB"
+    assert layout_role(_p("dm", 64, .48, .70), f) == "DM"
+    assert layout_role(_p("rw", 83, .68, .84), f) == "RW" and layout_role(_p("am", 85, .68, .50), f) == "AM"
+    assert layout_role(_p("st", 115, .87, .50), f) == "ST"
+    assert layout_role(_p("rwb", 52, .50, .90), "3-4-3") == "RWB"
+    assert layout_role({"name": "x", "positionId": 1000}, f) is None     # sem layout: não inventa posição
+
+
+def test_fotmob_parse_match_and_details():
+    from src.data_hub.sources.fotmob import FotmobProvider
+
+    done, fut = FotmobProvider.parse_match({"id": "5", "home": {"name": "A", "id": 1}, "away": {"name": "B", "id": 2},
+                                            "status": {"utcTime": "2026-11-14T22:00:00Z", "finished": True, "scoreStr": "2 - 1"}},
+                                           268, "2026")
+    assert done["home_score"] == 2 and done["away_score"] == 1 and done["match_id"] == 12_000_000_005 and fut is None
+    done, fut = FotmobProvider.parse_match({"id": "6", "home": {"name": "A"}, "away": {"name": "B"},
+                                            "status": {"utcTime": "2026-12-01T22:00:00Z"}}, 268, "2026")
+    assert done is None and fut["league"] == "fotmob:268"
+    d = {"header": {"teams": [{"name": "A", "id": 1}, {"name": "B", "id": 2}]},
+         "content": {"stats": {"Periods": {"All": {"stats": [{"key": "top_stats", "stats": [
+             {"key": "expected_goals", "stats": ["1.20", "0.40"]}, {"key": "accurate_passes", "stats": ["300 (80%)", "200 (70%)"]},
+             {"key": "physical_metrics_distance_covered", "stats": [110000, 108000]}]}]}}},
+             "lineup": {"homeTeam": {"name": "A", "formation": "4-2-3-1", "starters": [_p("Gk A", 11, .1, .5), _p("Rw A", 83, .68, .84)],
+                                     "subs": [], "unavailable": [{"name": "Lesionado", "unavailability": {"type": "injury", "expectedReturn": "Doubtful"}}]},
+                        "awayTeam": {"name": "B", "formation": "4-4-2", "starters": [], "subs": []}},
+             "playerStats": {"83": {"name": "Rw A", "teamName": "A", "stats": [{"stats": {"Goals": {"key": "goals", "stat": {"value": 1}},
+                                                                                      "xA": {"key": "expected_assists", "stat": {"value": 0.3}}}}]}},
+             "shotmap": {"shots": [{"teamId": 1, "playerName": "Rw A", "min": 10, "x": 105, "y": 34, "expectedGoals": 0.5,
+                                    "eventType": "Goal", "isOnTarget": True}]},
+             "matchFacts": {"events": {"events": [{"type": "Goal", "time": 10, "isHome": True, "player": {"name": "Rw A"}}]}}}}
+    box, shots, unav = FotmobProvider.parse_details(d, 12_000_000_005)
+    st = {(r["team_name"], r["stat_key"]): r["value"] for r in box["team_stats"]}
+    assert st[("A", "xg")] == 1.2 and st[("A", "pass_accuracy_pct")] == 80 and st[("B", "distance_m")] == 108000
+    assert {(r["player_name"], r["position"]) for r in box["lineups"]} == {("Gk A", "GK"), ("Rw A", "RW")}
+    assert box["player_stats"][0]["stats"]["totalGoals"] == 1 and box["player_stats"][0]["rating"] == 7.1
+    assert shots[0]["x"] == 120 and shots[0]["y"] == 40 and shots[0]["xg"] == 0.5
+    assert unav["A"][0]["volta"] == "Doubtful"
+    assert any(e["event_type"] == "Yellow Card" for e in box["timeline"]) and any(e["event_type"] == "Goal" for e in box["timeline"])
+
+
+def test_fotmob_ids_and_fixture_dedup(tmp_path):
+    from src.data_hub.registry import source_from_internal_id
+    from src.data_hub.sources.espn import EspnProvider
+    from src.squad.matchday import next_fixtures
+
+    assert source_from_internal_id(12_000_000_005) == "fotmob" and source_from_internal_id(11_000_000_005) == "openplay"
+    db = DataHubDB(tmp_path / "f.db")
+
+    class _S:
+        pass
+    s = _S(); s.db = db
+    rows = [{"match_id": 500_000_001, "league": "bra.1", "competition": "Brasileirão", "kickoff": "2099-11-18T22:00Z",
+             "home": "Cruzeiro", "away": "Palmeiras", "home_id": 0, "away_id": 0, "status": "S", "venue": ""},
+            {"match_id": 12_000_000_001, "league": "fotmob:268", "competition": "Brasileirão", "kickoff": "2099-11-18T22:00:00Z",
+             "home": "Cruzeiro", "away": "Palmeiras", "home_id": 0, "away_id": 0, "status": "S", "venue": ""}]
+    EspnProvider.save_fixtures(s, rows)
+    fx = next_fixtures(db, ["Cruzeiro"])
+    assert len(fx) == 1 and fx.iloc[0]["league"] == "bra.1"

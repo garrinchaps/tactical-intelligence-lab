@@ -105,6 +105,9 @@ class MatchDataService:
         self.api_football = ApiFootballProvider(self.db)
         self.football_data = FootballDataProvider(self.db)
         self.espn = EspnProvider(self.db)
+        from src.data_hub.sources.fotmob import FotmobProvider
+
+        self.fotmob = FotmobProvider(self.db)
         self.fdcouk = FootballDataCoUkProvider(self.db)
         from src.data_hub.sources.openfootball import OpenFootballProvider
 

@@ -387,11 +387,17 @@ def next_fixtures(db, team_names: Sequence[str], limit: int = 5) -> pd.DataFrame
     ph, ps = _names_sql(team_names)
     try:
         with db.connect() as conn:
-            return pd.read_sql_query(f"SELECT * FROM fixtures WHERE (home IN ({ph}) OR away IN ({ph})) "
-                                     f"AND kickoff >= ? ORDER BY kickoff LIMIT {int(limit)}", conn,
-                                     params=ps * 2 + [(date.today() - timedelta(days=1)).isoformat()])
+            fx = pd.read_sql_query(f"SELECT * FROM fixtures WHERE (home IN ({ph}) OR away IN ({ph})) "
+                                   f"AND kickoff >= ? ORDER BY kickoff LIMIT {int(limit) * 3}", conn,
+                                   params=ps * 2 + [(date.today() - timedelta(days=1)).isoformat()])
     except Exception:
         return pd.DataFrame()
+    if fx.empty:
+        return fx
+    # o mesmo jogo pode vir da ESPN e da FotMob: fica um por dia (prefere a ESPN, que tem a escalação oficial)
+    fx = fx.assign(_d=fx["kickoff"].astype(str).str[:10], _espn=~fx["league"].astype(str).str.startswith("fotmob:"))
+    fx = fx.sort_values(["_d", "_espn"], ascending=[True, False]).drop_duplicates("_d")
+    return fx.drop(columns=["_d", "_espn"]).head(int(limit)).reset_index(drop=True)
 
 
 def xi_for(info: Dict[str, Any], formation: Optional[str], mode: str = "provavel") -> Tuple[List[Dict[str, Any]], str]:

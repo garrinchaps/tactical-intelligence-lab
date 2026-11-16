@@ -164,6 +164,13 @@ SOURCES: Dict[str, SourceInfo] = {
         "pelos donos. Uso pessoal/acadêmico com atribuição.",
         "https://github.com/nlbair/openplay", connector="OpenPlayProvider", raw_tier="DERIVED",
     ),
+    "fotmob": SourceInfo(
+        "fotmob", "FotMob (JSON público do site)", DataLevel.BOXSCORE,
+        12_000_000_000, False,
+        "Endpoints públicos do site, sem contrato. Uso pessoal e não comercial, devagar e com retomada. xG e notas "
+        "são os da FotMob (modelo próprio/Opta); distância e sprints só onde a liga mede.",
+        "https://www.fotmob.com/", needs_key="ENABLE_FOTMOB", connector="FotmobProvider", raw_tier="DERIVED",
+    ),
 }
 
 SIMULATED_ID_RANGES = ((880_000, 889_999), (900_000, 989_999))
@@ -181,7 +188,7 @@ def source_from_internal_id(match_id: int) -> str:
             return "simulated"
     if mid == UPLOAD_ID:
         return "upload"
-    for key in ("openplay", "cbf", "open_matchday", "brasileirao", "understat", "intl", "openfootball", "fdcouk", "espn",
+    for key in ("fotmob", "openplay", "cbf", "open_matchday", "brasileirao", "understat", "intl", "openfootball", "fdcouk", "espn",
                 "football_data", "api_football", "wyscout"):
         off = SOURCES[key].id_offset
         if mid >= off:

@@ -35,7 +35,7 @@ ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", 
                "open_sources", "lake"]
 # cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
 HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil", "espn_temporada", "espn_resumos",
-                 "espn_elencos"]
+                 "espn_elencos", "fotmob_temporada", "fotmob_jogos", "fotmob_recentes"]
 # --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
 # bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
 EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
@@ -56,6 +56,7 @@ def run_sync(
     espn_leagues: Optional[List[str]] = None,
     since_year: int = 2018,
     summaries_limit: int = 1500,
+    fotmob_seasons: int = 0,
 ) -> Dict[str, Dict]:
     load_dotenv()
     svc = service or MatchDataService()
@@ -76,6 +77,17 @@ def run_sync(
         "espn_resumos": lambda: svc.espn.fetch_summaries(espn_leagues, limit=summaries_limit, progress=say),
         # elencos atuais com lesões (referência de transferências e desfalques)
         "espn_elencos": lambda: svc.espn.sync_rosters(espn_leagues, progress=say),
+        # rodada 5: FotMob — resultados + calendário de ~100 competições (Série A–D, estaduais, 2ª divisões, feminino…)
+        # e, por jogo, estatísticas com xG, escalação com posição exata, números por jogador e mapa de chutes
+        "fotmob_temporada": lambda: svc.fotmob.sync_seasons(_fotmob_ids(espn_leagues), seasons_back=fotmob_seasons,
+                                                            progress=say),
+        # automático (diário): só os jogos dos últimos 10 dias, no máximo 150 por vez
+        "fotmob_recentes": lambda: svc.fotmob.fetch_details(None, limit=150,
+                                                            since=(date.today() - timedelta(days=10)).isoformat(),
+                                                            progress=say),
+        "fotmob_jogos": lambda: svc.fotmob.fetch_details(_fotmob_ids(espn_leagues), limit=summaries_limit,
+                                                         since=f"{date.today().year - max(fotmob_seasons, 1)}-01-01",
+                                                         progress=say),
         # Brasileirão (A, B, Copa do Brasil) com xG, passes, posse e números por jogador: API-Football, lotes de 20
         # jogos por requisição, dentro da cota do dia (continua de onde parou na próxima vez)
         "estatisticas_brasil": lambda: svc.api_football.backfill_stats(
@@ -101,6 +113,8 @@ def run_sync(
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
                "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled, "espn_temporada": svc.espn.enabled,
                "espn_resumos": svc.espn.enabled, "espn_elencos": svc.espn.enabled,
+               "fotmob_temporada": svc.fotmob.enabled, "fotmob_jogos": svc.fotmob.enabled,
+               "fotmob_recentes": svc.fotmob.enabled,
                "estatisticas_brasil": svc.api_football.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 
@@ -263,6 +277,12 @@ def prefetch_recent_boxscores(svc: MatchDataService, days_back: int = 3, limit: 
     return {"downloaded": ok, "errors": err}
 
 
+def _fotmob_ids(leagues: Optional[List[str]]) -> Optional[List[int]]:
+    """--ligas com números = ids da FotMob (ex.: 268 9464); sem números, todas as acompanhadas."""
+    ids = [int(x) for x in (leagues or []) if str(x).isdigit()]
+    return ids or None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Sincroniza a base do Tactical Intelligence Lab.")
     ap.add_argument("--only", nargs="*", choices=ALL_SOURCES + HEAVY_SOURCES,
@@ -273,6 +293,8 @@ def main() -> None:
     ap.add_argument("--desde", type=int, default=2018, help="espn_historico: ano inicial (padrão 2018)")
     ap.add_argument("--limite", type=int, default=1500,
                     help="espn_resumos: quantos resumos (estatísticas + escalações) baixar nesta rodada (~1 s cada)")
+    ap.add_argument("--temporadas", type=int, default=0,
+                    help="fotmob_temporada/fotmob_jogos: temporadas ANTERIORES além da atual (0–5)")
     ap.add_argument("--tudo", action="store_true",
                     help="monta a base completa: todas as fontes, histórico inteiro (fdcouk desde 1993, Understat desde "
                          "2014, ESPN desde --desde), OpenPlay e súmulas da CBF baixados automaticamente")
@@ -296,7 +318,8 @@ def main() -> None:
         run_sync(args.only or QUICK_SOURCES, args.days, 0, seasons_back=0, prefetch_boxscores=args.prefetch_boxscores)
     else:
         run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons, summaries_limit=args.limite,
-                 prefetch_boxscores=args.prefetch_boxscores, espn_leagues=args.ligas, since_year=args.desde)
+                 prefetch_boxscores=args.prefetch_boxscores, espn_leagues=args.ligas, since_year=args.desde,
+                 fotmob_seasons=max(0, min(args.temporadas, 5)))
 
 
 if __name__ == "__main__":
