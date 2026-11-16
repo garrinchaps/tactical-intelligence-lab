@@ -118,10 +118,11 @@ def _with_market_value(s: pd.DataFrame, ctx: MatchContext) -> pd.DataFrame:
     return out
 
 
-RATING_HELP = ("Avaliação 2.0: 7 dimensões (6 para goleiros), cada indicador comparado com jogadores da MESMA função "
-               "(percentil → nota: P50 = 5,5 · P90 = 8,5), pesos pela função exercida no jogo. Desempenho = qualidade da "
-               "atuação; impacto = quanto mudou o jogo (gols, assistências, erros decisivos); confiança = quanto de "
-               "evidência existe. Menos de 15 min: sem nota. Dado ausente nunca vira zero.")
+RATING_HELP = ("Avaliação 3.0: indicadores comparados com pares da mesma função; pesos mistos quando os eventos mostram "
+               "mais de um papel. A régua tem centro em P50 = 6,4 e P90 = 8,6. A nota final combina desempenho com "
+               "eventos decisivos observáveis (gols, assistências, defesas-chave e pênaltis defendidos); desempenho base "
+               "e impacto ficam separados. Menos de 15 min: sem nota. Dado ausente nunca vira zero; trabalho sem bola "
+               "só é avaliado quando existe evidência registrada.")
 
 
 def _stats_table(ctx: MatchContext) -> None:
@@ -138,31 +139,40 @@ def _stats_table(ctx: MatchContext) -> None:
     from src.ui.context import match_ratings
 
     s = match_ratings(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
-    try:                                                 # v36: avaliação 2.0 (desempenho, impacto, confiança)
+    v2 = pd.DataFrame()
+    try:
         from src.ui.context import match_ratings_v2
 
         v2 = match_ratings_v2(ctx.match_id, ctx.df)
-        if not v2.empty:
-            s = s.merge(v2[["jogador", "desempenho", "impacto", "confianca"]], on="jogador", how="left")
-            s["nota"] = s["desempenho"]
     except Exception:
-        pass
+        v2 = pd.DataFrame()
     if s.empty:
         empty_state("Sem atletas com eventos.")
         return
-    ctx.prov("ps_table", "Estatísticas individuais", len(s), "contagem de eventos por atleta; minutos estimados pelas substituições")
-    ctx.prov("nota", "Nota da atuação (0–10)", "por jogador", "regras abertas em src/metrics/player_rating.py", tier="DERIVED")
     if mode == "Por 90 minutos":
         s = per90(s)
-        note("Por 90 minutos", "Atletas com poucos minutos têm valores por 90 instáveis: veja a coluna de minutos.", "warn")
+        note("Por 90 minutos", "As estatísticas são normalizadas por 90 minutos; nota, desempenho, impacto e confiança continuam na escala 0–10 original.", "warn")
+    # A nota não pode ser multiplicada por 90: incorporamos o resultado 3.0 depois da normalização das contagens.
+    if not v2.empty:
+        cols_v2 = [c for c in ("jogador", "nota", "nota_final", "desempenho", "impacto", "confianca",
+                               "confianca_pct", "classificacao", "amostra", "dim_tatica") if c in v2.columns]
+        s = s.merge(v2[cols_v2].drop_duplicates("jogador"), on="jogador", how="left", suffixes=("", "_v3"))
+        if "nota_v3" in s:
+            s["nota"] = s["nota_v3"]
+        if "nota_final" in s:
+            s["nota"] = s["nota_final"]
+    ctx.prov("ps_table", "Estatísticas individuais", len(s), "contagem de eventos por atleta; minutos estimados pelas substituições")
+    ctx.prov("nota", "Nota final 3.0 da atuação (0–10)", "por jogador",
+             "percentis por função + papéis mistos + impacto decisivo observável; dados ausentes reduzem cobertura", tier="DERIVED")
     s = _with_market_value(s, ctx)
-    labels = {**PLAYER_STAT_LABELS, "nota": "Nota (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
-              "impacto": "Impacto (0–10)", "confianca": "Confiança",
+    labels = {**PLAYER_STAT_LABELS, "nota": "Nota final 3.0 (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
+              "desempenho": "Desempenho base (0–10)", "nota_final": "Nota final (0–10)",
+              "impacto": "Impacto (0–10)", "confianca": "Confiança", "confianca_pct": "Confiança (%)",
               "defesas_goleiro": "Defesas (goleiro)", "gols_sofridos_goleiro": "Gols sofridos (goleiro)"}
     base = ["jogador", "equipe", "posicao", "setor", "nota", "minutos"]
     if cat == "Nota":
-        cols = base + ["impacto", "confianca", "gols", "assistencias", "xg", "xt", "passes_certos", "acoes_defensivas",
-                       "passes_errados", "perdas_de_posse"]
+        cols = base + ["desempenho", "impacto", "confianca", "confianca_pct", "classificacao", "gols", "assistencias",
+                       "xg", "xt", "passes_certos", "acoes_defensivas", "passes_errados", "perdas_de_posse"]
     elif cat == "Tudo":
         cols = list(s.columns)
     else:
