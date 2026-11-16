@@ -95,6 +95,41 @@ FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors",
              "between_lines", "efficiency", "moments", "goal_buildup", "defenders_diag", "combinations"}
 
 
+def _wants_fotmob_supplement(query: str, sc: Any) -> bool:
+    """Só consulta a fonte complementar quando ela pode acrescentar um indicador que os eventos não trazem."""
+    q = norm_q(query)
+    physical = bool(re.search(r"\bcorr\w*|\bsprint\w*|\bdistanci\w*|\bkm\b|\bvelocidade", q))
+    fotmob_only = bool(re.search(r"\bxa\b|\bxgot\b|nota (da )?fotmob", q))
+    return "fotmob" in q or fotmob_only or (getattr(sc, "ask", None) == "unavailable" and physical)
+
+
+def _fotmob_answer(evidence: Dict[str, Any], sc: Any, meta: Dict[str, Any],
+                   target_team: str, teams_in_match: List[str]):
+    """Enriquece a evidência sem substituir os blocos de eventos; retorna texto específico se a FotMob tiver o dado."""
+    try:
+        from src.data_hub.db import DataHubDB
+        from src.intelligence import box_analyst
+
+        opp = next((t for t in teams_in_match if t != target_team), "")
+        fb = box_analyst.build(DataHubDB(), sc, meta, target_team, opp)
+        txt = box_analyst.write(fb) if fb else ""
+        if not txt:
+            return evidence, None
+        evidence = {**evidence, "blocos": {**(evidence.get("blocos") or {}), "fotmob": fb},
+                    "escopo": {**(evidence.get("escopo") or {}), "resumo_generico": False}}
+        meta_r = evidence.setdefault("metadata", {})
+        roster_fm = []
+        for key in ("ranking", "plano_jogador", "nota", "como_sofreu", "historia_box", "dupla"):
+            if key in fb:
+                roster_fm += re.findall(r"'jogador': '([^']+)'", str(fb[key]))
+        meta_r["match_player_roster"] = list(dict.fromkeys(
+            (meta_r.get("match_player_roster") or []) + roster_fm
+        ))
+        return evidence, txt
+    except Exception:
+        return evidence, None
+
+
 def log_generic_fallback(query: str, sc: Any, path: Optional[str] = None) -> None:
     """
     Registra perguntas sem alvo como casos de teste. Isso melhora a cobertura, mas não treina pesos automaticamente.
@@ -1567,28 +1602,18 @@ class DynamicTacticalAnalyst:
         if has_events:
             evidence = ScopedEvidenceBuilder.build(df_events, sc, target_team, meta)
             local_md = LocalScopedWriter.write(evidence, sc)
+            # Eventos continuam sendo a fonte principal. A FotMob complementa apenas campos
+            # que os eventos não medem (sprints, distância, velocidade, xA/xGOT) ou quando pedida.
+            if _wants_fotmob_supplement(query, sc):
+                evidence, fotmob_text = _fotmob_answer(evidence, sc, meta, target_team, teams_in_match)
+                if fotmob_text:
+                    local_md = fotmob_text
         else:
             evidence = ScopedEvidenceBuilder.build_boxscore(boxscore or {}, sc, meta, target_team)
             local_md = LocalScopedWriter.write_boxscore(evidence, sc)
-            try:                                   # rodada 5: com dados da FotMob, resposta própria (não a tabela de sempre)
-                from src.data_hub.db import DataHubDB
-                from src.intelligence import box_analyst
-
-                opp = next((t for t in teams_in_match if t != target_team), "")
-                fb = box_analyst.build(DataHubDB(), sc, meta, target_team, opp)
-                txt = box_analyst.write(fb) if fb else ""
-                if txt:
-                    evidence = {**evidence, "blocos": {**(evidence.get("blocos") or {}), "fotmob": fb},
-                                "escopo": {**(evidence.get("escopo") or {}), "resumo_generico": False}}
-                    meta_r = evidence.setdefault("metadata", {})
-                    roster_fm = []
-                    for k in ("ranking", "plano_jogador", "nota", "como_sofreu", "historia_box"):
-                        if k in fb:
-                            roster_fm += re.findall(r"'jogador': '([^']+)'", str(fb[k]))
-                    meta_r["match_player_roster"] = list(dict.fromkeys((meta_r.get("match_player_roster") or []) + roster_fm))
-                    local_md = txt
-            except Exception:
-                pass
+            evidence, fotmob_text = _fotmob_answer(evidence, sc, meta, target_team, teams_in_match)
+            if fotmob_text:
+                local_md = fotmob_text
 
         if (evidence.get("escopo") or {}).get("resumo_generico"):
             log_generic_fallback(query, sc)
