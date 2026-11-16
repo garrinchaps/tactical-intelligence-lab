@@ -154,6 +154,53 @@ def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.D
     return pd.DataFrame(out).sort_values("desempenho", ascending=False, na_position="last").reset_index(drop=True)
 
 
+def player_form(db, names: List[str], n: int = 10, ref: Optional[pd.DataFrame] = None,
+                team_names: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Nota 2.0 (por estatísticas) do jogador nos últimos `n` jogos com números por jogador — base da FASE (últimos 5),
+    da QUALIDADE (média do período) e da REGULARIDADE (desvio entre jogos). Sem jogos assim, volta vazio.
+    Nunca só pelo nome: usa o id do atleta na FotMob; sem id, fica no clube informado ou no time do jogo mais recente.
+    """
+    if not names:
+        return pd.DataFrame()
+    ph = ",".join("?" * len(names))
+    with db.connect() as conn:
+        cand = pd.read_sql_query(
+            f"SELECT s.match_id, s.team_name, s.stats_json, m.match_date, m.home_team_name, m.away_team_name, m.home_score, "
+            f"m.away_score FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id WHERE s.player_name IN ({ph}) "
+            f"AND m.data_source = 'fotmob' ORDER BY m.match_date DESC LIMIT 200", conn, params=list(names))
+    if cand.empty:
+        return pd.DataFrame()
+    cand["fid"] = [(json.loads(js or "{}") or {}).get("fotmob_id") for js in cand["stats_json"]]
+    if team_names:
+        tn = set(team_names)
+        c2 = cand[cand["team_name"].isin(tn)]
+        cand = c2 if not c2.empty else cand.iloc[0:0]
+    if cand.empty:
+        return pd.DataFrame()
+    top = cand.iloc[0]
+    if top["fid"] is not None:
+        cand = cand[cand["fid"] == top["fid"]]
+    else:
+        cand = cand[cand["team_name"] == top["team_name"]]
+    ids = cand.head(int(n))[["match_id", "match_date", "home_team_name", "away_team_name", "home_score", "away_score"]] \
+        .itertuples(index=False, name=None)
+    pool = ref if ref is not None else reference()
+    rows = []
+    for mid, d, h, a, hs, as_ in ids:
+        r = match_ratings(db, mid, pool)
+        if r.empty:
+            continue
+        me = r[r["jogador"].isin(names)]
+        if me.empty or me.iloc[0]["desempenho"] is None or pd.isna(me.iloc[0]["desempenho"]):
+            continue
+        x = me.iloc[0]
+        dims = x["_detalhe"]["dimensoes"]
+        rows.append({"match_id": mid, "data": d, "jogo": f"{h} {hs} x {as_} {a}", "funcao": x["funcao"], "minutos": x["minutos"],
+                     "desempenho": x["desempenho"], "impacto": x["impacto"], "confianca_pct": x["confianca_pct"], **dims})
+    return pd.DataFrame(rows)
+
+
 def main() -> None:
     import argparse
 

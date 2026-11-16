@@ -146,7 +146,9 @@ def render(_ctx=None) -> None:
         st.markdown("##### 📅 Próximos jogos")
         st.caption("Agenda do open-matchday (horário de início em CET-1, como a fonte publica).")
         comparison_table(nxt.head(5))
-    t1, t2, t3 = st.tabs(["🗓️ Jogos", "💶 Elenco e valores", "📈 Temporada (xG)"])
+    t1, t0, t2, t3 = st.tabs(["🗓️ Jogos", "🧬 Estilo e tendências", "💶 Elenco e valores", "📈 Temporada (xG)"])
+    with t0:
+        _style_tab(name, names)
     with t1:
         lv_names = [k for k, v in LEVEL_CHOICES.items() if v in chosen_levels()]
         st.caption("Mostrando só jogos com: " + " · ".join(lv_names) + " (o filtro de nível do topo vale aqui também).")
@@ -227,3 +229,73 @@ def render(_ctx=None) -> None:
                 st.plotly_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
                                              ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
                                 use_container_width=True)
+
+
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+def _style_data(names: tuple, version: str) -> dict:
+    from src.analytics import team_history as TH
+    from src.ui.context import get_service
+
+    db = get_service().db
+    out = {"identidade": TH.identity(db, list(names), 15), "vulneraveis": TH.vulnerabilities(db, list(names), 15)}
+    m = TH._matches(db, list(names), 15)
+    v = TH._vectors(db, m, list(names))
+    out["serie"] = v[["match_date", "home_team_name", "away_team_name", "home_score", "away_score", "f_xg", "c_xg",
+                      "f_possession_pct"]].sort_values("match_date") if not v.empty else pd.DataFrame()
+    from src.squad.matchday import next_fixtures
+
+    out["proximos"] = next_fixtures(db, list(names), 5)
+    return out
+
+
+def _style_tab(name: str, names: List[str]) -> None:
+    """Hub do clube (rodada 5): estilo habitual, problemas que se repetem, evolução do xG e próximos jogos."""
+    import plotly.graph_objects as go
+
+    from src.ui import charts
+    from src.ui.context import get_service
+    from src.ui.names import pt
+
+    d = _style_data(tuple(names), get_service().db.stable_version())
+    idn, vu, ser = d["identidade"], d["vulneraveis"], d["serie"]
+    card = lambda txt, c: st.markdown(f'<div class="fm-card" style="border-left:4px solid {c};border-radius:14px;padding:.6rem .9rem;'
+                                      f'margin-bottom:.45rem">{txt}</div>', unsafe_allow_html=True)
+    if ser is not None and not ser.empty:
+        k = st.columns(4)
+        xg_f, xg_c = pd.to_numeric(ser["f_xg"], errors="coerce"), pd.to_numeric(ser["c_xg"], errors="coerce")
+        k[0].metric("xG a favor por jogo", f"{xg_f.mean():.2f}" if xg_f.notna().any() else "—")
+        k[1].metric("xG contra por jogo", f"{xg_c.mean():.2f}" if xg_c.notna().any() else "—")
+        pos = pd.to_numeric(ser["f_possession_pct"], errors="coerce")
+        k[2].metric("Posse média", f"{pos.mean():.0f}%" if pos.notna().any() else "—")
+        k[3].metric("Jogos com estatísticas", len(ser))
+        if xg_f.notna().sum() >= 3:
+            lab = [f"{r.match_date} · {pt(r.home_team_name)} {r.home_score}x{r.away_score} {pt(r.away_team_name)}" for r in ser.itertuples()]
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=list(range(len(ser))), y=xg_f, mode="lines+markers", name="xG a favor",
+                                     line=dict(color="#22D3EE", width=3), hovertext=lab, hoverinfo="text+y"))
+            fig.add_trace(go.Scatter(x=list(range(len(ser))), y=xg_c, mode="lines+markers", name="xG contra",
+                                     line=dict(color="#EF4444", width=3), hovertext=lab, hoverinfo="text+y"))
+            fig.update_xaxes(showticklabels=False, title="jogos (do mais antigo ao mais recente)")
+            st.plotly_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
+    a, b = st.columns(2)
+    with a:
+        st.markdown("#### 🧬 Como joga")
+        for t_ in idn.get("tracos") or []:
+            card(f"<b>{t_['traco'].capitalize()}</b><br><span style='color:#94A3B8'>{t_['metrica']}: {t_['media']} · normal "
+                 f"{t_['referencia']} ({t_['dif_pct']:+.0f}%) · em {t_['frequencia_pct']}% dos jogos</span>", "#22D3EE")
+        if not idn.get("tracos"):
+            st.caption("Sem traço de estilo consistente nos jogos com estatísticas (ou poucos jogos).")
+    with b:
+        st.markdown("#### 🩹 Onde costuma sofrer")
+        for p_ in vu.get("padroes") or []:
+            card(f"<b>{p_['problema'].capitalize()}</b><br><span style='color:#94A3B8'>{p_['jogos_acima']} de {p_['jogos']} jogos acima "
+                 f"do P70 da competição</span>", "#EF4444")
+        for p_ in vu.get("sinais") or []:
+            card(f"⚠️ {p_['problema'].capitalize()} <span style='color:#94A3B8'>— sinal, {p_['jogos_acima']} de {p_['jogos']} jogos</span>", "#F59E0B")
+        if not (vu.get("padroes") or vu.get("sinais")):
+            st.caption("Nenhum problema que se repita com frequência.")
+    fx = d.get("proximos")
+    if fx is not None and not fx.empty:
+        st.markdown("#### 📅 Próximos jogos (ESPN/FotMob)")
+        comparison_table(fx[["kickoff", "home", "away", "competition"]].rename(columns={
+            "kickoff": "Início (UTC)", "home": "Mandante", "away": "Visitante", "competition": "Competição"}))

@@ -179,6 +179,7 @@ def render(_ctx=None) -> None:
                 f'</div></div>', unsafe_allow_html=True)
     if p["clube"]:
         nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
+    _player_card(p["nome"], tuple(names), p["clube"])
     t1, t5, t4, t2, t3 = st.tabs(["🗓️ Jogos com todos os lances", "📊 Scout por 90 min", "📚 Carreira (Transfermarkt)",
                                   "💶 Perfil e valor", "📈 Temporada (Understat)"])
     with t5:
@@ -398,3 +399,70 @@ def _career_tab(core: str) -> None:
     k[3].metric("Minutos", f"{int(car['Minutos'].sum()):,}".replace(",", "."))
     comparison_table(car.rename(columns={"temporada": "Temporada", "clube": "Clube"}),
                      "Fonte: Transfermarkt (transfermarkt-datasets), jogo a jogo, competições oficiais cobertas.")
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
+def _form_data(names: tuple, version: str, club: str = "") -> pd.DataFrame:
+    from src.analytics import rating_box as RB
+    from src.ui.context import get_service
+
+    try:
+        teams = None
+        if club:
+            from src.ui.pages.clubs import same_team_names
+
+            teams = same_team_names(club)
+        f = RB.player_form(get_service().db, list(names), 10, team_names=teams)
+        return f if not f.empty or not teams else RB.player_form(get_service().db, list(names), 10)
+    except Exception:
+        return pd.DataFrame()
+
+
+DIM_SHORT = [("ofensiva", "ATA"), ("criacao", "CRI"), ("progressao", "PRO"), ("defesa", "DEF"), ("eficiencia", "TEC"),
+             ("disciplina", "DIS")]
+GK_SHORT = [("defesas", "DEF"), ("aereo", "AER"), ("distribuicao", "DIS"), ("seguranca", "SEG"), ("cobertura", "COB")]
+
+
+def _player_card(nome: str, names: tuple, club: str = "") -> None:
+    """
+    Cartão no estilo FC/FIFA (rodada 5): qualidade = média da nota 2.0 nos últimos jogos com números por jogador;
+    fase = últimos 5; regularidade = quanto a nota oscila. Atributos = média de cada dimensão (0–10 → 0–99).
+    Nada é inventado: sem jogos com números por jogador, o cartão não aparece.
+    """
+    from src.ui.context import get_service
+
+    f = _form_data(names, get_service().db.stable_version(), club or "")
+    if f is None or f.empty or len(f) < 2:
+        return
+    q = float(f["desempenho"].mean())
+    fase = float(f.head(5)["desempenho"].mean())
+    sd = float(f["desempenho"].std() or 0)
+    reg = "muito regular" if sd < 0.6 else "regular" if sd < 1.0 else "oscila bastante"
+    fun = f["funcao"].mode().iloc[0]
+    dims = GK_SHORT if fun == "goleiro" else DIM_SHORT
+    tier = "#FBBF24" if q >= 7 else "#CBD5E1" if q >= 5.5 else "#B45309"
+    attrs = "".join(
+        f'<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:#94A3B8">{lab}</span>'
+        f'<b>{int(round(9.9 * float(f[k].dropna().mean())))}</b></div>' for k, lab in dims if k in f and f[k].notna().any())
+    trend = "▲" if fase - q >= 0.3 else "▼" if q - fase >= 0.3 else "●"
+    tcol = "#22C55E" if trend == "▲" else "#EF4444" if trend == "▼" else "#94A3B8"
+    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * r.desempenho)}px;'
+                     f'background:{"#22C55E" if r.desempenho >= 6.5 else "#F59E0B" if r.desempenho >= 5 else "#EF4444"};'
+                     f'border-radius:3px;margin-right:2px;vertical-align:bottom"></span>'
+                     for r in f.iloc[::-1].itertuples())
+    st.markdown(
+        f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:stretch;margin:.4rem 0 1rem">'
+        f'<div style="width:190px;background:linear-gradient(160deg,{tier}33,#0F1626 55%);border:2px solid {tier};'
+        f'border-radius:18px;padding:14px 16px">'
+        f'<div style="font-size:2.6rem;font-weight:800;line-height:1;color:{tier}">{int(round(9.9 * q))}</div>'
+        f'<div style="font-size:.8rem;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em">{fun}</div>'
+        f'<div style="font-weight:700;margin:6px 0 8px;color:#F5F7FB">{nome}</div>{attrs}</div>'
+        f'<div style="flex:1;min-width:240px;background:#0F1626;border:1px solid #1E2A44;border-radius:18px;padding:14px 16px">'
+        f'<div style="color:#94A3B8;font-size:.8rem">QUALIDADE (média de {len(f)} jogos)</div>'
+        f'<div style="font-size:1.6rem;font-weight:700">{q:.1f}</div>'
+        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {min(5, len(f))}) '
+        f'<span style="color:{tcol}">{trend}</span></div><div style="font-size:1.3rem;font-weight:700">{fase:.1f}</div>'
+        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
+        f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
+    st.caption("Cartão = nota 2.0 por estatísticas (FotMob), contra jogadores da mesma função. Número grande = qualidade × 9,9 "
+               "(escala 0–99, estilo jogo de videogame). Fase ≠ qualidade: um bom jogador pode estar em má fase.")

@@ -308,6 +308,7 @@ class FotmobProvider:
                     flat[PLAYER_MAP.get(k, k)] = st.get("value")
                     if st.get("total") is not None:
                         flat[PLAYER_MAP.get(k, k) + "_total"] = st.get("total")
+            flat["fotmob_id"] = int(pid) if str(pid).isdigit() else pid      # identidade do atleta (homônimos não se misturam)
             rating = None
             for p in [x for side in ("homeTeam", "awayTeam") for x in ((lu.get(side) or {}).get("starters") or [])
                       + ((lu.get(side) or {}).get("subs") or [])]:
