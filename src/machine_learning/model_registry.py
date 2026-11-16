@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss, roc_auc_score
 
-from src.machine_learning.danger_dataset import FEATURES, build_match_rows
+from src.machine_learning.danger_dataset import FEATURES, LEGACY_FEATURES, build_match_rows
 from src.machine_learning.neural_net import NeuralNetwork
 
 ROOT = Path("models/registry/danger")
@@ -80,6 +80,8 @@ class Version:
     optimizer: str = "sgd"
     warm_start: bool = False
     epochs_run: Optional[int] = None
+    density_360_share: Optional[float] = None
+    density_proxy_matches: int = 0
 
 
 class DangerModelRegistry:
@@ -118,11 +120,12 @@ class DangerModelRegistry:
 
     # ------------------------------------------------------------------ dados
     @staticmethod
-    def dataset(load_db_rows: Optional[Callable[[], pd.DataFrame]] = None, include_proxy: bool = False) -> pd.DataFrame:
+    def dataset(load_db_rows: Optional[Callable[[], pd.DataFrame]] = None, include_proxy: bool = True) -> pd.DataFrame:
         """
-        Todos os exemplos consistentes disponíveis, sem duplicar partidas:
-        amostra de demonstração (16 mil ações) → dataset completo do protocolo, se existir (~117 mil, com 360) →
-        partidas do banco com densidade medida pelo 360 (as que só têm a estimativa entram com include_proxy=True).
+        Todos os exemplos de partidas com eventos, sem duplicar jogos:
+        amostra de demonstração → protocolo completo → eventos do banco. Por padrão, entram também as partidas
+        cuja densidade de adversários é estimada por eventos; `density_is_360` informa ao modelo se a medida veio
+        de tracking 360. Partidas só com placar/boxscore não viram exemplos de ações.
         """
         parts: List[pd.DataFrame] = []
         if FULL.exists():
@@ -139,7 +142,17 @@ class DangerModelRegistry:
                 have = set(pd.concat(parts)["match_id"]) if parts else set()
                 parts.append(extra[extra["match_id"].isin(ok) & ~extra["match_id"].isin(have)])
         data = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
-        return data.dropna(subset=FEATURES + ["target"]).reset_index(drop=True) if not data.empty else data
+        if data.empty:
+            return data
+        # Compatibilidade com CSVs/NPZ antigos: ausência do indicador significa fonte não identificada,
+        # nunca tracking 360 confirmado.
+        if "density_is_360" not in data:
+            if "density_source" in data:
+                data["density_is_360"] = data["density_source"].eq("statsbomb_360").astype(float)
+            else:
+                data["density_is_360"] = 0.0
+        data["density_is_360"] = pd.to_numeric(data["density_is_360"], errors="coerce").fillna(0.0).clip(0, 1)
+        return data.dropna(subset=FEATURES + ["target"]).reset_index(drop=True)
 
     def _validation_ids(self, data: pd.DataFrame) -> List[int]:
         """Escolhidas uma vez (determinístico) e depois fixas."""
@@ -186,8 +199,21 @@ class DangerModelRegistry:
 
     # ------------------------------------------------------------------ treino
     @staticmethod
+    def _model_matrix(net: NeuralNetwork, rows: pd.DataFrame) -> np.ndarray:
+        """Monta as colunas esperadas pelo modelo, inclusive campeões antigos de 14 entradas."""
+        n_in = int(net.layer_sizes[0])
+        names = list(getattr(net, "feature_names", []) or [])
+        if len(names) == n_in and all(name in rows.columns for name in names):
+            return rows[names].to_numpy(float)
+        if n_in == len(FEATURES):
+            return rows[FEATURES].to_numpy(float)
+        if n_in == len(LEGACY_FEATURES):
+            return rows[LEGACY_FEATURES].to_numpy(float)
+        raise ValueError(f"modelo espera {n_in} variáveis, mas não há adaptador de compatibilidade")
+
+    @staticmethod
     def _evaluate(net: NeuralNetwork, val: pd.DataFrame) -> Dict[str, float]:
-        p = np.clip(net.predict_proba(val[FEATURES].to_numpy(float)), 1e-6, 1 - 1e-6)
+        p = np.clip(net.predict_proba(DangerModelRegistry._model_matrix(net, val)), 1e-6, 1 - 1e-6)
         y = val["target"].to_numpy(int)
         return {"auc": round(float(roc_auc_score(y, p)), 4), "logloss": round(float(log_loss(y, p)), 5)}
 
@@ -240,9 +266,9 @@ class DangerModelRegistry:
     def paired_gain(champ: NeuralNetwork, chall: NeuralNetwork, test: pd.DataFrame, n_boot: int = 400,
                     seed: int = 7) -> Dict[str, float]:
         """Ganho de log-loss no teste isolado (campeão − desafiante) com bootstrap por PARTIDA (IC 95%)."""
-        X, y = test[FEATURES].to_numpy(float), test["target"].to_numpy(int)
-        pc = np.clip(champ.predict_proba(X), 1e-6, 1 - 1e-6)
-        pn = np.clip(chall.predict_proba(X), 1e-6, 1 - 1e-6)
+        y = test["target"].to_numpy(int)
+        pc = np.clip(champ.predict_proba(DangerModelRegistry._model_matrix(champ, test)), 1e-6, 1 - 1e-6)
+        pn = np.clip(chall.predict_proba(DangerModelRegistry._model_matrix(chall, test)), 1e-6, 1 - 1e-6)
         loss = lambda p: -(y * np.log(p) + (1 - y) * np.log(1 - p))
         d = loss(pc) - loss(pn)                              # > 0 = desafiante melhor naquela ação
         g = test["match_id"].to_numpy()
@@ -290,8 +316,10 @@ class DangerModelRegistry:
         cv_auc_std = round(float(np.std(cv["auc"], ddof=1)), 4) if len(cv["auc"]) > 1 else None
         champ = self.champion_info()
         champ_net = self.champion() if champ else None
-        warm = (champ_net is not None and list(champ_net.layer_sizes) == [len(FEATURES), *hidden, 1]
-                if warm_start is None else bool(warm_start and champ_net is not None))
+        same_architecture = champ_net is not None and list(champ_net.layer_sizes) == [len(FEATURES), *hidden, 1]
+        warm = bool(same_architecture and (warm_start is None or warm_start))
+        if warm_start and champ_net is not None and not same_architecture:
+            say("ajuste fino ignorado: a arquitetura de entrada mudou; o desafiante começará do zero.")
         # fatia de parada antecipada: ~10% das partidas do treino (determinística pela semente)
         ids = np.array(sorted(train["match_id"].unique()))
         rng = np.random.default_rng(seed)
@@ -333,6 +361,8 @@ class DangerModelRegistry:
                           f"v{champ['version']:03d}")
         v = len(self.meta["versions"]) + 1
         net.save(self.root / f"v{v:03d}.npz")
+        share_360 = float(train["density_is_360"].mean()) if "density_is_360" in train and len(train) else None
+        proxy_matches = int(train.loc[train["density_is_360"] < 0.5, "match_id"].nunique()) if "density_is_360" in train else 0
         rec = Version(v, time.strftime("%Y-%m-%d %H:%M"), list(hidden), learning_rate, epochs, l2, batch_size,
                       int(train["match_id"].nunique()), int(len(train)), m["auc"], m["logloss"], promoted, reason, origin,
                       {k: [round(float(x), 5) for x in vals] for k, vals in net.history.items()},
@@ -340,7 +370,9 @@ class DangerModelRegistry:
                       round(float(np.mean(cv["auc"])), 4) if cv["auc"] else None,
                       round(pg["gain"], 6) if pg else None, round(pg["ci_low"], 6) if pg else None,
                       round(pg["ci_high"], 6) if pg else None, round(pg["p_positive"], 4) if pg else None,
-                      cv_auc_std, optimizer, bool(warm), len(net.history.get("train_loss", [])))
+                      cv_auc_std, optimizer, bool(warm), len(net.history.get("train_loss", [])),
+                      density_360_share=round(share_360, 4) if share_360 is not None else None,
+                      density_proxy_matches=proxy_matches)
         self.meta["versions"].append(asdict(rec))
         if promoted:
             self.meta["champion"] = v
@@ -458,7 +490,7 @@ def score_actions(df_events: pd.DataFrame, net: Optional[NeuralNetwork] = None) 
     rows = build_match_rows(df_events)
     if rows.empty:
         return rows
-    rows["p_perigo"] = net.predict_proba(rows[FEATURES].to_numpy(float))
+    rows["p_perigo"] = net.predict_proba(DangerModelRegistry._model_matrix(net, rows))
     info = df_events[["event_id", "player_name", "x", "y"]].drop_duplicates("event_id")
     return rows.merge(info, on="event_id", how="left")
 
@@ -471,6 +503,8 @@ def model_card() -> Optional[Dict[str, Any]]:
     if not c:
         return None
     return {"versao": f"v{c['version']:03d}", "auc_validacao": c["val_auc"], "partidas_de_treino": c["n_matches_train"],
+            "acoes_de_treino": c.get("n_samples_train"), "tracking_360_pct": round(100 * c["density_360_share"], 1)
+            if c.get("density_360_share") is not None else None, "partidas_com_proxy": c.get("density_proxy_matches", 0),
             "arquitetura": " → ".join(str(x) for x in [len(FEATURES), *c["hidden"], 1]), "treinado_em": c["created"]}
 
 
@@ -491,6 +525,8 @@ def db_rows(db, max_new: int = 25, progress: Optional[Callable[[str], None]] = N
     (o 360 só existe para parte do StatsBomb).
     """
     cached = pd.read_csv(ROWS_CACHE) if ROWS_CACHE.exists() else pd.DataFrame()
+    if not cached.empty and "density_is_360" not in cached:
+        cached["density_is_360"] = cached["density_source"].eq("statsbomb_360").astype(float) if "density_source" in cached else 0.0
     have = set(cached["match_id"].unique()) if not cached.empty else set()
     demo = set(pd.read_csv(DEMO, usecols=["match_id"])["match_id"].unique()) if DEMO.exists() else set()
     with db.connect() as conn:
@@ -590,7 +626,8 @@ def main() -> None:
     ap.add_argument("--tentativas", type=int, default=3)
     ap.add_argument("--epocas", type=int, default=30)
     ap.add_argument("--partidas-novas", type=int, default=200, help="partidas do banco preparadas nesta rodada")
-    ap.add_argument("--com-estimadas", action="store_true", help="inclui partidas sem 360 (densidade estimada)")
+    ap.add_argument("--com-estimadas", action="store_true", help="compatibilidade: inclui também densidade estimada")
+    ap.add_argument("--somente-360", action="store_true", help="restringe o treino às partidas com tracking 360 medido")
     ap.add_argument("--experimentos", default="", help="ex.: B ou B,A,C,D — experimentos controlados (v36)")
     ap.add_argument("--ocultas", default="", help="treino manual: neurônios por camada, ex.: 32,16")
     ap.add_argument("--eta", type=float, default=0.001)
@@ -618,7 +655,7 @@ def main() -> None:
         db = MatchDataService().db
         data = DangerModelRegistry.dataset(None if args.sem_banco else (lambda: db_rows(db, max_new=args.partidas_novas,
                                                                                          progress=say)),
-                                           include_proxy=args.com_estimadas)
+                                           include_proxy=not args.somente_360 or args.com_estimadas)
         say(f"conjunto: {data['match_id'].nunique()} partidas, {len(data)} ações")
         champion_cached()                                   # garante a v001 antes de comparar
         reg = DangerModelRegistry()
