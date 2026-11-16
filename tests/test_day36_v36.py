@@ -833,6 +833,7 @@ def test_rating_v3_rules(final_df):
 
     assert pct_to_score(50) == 6.4 and pct_to_score(90) == 8.6 and pct_to_score(99) == 10.0
     assert role_of("Left Center Back") == "zagueiro" and role_of("Right Back") == "lateral" and role_of("Goalkeeper") == "goleiro"
+    assert role_of("Unknown") == "não identificado"
     r = match_ratings_v2(final_df).set_index("jogador")
     assert r.loc["Lionel Messi", "desempenho"] > r.loc["Nicolás Otamendi", "desempenho"]
     assert r.loc["Kylian Mbappé", "nota"] > r.loc["Kylian Mbappé", "desempenho"]  # gols elevam a nota final
