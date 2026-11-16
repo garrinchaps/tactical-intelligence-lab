@@ -828,7 +828,7 @@ def test_two_questions_in_one_message_get_two_answers(final_df):
     assert "Quem mais se destacou em **passes**" in md and "Pelo xG" in md and r["hallucination_audit"]["is_grounded"]
 
 
-def test_rating_v2_rules(final_df):
+def test_rating_v3_rules(final_df):
     from src.analytics.rating_v2 import evaluate, match_ratings_v2, pct_to_score, role_of
 
     assert pct_to_score(50) == 6.4 and pct_to_score(90) == 8.6 and pct_to_score(99) == 10.0
@@ -848,6 +848,20 @@ def test_rating_v2_rules(final_df):
     gk = r.loc["Hugo Lloris", "_detalhe"]
     assert gk["dimensoes"]["posicionamento"] is None  # não observado ≠ zero
     assert r["desempenho"].dropna().max() < 9.6       # desempenho 10 continua raríssimo
+
+
+def test_rating_v3_missing_optional_values_do_not_create_penalties():
+    import numpy as np
+
+    from src.analytics.rating_v2 import impact_delta
+
+    row = {
+        "funcao": "zagueiro", "gols": 0, "assistencias": 0,
+        "gols_penalti": None, "vermelhos": np.nan,
+        "erros_que_viraram_chance": np.nan,
+        "chances_claras_perdidas": np.nan,
+    }
+    assert impact_delta(row) == 0.0
 
 
 def test_rating_v3_blends_distinct_roles_in_the_same_match(final_df):
