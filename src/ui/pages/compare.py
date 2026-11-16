@@ -341,9 +341,11 @@ def _club_vs_club() -> None:
     for lab, k in (("Jogos", "jogos"), ("Vitórias", "V"), ("Empates", "E"), ("Derrotas", "D"), ("Gols pró", "gp"),
                    ("Gols contra", "gc"), ("Aproveitamento (%)", "aprov")):
         rows.append({"indicador": lab, ta: ra.get(k), tb: rb.get(k)})
-    tab = pd.DataFrame(rows)
-    st.plotly_chart(charts.grouped_bars(tab[tab["indicador"] != "Jogos"], "indicador", [ta, tb],
-                                        "Últimos 38 jogos com placar (todas as competições)", height=420), use_container_width=True)
+    from src.ui.components import duel_bars
+
+    duel_bars([{"label": r["indicador"], "a": r[ta], "b": r[tb], "fmt": "{:.0f}",
+                "lower_is_better": r["indicador"] in ("Derrotas", "Gols contra")} for r in rows if r["indicador"] != "Jogos"],
+              ta, tb, "Últimos 38 jogos com placar (todas as competições)")
     h2h = ma[((ma["home_team_name"] == ta) & (ma["away_team_name"] == tb)) | ((ma["home_team_name"] == tb) & (ma["away_team_name"] == ta))]
     st.markdown(f"##### Confronto direto: {len(h2h)} jogo(s) no catálogo")
     if not h2h.empty:
@@ -500,17 +502,27 @@ def _any_players() -> None:
         st.markdown("- " + line)
     if len(cols) < 2:
         return
+    from src.ui.components import duel_bars
+
     (n1, v1), (n2, v2) = list(cols.items())
-    rows = []
-    for g, items in SCOUT_GROUPS.items():
-        for k, lab in items:
-            if k in v1 and k in v2:
-                worse_is_more = k in ("perdas_de_posse", "faltas_cometidas", "amarelos", "vermelhos", "erros")
-                best = "" if abs(v1[k] - v2[k]) < 1e-9 else (n1 if (v1[k] > v2[k]) != worse_is_more else n2)
-                rows.append({"Grupo": g, "Indicador (por 90 min)": lab, n1: round(v1[k], 2), n2: round(v2[k], 2),
-                             "Melhor": best})
-    comparison_table(pd.DataFrame(rows), "Valores por 90 minutos no recorte. Minutos estimados pelo intervalo entre a "
-                                         "primeira e a última ação de cada jogo. Partidas sem lances do jogador não entram.")
+    worse = {"perdas_de_posse", "faltas_cometidas", "amarelos", "vermelhos", "erros"}
+    wins = {n1: 0, n2: 0}
+    tabs = st.tabs([{"Atacando": "⚽ Ataque", "Passe": "🎯 Passe", "Defendendo": "🛡️ Defesa", "Outros": "⚔️ Duelos e disciplina"}
+                    .get(g, g) for g in SCOUT_GROUPS])
+    for tab, (g, items) in zip(tabs, SCOUT_GROUPS.items()):
+        rows = [{"label": lab, "a": v1[k], "b": v2[k], "fmt": "{:.2f}", "lower_is_better": k in worse}
+                for k, lab in items if k in v1 and k in v2]
+        for r in rows:
+            if r["a"] != r["b"]:
+                wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
+        with tab:
+            duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+    lead = max(wins, key=wins.get)
+    st.markdown(f'<div class="til-card" style="min-height:auto"><div class="label">Placar dos indicadores</div>'
+                f'<div class="value" style="font-size:1.6rem"><span style="color:#22D3EE">{n1} {wins[n1]}</span> × '
+                f'<span style="color:#EF4444">{wins[n2]} {n2}</span></div></div>', unsafe_allow_html=True)
+    st.caption("Valores por 90 minutos no recorte. Minutos estimados pelo intervalo entre a primeira e a última ação de "
+               "cada jogo. Partidas sem lances do jogador não entram. Em perdas, faltas e cartões, menos é melhor.")
 
 
 def render_page(current_context, match_bar) -> None:

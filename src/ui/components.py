@@ -157,6 +157,14 @@ def zebra(df: pd.DataFrame):
     try:
         sty = df.style.apply(lambda r: [f"background-color: {'#0D1117' if r.name % 2 == 0 else '#161B22'}"] * len(r)
                              if isinstance(r.name, int) else [""] * len(r), axis=1)
+        # números legíveis: no máximo 2 casas (nada de 0.000000), inteiros sem casa decimal
+        fmt = {}
+        for c in df.columns:
+            if pd.api.types.is_float_dtype(df[c]):
+                vals = pd.to_numeric(df[c], errors="coerce").dropna()
+                fmt[c] = "{:.0f}" if len(vals) and (vals == vals.round()).all() else "{:.2f}"
+        if fmt:
+            sty = sty.format(fmt, na_rep="—")
         rating = [c for c in df.columns if str(c).lower() in ("nota", "rating", "avaliação")]
         if rating:
             def col(v):
@@ -229,6 +237,46 @@ def metric_bars(items: List[dict], kind: str = "forte", empty_text: str = "") ->
             f'<div style="width:{pct:.0f}%;height:8px;background:{color};border-radius:6px"></div></div>'
             f'<div style="color:#94A3B8;font-size:.8rem">{phrase} · jogo típico: {_esc(d.get("reference_median", "—"))}</div></div>')
     st.markdown("".join(html_rows), unsafe_allow_html=True)
+
+
+def duel_bars(rows: List[dict], name_a: str, name_b: str, title: str = "") -> None:
+    """
+    Comparação lado a lado em cartões (sem cara de planilha): cada linha = indicador, com a barra de A (azul) para a
+    esquerda e a de B (vermelho) para a direita, proporcionais ao maior dos dois; quem é melhor fica em destaque.
+    rows: [{"label", "a", "b", "fmt": "{:.2f}", "lower_is_better": bool}]
+    """
+    def f(v, fm):
+        try:
+            return (fm or "{:.2f}").format(float(v)).rstrip("0").rstrip(".") if v is not None else "—"
+        except Exception:
+            return str(v)
+    html_rows = []
+    for r in rows:
+        a, b = r.get("a"), r.get("b")
+        try:
+            fa, fb = float(a or 0), float(b or 0)
+        except Exception:
+            fa = fb = 0.0
+        mx = max(abs(fa), abs(fb), 1e-9)
+        better = None if fa == fb else ("a" if (fa > fb) != bool(r.get("lower_is_better")) else "b")
+        wa, wb = 100 * abs(fa) / mx, 100 * abs(fb) / mx
+        ca = "#22D3EE" if better == "a" else "#1E3A5F"
+        cb = "#EF4444" if better == "b" else "#4A2228"
+        html_rows.append(
+            f'<div style="display:grid;grid-template-columns:72px 1fr 150px 1fr 72px;align-items:center;gap:8px;'
+            f'padding:6px 0;border-bottom:1px solid #141C2E">'
+            f'<div style="text-align:right;font-weight:{800 if better == "a" else 500};color:{"#22D3EE" if better == "a" else "#CBD5E1"}">{f(a, r.get("fmt"))}</div>'
+            f'<div style="display:flex;justify-content:flex-end"><div style="width:{wa:.0f}%;height:10px;border-radius:6px;background:{ca}"></div></div>'
+            f'<div style="text-align:center;color:#94A3B8;font-size:.82rem">{_esc(t(r["label"]))}</div>'
+            f'<div><div style="width:{wb:.0f}%;height:10px;border-radius:6px;background:{cb}"></div></div>'
+            f'<div style="font-weight:{800 if better == "b" else 500};color:{"#EF4444" if better == "b" else "#CBD5E1"}">{f(b, r.get("fmt"))}</div></div>')
+    head = (f'<div style="display:grid;grid-template-columns:1fr 1fr;margin-bottom:6px"><div style="color:#22D3EE;'
+            f'font-weight:700">● {_esc(name_a)}</div><div style="color:#EF4444;font-weight:700;text-align:right">'
+            f'{_esc(name_b)} ●</div></div>')
+    st.markdown(f'<div style="background:#0F1626;border:1px solid #1E2A44;border-radius:14px;padding:12px 16px;'
+                f'margin-bottom:12px;box-shadow:0 6px 18px rgba(0,0,0,.3)">'
+                + (f'<div style="font-weight:700;margin-bottom:8px">{_esc(t(title))}</div>' if title else "")
+                + head + "".join(html_rows) + "</div>", unsafe_allow_html=True)
 
 
 def entity_chips(players: List[str], teams: List[str], key: str) -> None:
