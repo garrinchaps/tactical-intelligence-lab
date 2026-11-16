@@ -293,9 +293,20 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
             for lab, v, c in (("qualidade", p.get("qualidade"), "#22D3EE"), ("fase", p.get("fase"), "#A78BFA"),
                               ("titular", f'{p.get("prob_titular")}%' if p.get("prob_titular") is not None else None, "#FBBF24"),
                               ("encaixe", p.get("encaixe"), "#22C55E")) if v is not None)
-        rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:8px 12px;'
-                    f'margin-bottom:6px"><b>{p["papel_pt"]}: {p["jogador"]}</b>{chips}<br><span style="color:#CBD5E1;'
-                    f'font-size:.85rem">{why}</span></div>')
+        d = p.get("destaques") or {}
+        box = lambda items, bg, bd, icon: "".join(
+            f'<div style="background:{bg};border:1px solid {bd};border-radius:10px;padding:5px 9px;margin:4px 6px 0 0;'
+            f'display:inline-block;font-size:.85rem"><b>{icon} {x["rotulo"]}</b> {x["valor"]} '
+            f'<span style="opacity:.8">(melhor que {x["percentil"]}% da função)</span></div>' for x in items)
+        hl = ""
+        if d.get("fortes") or d.get("fracos"):
+            hl = ('<div style="margin-top:6px">' + box(d.get("fortes") or [], "rgba(34,197,94,.14)", "#22C55E", "✅")
+                  + box(d.get("fracos") or [], "rgba(239,68,68,.14)", "#EF4444", "⚠️") + "</div>"
+                  + f'<div style="color:#64748B;font-size:.75rem;margin-top:3px">temporada: {d["jogos"]} jogos, {d["minutos"]} min, '
+                  f'contra {d["funcao"]}s de outros jogos</div>')
+        rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:9px 12px;'
+                    f'margin-bottom:8px"><b style="font-size:1rem">{p["papel_pt"]}: {p["jogador"]}</b>{chips}{hl}'
+                    f'<div style="color:#CBD5E1;font-size:.82rem;margin-top:5px">{why}</div></div>')
     st.markdown("".join(rows), unsafe_allow_html=True)
 
 
@@ -468,6 +479,13 @@ def render(_ctx=None) -> None:
     if not team:
         empty_state("Escolha o seu time", "Digite o nome no campo 'Meu time'.", "📋")
         return
+    if rival and team:
+        from src.ui.pages.clubs import same_team_names
+
+        if rival in same_team_names(team):
+            st.warning(f"O adversário é o próprio {team}. Escolha outro time no campo 'Adversário' — por enquanto a "
+                       "análise segue sem adversário.")
+            rival = None
     with st.spinner("Montando elenco e perfis..."):
         sq = _squad(team, version)
         mine = _profile(team, n, version)

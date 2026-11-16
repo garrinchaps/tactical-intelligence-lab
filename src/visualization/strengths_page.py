@@ -191,16 +191,16 @@ def _outlier_tab(ctx, mode: str, entity: str) -> None:
         return
     team = v2[(v2["equipe"] == entity) & v2["desempenho"].notna()]
     rows = []
-    for r in team.itertuples():
-        o = outliers(r._detalhe)
+    for r in team.to_dict("records"):        # itertuples renomeia colunas com "_" na frente (quebrava o _detalhe)
+        o = outliers(r["_detalhe"])
         if o["fortes"]:
             x = o["fortes"][0]
-            rows.append({"label": f"{r.jogador}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
+            rows.append({"label": f"{r['jogador']}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
                          "reference_median": round(float(x["mediana_pares"]), 2) if x.get("mediana_pares") is not None else "—",
                          "_kind": "forte"})
         if o["fracos"]:
             x = o["fracos"][0]
-            rows.append({"label": f"{r.jogador}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
+            rows.append({"label": f"{r['jogador']}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
                          "reference_median": round(float(x["mediana_pares"]), 2) if x.get("mediana_pares") is not None else "—",
                          "_kind": "fraco"})
     a, b = st.columns(2)

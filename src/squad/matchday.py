@@ -84,7 +84,49 @@ def recent_lineups(db, team_names: Sequence[str], n: int = 10) -> pd.DataFrame:
     return lu.sort_values("data", ascending=False)
 
 
-def recent_player_stats(db, match_ids: Sequence[int], team_names: Sequence[str]) -> pd.DataFrame:
+def _fold(name: str) -> str:
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", str(name)).encode("ascii", "ignore").decode().lower()
+    return " ".join(t.replace("-", " ").replace(".", " ").split())
+
+
+def canonical_names(names: Sequence[str], roster_names: Sequence[str]) -> Dict[str, str]:
+    """
+    Nome de cada fonte → um nome só. Regras (nunca junta dois atletas diferentes por palpite):
+      1. igual sem acento/maiúscula ("Konate" = "Konaté", "Van Dijk" = "van Dijk");
+      2. todas as palavras de um estão no outro e só existe UM candidato ("Alisson" ⊂ "Alisson Becker");
+      3. inicial + sobrenome ("V. van Dijk") com um único candidato.
+    Preferência pelo nome do elenco atual (ESPN); sem elenco, pelo nome mais longo entre as fontes.
+    """
+    pool = list(dict.fromkeys([n for n in roster_names if n] + [n for n in names if n]))
+    folded = {n: _fold(n) for n in pool}
+    out: Dict[str, str] = {}
+    targets = list(dict.fromkeys(roster_names)) or sorted(set(names), key=lambda n: -len(n))
+    tok = {t: set(folded.get(t, _fold(t)).split()) for t in targets}
+    for n in names:
+        f = folded[n]
+        same = [t for t in targets if folded.get(t, _fold(t)) == f]
+        if same:
+            out[n] = same[0]
+            continue
+        a = set(f.split())
+        sub = [t for t in targets if t != n and tok[t] and (a <= tok[t] or tok[t] <= a) and len(a & tok[t]) >= 1
+               and (len(a) > 1 or len(tok[t]) > 1)]
+        if len(sub) == 1:
+            out[n] = sub[0]
+            continue
+        parts = f.split()
+        if len(parts) >= 2 and len(parts[0]) == 1:
+            ini = [t for t in targets if folded.get(t, _fold(t)).split()[-1:] == parts[-1:] and
+                   folded.get(t, _fold(t)).startswith(parts[0])]
+            if len(ini) == 1:
+                out[n] = ini[0]
+    return out
+
+
+def recent_player_stats(db, match_ids: Sequence[int], team_names: Sequence[str],
+                        canon: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     if not match_ids:
         return pd.DataFrame()
     ph, ps = _names_sql([int(x) for x in match_ids])
@@ -107,7 +149,12 @@ def recent_player_stats(db, match_ids: Sequence[int], team_names: Sequence[str])
                      "vermelhos": s.get("redCards", 0) or 0, "defesas": s.get("saves", 0) or 0})
     if not rows:
         return pd.DataFrame()
-    return pd.DataFrame(rows).groupby("jogador", as_index=False).sum(numeric_only=True)
+    df = pd.DataFrame(rows)
+    if canon is not None:
+        extra = canonical_names([n for n in df["jogador"].unique() if n not in canon], list(dict.fromkeys(canon.values())))
+        m = {**canon, **extra}
+        df["jogador"] = df["jogador"].map(lambda x: m.get(x, x))
+    return df.groupby("jogador", as_index=False).sum(numeric_only=True)
 
 
 def suspensions(db, last_match_id: Optional[int], team_names: Sequence[str]) -> Dict[str, str]:
@@ -138,6 +185,12 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
     """
     ros = roster(db, team_names)
     lu = recent_lineups(db, team_names, season_games)
+    canon: Dict[str, str] = {}
+    if not lu.empty:
+        # o mesmo atleta escrito de jeitos diferentes nas fontes ("Ibrahima Konate" × "Ibrahima Konaté", "Alisson" ×
+        # "Alisson Becker", "Virgil Van Dijk" × "Virgil van Dijk") vira UM nome — o do elenco atual quando existe
+        canon = canonical_names(lu["jogador"].dropna().unique().tolist(), ros["name"].tolist() if not ros.empty else [])
+        lu = lu.assign(jogador=lu["jogador"].map(lambda x: canon.get(x, x)))
     games = lu["match_id"].drop_duplicates().tolist() if not lu.empty else []
     if not lu.empty:                                   # temporada = últimos 365 dias a partir do jogo mais recente
         d = pd.to_datetime(lu["data"], errors="coerce")
@@ -145,8 +198,8 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
         games = lu["match_id"].drop_duplicates().tolist()
     recent = games[:max(n, 5)]
     last5 = set(games[:5])
-    stats_season = recent_player_stats(db, games, team_names)
-    stats_5 = recent_player_stats(db, list(last5), team_names)
+    stats_season = recent_player_stats(db, games, team_names, canon)
+    stats_5 = recent_player_stats(db, list(last5), team_names, canon)
     last_id = games[0] if games else None
     susp = suspensions(db, last_id, team_names)
     susp.update(yellow_suspensions(db, games, team_names))
@@ -199,7 +252,12 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
         # omite lesionados de longo prazo ou atualiza atrasada). Quem jogou recentemente fica como DÚVIDA, com o motivo.
         last_play = lu.groupby("jogador")["data"].max() if not lu.empty else pd.Series(dtype=str)
         newest = pd.to_datetime(lu["data"], errors="coerce").max() if not lu.empty else None
-        recent_cut = (newest - pd.Timedelta(days=60)) if newest is not None else None
+        # referência = o mais novo entre o último jogo com escalação e a data do elenco: com escalações antigas na base
+        # (outra fonte, temporada passada), quem não está no elenco ATUAL não volta a ser escalado
+        ros_day = pd.to_datetime(ros.get("fetched_at"), errors="coerce").max() if "fetched_at" in ros else None
+        ros_day = ros_day.tz_localize(None) if ros_day is not None and pd.notna(ros_day) and ros_day.tzinfo else ros_day
+        ref_day = max([x for x in (newest, ros_day) if x is not None and pd.notna(x)], default=None)
+        recent_cut = (ref_day - pd.Timedelta(days=60)) if ref_day is not None else None
         keep = []
         for r in df.itertuples():
             if r.no_elenco_atual is not False:
@@ -241,9 +299,17 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
     df["qualidade"], df["fase"], df["nota_base"] = q, f, base
     df["nota"] = (df["qualidade"] * 10).round()                  # compatibilidade com as telas antigas (0–100)
     forms = Counter(lu.drop_duplicates("match_id").head(3)["formation"].dropna()) if not lu.empty else Counter()
+    try:
+        dest = player_highlights(db, games, team_names, {r.nome: r.papel for r in df.itertuples()
+                                                         if isinstance(r.papel, str) and not r.papel.endswith("?")}, canon)
+    except Exception:
+        dest = {}
+    newest = pd.to_datetime(lu["data"], errors="coerce").max() if not lu.empty else None
+    stale = None if newest is None or pd.isna(newest) else int((pd.Timestamp(date.today()) - newest).days)
     return {"jogadores": df.sort_values(["prob_titular", "qualidade"], ascending=False).reset_index(drop=True),
             "jogos": games, "formacao": forms.most_common(1)[0][0] if forms else None, "escalacoes": lu,
-            "fonte_elenco": "ESPN (elenco atual)" if not ros.empty else "escalações recentes"}
+            "fonte_elenco": "ESPN (elenco atual)" if not ros.empty else "escalações recentes", "destaques": dest,
+            "dias_desde_ultima_escalacao": stale}
 
 
 # regra de suspensão por acúmulo de amarelos (estimativa pela regra da competição; zera em fases que o regulamento manda)
@@ -300,6 +366,77 @@ def multi_fit(slot_role: str, posicoes: Dict[str, int], main: Optional[str]) -> 
     return best
 
 
+def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles: Dict[str, str],
+                      canon: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
+    """
+    Pontos fortes e fracos de cada jogador na temporada: soma os números por jogador dos jogos (FotMob), converte
+    por 90 min e compara com jogadores da MESMA função na régua da nota 2.0 por estatísticas. Só entra o que foge da
+    média (≥ P75 forte, ≤ P25 fraco). Sem números por jogador, o jogador fica sem destaque (nunca inventado).
+    """
+    if not games:
+        return {}
+    from src.analytics import rating_box as RB
+    from src.analytics.rating_v2 import INDICATORS, GK_INDICATORS, IND_PT, _peer_group, _pct
+
+    ref = RB.reference()
+    if ref.empty:
+        return {}
+    ph, ps = _names_sql([int(x) for x in games])
+    th, ts = _names_sql(team_names)
+    try:
+        with db.connect() as conn:
+            d = pd.read_sql_query(f"SELECT match_id, team_name, player_name, position, minutes, stats_json FROM match_player_stats "
+                                  f"WHERE match_id IN ({ph}) AND team_name IN ({th})", conn, params=ps + ts)
+    except Exception:
+        return {}
+    if d.empty:
+        return {}
+    if canon:
+        d["player_name"] = d["player_name"].map(lambda x: canon.get(x, x))
+    out: Dict[str, Dict[str, Any]] = {}
+    for name, g in d.groupby("player_name"):
+        agg: Dict[str, float] = {}
+        n_games = 0
+        for js in g["stats_json"]:
+            try:
+                s = json.loads(js or "{}")
+            except Exception:
+                continue
+            if not s.get("minutes"):
+                continue
+            n_games += 1
+            for k, v in s.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and k not in ("fotmob_id",):
+                    agg[k] = agg.get(k, 0.0) + float(v)
+        if n_games < 2 or agg.get("minutes", 0) < 120:
+            continue
+        role = roles.get(name)
+        row = pd.DataFrame([{"team_name": g["team_name"].iloc[0], "player_name": name, "position": g["position"].iloc[0],
+                             "minutes": agg["minutes"], "stats_json": json.dumps(agg)}])
+        ind = RB.indicators(row, {name: role} if role else {})
+        if ind.empty:
+            continue
+        r = ind.iloc[0].to_dict()
+        peers = _peer_group(ref, r["funcao"])
+        inds = GK_INDICATORS if r["funcao"] == "goleiro" else INDICATORS
+        scored = []
+        for k, (_dim, _w, hi) in inds.items():
+            v = r.get(k)
+            if v is None or (isinstance(v, float) and v != v) or k not in peers:
+                continue
+            pc = _pct(v, peers[k])
+            if pc is None:
+                continue
+            scored.append((pc if hi else 100 - pc, k, v))
+        if not scored:
+            continue
+        scored.sort(key=lambda x: -x[0])
+        fortes = [{"rotulo": IND_PT.get(k, k), "valor": round(float(v), 2), "percentil": round(p)} for p, k, v in scored if p >= 75][:3]
+        fracos = [{"rotulo": IND_PT.get(k, k), "valor": round(float(v), 2), "percentil": round(p)} for p, k, v in reversed(scored) if p <= 25][:2]
+        out[name] = {"fortes": fortes, "fracos": fracos, "jogos": n_games, "minutos": int(agg["minutes"]), "funcao": r["funcao"]}
+    return out
+
+
 def _age(b) -> Optional[int]:
     try:
         d = date.fromisoformat(str(b)[:10])
@@ -322,7 +459,13 @@ def reasons(row: Dict[str, Any], slot_role: str, bench: pd.DataFrame, n_games: i
                       if (row.get("titular_temporada") or 0) / max(G, 1) >= 0.5 else ""))
     pos = row.get("posicoes") or {}
     if pos.get(slot_role):
-        out.append(f"jogou de {ROLE_PT.get(slot_role, slot_role).lower()} em {pos[slot_role]} jogo(s)")
+        tot = sum(v for k, v in pos.items() if not str(k).endswith("?")) or sum(pos.values())
+        share = round(100 * pos[slot_role] / tot) if tot else None
+        src = row.get("origem_posicao") or ""
+        if "Transfermarkt" in src and not row.get("titular_temporada"):
+            out.append(f"posição de cadastro: {ROLE_PT.get(slot_role, slot_role).lower()} (sem jogos recentes com escalação)")
+        elif share is not None:
+            out.append(f"{ROLE_PT.get(slot_role, slot_role).lower()} em {share}% das vezes que começou jogando")
     elif row.get("papel") and row["papel"] != slot_role:
         out.append(f"adaptado: costuma jogar de {ROLE_PT.get(row['papel'], row['papel']).lower()}")
     if row.get("gols") or row.get("assistencias"):
@@ -444,6 +587,7 @@ def xi_for(info: Dict[str, Any], formation: Optional[str], mode: str = "provavel
              "papel_natural": ROLE_PT.get(r["papel"], "—") if r else None}
         if r:
             p["porque"] = reasons(r, role, bench, G)
+            p["destaques"] = (info.get("destaques") or {}).get(r["nome"])
         xi.append(p)
     return xi, form
 
@@ -497,5 +641,6 @@ def official_xi(info: Dict[str, Any], lineup: Dict[str, Any]) -> Tuple[List[Dict
         xi.append({"vaga": i, "papel": slot, "papel_pt": ROLE_PT[slot], "x": x, "y": y, "jogador": cand,
                    "nota": r.get("qualidade"), "qualidade": r.get("qualidade"), "fase": r.get("fase"), "prob_titular": 100,
                    "encaixe": 1.0, "papel_natural": ROLE_PT.get(r.get("papel"), "—"),
-                   "porque": ["✅ escalação oficial publicada pela ESPN"]})
+                   "porque": ["✅ escalação oficial publicada pela ESPN"],
+                   "destaques": (info.get("destaques") or {}).get(cand)})
     return xi, form

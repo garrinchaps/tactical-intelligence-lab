@@ -200,3 +200,13 @@ def test_benchmark_compares_models_on_same_folds():
     floor = next(r for r in res["resultados"] if r["modelo"].startswith("Taxa constante"))
     assert all(r["auc"] >= floor["auc"] - 0.05 for r in res["resultados"])
     assert all("veredito" in r for r in res["resultados"] if not r["modelo"].startswith(("Taxa", "Regressão logística (todas")))
+
+
+def test_canonical_names_across_sources():
+    from src.squad.matchday import canonical_names
+
+    m = canonical_names(["Ibrahima Konate", "Virgil Van Dijk", "Alisson", "Gabriel", "V. van Dijk"],
+                        ["Ibrahima Konaté", "Virgil van Dijk", "Alisson Becker", "Gabriel Jesus", "Gabriel Magalhães"])
+    assert m["Ibrahima Konate"] == "Ibrahima Konaté" and m["Virgil Van Dijk"] == "Virgil van Dijk"
+    assert m["Alisson"] == "Alisson Becker"
+    assert "Gabriel" not in m                      # dois Gabriel no elenco: não junta por palpite
