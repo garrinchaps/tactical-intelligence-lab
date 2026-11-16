@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-REF_PATH = Path("data/processed/rating_ref_box.parquet")
+REF_PATH = Path("data/processed/rating_ref_box_v3_0_1.parquet")
 ROLE_TO_FUNCAO = {"GK": "goleiro", "CB": "zagueiro", "LB": "lateral", "RB": "lateral", "LWB": "lateral", "RWB": "lateral",
                   "DM": "volante", "CM": "meia central", "AM": "meia ofensivo", "LM": "ponta", "RM": "ponta",
                   "LW": "ponta", "RW": "ponta", "ST": "centroavante"}
