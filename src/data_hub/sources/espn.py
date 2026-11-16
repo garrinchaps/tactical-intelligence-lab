@@ -21,35 +21,47 @@ from src.data_hub.registry import DataLevel, to_internal_id
 
 BASE = "https://site.api.espn.com/apis/site/v2/sports/soccer"
 
-# v36 (B1) — cobertura em duas prioridades. Os códigos seguem o padrão da ESPN; os marcados como "a validar" ainda
+# v36 (B1) — cobertura em duas prioridades; códigos VALIDADOS contra a ESPN em 16/11/2026 (pedido por ano). Antes:
 # não foram conferidos (a sessão na nuvem não alcança a ESPN). Código que a ESPN recusar (400/404) é pulado e a recusa
 # fica lembrada por 7 dias — nada é dado como "integrado" sem ter devolvido jogos de verdade.
 PRIORITY_A: Dict[str, str] = {   # Brasil, profundidade máxima
-    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B", "bra.3": "Brasileirão Série C (a validar)",
-    "bra.copa_do_brazil": "Copa do Brasil", "bra.supercopa": "Supercopa do Brasil (a validar)",
-    "bra.copa_do_nordeste": "Copa do Nordeste (a validar)",
-    "bra.camp.paulista": "Paulistão (a validar)", "bra.camp.carioca": "Carioca (a validar)",
-    "bra.camp.mineiro": "Mineiro (a validar)", "bra.camp.gaucho": "Gaúcho (a validar)",
+    "bra.1": "Brasileirão Série A", "bra.2": "Brasileirão Série B", "bra.3": "Brasileirão Série C",
+    "bra.copa_do_brazil": "Copa do Brasil", "bra.supercopa": "Supercopa do Brasil",
+    "bra.copa_do_nordeste": "Copa do Nordeste",
+    "bra.camp.paulista": "Paulistão", "bra.camp.carioca": "Carioca",
+    "bra.camp.mineiro": "Mineiro", "bra.camp.gaucho": "Gaúcho",
 }
 PRIORITY_B: Dict[str, str] = {   # exterior seletivo
     "conmebol.libertadores": "CONMEBOL Libertadores", "conmebol.sudamericana": "CONMEBOL Sul-Americana",
-    "conmebol.recopa": "Recopa Sul-Americana (a validar)", "arg.1": "Liga Profesional (ARG)", "uru.1": "Uruguai (a validar)",
-    "chi.1": "Chile (a validar)", "col.1": "Colômbia (a validar)", "par.1": "Paraguai (a validar)",
-    "ecu.1": "Equador (a validar)", "per.1": "Peru (a validar)", "bol.1": "Bolívia (a validar)",
-    "conmebol.america": "Copa América (a validar)", "fifa.worldq.conmebol": "Eliminatórias CONMEBOL (a validar)",
+    "conmebol.recopa": "Recopa Sul-Americana", "arg.1": "Liga Profesional (ARG)", "uru.1": "Uruguai",
+    "chi.1": "Chile", "col.1": "Colômbia", "par.1": "Paraguai",
+    "ecu.1": "Equador", "per.1": "Peru", "bol.1": "Bolívia",
+    "conmebol.america": "Copa América", "fifa.worldq.conmebol": "Eliminatórias CONMEBOL",
     "uefa.champions": "UEFA Champions League", "uefa.europa": "UEFA Europa League",
-    "uefa.europa.conf": "UEFA Conference League (a validar)", "eng.1": "Premier League", "eng.2": "Championship (a validar)",
-    "esp.1": "La Liga", "esp.2": "La Liga 2 (a validar)", "ger.1": "Bundesliga", "ger.2": "2. Bundesliga (a validar)",
-    "ita.1": "Serie A", "ita.2": "Serie B (ITA) (a validar)", "fra.1": "Ligue 1", "fra.2": "Ligue 2 (a validar)",
-    "ned.1": "Eredivisie", "por.1": "Primeira Liga", "bel.1": "Bélgica (a validar)", "tur.1": "Turquia (a validar)",
-    "sco.1": "Escócia (a validar)", "uefa.euro": "Eurocopa (a validar)", "uefa.nations": "Nations League (a validar)",
-    "usa.1": "MLS", "mex.1": "Liga MX (a validar)", "concacaf.leagues.cup": "Leagues Cup (a validar)",
-    "afc.champions": "Champions Asiática (a validar)", "jpn.1": "J1 League (a validar)", "kor.1": "K League (a validar)",
-    "ksa.1": "Saudi Pro League (a validar)", "caf.champions": "CAF Champions League (a validar)",
-    "aus.1": "A-League (a validar)", "fifa.world": "Copa do Mundo", "fifa.cwc": "Mundial de Clubes (a validar)",
+    "uefa.europa.conf": "UEFA Conference League", "eng.1": "Premier League", "eng.2": "Championship",
+    "esp.1": "La Liga", "esp.2": "La Liga 2", "ger.1": "Bundesliga", "ger.2": "2. Bundesliga",
+    "ita.1": "Serie A", "ita.2": "Serie B (ITA)", "fra.1": "Ligue 1", "fra.2": "Ligue 2",
+    "ned.1": "Eredivisie", "por.1": "Primeira Liga", "bel.1": "Bélgica", "tur.1": "Turquia",
+    "sco.1": "Escócia", "uefa.euro": "Eurocopa", "uefa.nations": "Nations League",
+    "usa.1": "MLS", "mex.1": "Liga MX", "concacaf.leagues.cup": "Leagues Cup",
+    "afc.champions": "Champions Asiática", "jpn.1": "J1 League", "kor.1": "K League",
+    "ksa.1": "Saudi Pro League", "caf.champions": "CAF Champions League",
+    "aus.1": "A-League", "fifa.world": "Copa do Mundo", "fifa.cwc": "Mundial de Clubes",
 }
 LEAGUES: Dict[str, str] = {**PRIORITY_A, **PRIORITY_B}
-LEAGUE_NAMES = {k: v.replace(" (a validar)", "") for k, v in LEAGUES.items()}
+# validado em 16/11/2026 (pedido por ano): fora da ESPN → bra.supercopa, kor.1; Série C 2026 vem vazia
+for _bad in ("bra.supercopa", "kor.1"):
+    LEAGUES.pop(_bad, None)
+    PRIORITY_A.pop(_bad, None)
+    PRIORITY_B.pop(_bad, None)
+# ordem dos resumos (estatísticas + escalações): Brasil e Europa principal primeiro
+SUMMARY_PRIORITY = ["bra.1", "bra.2", "bra.copa_do_brazil", "conmebol.libertadores", "conmebol.sudamericana",
+                    "uefa.champions", "eng.1", "esp.1", "ita.1", "ger.1", "fra.1", "bra.copa_do_nordeste",
+                    "bra.camp.paulista", "bra.camp.carioca", "bra.camp.mineiro", "bra.camp.gaucho", "bra.3",
+                    "uefa.europa", "uefa.europa.conf", "por.1", "ned.1", "arg.1", "usa.1", "mex.1", "ksa.1", "eng.2",
+                    "esp.2", "ita.2", "ger.2", "fra.2", "bel.1", "tur.1", "sco.1", "uefa.nations", "fifa.world"]
+ROSTER_LEAGUES = ["bra.1", "bra.2", "esp.1", "eng.1", "ita.1", "ger.1", "fra.1", "por.1", "arg.1"]
+LEAGUE_NAMES = {k: v.replace("", "") for k, v in LEAGUES.items()}
 
 
 class EspnProvider:
@@ -57,9 +69,10 @@ class EspnProvider:
 
     def __init__(self, db: DataHubDB, enabled: Optional[bool] = None):
         self.db = db
-        flag = os.getenv("ENABLE_ESPN_PUBLIC_FEED", "false") if enabled is None else str(enabled)
+        # v36: a ESPN virou a fonte principal da temporada atual (2025/2026); ligada por padrão, desligável no .env
+        flag = os.getenv("ENABLE_ESPN_PUBLIC_FEED", "true") if enabled is None else str(enabled)
         self._enabled = flag.strip().lower() in ("1", "true", "sim", "yes")
-        self.client = PoliteHttpClient("espn", db=db, min_interval_s=2.0)
+        self.client = PoliteHttpClient("espn", db=db, min_interval_s=1.0)
 
     @property
     def enabled(self) -> bool:
@@ -90,6 +103,8 @@ class EspnProvider:
             "match_date": (ev.get("date") or "")[:10],
             "home_team_name": (home.get("team") or {}).get("displayName", ""),
             "away_team_name": (away.get("team") or {}).get("displayName", ""),
+            "home_team_id": int((home.get("team") or {}).get("id") or 0),
+            "away_team_id": int((away.get("team") or {}).get("id") or 0),
             "home_score": int(home["score"]) if str(home.get("score", "")).isdigit() else None,
             "away_score": int(away["score"]) if str(away.get("score", "")).isdigit() else None,
             "stadium_name": ((comp.get("venue") or {}).get("fullName") or ""),
@@ -161,17 +176,181 @@ class EspnProvider:
         return record, box
 
     # ------------------------------------------------------------- consultas
-    def scoreboard(self, league: str, d_from: date, d_to: date) -> List[Dict[str, Any]]:
-        dates = d_from.strftime("%Y%m%d") if d_from == d_to else f"{d_from:%Y%m%d}-{d_to:%Y%m%d}"
-        recent = (date.today() - d_to).days < 3
-        data = self._get(f"{BASE}/{league}/scoreboard", {"dates": dates, "limit": 200},
+    # ------------------------------------------------------------- consultas
+    # v36: a ESPN passou a RECUSAR intervalos de datas ("20251001-20251007" → HTTP 400 em todas as ligas).
+    # Aceita um dia ("20251004"), um mês ("202510") ou um ano ("2025"). Por isso tudo é pedido por ano ou mês.
+    def _events(self, league: str, dates: str, recent: bool) -> List[Dict[str, Any]]:
+        data = self._get(f"{BASE}/{league}/scoreboard", {"dates": dates, "limit": 1000},
                          max_age_s=1800 if recent else None)
-        out = []
-        for ev in data.get("events", []) or []:
-            rec = self.parse_scoreboard_event(ev, league)
-            if rec:
-                out.append(rec)
+        return data.get("events", []) or []
+
+    def season_events(self, league: str, year: int) -> List[Dict[str, Any]]:
+        """Todos os jogos da liga no ano civil (1 pedido; se vier cheio, mês a mês)."""
+        recent = year >= date.today().year
+        evs = self._events(league, str(year), recent)
+        if len(evs) >= 1000:
+            evs = []
+            for m in range(1, 13):
+                evs += self._events(league, f"{year}{m:02d}", recent and m >= date.today().month - 1)
+        return evs
+
+    def scoreboard(self, league: str, d_from: date, d_to: date) -> List[Dict[str, Any]]:
+        """Jogos ENCERRADOS entre d_from e d_to (pedidos por mês, filtrados pela data)."""
+        out, seen = [], set()
+        y, m = d_from.year, d_from.month
+        while (y, m) <= (d_to.year, d_to.month):
+            recent = (date.today() - date(y, m, 1)).days < 40
+            for ev in self._events(league, f"{y}{m:02d}", recent):
+                rec = self.parse_scoreboard_event(ev, league)
+                if rec and d_from.isoformat() <= rec["match_date"] <= d_to.isoformat() and rec["match_id"] not in seen:
+                    seen.add(rec["match_id"])
+                    out.append(rec)
+            y, m = (y + 1, 1) if m == 12 else (y, m + 1)
         return out
+
+    @staticmethod
+    def parse_fixture(ev: Dict[str, Any], league: str) -> Optional[Dict[str, Any]]:
+        """Jogo futuro (ainda não começou): vai para a tabela `fixtures`, nunca para o catálogo de jogos jogados."""
+        comp = (ev.get("competitions") or [{}])[0]
+        st = ((comp.get("status") or ev.get("status") or {}).get("type") or {})
+        if st.get("completed") or st.get("state") == "in":
+            return None
+        sides = {c.get("homeAway"): c for c in comp.get("competitors", [])}
+        h, a = (sides.get("home") or {}).get("team") or {}, (sides.get("away") or {}).get("team") or {}
+        return {"match_id": to_internal_id("espn", int(ev["id"])), "league": league,
+                "competition": LEAGUE_NAMES.get(league, league), "kickoff": ev.get("date") or "",
+                "home": h.get("displayName", ""), "away": a.get("displayName", ""),
+                "home_id": int(h.get("id") or 0), "away_id": int(a.get("id") or 0),
+                "status": st.get("name") or "STATUS_SCHEDULED", "venue": (comp.get("venue") or {}).get("fullName") or ""}
+
+    def save_fixtures(self, rows: List[Dict[str, Any]]) -> int:
+        if not rows:
+            return 0
+        cols = ["match_id", "league", "competition", "kickoff", "home", "away", "home_id", "away_id", "status", "venue"]
+        with self.db.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS fixtures (match_id INTEGER PRIMARY KEY, league TEXT, competition TEXT, "
+                         "kickoff TEXT, home TEXT, away TEXT, home_id INTEGER, away_id INTEGER, status TEXT, venue TEXT, "
+                         "updated_at TEXT DEFAULT (datetime('now')))")
+            conn.executemany(f"INSERT OR REPLACE INTO fixtures ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                             [tuple(r[c] for c in cols) for r in rows])
+            # jogo que já aconteceu sai da lista de próximos
+            conn.execute("DELETE FROM fixtures WHERE match_id IN (SELECT match_id FROM matches WHERE home_score IS NOT NULL)")
+        return len(rows)
+
+    def sync_season(self, leagues: Optional[List[str]] = None, years: Optional[List[int]] = None,
+                    progress=None) -> Dict[str, int]:
+        """
+        Resultados e calendário da temporada (padrão: ano passado e o atual) de TODAS as ligas acompanhadas:
+        ~1 pedido por liga e ano. Jogos encerrados entram no catálogo; futuros vão para `fixtures`.
+        """
+        say = progress or (lambda m: None)
+        years = years or [date.today().year - 1, date.today().year]
+        tot = {"added": 0, "updated": 0, "errors": 0, "fixtures": 0, "ligas": 0}
+        for lg in leagues or list(LEAGUES):
+            done, fut = [], []
+            for y in years:
+                try:
+                    evs = self.season_events(lg, y)
+                except Exception as exc:
+                    tot["errors"] += 1
+                    say(f"  espn {lg} {y}: {exc}")
+                    continue
+                for ev in evs:
+                    r = self.parse_scoreboard_event(ev, lg)
+                    if r:
+                        done.append(r)
+                    else:
+                        f = self.parse_fixture(ev, lg)
+                        if f:
+                            fut.append(f)
+            if done:
+                r = self.db.upsert_matches(done)
+                tot["added"] += r["added"]
+                tot["updated"] += r["updated"]
+            tot["fixtures"] += self.save_fixtures(fut)
+            tot["ligas"] += 1
+            say(f"  {LEAGUE_NAMES.get(lg, lg)}: {len(done)} jogos encerrados, {len(fut)} próximos")
+        return tot
+
+    def fetch_summaries(self, leagues: Optional[List[str]] = None, since: Optional[str] = None, limit: int = 500,
+                        progress=None) -> Dict[str, int]:
+        """
+        Resumo (estatísticas dos times, escalações com posição, números por jogador, lances principais) dos jogos
+        encerrados que ainda não têm, em ORDEM DE PRIORIDADE (Brasil e Europa principal primeiro) e do mais recente
+        para o mais antigo. `limit` = pedidos nesta rodada; a próxima continua de onde parou.
+        """
+        say = progress or (lambda m: None)
+        leagues = leagues or SUMMARY_PRIORITY
+        since = since or f"{date.today().year - 1}-01-01"
+        ph = ",".join("?" * len(leagues))
+        q = (f"SELECT m.match_id, json_extract(m.extra_json, '$.espn_league') AS lg, m.match_date FROM matches m "
+             f"WHERE m.data_source = 'espn' AND m.home_score IS NOT NULL AND m.match_date >= ? "
+             f"AND json_extract(m.extra_json, '$.espn_league') IN ({ph}) "
+             f"AND m.match_id NOT IN (SELECT DISTINCT match_id FROM match_team_stats) ORDER BY m.match_date DESC")
+        with self.db.connect() as conn:
+            todo = conn.execute(q, [since, *leagues]).fetchall()
+        rank = {lg: i for i, lg in enumerate(leagues)}
+        todo.sort(key=lambda r: (rank.get(r[1], 99), r[2] and -int(r[2].replace("-", "")[:8] or 0)))
+        tot = {"resumos": 0, "errors": 0, "pendentes": max(len(todo) - limit, 0)}
+        for i, (mid, lg, d) in enumerate(todo[:limit], 1):
+            try:
+                self.ingest_event(int(mid))
+                tot["resumos"] += 1
+            except Exception as exc:
+                tot["errors"] += 1
+                say(f"  espn resumo {mid}: {exc}")
+            if i % 50 == 0:
+                say(f"  resumos: {i}/{min(limit, len(todo))}")
+        say(f"  resumos baixados: {tot['resumos']} · ainda faltam {tot['pendentes']} (rode de novo para continuar)")
+        return tot
+
+    def team_ids(self, league: str) -> Dict[str, int]:
+        data = self._get(f"{BASE}/{league}/teams", {"limit": 100}, max_age_s=7 * 24 * 3600)
+        teams = ((data.get("sports") or [{}])[0].get("leagues") or [{}])[0].get("teams") or []
+        return {(t.get("team") or {}).get("displayName", ""): int((t.get("team") or {}).get("id") or 0) for t in teams}
+
+    def sync_rosters(self, leagues: Optional[List[str]] = None, progress=None) -> Dict[str, int]:
+        """
+        Elenco ATUAL de cada clube (ESPN): nome, nascimento, nacionalidade, posição, camisa, situação e LESÕES.
+        É a referência para transferências e desfalques; guardado em `espn_rosters` (substitui o do clube a cada busca).
+        """
+        import json as _json
+
+        say = progress or (lambda m: None)
+        tot = {"clubes": 0, "jogadores": 0, "errors": 0, "lesionados": 0}
+        with self.db.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS espn_rosters (team_id INTEGER, team TEXT, league TEXT, athlete_id INTEGER, "
+                         "name TEXT, birth TEXT, citizenship TEXT, position TEXT, jersey TEXT, status TEXT, injuries TEXT, "
+                         "fetched_at TEXT, PRIMARY KEY (team_id, athlete_id))")
+        for lg in leagues or ROSTER_LEAGUES:
+            try:
+                ids = self.team_ids(lg)
+            except Exception as exc:
+                tot["errors"] += 1
+                say(f"  espn elencos {lg}: {exc}")
+                continue
+            for team, tid in ids.items():
+                try:
+                    data = self._get(f"{BASE}/{lg}/teams/{tid}/roster", {}, max_age_s=20 * 3600)
+                except Exception:
+                    tot["errors"] += 1
+                    continue
+                rows = []
+                for a in data.get("athletes", []) or []:
+                    inj = a.get("injuries") or []
+                    tot["lesionados"] += 1 if inj else 0
+                    rows.append((tid, team, lg, int(a.get("id") or 0), a.get("displayName") or "",
+                                 (a.get("dateOfBirth") or "")[:10], a.get("citizenship") or "",
+                                 (a.get("position") or {}).get("abbreviation") or "", str(a.get("jersey") or ""),
+                                 ((a.get("status") or {}).get("name") or ""), _json.dumps(inj, ensure_ascii=False)[:2000],
+                                 date.today().isoformat()))
+                with self.db.connect() as conn:
+                    conn.execute("DELETE FROM espn_rosters WHERE team_id = ?", (tid,))
+                    conn.executemany("INSERT OR REPLACE INTO espn_rosters VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+                tot["clubes"] += 1
+                tot["jogadores"] += len(rows)
+            say(f"  {LEAGUE_NAMES.get(lg, lg)}: elencos atualizados")
+        return tot
 
     def ingest_event(self, internal_match_id: int) -> Dict[str, Any]:
         from src.data_hub import sync_policy as P
@@ -196,143 +375,65 @@ class EspnProvider:
     def backfill(self, leagues: Optional[List[str]] = None, since_year: int = 2018, until: Optional[date] = None,
                  max_summaries: Optional[int] = None, progress=None) -> Dict[str, int]:
         """
-        Histórico com estatísticas: percorre mês a mês o placar de cada liga e baixa o resumo (estatísticas de
-        equipe, escalações, lances) de cada jogo que ainda não tem números. Respeitoso: 1 requisição a cada 2 s,
-        meses passados ficam em cache e não são baixados de novo. Pode ser interrompido e retomado.
+        Histórico: um pedido por liga e ANO (a ESPN não aceita mais intervalos de datas). Depois baixa os resumos
+        (estatísticas, escalações) dos jogos sem números, na ordem de prioridade, até `max_summaries`.
         """
         say = progress or (lambda m: None)
-        tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "meses": 0, "janelas_falhas": 0}
         until = until or date.today()
         leagues = leagues or list(PRIORITY_A) + ["conmebol.libertadores", "conmebol.sudamericana"]
-        fails = 0
-
-        def refused(exc) -> bool:
-            return isinstance(exc, ClientRefused) or " 400" in str(exc)
-
-        def fetch(lg, d, e):
-            return self.scoreboard(lg, d, e)
-
-        def window(lg, d, e, size):
-            """
-            Janela [d, e] de até `size` dias. HTTP 400 = a ESPN recusou a JANELA (não é erro fatal): divide em
-            janelas menores, 7 → 3 → 1 dia. Devolve (jogos, janelas de 1 dia que continuaram recusadas, recusou_tudo).
-            Para não martelar o site: se todas as janelas de 3 dias falharem, testa só o 1º dia; se ele também
-            falhar, a semana é dada como sem calendário.
-            """
-            try:
-                return fetch(lg, d, e), 0, False
-            except Exception as exc:
-                if not refused(exc):
-                    raise
-            if size <= 1:
-                return [], 1, True
-            nxt = 3 if size > 3 else 1
-            out, fails, parts, all_bad, cur = [], 0, 0, True, d
-            while cur <= e:
-                ce = min(cur + timedelta(days=nxt - 1), e)
-                parts += 1
-                if nxt == 1 and all_bad and parts > 1 and size <= 3 and fails >= 1:
-                    fails += (e - cur).days + 1               # 1º dia recusado: o resto da janela também
-                    break
-                got, f, bad = window(lg, cur, ce, nxt)
-                out += got
-                fails += f
-                all_bad = all_bad and bad
-                cur = ce + timedelta(days=1)
-            return out, fails, all_bad
-
-        def month(lg, first, last):
-            """
-            Mês em janelas de no máximo 7 dias (a ESPN recusa janelas longas). Devolve (jogos, recusado):
-            recusado=True quando as duas primeiras semanas foram recusadas até o nível de 1 dia e nada veio.
-            Recusas não são repetidas (o cliente lembra por 7 dias), então rodar de novo é rápido.
-            """
-            out, d, weeks, bad = [], first, 0, 0
-            while d <= last:
-                e = min(d + timedelta(days=6), last)
-                weeks += 1
-                got, fails, all_bad = window(lg, d, e, 7)
-                out += got
-                tot["janelas_falhas"] = tot.get("janelas_falhas", 0) + fails
-                if all_bad:
-                    bad += 1
-                    if bad >= 2 and not out:
-                        return out, True
-                d = e + timedelta(days=1)
-            return out, bad == weeks
-
+        tot = {"added": 0, "updated": 0, "errors": 0, "resumos": 0, "anos": 0, "janelas_falhas": 0}
         for lg in leagues:
-            y, m = since_year, 1
-            refused_months = 0
-            while date(y, m, 1) <= until:
-                first = date(y, m, 1)
-                last = (date(y + (m == 12), m % 12 + 1, 1) - timedelta(days=1))
+            empty_years = 0
+            for y in range(until.year, since_year - 1, -1):          # do mais recente para trás
                 try:
-                    recs, ref = month(lg, first, min(last, until))
-                    fails = 0
+                    evs = self.season_events(lg, y)
                 except Exception as exc:
                     tot["errors"] += 1
-                    fails += 1
-                    say(f"  espn {lg} {first:%Y-%m}: {exc}")
-                    if fails >= 5:
-                        say("  espn: 5 falhas seguidas — parando para não insistir; rode de novo mais tarde.")
+                    tot["janelas_falhas"] += 1
+                    say(f"  espn {lg} {y}: {exc}")
+                    continue
+                tot["anos"] += 1
+                recs = [r for r in (self.parse_scoreboard_event(ev, lg) for ev in evs) if r and r["match_date"] <= until.isoformat()]
+                say(f"  {LEAGUE_NAMES.get(lg, lg)} {y}: {len(recs)} jogos")
+                if not recs:
+                    empty_years += 1
+                    if empty_years >= 2:                        # dois anos seguidos sem jogos: a ESPN não tem mais
+                        say(f"  {LEAGUE_NAMES.get(lg, lg)}: sem jogos antes de {y + 2} na ESPN")
+                        break
+                    continue
+                empty_years = 0
+                r = self.db.upsert_matches(recs)
+                tot["added"] += r["added"]
+                tot["updated"] += r["updated"]
+                todo = [x for x in recs if not self.db.has_boxscore(int(x["match_id"]))]
+                for x in todo:
+                    if max_summaries is not None and tot["resumos"] >= max_summaries:
                         return tot
-                    recs, ref = [], False
-                tot["meses"] += 1
-                if ref:
-                    refused_months += 1
-                    tot["recusados"] = tot.get("recusados", 0) + 1
-                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: ESPN recusou o período (HTTP 400) — sem calendário")
-                    if refused_months >= 6:
-                        # meia temporada inteira recusada: a ESPN não tem esse histórico; pula para o próximo ano
-                        say(f"  {LEAGUE_NAMES.get(lg, lg)}: 6 meses seguidos recusados — pulando para {y + 1}")
-                        y, m, refused_months = y + 1, 1, 0
-                        continue
-                else:
-                    refused_months = 0
-                if recs:
-                    r = self.db.upsert_matches(recs)
-                    tot["added"] += r["added"]
-                    tot["updated"] += r["updated"]
-                    todo = [x for x in recs if not self.db.has_boxscore(int(x["match_id"]))]
-                    for x in todo:
-                        if max_summaries is not None and tot["resumos"] >= max_summaries:
-                            return tot
-                        try:
-                            self.ingest_event(int(x["match_id"]))
-                            tot["resumos"] += 1
-                        except Exception as exc:
-                            tot["errors"] += 1
-                            say(f"  espn resumo {x['home_team_name']} x {x['away_team_name']}: {exc}")
-                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: {len(recs)} jogos, {len(todo)} resumos novos")
-                elif not ref:
-                    say(f"  {LEAGUE_NAMES.get(lg, lg)} {first:%m/%Y}: nenhum jogo encerrado no período")
-                y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+                    try:
+                        self.ingest_event(int(x["match_id"]))
+                        tot["resumos"] += 1
+                    except Exception as exc:
+                        tot["errors"] += 1
+                        say(f"  espn resumo {x['home_team_name']} x {x['away_team_name']}: {exc}")
         return tot
 
-    def sync_recent(self, days_back: int = 3, leagues: Optional[List[str]] = None) -> Dict[str, int]:
-        """B2: incremental por competição (do último sync − 2 dias), em vez de uma janela fixa."""
+    def sync_recent(self, days_back: int = 3, leagues: Optional[List[str]] = None, summaries: int = 200) -> Dict[str, int]:
+        """
+        Atualização automática (a cada poucas horas): temporada do ano corrente de todas as ligas (1 pedido por liga,
+        com cache de 30 min) — resultados novos entram, fixtures são atualizadas — e os resumos dos jogos encerrados
+        na última semana (estatísticas + escalações), dentro de `summaries` pedidos.
+        """
         from src.data_hub import sync_policy as P
 
-        totals = {"added": 0, "updated": 0, "errors": 0}
-        today = date.today()
-        for lg in leagues or list(LEAGUES):
-            d0, d1 = P.window(self.db, "espn", lg, today, default_days=days_back)
-            try:
-                recs = []
-                d = d0
-                while d <= d1:                                  # janelas de até 7 dias (a ESPN recusa janelas longas)
-                    e = min(d + timedelta(days=6), d1)
-                    recs += self.scoreboard(lg, d, e)
-                    d = e + timedelta(days=1)
-            except Exception:
-                totals["errors"] += 1
-                continue
-            r = self.db.upsert_matches(recs)
-            totals["added"] += r["added"]
-            totals["updated"] += r["updated"]
+        lgs = leagues or list(LEAGUES)
+        tot = self.sync_season(lgs, [date.today().year])
+        for lg in lgs:
             P.mark_synced(self.db, "espn", lg)
-        return totals
+        if summaries:
+            s = self.fetch_summaries([l for l in SUMMARY_PRIORITY if l in lgs] or lgs,
+                                     since=(date.today() - timedelta(days=max(days_back, 7))).isoformat(), limit=summaries)
+            tot["resumos"] = s["resumos"]
+        return tot
 
     def live_tick(self, leagues: Optional[List[str]] = None) -> Dict[str, int]:
         """

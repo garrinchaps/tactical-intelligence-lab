@@ -40,43 +40,20 @@ def test_http_400_is_not_retried_and_is_remembered(tmp_path, monkeypatch):
     assert len(calls) == 1                                              # recusa lembrada: nem chama a rede
 
 
-def test_espn_backfill_skips_refused_year_quickly(db, monkeypatch):
+def test_espn_refused_year_does_not_hang(db):
+    import time as _t
+
     from src.data_hub.http import ClientRefused
     from src.data_hub.sources.espn import EspnProvider
 
     p = EspnProvider(db, enabled=True)
-    n = []
 
     def refuse(*a, **k):
-        n.append(1)
         raise ClientRefused(400, "HTTP 400")
-    p.scoreboard = refuse
-    p._get = refuse
-    msgs = []
-    t0 = time.time()
-    out = p.backfill(["bra.1"], since_year=2019, until=date(2020, 12, 31), progress=msgs.append)
-    assert time.time() - t0 < 2
-    assert out["errors"] == 0 and out["recusados"] == 12               # 6 meses por ano, depois pula o ano
-    assert any("pulando para 2020" in m for m in msgs)
-    assert out["janelas_falhas"] > 0 and len(n) <= 12 * 2 * 7         # 7 → 3 → 1 dia, ~7 pedidos por semana recusada
-
-
-def test_espn_window_shrinks_7_3_1_and_keeps_good_days(db):
-    from src.data_hub.http import ClientRefused
-    from src.data_hub.sources.espn import EspnProvider
-
-    p = EspnProvider(db, enabled=True)
-    asked = []
-
-    def sb(lg, d, e):
-        asked.append((d.day, e.day))
-        if (e - d).days >= 1 and d.day < 15:
-            raise ClientRefused(400, "HTTP 400")                         # janela longa recusada na 1ª quinzena
-        return []
-    p.scoreboard = sb
-    out = p.backfill(["bra.1"], since_year=2019, until=date(2019, 3, 31))
-    sizes = {(e - d) + 1 for d, e in asked}
-    assert {7, 3, 1} <= sizes and out["janelas_falhas"] == 0             # dias isolados funcionaram
+    p.season_events = refuse
+    t0 = _t.time()
+    out = p.backfill(["bra.1"], since_year=2019, until=date(2020, 12, 31))
+    assert _t.time() - t0 < 2 and out["janelas_falhas"] == 2 and out["errors"] == 2     # 1 por ano, sem martelar
 
 
 # ------------------------------------------------------------------ assistente: perguntas com alvo

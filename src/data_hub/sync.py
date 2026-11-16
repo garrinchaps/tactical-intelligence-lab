@@ -34,7 +34,8 @@ ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", 
                "football_data", "espn", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti",
                "open_sources", "lake"]
 # cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
-HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil"]
+HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil", "espn_temporada", "espn_resumos",
+                 "espn_elencos"]
 # --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
 # bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
 EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
@@ -54,6 +55,7 @@ def run_sync(
     prefetch_boxscores: int = 0,
     espn_leagues: Optional[List[str]] = None,
     since_year: int = 2018,
+    summaries_limit: int = 1500,
 ) -> Dict[str, Dict]:
     load_dotenv()
     svc = service or MatchDataService()
@@ -68,6 +70,12 @@ def run_sync(
         "football_data": lambda: svc.football_data.sync_recent(days_back=max(days_back, 3)),
         "espn": lambda: svc.espn.sync_recent(days_back=days_back),
         "espn_historico": lambda: svc.espn.backfill(espn_leagues, since_year=since_year, progress=say),
+        # v36: temporada 2025/2026 de todas as ligas acompanhadas (resultados + próximos jogos), ~1 pedido por liga/ano
+        "espn_temporada": lambda: svc.espn.sync_season(espn_leagues, progress=say),
+        # estatísticas + escalações dos jogos (Brasil e Europa principal primeiro); continua de onde parou
+        "espn_resumos": lambda: svc.espn.fetch_summaries(espn_leagues, limit=summaries_limit, progress=say),
+        # elencos atuais com lesões (referência de transferências e desfalques)
+        "espn_elencos": lambda: svc.espn.sync_rosters(espn_leagues, progress=say),
         # Brasileirão (A, B, Copa do Brasil) com xG, passes, posse e números por jogador: API-Football, lotes de 20
         # jogos por requisição, dentro da cota do dia (continua de onde parou na próxima vez)
         "estatisticas_brasil": lambda: svc.api_football.backfill_stats(
@@ -91,7 +99,8 @@ def run_sync(
     from src.data_hub.sources.basedosdados import BaseDosDadosProvider
 
     enabled = {"api_football": svc.api_football.enabled, "football_data": svc.football_data.enabled,
-               "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled,
+               "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled, "espn_temporada": svc.espn.enabled,
+               "espn_resumos": svc.espn.enabled, "espn_elencos": svc.espn.enabled,
                "estatisticas_brasil": svc.api_football.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 
@@ -262,6 +271,8 @@ def main() -> None:
                     help="espn_historico: ligas ESPN (padrão: bra.1 bra.2 bra.copa_do_brazil conmebol.libertadores "
                          "conmebol.sudamericana)")
     ap.add_argument("--desde", type=int, default=2018, help="espn_historico: ano inicial (padrão 2018)")
+    ap.add_argument("--limite", type=int, default=1500,
+                    help="espn_resumos: quantos resumos (estatísticas + escalações) baixar nesta rodada (~1 s cada)")
     ap.add_argument("--tudo", action="store_true",
                     help="monta a base completa: todas as fontes, histórico inteiro (fdcouk desde 1993, Understat desde "
                          "2014, ESPN desde --desde), OpenPlay e súmulas da CBF baixados automaticamente")
@@ -284,7 +295,7 @@ def main() -> None:
     if args.rapido:
         run_sync(args.only or QUICK_SOURCES, args.days, 0, seasons_back=0, prefetch_boxscores=args.prefetch_boxscores)
     else:
-        run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons,
+        run_sync(args.only, args.days, args.prefetch_events, seasons_back=args.seasons, summaries_limit=args.limite,
                  prefetch_boxscores=args.prefetch_boxscores, espn_leagues=args.ligas, since_year=args.desde)
 
 

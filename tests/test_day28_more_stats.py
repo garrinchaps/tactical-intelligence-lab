@@ -80,46 +80,53 @@ def test_shots_are_fetched_once_on_demand(db, lake):
     assert ensure_shots(3_000_009_999, lake=lake, provider=FakeProvider()).empty   # sem ligação → nada
 
 
-def test_espn_backfill_walks_months_and_downloads_summaries(db):
+def _espn_ev(i, d, done=True):
+    return {"id": i, "date": f"{d}T19:00Z", "season": {"year": int(d[:4])}, "competitions": [{
+        "status": {"type": {"completed": done, "state": "post" if done else "pre"}},
+        "competitors": [{"homeAway": "home", "score": "2", "team": {"displayName": "Flamengo", "id": "1"}},
+                        {"homeAway": "away", "score": "1", "team": {"displayName": "Palmeiras", "id": "2"}}]}]}
+
+
+def test_espn_backfill_walks_years_and_downloads_summaries(db):
+    """v36: a ESPN recusa intervalos de datas; o histórico é pedido por ANO (um pedido por liga/ano)."""
     from src.data_hub.sources.espn import EspnProvider
 
     p = EspnProvider(db, enabled=True)
-    months, summaries = [], []
+    years, summaries = [], []
 
-    def scoreboard(lg, d1, d2):
-        months.append((lg, d1.isoformat(), d2.isoformat()))
-        if d1.month == 5 and d1.day == 8:
-            return [{**_m(500_000_000 + 77, "espn", DataLevel.RESULT, "Flamengo", "Palmeiras", d="2024-05-12"),
-                     "extra_json": '{"espn_league": "bra.1"}'}]
-        return []
+    def season(lg, y):
+        years.append(y)
+        return [_espn_ev(77, "2024-05-12")] if y == 2024 else []
 
     def ingest(mid):
         summaries.append(mid)
         db.save_boxscore(mid, {"team_stats": [{"team_name": "Flamengo", "stat_key": "shots_total", "value": 15}],
                                "lineups": [], "timeline": []})
-    p.scoreboard, p.ingest_event = scoreboard, ingest
-    out = p.backfill(["bra.1"], since_year=2024, until=date(2024, 6, 30))
-    starts = [m[1] for m in months]
-    assert [s for s in starts if s.endswith("-01")] == [f"2024-0{i}-01" for i in range(1, 7)]   # todo mês percorrido
-    assert all((date.fromisoformat(b) - date.fromisoformat(a)).days <= 6 for _, a, b in months)  # janelas ≤ 7 dias
-    assert ("bra.1", "2024-02-29", "2024-02-29") in months               # fim de mês certo (bissexto)
+    p.season_events, p.ingest_event = season, ingest
+    out = p.backfill(["bra.1"], since_year=2020, until=date(2024, 6, 30))
+    assert years[:3] == [2024, 2023, 2022]                              # do mais recente para trás, para ao 2º ano vazio
     assert summaries == [500_000_077] and out["resumos"] == 1
-    out2 = p.backfill(["bra.1"], since_year=2024, until=date(2024, 6, 30))
+    out2 = p.backfill(["bra.1"], since_year=2020, until=date(2024, 6, 30))
     assert out2["resumos"] == 0                                         # já tem números: não baixa de novo
 
 
-def test_espn_backfill_stops_after_repeated_failures(db):
+def test_espn_never_asks_for_date_ranges(db):
     from src.data_hub.sources.espn import EspnProvider
 
     p = EspnProvider(db, enabled=True)
-    n = []
+    asked = []
 
-    def boom(*a):
-        n.append(1)
-        raise RuntimeError("HTTP 403")
-    p.scoreboard = boom
-    out = p.backfill(["bra.1"], since_year=2020, until=date(2024, 12, 31))
-    assert len(n) == 5 and out["errors"] == 5                           # desiste com educação, não martela o site
+    def get(url, params, max_age_s):
+        asked.append(params.get("dates"))
+        return {"events": [_espn_ev(5, "2026-03-10"), _espn_ev(6, "2026-12-01", done=False)]}
+    p._get = get
+    out = p.sync_season(["bra.1"], [2026])
+    assert asked == ["2026"] and all("-" not in str(a) for a in asked)  # nunca "AAAAMMDD-AAAAMMDD"
+    assert out["added"] == 1 and out["fixtures"] == 1
+    with db.connect() as c:
+        assert c.execute("SELECT home, away FROM fixtures").fetchall() == [("Flamengo", "Palmeiras")]
+    p.scoreboard("bra.1", date(2026, 3, 1), date(2026, 4, 30))
+    assert asked[1:] == ["202603", "202604"]                             # intervalo vira pedidos por mês
 
 
 def test_fdcouk_has_lower_divisions_and_full_history():
