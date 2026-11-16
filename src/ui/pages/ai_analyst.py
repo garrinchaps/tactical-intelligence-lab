@@ -80,12 +80,25 @@ def render(ctx: MatchContext) -> None:
     clicked = next((e for i, e in enumerate(examples) if cols[i].button(e, key=f"ex_{i}", use_container_width=True)), None)
 
     history = st.session_state.setdefault("chat_history", [])
-    for h in history:
+    from src.intelligence.learning_hub import feedback_ids, record_feedback
+
+    reviewed = feedback_ids()
+    for hi, h in enumerate(history):
         with st.chat_message("user"):
             st.markdown(h["q"])
         with st.chat_message("assistant"):
             st.markdown(h["a"])
             st.caption(h["meta"])
+            learning_id = h.get("learning_id")
+            if learning_id:
+                if learning_id not in reviewed:
+                    st.caption("Avaliação para revisão; não altera os pesos automaticamente.")
+                    vote = st.feedback("thumbs", key=f"match_feedback_{learning_id}")
+                    if vote is not None:
+                        record_feedback(learning_id, vote)
+                        st.rerun()
+                else:
+                    st.caption("Feedback registrado para revisão.")
 
     question = st.chat_input("Ex.: quem mais abasteceu o centroavante no segundo tempo?") or clicked
     if question:
@@ -134,6 +147,7 @@ def render(ctx: MatchContext) -> None:
                                    file_name="relatorio_tatico.html", mime="text/html")
             with st.expander("Evidências usadas nesta resposta"):
                 st.json(res.get("evidence") or {})
-        history.append({"q": question, "a": res["report_markdown"], "meta": meta})
+        history.append({"q": question, "a": res["report_markdown"], "meta": meta,
+                        "learning_id": res.get("interaction_id")})
     _history_panel()
     provenance_panel(ctx.registry)
