@@ -13,6 +13,7 @@ agendada do Windows (scripts/agendar_atualizacao.ps1). Desligar: AUTO_SYNC=0 no 
 from __future__ import annotations
 
 import os
+import shutil
 import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -20,8 +21,11 @@ from typing import Any, Dict, List, Optional
 _lock = threading.Lock()
 _state: Dict[str, Any] = {"running": False, "last_finished": None, "last_attempt": None, "last_log": [], "last_error": None}
 RETRY_MINUTES = 30   # se a última tentativa falhou (ex.: sem internet), espera antes de tentar de novo
+
+_OPENPLAY: Dict[str, Any] = {"running": False, "converted": 0, "pending": None, "failed": 0,
+                                 "last_batch": None, "phase": "", "error": None}
 QUICK = ["fdcouk", "open_matchday", "api_football", "football_data", "espn"]
-DAILY = ["espn_elencos", "statsbomb", "wyscout", "openfootball", "brasileirao", "open_sources", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake", "estatisticas_brasil"]
+DAILY = ["espn_elencos", "statsbomb", "wyscout", "openplay", "openfootball", "brasileirao", "open_sources", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake", "estatisticas_brasil"]
 
 
 def enabled() -> bool:
@@ -95,6 +99,67 @@ def _refresh_rating_references(svc) -> None:
     _fm["regua_status"] = f"régua atualizada: {box_n} atuações FotMob e {event_n} atuações com eventos"
     if errors:
         _fm["regua_status"] += " · " + " | ".join(errors)[:180]
+
+
+def openplay_prefetch_enabled() -> bool:
+    """Converte os eventos OpenPlay locais em lotes; pode ser desligado sem afetar as outras fontes."""
+    return os.getenv("ENABLE_OPENPLAY_PREFETCH", "true").strip().lower() not in ("0", "false", "nao", "não", "no")
+
+
+def _openplay_prefetch_loop() -> None:
+    """Transforma os 26 mil jogos OpenPlay em eventos locais, em lotes retomáveis e com proteção de disco."""
+    import time
+    from pathlib import Path
+
+    from src.data_hub.service import MatchDataService
+    from src.data_hub.sources.openplay import OpenPlayProvider
+
+    try:
+        svc = MatchDataService()
+        provider = OpenPlayProvider(svc.db)
+        if not provider.enabled:
+            _OPENPLAY["phase"] = "arquivos locais não encontrados; configure OPENPLAY_PATH"
+            return
+        try:
+            batch = max(25, min(int(os.getenv("OPENPLAY_PREFETCH_BATCH", "250")), 1000))
+            interval = max(1, int(os.getenv("OPENPLAY_PREFETCH_INTERVAL_MINUTES", "15"))) * 60
+            min_free_gb = max(1, int(os.getenv("OPENPLAY_PREFETCH_MIN_FREE_GB", "3")))
+        except ValueError:
+            batch, interval, min_free_gb = 250, 900, 3
+        while enabled() and openplay_prefetch_enabled():
+            try:
+                db_dir = Path(getattr(svc.db, "db_path", "database")).resolve().parent
+                free_gb = shutil.disk_usage(db_dir).free / (1024 ** 3)
+                if free_gb < min_free_gb:
+                    _OPENPLAY["phase"] = f"pausado: apenas {free_gb:.1f} GB livres (mínimo {min_free_gb} GB)"
+                    time.sleep(interval)
+                    continue
+                _OPENPLAY["phase"] = "convertendo eventos locais"
+                result = provider.prefetch_events(limit=batch, progress=lambda msg: None,
+                                                   stop=lambda: not enabled() or not openplay_prefetch_enabled())
+                _OPENPLAY["converted"] += result["loaded"]
+                _OPENPLAY["failed"] += result["failed"]
+                _OPENPLAY["pending"] = result["pending"]
+                _OPENPLAY["last_batch"] = datetime.now(timezone.utc)
+                _OPENPLAY["error"] = None
+                _OPENPLAY["phase"] = "em dia" if result["pending"] == 0 else "lote concluído"
+                time.sleep(6 * 3600 if result["pending"] == 0 else interval)
+            except Exception as exc:
+                _OPENPLAY["error"] = f"{type(exc).__name__}: {exc}"
+                _OPENPLAY["phase"] = "tentará novamente"
+                time.sleep(interval)
+    finally:
+        _OPENPLAY["running"] = False
+
+
+def openplay_status() -> str:
+    if not openplay_prefetch_enabled() or not _OPENPLAY.get("running"):
+        return ""
+    if _OPENPLAY.get("error"):
+        return f" · OpenPlay: { _OPENPLAY['error'][:70] }"
+    pending = _OPENPLAY.get("pending")
+    suffix = f" · faltam {pending:,}" if pending is not None else ""
+    return f" · 🧭 OpenPlay: {_OPENPLAY.get('converted', 0):,} convertidos nesta sessão{suffix} ({_OPENPLAY.get('phase', '')})"
 
 
 def fotmob_enabled() -> bool:
@@ -218,6 +283,9 @@ def ensure_started(db) -> Dict[str, Any]:
         if not _fm["running"] and fotmob_enabled():
             _fm["running"] = True
             threading.Thread(target=_fotmob_loop, daemon=True, name="til-fotmob").start()
+        if not _OPENPLAY["running"] and openplay_prefetch_enabled():
+            _OPENPLAY["running"] = True
+            threading.Thread(target=_openplay_prefetch_loop, daemon=True, name="til-openplay-prefetch").start()
         recent = _state["last_attempt"] and datetime.now(timezone.utc) - _state["last_attempt"] < timedelta(minutes=RETRY_MINUTES)
         if not _state["running"] and not recent:
             pending = due(db)
@@ -238,9 +306,9 @@ def status_text(st_: Dict[str, Any]) -> str:
     if not st_.get("enabled", True):
         return "Atualização automática desligada (AUTO_SYNC=0)."
     if st_.get("running"):
-        return "🔄 Atualizando a base em segundo plano (jogos recentes)…"
+        return "🔄 Atualizando a base em segundo plano (jogos recentes)…" + openplay_status()
     nxt = st_.get("next_quick")
     local = lambda d: d.astimezone().strftime("%d/%m %H:%M")
     if nxt:
-        return f"🔄 Base atualizada automaticamente a cada {interval_hours():g} h · próxima: {local(nxt)}"
-    return "🔄 Atualização automática ativa."
+        return f"🔄 Base atualizada automaticamente a cada {interval_hours():g} h · próxima: {local(nxt)}" + openplay_status()
+    return "🔄 Atualização automática ativa." + openplay_status()
