@@ -304,7 +304,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             saved_min = (pd.to_numeric(saved_shots["minute"], errors="coerce").fillna(0)
                          if "minute" in saved_shots else pd.Series(dtype=float))
             key_saves = (int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
-                         if has_match_xg and "minute" in saved_shots else None)
+                         if has_faced_xg and "minute" in saved_shots else None)
             gk = {"defesas90": saves * f if has_shot_outcome else None,
                   "pct_defesas": 100 * saves / len(on_t) if has_shot_outcome and len(on_t) else None,
                   "gols_evitados": xg_on - ga if xg_on is not None else None,
@@ -317,7 +317,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                   "gk_longos_pct": (100 * len(longp_ok) / len(longp)
                                     if len(longp) >= 3 and "pass_outcome_name" in longp else None),
                   "gk_prog90": int((ok["is_progressive_action"] == 1).sum()) * f
-                      if "is_progressive_action" in ok else None,
+                      if "is_progressive_action" in ok and "pass_outcome_name" in ok else None,
                   "gk_perdas90": len(turn) * f if "is_turnover" in e else None,
                   "gk_erros": errors_to_chance,
                   "gk_acoes_fora_area90": int(((e["x"] > 18) & et.isin(["Clearance", "Interception", "Ball Recovery",
