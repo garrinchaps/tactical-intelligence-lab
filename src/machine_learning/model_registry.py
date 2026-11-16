@@ -82,6 +82,7 @@ class Version:
     epochs_run: Optional[int] = None
     density_360_share: Optional[float] = None
     density_proxy_matches: int = 0
+    n_features: Optional[int] = None
 
 
 class DangerModelRegistry:
@@ -372,7 +373,7 @@ class DangerModelRegistry:
                       round(pg["ci_high"], 6) if pg else None, round(pg["p_positive"], 4) if pg else None,
                       cv_auc_std, optimizer, bool(warm), len(net.history.get("train_loss", [])),
                       density_360_share=round(share_360, 4) if share_360 is not None else None,
-                      density_proxy_matches=proxy_matches)
+                      density_proxy_matches=proxy_matches, n_features=len(FEATURES))
         self.meta["versions"].append(asdict(rec))
         if promoted:
             self.meta["champion"] = v
@@ -505,7 +506,8 @@ def model_card() -> Optional[Dict[str, Any]]:
     return {"versao": f"v{c['version']:03d}", "auc_validacao": c["val_auc"], "partidas_de_treino": c["n_matches_train"],
             "acoes_de_treino": c.get("n_samples_train"), "tracking_360_pct": round(100 * c["density_360_share"], 1)
             if c.get("density_360_share") is not None else None, "partidas_com_proxy": c.get("density_proxy_matches", 0),
-            "arquitetura": " → ".join(str(x) for x in [len(FEATURES), *c["hidden"], 1]), "treinado_em": c["created"]}
+            "arquitetura": " → ".join(str(x) for x in [c.get("n_features") or len(LEGACY_FEATURES), *c["hidden"], 1]),
+            "n_features": c.get("n_features") or len(LEGACY_FEATURES), "treinado_em": c["created"]}
 
 
 def bootstrap_registry(progress: Optional[Callable[[str], None]] = None) -> DangerModelRegistry:
