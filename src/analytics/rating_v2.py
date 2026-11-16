@@ -520,6 +520,18 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
             "confianca_pct": conf, "confianca": "alta" if conf >= 75 else "média" if conf >= 50 else "baixa",
             "amostra": minutes_tier(mins), "dimensoes": {k: (round(v, 1) if v is not None else None) for k, v in dim_score.items()},
             "dimensoes_pt": DIM_PT if not gk else GK_DIM_PT, "pesos": dict(zip(dims, wts)), "base": detail,
+            "role_mix": (dict(role_mix) if isinstance(role_mix, dict) else {}),
+            "eventos_decisivos": {
+                "gols": int(row.get("gols", 0) or 0), "assistencias": int(row.get("assistencias", 0) or 0),
+                "gols_decisivos": int((context or {}).get("gols_decisivos", 0) or 0),
+                "penaltis_defendidos_disputa": int(row.get("shootout_saves", 0) or 0),
+                "defesas_chave": int(row.get("key_saves", 0) or 0),
+                "penaltis_convertidos_disputa": int(row.get("shootout_penaltis_marcados", 0) or 0),
+                "penaltis_perdidos_disputa": int(row.get("shootout_penaltis_perdidos", 0) or 0),
+                "grandes_chances_desperdicadas": int(row.get("chances_claras_perdidas", 0) or 0),
+                "erros_que_geraram_chance": int(row.get("erros_que_viraram_chance", 0) or 0),
+                "expulsoes": int(row.get("vermelhos", 0) or 0),
+            },
             "pares": int(len(peers))}
 
 
@@ -600,7 +612,7 @@ def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 def report(ev: Dict[str, Any]) -> str:
-    """Relatório curto e honesto de uma atuação (pontos fortes/fracos saem das dimensões, com o número)."""
+    """Relatório explicável de uma atuação, incluindo o ajuste decisivo e as lacunas de observação."""
     if ev.get("desempenho") is None:
         return (f"**{ev['jogador']}** jogou {ev['minutos']:.0f} min — {ev['amostra']}: sem nota (pouco tempo ou sem lances "
                 "suficientes). Ausência de dado não vira nota baixa.")
@@ -609,14 +621,32 @@ def report(ev: Dict[str, Any]) -> str:
     top = sorted(dims.items(), key=lambda kv: -kv[1])[:2]
     low = sorted(dims.items(), key=lambda kv: kv[1])[:2]
     not_obs = [pt[k] for k, v in ev["dimensoes"].items() if v is None]
-    s = (f"**{ev['jogador']}** ({ev['funcao']}, {ev['minutos']:.0f} min): desempenho **{ev['desempenho']:.1f}** "
-         f"({ev['classificacao']}), impacto **{ev['impacto']:.1f}**, confiança {ev['confianca']} ({ev['confianca_pct']}%). "
+    delta = float(ev.get("impacto") or 0)
+    sign = "+" if delta > 0 else ""
+    s = (f"**{ev['jogador']}** ({ev['funcao']}, {ev['minutos']:.0f} min): nota final **{ev['nota']:.1f}** "
+         f"({ev['classificacao']}); desempenho-base **{ev['desempenho']:.1f}**; ajuste decisivo **{sign}{delta:.1f} pts**; "
+         f"confiança {ev['confianca']} ({ev['confianca_pct']}%). "
          f"Melhor em {pt[top[0][0]].lower()} ({top[0][1]:.1f})"
          + (f" e {pt[top[1][0]].lower()} ({top[1][1]:.1f})" if len(top) > 1 else "")
-         + f"; mais fraco em {pt[low[0][0]].lower()} ({low[0][1]:.1f}).")
+         + f"; menor dimensão observada: {pt[low[0][0]].lower()} ({low[0][1]:.1f}).")
+    events = ev.get("eventos_decisivos") or {}
+    moments = []
+    if events.get("penaltis_defendidos_disputa"):
+        moments.append(f"{events['penaltis_defendidos_disputa']} pênalti(s) defendido(s) na disputa")
+    if events.get("defesas_chave"):
+        moments.append(f"{events['defesas_chave']} defesa(s) de alto impacto")
+    if events.get("gols_decisivos"):
+        moments.append(f"{events['gols_decisivos']} gol(s) que empatou(aram) ou virou(aram) o placar")
+    if events.get("grandes_chances_desperdicadas"):
+        moments.append(f"{events['grandes_chances_desperdicadas']} grande(s) chance(s) desperdiçada(s)")
+    if moments:
+        s += " Momentos decisivos contabilizados: " + "; ".join(moments) + "."
+    if len(ev.get("role_mix") or {}) > 1:
+        roles = ", ".join(f"{role} {share:.0%}" for role, share in ev["role_mix"].items())
+        s += " Papéis detectados nos eventos: " + roles + " (aproximação pelas posições anotadas, não tracking)."
     if not_obs:
         s += " Não observado nesta fonte: " + ", ".join(x.lower() for x in not_obs) + "."
-    s += f" Comparado com {ev['pares']} atuações de jogadores da mesma função na base."
+    s += f" Comparado com {ev['pares']} atuações de jogadores da mesma função ou de papéis próximos na base."
     return s
 
 
