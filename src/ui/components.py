@@ -159,8 +159,8 @@ def zebra(df: pd.DataFrame):
     try:
         sty = df.style.apply(
             lambda row: [
-                "background-color: #0D1424" if isinstance(row.name, int) and row.name % 2 == 0
-                else ("background-color: #111C30" if isinstance(row.name, int) else "")
+                "background-color: #0D1424" if isinstance(row.name, (int, np.integer)) and row.name % 2 == 0
+                else ("background-color: #111C30" if isinstance(row.name, (int, np.integer)) else "")
             ] * len(row),
             axis=1,
         )
@@ -204,10 +204,6 @@ def zebra(df: pd.DataFrame):
             low = str(col_name).strip().lower()
             if any(token in low for token in ("nota", "rating", "avaliação", "avaliacao")):
                 rating_cols.append(col_name)
-            elif any(token in low for token in ("percent", "_pct", "pct", "taxa", "auc", "precisão", "precisao", "recall", "f1")):
-                # As barras reais são configuradas por st.column_config.ProgressColumn abaixo;
-                # pandas.Styler.bar não é renderizado pelo st.dataframe do Streamlit 1.36.
-                pass
         if fmt:
             sty = sty.format(fmt, na_rep="—")
 
