@@ -275,7 +275,7 @@ def _box_ratings(ctx: MatchContext) -> None:
     show = r.drop(columns=["_detalhe", "nota_final"], errors="ignore").rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
                                                         "minutos": "Min", "gols": "Gols", "assistencias": "Assist.",
                                                         "nota": "Nota final", "nota_final": "Nota final",
-                                                        "desempenho": "Desempenho base", "impacto": "Impacto",
+                                                        "desempenho": "Desempenho base", "impacto": "Ajuste decisivo (pts)",
                                                         "confianca": "Confiança", "confianca_pct": "Conf. %",
                                                         "classificacao": "Leitura", "pares": "Pares"})
     comparison_table(show)
