@@ -165,6 +165,9 @@ def render(current_context, match_bar) -> None:
         if st.button("Limpar conversa"):
             st.session_state["chat_history"] = []
     history = st.session_state.setdefault("chat_history", [])
+    from src.intelligence.learning_hub import feedback_ids, record_feedback
+
+    reviewed = feedback_ids()
     clicked = None
     if not history:
         w = st.columns(3)
@@ -191,6 +194,16 @@ def render(current_context, match_bar) -> None:
 
                 entity_chips(h.get("chips_p") or [], h.get("chips_t") or [], key=f"as_chip_{hi}")
             _audit_panel(h)
+            learning_id = h.get("learning_id")
+            if learning_id:
+                if learning_id not in reviewed:
+                    st.caption("Sua avaliação entra na fila de revisão; ela não muda os pesos automaticamente.")
+                    vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
+                    if vote is not None:
+                        record_feedback(learning_id, vote)
+                        st.rerun()
+                else:
+                    st.caption("Feedback registrado para revisão.")
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked
     if not question:
@@ -212,6 +225,6 @@ def render(current_context, match_bar) -> None:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
                     "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
-                    "audit": (res.get("number_tags") or {}).get("linhas", []), **_mentioned(res),
-                    "players_q": list((res.get("scope") or {}).get("players") or [])})
+                    "audit": (res.get("number_tags") or {}).get("linhas", []), "learning_id": res.get("interaction_id"),
+                    **_mentioned(res), "players_q": list((res.get("scope") or {}).get("players") or [])})
     st.rerun()
