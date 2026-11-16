@@ -61,8 +61,8 @@ def indicators(rows: pd.DataFrame, positions: Optional[Dict[str, str]] = None) -
                "gols_penalti": _num(s.get("penalty_goals")) if s.get("penalty_goals") is not None else None,
                "assistencias": int(_num(s.get("goalAssists")) or 0) if s.get("goalAssists") is not None else 0,
                "xg": s.get("xg"), "xa": s.get("xa"), "amarelos": s.get("yellow_cards"),
-               "vermelhos": int(_num(s.get("red_cards")) or 0) if s.get("red_cards") is not None else 0,
-               "erros_que_viraram_chance": (_num(s.get("errors_led_to_goal")) or 0) if s.get("errors_led_to_goal") is not None else 0}
+               "vermelhos": int(_num(s.get("red_cards")) or 0) if s.get("red_cards") is not None else None,
+               "erros_que_viraram_chance": (_num(s.get("errors_led_to_goal")) or 0) if s.get("errors_led_to_goal") is not None else None}
         if fun == "goleiro":
             saves, conc = _num(s.get("saves")), _num(s.get("goals_conceded"))
             row.update({"defesas90": p90("saves"), "gols_evitados": s.get("goals_prevented"),
