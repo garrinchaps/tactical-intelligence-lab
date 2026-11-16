@@ -23,8 +23,8 @@ PALETTE = {
     "warning": "#FBBF24",
     "success": "#22C55E",
     "violet": "#A78BFA",
-    "pitch": "#0A1A14",
-    "pitch_line": "#2C4A3C",
+    "pitch": "#0B2318",
+    "pitch_line": "#4E7A63",
 }
 
 TIER_COLORS = {"OFFICIAL": PALETTE["primary"], "DERIVED": PALETTE["accent"], "SIMULATED": PALETTE["warning"]}
@@ -37,7 +37,8 @@ PLOTLY_LAYOUT = dict(
     font=dict(color=PALETTE["text"], family="Inter, Segoe UI, sans-serif", size=13),
     colorway=[PALETTE["primary"], PALETTE["secondary"], PALETTE["accent"], PALETTE["warning"], PALETTE["violet"], "#F472B6"],
     margin=dict(l=30, r=20, t=50, b=35),
-    legend=dict(orientation="h", y=-0.15),
+    legend=dict(orientation="h", y=-0.15, font=dict(size=12)),
+    hoverlabel=dict(bgcolor="#111A2E", bordercolor="#22D3EE", font=dict(color=PALETTE["text"], size=13)),
 )
 
 P = PALETTE

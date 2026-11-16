@@ -18,7 +18,10 @@ CLUSTER_COLORS = ["#22C55E", "#38BDF8", "#FBBF24", "#A78BFA", "#F472B6", "#F9731
 
 
 def _layout(fig: go.Figure, title: str, height: int = 420, **kw) -> go.Figure:
-    fig.update_layout(**PLOTLY_LAYOUT, title=dict(text=title, x=0.01, font=dict(size=15)), height=height, **kw)
+    fig.update_layout(**PLOTLY_LAYOUT, title=dict(text=title, x=0.01, font=dict(family="Space Grotesk, Inter, sans-serif",
+                                                                                size=15)), height=height, **kw)
+    fig.update_xaxes(gridcolor="rgba(152,166,191,0.10)", zerolinecolor="rgba(152,166,191,0.18)")
+    fig.update_yaxes(gridcolor="rgba(152,166,191,0.10)", zerolinecolor="rgba(152,166,191,0.18)")
     return fig
 
 
@@ -26,8 +29,11 @@ def pitch(fig: Optional[go.Figure] = None, title: str = "", height: int = 460) -
     """Campo 120×80 desenhado com shapes (gramado, linhas, áreas, círculo central)."""
     fig = fig or go.Figure()
     line = dict(color=P["pitch_line"], width=1.6)
+    stripes = [dict(type="rect", x0=x, y0=0, x1=x + 10, y1=80, line=dict(width=0), fillcolor="rgba(255,255,255,0.025)",
+                    layer="below") for x in range(0, 120, 20)]              # gramado listrado
     shapes = [
         dict(type="rect", x0=0, y0=0, x1=120, y1=80, line=line, fillcolor=P["pitch"], layer="below"),
+        *stripes,
         dict(type="line", x0=60, y0=0, x1=60, y1=80, line=line, layer="below"),
         dict(type="circle", x0=50, y0=30, x1=70, y1=50, line=line, layer="below"),
         dict(type="rect", x0=0, y0=18, x1=18, y1=62, line=line, layer="below"),
@@ -38,8 +44,11 @@ def pitch(fig: Optional[go.Figure] = None, title: str = "", height: int = 460) -
         dict(type="line", x0=80, y0=0, x1=80, y1=80, line=dict(color=P["pitch_line"], width=0.8, dash="dot"), layer="below"),
     ]
     fig.update_layout(shapes=shapes)
-    fig.update_xaxes(range=[-2, 122], showgrid=False, zeroline=False, title="comprimento (jardas) → ataque")
-    fig.update_yaxes(range=[82, -2], showgrid=False, zeroline=False, title="largura (jardas)", scaleanchor="x", scaleratio=1)
+    # campo sem números de eixo (cara de planilha); só a seta do sentido do ataque
+    fig.update_xaxes(range=[-2, 122], showgrid=False, zeroline=False, showticklabels=False, title="ataque →",
+                     title_font=dict(size=11, color=P["muted"]))
+    fig.update_yaxes(range=[82, -2], showgrid=False, zeroline=False, showticklabels=False, title=None,
+                     scaleanchor="x", scaleratio=1)
     return _layout(fig, title, height)
 
 

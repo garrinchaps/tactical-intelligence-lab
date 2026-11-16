@@ -88,9 +88,9 @@ def render(ctx: MatchContext) -> None:
     subs_set = set(came_in) if view == "all" else set()
     l, r = st.columns(2)
     with l:
-        st.plotly_chart(charts.pass_network(net, f"Troca de passes — {team} (bolinha maior = mais passes; verde mais "
-                                                 f"forte = mais importante para ligar o time)", subs=subs_set),
-                        use_container_width=True)
+        st.plotly_chart(charts.pass_network(net, f"Troca de passes — {team}", subs=subs_set), use_container_width=True)
+        st.caption("Bolinha maior = mais passes; verde mais forte = mais importante para ligar o time; linha mais grossa "
+                   "= mais passes entre os dois.")
         if view == "all" and came_in:
             st.caption("Entraram no jogo: " + ", ".join(came_in) + ". A posição de quem entrou é a média do tempo que "
                        "jogou, por isso pode se sobrepor à de quem saiu.")
@@ -98,8 +98,9 @@ def render(ctx: MatchContext) -> None:
             st.caption(f"Mostrando só quem começou jogando ({len(starters)}). Quem entrou depois: "
                        + ", ".join(came_in) + ".")
     with r:
-        st.plotly_chart(charts.xt_progression(df, team, f"As 60 jogadas de {team} que mais aproximaram a bola do gol "
-                                                        "(verde: passe · amarelo: condução)"), use_container_width=True)
+        st.plotly_chart(charts.xt_progression(df, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
+                        use_container_width=True)
+        st.caption("As 60 ações com maior ganho de ameaça (xT). Verde: passe · amarelo: condução.")
 
     st.markdown("##### Quem mais toca na bola × quem mais leva o time ao ataque")
     keep = set(field["jogadores"]) if field else set(starters) if view in ("xi", "xi_full") and starters else None
@@ -112,10 +113,12 @@ def render(ctx: MatchContext) -> None:
                  "volume = passes dados+recebidos; importância = caminhos de passe que passam pelo jogador, pesando "
                  "mais os que levam a bola para zonas de ameaça (xT)")
         x, y = st.columns([1.2, 1])
-        x.plotly_chart(charts.centrality_compare(comp, "Volume de passes × importância para chegar ao ataque "
-                                                       "(cada um comparado ao maior do time)"), use_container_width=True)
+        x.plotly_chart(charts.centrality_compare(comp, "Volume × importância para chegar ao ataque"), use_container_width=True)
         with y:
-            comparison_table(comp, "Quando as duas listas não batem, o jogador pesa mais (ou menos) para levar a bola da "
+            nice = comp.rename(columns={"atleta": "Jogador", "grau_ponderado": "Passes dados + recebidos",
+                                        "betweenness_xt": "Importância para ligar ao ataque", "rank_grau": "Posição no volume",
+                                        "rank_betweenness": "Posição na importância"})
+            comparison_table(nice, "Quando as duas listas não batem, o jogador pesa mais (ou menos) para levar a bola da "
                                    "saída de jogo até a área do que o número de passes sugere — é o caso do volante que toca "
                                    "pouco mas sempre para frente.")
     provenance_panel(ctx.registry)
