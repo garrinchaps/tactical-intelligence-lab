@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -169,9 +169,9 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
         with st.spinner("Buscando as finalizações no Understat..."):
             shots = ensure_shots(ctx.match_id)
     except Exception:
-        return
+        return False
     if shots is None or shots.empty:
-        return
+        return False
     m = ctx.bundle.meta or {}
     shots = shots.assign(equipe=shots["lado"].map({"h": m.get("home_team_name", home), "a": m.get("away_team_name", "")})
                          .fillna(shots["equipe"]))                   # nomes iguais aos do placar
@@ -198,6 +198,92 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
         st.markdown("###### Lance a lance")
         comparison_table(shots[["minuto", "equipe", "jogador", "assistente", "situacao", "tipo", "resultado", "xg"]]
                          .rename(columns={"equipe": "time", "situacao": "situação"}))
+    return True
+
+
+def _sibling_ids(ctx: MatchContext) -> List[int]:
+    """A própria partida + a mesma partida em outras fontes (para buscar chutes/números por jogador da FotMob)."""
+    ids = [int(ctx.match_id)]
+    try:
+        from src.data_hub.consolidate import siblings
+
+        ids += [int(x["match_id"]) for x in siblings(ctx_db(ctx), ctx.match_id, ctx.bundle.meta) if int(x["match_id"]) not in ids]
+    except Exception:
+        pass
+    return ids
+
+
+SIT_PT = {"RegularPlay": "jogada", "FastBreak": "contra-ataque", "SetPiece": "bola parada", "FromCorner": "escanteio",
+          "Penalty": "pênalti", "FreeKick": "falta direta", "ThrowInSetPiece": "lateral"}
+OUT_PT = {"Goal": "gol", "AttemptSaved": "defendida", "Miss": "para fora", "Post": "trave", "Blocked": "bloqueada"}
+
+
+def _fotmob_shots(ctx: MatchContext, home: str) -> None:
+    """Mapa de finalizações e xG da FotMob (quando a partida, ou a mesma partida na FotMob, tem o mapa de chutes)."""
+    try:
+        ids = _sibling_ids(ctx)
+        ph = ",".join("?" * len(ids))
+        with ctx_db(ctx).connect() as conn:
+            sh = pd.read_sql_query(f"SELECT * FROM match_shots WHERE match_id IN ({ph})", conn, params=ids)
+    except Exception:
+        return
+    if sh.empty:
+        return
+    sh = sh[sh["match_id"] == sh["match_id"].iloc[0]]
+    m = ctx.bundle.meta or {}
+    from src.data_hub.service import _same
+    from src.data_lake.ids import team_core
+
+    hn = m.get("home_team_name", home)
+    shots = pd.DataFrame({"lado": ["h" if _same(team_core(t), team_core(hn)) else "a" for t in sh["team_name"]],
+                          "x": sh["x"], "y": sh["y"], "xg": pd.to_numeric(sh["xg"], errors="coerce").fillna(0),
+                          "minuto": sh["minute"], "jogador": sh["player_name"],
+                          "resultado": sh["outcome"].map(OUT_PT).fillna(sh["outcome"]),
+                          "situacao": sh["situation"].map(SIT_PT).fillna(sh["situation"]), "tipo": sh["shot_type"]})
+    shots["equipe"] = shots["lado"].map({"h": hn, "a": m.get("away_team_name", "")})
+    st.markdown("##### 📍 Finalizações e xG (FotMob)")
+    by = shots.groupby("equipe").agg(chutes=("xg", "size"), xg=("xg", "sum"), gols=("resultado", lambda r: int((r == "gol").sum())))
+    for col, (team, r) in zip(st.columns(len(by)), by.iterrows()):
+        with col:
+            metric_card(f"xG — {team}", f"{r['xg']:.2f}",
+                        ctx.prov(f"fm_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
+                                 "soma do xG das finalizações (modelo da FotMob/Opta)", tier="DERIVED"),
+                        f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
+    st.plotly_chart(charts.shot_map(shots, hn, "Finalizações (tamanho = xG, ★ = gol) — fonte: FotMob"), use_container_width=True)
+
+
+def _box_ratings(ctx: MatchContext) -> None:
+    """Nota 2.0 por ESTATÍSTICAS (sem lances): régua própria, das atuações com números por jogador da mesma fonte."""
+    from src.analytics import rating_box as RB
+
+    for mid in _sibling_ids(ctx):
+        r = _box_ratings_cached(int(mid))
+        if r is not None and not r.empty:
+            break
+    else:
+        return
+    st.markdown("##### 🏅 Avaliação 2.0 dos jogadores (por estatísticas)")
+    st.caption("Sem lances com coordenadas neste jogo: a nota usa os números por jogador (xG, xA, chances criadas, "
+               "passes no terço final, desarmes, recuperações, duelos, perdas…) comparados com jogadores da MESMA função "
+               "em outros jogos da mesma fonte. O que a fonte não mede (xT, pressão, entre linhas) não entra e reduz a "
+               "confiança — nunca vira zero.")
+    show = r.drop(columns=["_detalhe"]).rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
+                                                        "minutos": "Min", "gols": "Gols", "assistencias": "Assist.",
+                                                        "desempenho": "Desempenho", "impacto": "Impacto",
+                                                        "confianca": "Confiança", "confianca_pct": "Conf. %",
+                                                        "classificacao": "Leitura", "pares": "Pares"})
+    comparison_table(show)
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
+def _box_ratings_cached(match_id: int):
+    from src.analytics import rating_box as RB
+    from src.ui.context import get_service
+
+    try:
+        return RB.match_ratings(get_service().db, match_id)
+    except Exception:
+        return None
 
 
 def ctx_db(ctx):
@@ -271,7 +357,8 @@ def render_boxscore(ctx: MatchContext) -> None:
                home_goals=hg, away_goals=ag)
     for n in b.notes:
         (st.info if ("trazidas" in n or "abrindo" in n) else st.warning)(n)
-    _understat_shots(ctx, home)
+    if not _understat_shots(ctx, home):
+        _fotmob_shots(ctx, home)
     _sources_panel(ctx)
     box = b.boxscore or {}
     stats, lineups, timeline, players = (box.get(k, pd.DataFrame()) for k in ("team_stats", "lineups", "timeline", "player_stats"))
@@ -320,6 +407,7 @@ def render_boxscore(ctx: MatchContext) -> None:
             cols[i].dataframe(lt[["shirt_number", "player_name", "position", "is_starter"]].rename(columns={
                 "shirt_number": "Nº", "player_name": "Atleta", "position": "Posição", "is_starter": "Titular"}),
                 use_container_width=True, hide_index=True)
+    _box_ratings(ctx)
 
 
 def render(ctx: MatchContext) -> None:

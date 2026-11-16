@@ -42,7 +42,10 @@ def _side_of_defense(lane: str) -> str:
 
 
 def _shots(d: pd.DataFrame, team: str) -> pd.DataFrame:
-    return d[(d["team_name"] == team) & (d["type_name"] == "Shot")]
+    s = d[(d["team_name"] == team) & (d["type_name"] == "Shot")]
+    if "period" in s:                                   # disputa de pênaltis (período 5) não é finalização do jogo
+        s = s[pd.to_numeric(s["period"], errors="coerce").fillna(1) < 5]
+    return s
 
 
 def _xg(s: pd.DataFrame) -> float:
@@ -175,7 +178,8 @@ def moments(df: pd.DataFrame, teams: List[str], step: int = 15) -> Dict[str, Any
 # ------------------------------------------------------------------ jogadas dos gols
 def goal_buildup(df: pd.DataFrame, team: str) -> Dict[str, Any]:
     d = _sorted(df)
-    goals = d[(d["team_name"] == team) & (d["type_name"] == "Shot") & (_col(d, "shot_outcome_name") == "Goal")]
+    sh = _shots(d, team)
+    goals = sh[_col(sh, "shot_outcome_name") == "Goal"]
     out, pattern = [], {}
     for _, g in goals.iterrows():
         chain = d[(d.get("possession") == g.get("possession")) & (d["team_name"] == team) & (d.index <= g.name)] \

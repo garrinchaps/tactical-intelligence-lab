@@ -444,7 +444,7 @@ class DataHubDB:
                 conn.execute(
                     "INSERT OR REPLACE INTO match_player_stats VALUES (?,?,?,?,?,?,?)",
                     (mid, p["team_name"], p["player_name"], p.get("position"), p.get("minutes"),
-                     p.get("rating"), json.dumps(p.get("stats") or {}, ensure_ascii=False)),
+                     p.get("rating"), json.dumps(p.get("stats") or {}, ensure_ascii=False, separators=(",", ":"))),
                 )
 
     def load_boxscore(self, match_id: int) -> Dict[str, Any]:

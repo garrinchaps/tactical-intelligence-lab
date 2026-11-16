@@ -721,6 +721,16 @@ TACTICAL_QS = [
     ("quem foi o jogador que mais correu nas costas da defesa?", "ranking", "Sem tracking"),
     ("quem menos marcou/ se dedicou defensivamente?", "ranking", "Quem menos contribuiu"),
     ("qual foi a nota de martinezz?", None, "De qual deles"),
+    # rodada 5 — casos A–H (equivalentes na final da Copa 2022)
+    ("O que a Argentina fez para ganhar da França?", "result", "O que os dados mostram"),
+    ("Quem foi o jogador com mais perigo criado?", "ranking", "Depende do que você chama de perigo"),
+    ("Como a França poderia parar tanto Messi, quanto Di María quanto Julián Álvarez?", "plan", "o que liga os"),
+    ("Como o Mbappé jogou? Foi bem na partida?", "rating", "nota de desempenho"),
+    ("O Neymar jogou esse jogo?", "presence", "Não encontrei"),
+    ("O Lloris teve um bom jogo?", "rating", "goleiro"),
+    ("E as corridas? Quem teve mais sprints?", "unavailable", "não existe na base"),
+    ("Quem foi o goleiro da França?", "lineup_role", "foi **Hugo Lloris**"),
+    ("Qual foi a escalação da França?", "lineup_role", "Titulares d"),
 ]
 
 

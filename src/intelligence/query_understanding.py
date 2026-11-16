@@ -20,6 +20,8 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
 FOOTBALL_TERMS = {
+    "sprint", "sprints", "corrida", "corridas", "correu", "correram", "distancia", "velocidade", "goleiro", "zagueiro",
+    "centroavante", "lateral", "volante", "capitao", "escalacao", "titular", "titulares", "reserva", "banco",
     "jogo", "partida", "time", "equipe", "jogador", "atleta", "gol", "gols", "passe", "passes", "finalizacao",
     "finalizacoes", "chute", "chutes", "xg", "xt", "posse", "pressao", "pressing", "ppda", "marcacao", "marcar",
     "defesa", "defensiva", "defensivo", "ataque", "ofensiva", "ofensivo", "transicao", "contra-ataque",
@@ -303,6 +305,20 @@ class QueryUnderstanding:
         unav = re.search(r"distancia percorrida|\bkms?\b|quilometr|\bcorreu\b|\bcorreram\b|velocidade|sprint|"
                          r"aceleracao|batimento|frequencia cardiaca|\bpeso\b|\bpesa\b|salari|temperatura|chuva|"
                          r"publico|torcedores|ingresso|lesao|lesionad|machucad|\bvento\b|gramado", t)
+        role_q = re.search(r"\bquem (foi|era|jogou|atuou|comecou|estava|ficou)\b( no gol| na zaga| no ataque)?( de| como| no| na)?"
+                           r"( o| a| os| as)? ?(goleiro|zagueiros?|laterais|lateral( esquerdo| direito)?|volantes?|meias?|"
+                           r"centroavante|atacantes?|pontas?|camisa \d+|capitao|titulares|reservas|banco|escalacao)\b|"
+                           r"\b(qual|quais) (foi|foram|era|eram) (o |a |os |as )?(goleiro|escalacao|titulares|zagueiros|time titular)\b|"
+                           r"\bquem (foi|era) o goleiro\b|\bescalacao (da|do|de)\b", t)
+        if role_q and not re.search(r"\bmais\b|\bmenos\b|melhor|pior", t):
+            g = role_q.group(0)
+            sc.ask = "lineup_role"
+            sc.attribute = next((k for k in ("goleiro", "zagueiro", "lateral", "volante", "meia", "centroavante", "atacante",
+                                             "ponta", "camisa", "capitao", "reserva", "banco") if k in g), "escalacao")
+            m_num = re.search(r"camisa (\d+)", g)
+            if m_num:
+                sc.attribute = f"camisa {m_num.group(1)}"
+            return cls._finish(sc, t)
         if prof:
             sc.ask = "profile"
             sc.attribute = ("altura" if re.search(r"altura|estatura|alt[oa]", prof.group(0)) else
@@ -334,6 +350,8 @@ class QueryUnderstanding:
                      r"camisa 10|maior perigo deles", t):
             sc.subject = "criador"
         rating_q = re.search(r"\bnota\b|avalia\w*|foi (bem|bom|mal|ruim)|bom ou ruim|ruim ou bom|"
+                             r"(teve|fez) (um |uma )?(bom|boa|grande|otim\w|excelente|mau|ma|pessim\w|frac\w|ruim) "
+                             r"(jogo|partida|atuacao|desempenho)|esteve bem|rendeu|como (se saiu|se comportou)|"
                              r"como (o |a )?\w+( \w+)? (foi|jogou|atuou)( na partida| no jogo| hoje)?\s*(\?|$)|"
                              r"jogou (bem|mal)|atuacao|desempenho d", t)
         team_merit = re.search(r"(quem|qual (time|equipe)|que time) (deveria|merecia|mereceu)\b|merecia (ganhar|vencer)|"
@@ -382,6 +400,12 @@ class QueryUnderstanding:
         elif not sc.players and re.search(r"(ganh|venc|perd|empat)\w*.*(partida|jogo|confronto)|por que (ganh|venc|perd)|como (ganh|venc)|"
                        r"o que .* fez para|motivo d\w* (vitoria|derrota)|resultado", t):
             sc.ask = "result"
+            if re.search(r"por que|porque|como (ganh|venc|conseg)|o que .* fez|motivo|explica|o que (deu|explica)|"
+                         r"segredo|chave d\w* (vitoria|jogo)|tao bem|diferenca entre", t):
+                sc.attribute = "historia"          # "o que o Barcelona fez para ganhar tão bem?" → explicação, não tabela
+        elif not sc.players and re.search(r"(principal|maior) diferenca entre (os dois|as duas|.* e .*)|o que decidiu (o jogo|a partida)|"
+                                          r"por que (o|a) .* (sofreu|teve dificuldade)", t):
+            sc.ask, sc.attribute = "result", "historia"
 
         return cls._finish(sc, t)
 

@@ -92,8 +92,10 @@ PLAYER_MAP = {"goals": "totalGoals", "assists": "goalAssists", "total_shots": "t
               "fouls": "foulsCommitted", "saves": "saves", "minutes_played": "minutes", "expected_goals": "xg",
               "expected_assists": "xa", "chances_created": "chances_created", "touches": "touches",
               "physical_metrics_distance_covered": "distance_m", "physical_metrics_topspeed": "top_speed_kmh",
-              "errors_led_to_goal": "errors_led_to_goal", "defensive_actions": "defensive_actions"}
+              "errors_led_to_goal": "errors_led_to_goal", "defensive_actions": "defensive_actions",
+              "physical_metrics_number_of_sprints": "sprints", "expected_goals_on_target_faced": "xgot_faced"}
 GENERIC_POS = {0: "G", 1: "D", 2: "M", 3: "F"}
+DROP_KEYS = {"fantasy_points", "xg_and_xa", "rating_title"}       # redundantes (somas, pontos de fantasy)
 
 
 def _season_label(raw: Any) -> str:
@@ -301,7 +303,7 @@ class FotmobProvider:
                 for _label, s in (grp.get("stats") or {}).items():
                     st = s.get("stat") or {}
                     k = s.get("key")
-                    if not k or st.get("value") is None:
+                    if not k or st.get("value") is None or k.endswith("_title") or k in DROP_KEYS:
                         continue
                     flat[PLAYER_MAP.get(k, k)] = st.get("value")
                     if st.get("total") is not None:

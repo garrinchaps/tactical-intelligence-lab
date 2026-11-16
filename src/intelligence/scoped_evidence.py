@@ -376,11 +376,21 @@ class ScopedEvidenceBuilder:
         extra = {"finalizacoes_no_alvo": "finalizacoes", "passes_certos": "passes", "gols": "finalizacoes",
                  "assistencias": "passes_decisivos", "perigo": "xg", "passes_errados": "passes"}.get(metric)
         ia = {}
-        if metric == "perigo":   # xT + xG por jogador; a rede neural entra como segunda opinião
+        if metric == "perigo":   # critérios SEPARADOS (xT, xG, passes para finalização) + rede neural como outra visão
             try:
                 ia = {"segunda_opiniao_ia": cls.block_danger_ranking(df[cls._time_mask(df, sc)], sc, team, opp, 3)}
             except Exception:
                 ia = {}
+            base = player_match_stats(w, scope_team)
+            persp = {}
+            for col, lab in (("xt", "levar a bola para perto do gol (xT de passes e conduções)"),
+                             ("xg", "qualidade das chances que ele mesmo finalizou (xG)"),
+                             ("passes_decisivos", "chances criadas para os companheiros (passes para finalização)")):
+                if col in base:
+                    t3 = base[base[col].fillna(0) > 0].sort_values(col, ascending=False).head(3)
+                    persp[col] = {"criterio": lab, "lideres": [{"jogador": r["jogador"], "equipe": r["equipe"],
+                                                                 "valor": _r(r[col], 3)} for _, r in t3.iterrows()]}
+            ia["perspectivas"] = persp
         return {**ia, "metrica": PLAYER_STAT_LABELS.get(metric, metric), "chave": metric,
                 "equipes_consideradas": scope_team or f"{team} e {opp}",
                 "lideres": [{"jogador": r.jogador, "equipe": r.equipe, "valor": _r(getattr(r, metric), 3),
@@ -476,7 +486,107 @@ class ScopedEvidenceBuilder:
             "para_quem_mais_passa": p.get("para_quem_mais_passa"),
             "amostra_N": int(len(acts)),
             **cls._danger_for_player(w, player),
+            "perfil": cls._threat_profile(w, player, team, rec, acts),
         }
+
+    @classmethod
+    def _threat_profile(cls, w: pd.DataFrame, player: str, team: str, rec: pd.DataFrame, acts: pd.DataFrame) -> Dict[str, Any]:
+        """
+        Números que definem COMO o jogador machuca (para escolher a estratégia certa, não um roteiro fixo):
+        recepções entre linhas e nas costas, conduções progressivas, dribles certos, chutes de fora, cruzamentos,
+        jogo aéreo, quanto ele defende (para a proposição: atacar o lado dele quando perdemos a bola para ele).
+        """
+        num = lambda c: pd.to_numeric(acts.get(c, pd.Series(index=acts.index, dtype=float)), errors="coerce")
+        ex = pd.to_numeric(rec.get("end_x"), errors="coerce") if len(rec) else pd.Series(dtype=float)
+        ey = pd.to_numeric(rec.get("end_y"), errors="coerce") if len(rec) else pd.Series(dtype=float)
+        between = int(((ex >= 72) & (ex < 102) & (ey >= 18) & (ey <= 62)).sum()) if len(rec) else 0
+        behind = int(((ex >= 102) & (ey >= 18) & (ey <= 62)).sum()) if len(rec) else 0
+        wide = int(((ey < 18) | (ey > 62)).sum()) if len(rec) else 0
+        carries = acts[acts["type_name"] == "Carry"]
+        prog_car = int((carries.get("is_progressive_action", pd.Series(0, index=carries.index)).fillna(0) == 1).sum())
+        drib = acts[acts["type_name"] == "Dribble"]
+        drib_ok = int((drib["dribble_outcome_name"] == "Complete").sum()) if "dribble_outcome_name" in drib else None   # sem coluna = desconhecido
+        shots = acts[acts["type_name"] == "Shot"]
+        long_sh = int((pd.to_numeric(shots.get("x"), errors="coerce") < 102).sum()) if len(shots) else 0
+        passes = acts[acts["type_name"] == "Pass"]
+        crosses = int((passes.get("is_pass_cross", pd.Series(False, index=passes.index)).fillna(False).astype(bool)).sum())
+        aer = acts[acts.get("is_aerial_won", pd.Series(False, index=acts.index)).fillna(False).astype(bool)] if "is_aerial_won" in acts else acts.iloc[0:0]
+        defend = int(acts["type_name"].isin(["Pressure", "Duel", "Interception", "Ball Recovery", "Block", "Clearance"]).sum())
+        side_y = pd.to_numeric(acts.get("y"), errors="coerce").dropna()
+        side = ("esquerda" if side_y.mean() < 30 else "direita" if side_y.mean() > 50 else "centro") if len(side_y) else None
+        mins = cls._mins(w, player)
+        return {"recebe_entre_linhas": between, "recebe_nas_costas": behind, "recebe_aberto": wide,
+                "conducoes_progressivas": prog_car, "dribles_certos": drib_ok, "dribles_tentados": int(len(drib)),
+                "chutes_de_fora": long_sh, "cruzamentos": crosses, "aereos_ganhos": int(len(aer)),
+                "acoes_defensivas": defend, "lado_habitual": side, "minutos": mins}
+
+    @staticmethod
+    def _mins(w: pd.DataFrame, player: str) -> Optional[float]:
+        try:
+            from src.metrics.match_facts import _minutes
+
+            return float(_minutes(w).get(player) or 0) or None
+        except Exception:
+            return None
+
+    @classmethod
+    def block_plan_multi(cls, df: pd.DataFrame, sc: QueryScope, players: List[str]) -> Dict[str, Any]:
+        """
+        Como parar VÁRIOS jogadores juntos: em vez de três planos soltos, mede o que liga as ameaças — quem abastece
+        mais de um deles, quanto eles trocam passes entre si, em que corredor se concentram — e onde ficam os
+        espaços que sobrariam se o time fechasse esse lado.
+        """
+        w = df[cls._time_mask(df, sc)]
+        ok = [p for p in players if (w["player_name"] == p).any()]
+        if len(ok) < 2:
+            return {"jogadores": players, "validos": ok}
+        team = str(w.loc[w["player_name"] == ok[0], "team_name"].dropna().iloc[0])
+        rival = next((t for t in w["team_name"].dropna().unique() if t != team), "adversário")
+        comp = w[(w["type_name"] == "Pass") & w["pass_outcome_name"].isna() & (w["team_name"] == team)]
+        feeders: Dict[str, Dict[str, int]] = {}
+        lanes: Dict[str, Dict[str, int]] = {}
+        for p in ok:
+            r = comp[comp.get("pass_recipient_name") == p]
+            feeders[p] = {k: int(v) for k, v in r["player_name"].value_counts().head(4).items()}
+            ey = pd.to_numeric(r.get("end_y"), errors="coerce").dropna()
+            lanes[p] = {"esquerda": int((ey < 26.7).sum()), "centro": int(((ey >= 26.7) & (ey <= 53.3)).sum()),
+                        "direita": int((ey > 53.3).sum())}
+        shared = {}
+        for f in {k for d in feeders.values() for k in d}:
+            hit = {p: feeders[p][f] for p in ok if f in feeders[p] and f not in ok}
+            if len(hit) >= 2:
+                shared[f] = hit
+        links = []
+        for a in ok:
+            for b in ok:
+                if a != b:
+                    n = int(((comp["player_name"] == a) & (comp.get("pass_recipient_name") == b)).sum())
+                    if n:
+                        links.append({"de": a, "para": b, "passes": n})
+        links.sort(key=lambda x: -x["passes"])
+        lane_tot = {k: sum(lanes[p][k] for p in ok) for k in ("esquerda", "centro", "direita")}
+        tot = sum(lane_tot.values()) or 1
+        top_lane = max(lane_tot, key=lane_tot.get)
+        # o que sobra: corredor menos usado por eles e quanto o time criou por lá (para não abrir um buraco)
+        from src.intelligence import tactical_blocks as T
+
+        corr = T.corridors(w, team).get("corredores") or []
+        weakest = min(lane_tot, key=lane_tot.get)
+        threat_share = {}
+        from src.metrics.match_facts import player_match_stats
+
+        ps = player_match_stats(w, team)
+        if not ps.empty:
+            tot_xt = float(ps["xt"].clip(lower=0).sum()) or 1.0
+            for p in ok:
+                row = ps[ps["jogador"] == p]
+                threat_share[p] = round(100 * float(row["xt"].clip(lower=0).sum()) / tot_xt, 1) if not row.empty else 0.0
+        return {"jogadores": ok, "equipe": team, "quem_defende": rival, "abastecedores": feeders,
+                "abastecedor_comum": shared, "ligacoes_entre_eles": links[:4], "corredores_de_recepcao": lanes,
+                "corredor_dominante": top_lane, "pct_corredor_dominante": round(100 * lane_tot[top_lane] / tot, 1),
+                "corredor_livre": weakest, "fatia_da_ameaca_pct": threat_share,
+                "fatia_somada_pct": round(sum(threat_share.values()), 1),
+                "corredores_do_time": corr[:3], "amostra_N": int(len(comp))}
 
     @classmethod
     def _danger_for_player(cls, w: pd.DataFrame, player: str) -> Dict[str, Any]:
@@ -639,7 +749,27 @@ class ScopedEvidenceBuilder:
             else:
                 names = [nr[hit[0]]]
         if not names:
-            return {"pedido": asked, "jogou": False, "eventos_registrados": 0}
+            # sem lance: procura na escalação gravada (ESPN/FotMob) — banco não utilizado ≠ ausente ≠ sem informação
+            out = {"pedido": asked, "jogou": False, "eventos_registrados": 0}
+            try:
+                import difflib
+
+                from src.intelligence.query_understanding import norm
+
+                teams = [t for t in df["team_name"].dropna().unique()]
+                lists = {t: cls._db_lineup_all(meta, t) for t in teams}
+                out["lista_de_relacionados"] = any(bool(v) for v in lists.values())
+                for t, rows in lists.items():
+                    cand = {norm(n): (n, st_) for n, st_ in rows}
+                    hit = difflib.get_close_matches(norm(asked or ""), list(cand), n=1, cutoff=0.8) or \
+                        [k for k in cand if norm(asked or "x") in k.split()]
+                    if hit:
+                        n, st_ = cand[hit[0]]
+                        out.update({"jogador": n, "equipe": t, "relacionado": True, "titular_na_lista": bool(st_)})
+                        break
+            except Exception:
+                pass
+            return out
         p = names[0]
         ev = df[df["player_name"] == p]
         mins = _minutes(df).get(p)
@@ -652,6 +782,129 @@ class ScopedEvidenceBuilder:
                 "entrou_aos": int(came_in["minute"].iloc[0]) + 1 if not came_in.empty else None,
                 "saiu_aos": int(went_out["minute"].iloc[0]) + 1 if not went_out.empty else None,
                 "minutos_estimados": mins, "eventos_registrados": int(len(ev))}
+
+    POS_PT = {"Goalkeeper": "goleiro", "Right Back": "lateral direito", "Left Back": "lateral esquerdo",
+              "Right Center Back": "zagueiro", "Left Center Back": "zagueiro", "Center Back": "zagueiro",
+              "Right Wing Back": "ala direito", "Left Wing Back": "ala esquerdo", "Right Defensive Midfield": "volante",
+              "Left Defensive Midfield": "volante", "Center Defensive Midfield": "volante",
+              "Right Center Midfield": "meio-campista", "Left Center Midfield": "meio-campista", "Center Midfield": "meio-campista",
+              "Right Midfield": "meia direita", "Left Midfield": "meia esquerda", "Right Attacking Midfield": "meia",
+              "Left Attacking Midfield": "meia", "Center Attacking Midfield": "meia", "Right Wing": "ponta direita",
+              "Left Wing": "ponta esquerda", "Right Center Forward": "centroavante", "Left Center Forward": "centroavante",
+              "Center Forward": "centroavante", "Secondary Striker": "segundo atacante"}
+    ROLE_WORD = {"goleiro": ("goleiro",), "zagueiro": ("zagueiro",), "lateral": ("lateral", "ala"),
+                 "volante": ("volante",), "meia": ("meia", "meio-campista"), "centroavante": ("centroavante", "segundo atacante"),
+                 "atacante": ("centroavante", "ponta", "segundo atacante"), "ponta": ("ponta",)}
+
+    @classmethod
+    def _physical(cls, meta: Dict[str, Any], sc: QueryScope) -> Dict[str, Any]:
+        """Distância/sprints/velocidade REAIS (medição da liga via FotMob) da partida ou de um irmão dela; senão vazio."""
+        import re as _re
+
+        ped = str(sc.attribute or "")
+        key, lab, unit = (("sprints", "sprints", "sprints") if _re.search(r"sprint", ped) else
+                          ("top_speed_kmh", "velocidade máxima", "km/h") if _re.search(r"velocid", ped) else
+                          ("distance_m", "distância percorrida", "km") if _re.search(r"distanc|km|quilometr|corr", ped) else
+                          (None, None, None))
+        if not key or not meta.get("match_id"):
+            return {}
+        try:
+            import json as _json
+
+            from src.data_hub.consolidate import siblings
+            from src.data_hub.db import DataHubDB
+
+            db = DataHubDB()
+            ids = [int(meta["match_id"])] + [int(x["match_id"]) for x in siblings(db, int(meta["match_id"]), meta)]
+            ph = ",".join("?" * len(ids))
+            with db.connect() as conn:
+                rows = conn.execute(f"SELECT team_name, player_name, stats_json FROM match_player_stats WHERE match_id IN ({ph})",
+                                    ids).fetchall()
+        except Exception:
+            return {}
+        out = []
+        for team, name, js in rows:
+            try:
+                v = (_json.loads(js or "{}") or {}).get(key)
+            except Exception:
+                v = None
+            if v is not None:
+                out.append({"jogador": name, "equipe": team, "valor": round(float(v) / 1000, 2) if key == "distance_m" else round(float(v), 1)})
+        out.sort(key=lambda r: -r["valor"])
+        return {"ranking": out, "rotulo": lab, "unidade": unit, "fonte": "FotMob (medição da liga)"} if out else {}
+
+    @classmethod
+    def _db_lineup_all(cls, meta: Dict[str, Any], team: str) -> List[tuple]:
+        """[(jogador, titular)] da escalação gravada desta partida (ou da mesma partida em outra fonte)."""
+        try:
+            from src.data_hub.consolidate import siblings
+            from src.data_hub.db import DataHubDB
+            from src.data_hub.service import _same
+            from src.data_lake.ids import team_core
+
+            db = DataHubDB()
+            ids = [int(meta.get("match_id"))] + [int(x["match_id"]) for x in siblings(db, int(meta.get("match_id")), meta)]
+            ph = ",".join("?" * len(ids))
+            with db.connect() as conn:
+                lu = pd.read_sql_query(f"SELECT team_name, player_name, is_starter FROM match_lineups WHERE match_id IN ({ph})",
+                                       conn, params=ids)
+            lu = lu[[_same(team_core(t), team_core(team)) for t in lu["team_name"]]]
+            return list(zip(lu["player_name"], lu["is_starter"]))
+        except Exception:
+            return []
+
+    @classmethod
+    def _db_bench(cls, meta: Dict[str, Any], team: str) -> List[str]:
+        """Reservas não utilizados pela escalação gravada (ESPN/FotMob), quando a partida ou um irmão dela tem."""
+        try:
+            from src.data_hub.consolidate import siblings
+            from src.data_hub.db import DataHubDB
+            from src.data_hub.service import _same
+            from src.data_lake.ids import team_core
+
+            db = DataHubDB()
+            ids = [int(meta.get("match_id"))] + [int(x["match_id"]) for x in siblings(db, int(meta.get("match_id")), meta)]
+            ph = ",".join("?" * len(ids))
+            with db.connect() as conn:
+                lu = pd.read_sql_query(f"SELECT team_name, player_name, is_starter FROM match_lineups WHERE match_id IN ({ph})",
+                                       conn, params=ids)
+            lu = lu[[_same(team_core(t), team_core(team)) for t in lu["team_name"]]]
+            return sorted(set(lu.loc[lu["is_starter"] == 0, "player_name"]))
+        except Exception:
+            return []
+
+    @classmethod
+    def block_lineup(cls, df: pd.DataFrame, sc: QueryScope, team: str, other: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+        """'Quem foi o goleiro do Real?' — resposta direta pela escalação (posição dos lances + trocas), sem análise do time."""
+        from src.metrics.match_facts import _minutes, _same_player
+
+        play = df[df["period"] <= 4] if "period" in df else df
+        mins = _minutes(play)
+        names = play["player_name"].dropna().unique()
+        subs = play[play["type_name"] == "Substitution"]
+        came = {_same_player(str(n), names): int(m) + 1 for n, m in
+                zip(subs.get("substitution_replacement_name", pd.Series(dtype=object)), subs["minute"]) if pd.notna(n)} if len(subs) else {}
+        went = dict(zip(subs["player_name"], subs["minute"] + 1)) if len(subs) else {}
+        out = []
+        unknown = {"não identificado", "nao identificado", "unknown", ""}
+        tp = play[(play["team_name"] == team) & play["player_name"].notna()]
+        tp = tp[~tp["player_name"].astype(str).str.strip().str.lower().isin(unknown)]
+        for p, g in tp.groupby("player_name"):
+            pos = g["position_name"].dropna().mode().iloc[0] if "position_name" in g and g["position_name"].notna().any() else ""
+            out.append({"jogador": p, "posicao": cls.POS_PT.get(pos, pos.lower() if pos else "—"), "titular": p not in came,
+                        "entrou_aos": came.get(p), "saiu_aos": went.get(p), "minutos": round(float(mins.get(p, 0) or 0))})
+        want = str(sc.attribute or "escalacao")
+        words = cls.ROLE_WORD.get(want)
+        hits = [r for r in out if words and any(r["posicao"].startswith(wd) for wd in words)] if words else []
+        if want == "goleiro":
+            hits.sort(key=lambda r: -r["minutos"])
+        order = ["goleiro", "lateral direito", "zagueiro", "lateral esquerdo", "ala", "volante", "meio-campista", "meia",
+                 "ponta", "segundo atacante", "centroavante"]
+        rank = lambda r: next((i for i, o in enumerate(order) if r["posicao"].startswith(o)), 99)
+        xi = sorted([r for r in out if r["titular"]], key=rank)
+        return {"equipe": team, "pedido": want, "encontrados": hits, "titulares": xi, "n_titulares": len(xi),
+                "entraram": [r for r in out if not r["titular"]], "banco_nao_utilizado": cls._db_bench(meta, team),
+                "fonte": "posição registrada nos lances; trocas pelos eventos de substituição"}
 
     @classmethod
     def block_errors(cls, df: pd.DataFrame, sc: QueryScope, player: str) -> Dict[str, Any]:
@@ -848,15 +1101,22 @@ class ScopedEvidenceBuilder:
         if sc.ask == "profile":
             blocks["perfil"] = cls.block_profile(df, team, other, sc.attribute or "altura", meta)
         elif sc.ask == "unavailable":
-            blocks["indisponivel"] = {"pedido": sc.attribute}
+            blocks["indisponivel"] = {"pedido": sc.attribute, "fisico": cls._physical(meta, sc),
+                                      "onde_existe": "Premier League (FotMob publica distância e sprints)"}
         elif sc.ask == "goals":
             blocks["gols"] = cls.block_goals(df, team, other, meta)
             if sc.goal_order:
                 blocks["gols"]["ordem_pedida"] = sc.goal_order
         elif sc.ask == "ranking":
             blocks["ranking"] = cls.block_ranking(df, sc, team, other)
+        elif sc.ask == "result" and sc.attribute == "historia":
+            from src.intelligence import match_story
+
+            blocks["historia"] = match_story.build(df, team, other)
         elif sc.ask == "result":
             blocks["resultado"] = cls.block_result(df, team, other, meta)
+        elif sc.ask == "lineup_role":
+            blocks["escalacao"] = cls.block_lineup(df, sc, team, other, meta)
         elif sc.ask == "presence":
             blocks["presenca"] = cls.block_presence(df, sc, meta)
         elif sc.ask == "errors":
@@ -883,7 +1143,11 @@ class ScopedEvidenceBuilder:
                     sc.players = [ps.sort_values("xt", ascending=False).iloc[0]["jogador"]]
                     blocks["sujeito"] = {"quem": sc.players[0], "equipe": rival, "criterio": "quem mais levou a bola para "
                                          "perto do gol (xT) no time adversário"}
-            if sc.players:
+            if len(sc.players) >= 2:
+                blocks["plano_conjunto"] = cls.block_plan_multi(df, sc, sc.players[:4])
+                for p in sc.players[:4]:
+                    blocks[f"perfil_ameaca::{p}"] = cls.block_plan_vs_player(df, sc, p)
+            elif sc.players:
                 for p in sc.players[:2]:
                     blocks[f"plano_jogador::{p}"] = cls.block_plan_vs_player(df, sc, p)
             else:

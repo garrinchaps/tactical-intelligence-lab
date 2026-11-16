@@ -38,3 +38,4 @@ data/treino_estado.json
 data/treino_log.txt
 data/treino.pid
 data/processed/rating_ref_v2*.parquet
+data/processed/rating_ref_box*.parquet

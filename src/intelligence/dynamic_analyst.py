@@ -19,7 +19,7 @@ import json
 import re
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -70,6 +70,7 @@ Não cite números nem estatísticas."""
 
 MISSES_PATH = "data/assistente_sem_alvo.jsonl"
 FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how", "rating",
+             "lineup_role",
              "team_merit",
              "between_lines", "efficiency", "moments", "goal_buildup", "defenders_diag", "combinations"}
 
@@ -205,6 +206,19 @@ class LocalScopedWriter:
                     summary.append(f"{best[0]} marcou {_pl(best[1], 'gol', 'gols')}" if best[1] > 1 else
                                    f"{len(b['gols'])} gols de {len(scorers)} autores diferentes")
                 continue
+            if key == "historia":
+                from src.intelligence import match_story
+
+                out.append(match_story.write(b, _fmt))
+                if b["fatores"]:
+                    summary.append(b["fatores"][0]["leitura"].rstrip("."))
+                continue
+            if key == "escalacao":
+                txt, summ = cls._lineup_text(b)
+                out.append(txt)
+                if summ:
+                    summary.append(summ)
+                continue
             if key == "presenca":
                 out.append(cls._presence(b, sc))
                 if b.get("jogou"):
@@ -275,6 +289,35 @@ class LocalScopedWriter:
                     l0 = b["lideres_ia"][0]
                     summary.append(f"segundo a rede neural, {l0['jogador']} criou mais ações perigosas ({l0['acoes_perigosas']})")
                 continue
+            if key == "ranking" and b.get("perspectivas"):
+                pp = b["perspectivas"]
+                leaders = {k: v["lideres"][0] for k, v in pp.items() if v["lideres"]}
+                names = {v["jogador"] for v in leaders.values()}
+                if len(names) == 1:
+                    one = next(iter(names))
+                    out.append(f"**{one}** foi quem mais criou perigo por qualquer critério — no passe/condução, no "
+                               "chute e nas chances para os outros.")
+                else:
+                    out.append("**Depende do que você chama de perigo** — são coisas diferentes, e cada uma tem um líder:")
+                for k, v in pp.items():
+                    if v["lideres"]:
+                        row = "; ".join(f"{r['jogador']} ({r['equipe']}) {_fmt(r['valor'])}" for r in v["lideres"])
+                        out.append(f"- **{v['criterio'][0].upper() + v['criterio'][1:]}:** {row}")
+                ia = b.get("segunda_opiniao_ia") or {}
+                if ia.get("modelo") and ia.get("lideres_ia"):
+                    l0 = ia["lideres_ia"][0]
+                    out.append(f"- **Posses que a rede neural vê com chance de virar finalização (≥ {ia.get('limiar_pct', 30)}%):** "
+                               + "; ".join(f"{r['jogador']} ({r['acoes_perigosas']})" for r in ia["lideres_ia"][:3])
+                               + " — leitura do modelo, de precisão modesta." + LocalScopedWriter._model_line(ia.get("modelo")))
+                lid = b.get("lideres") or []
+                if lid:
+                    out.append(f"_Se for para somar tudo num número só (xT + xG, a soma que o laboratório usa como \"perigo "
+                               f"total\"), quem lidera é {lid[0]['jogador']} ({_fmt(lid[0]['valor'])})._")
+                if "xt" in leaders:
+                    summary.append(f"{leaders['xt']['jogador']} foi quem mais levou a bola para perto do gol"
+                                   + (f", e {leaders['xg']['jogador']} quem teve as melhores chances" if "xg" in leaders and
+                                      leaders["xg"]["jogador"] != leaders["xt"]["jogador"] else ""))
+                continue
             if key == "ranking":
                 lid = b["lideres"]
                 if b.get("sem_dado"):
@@ -303,6 +346,17 @@ class LocalScopedWriter:
                 if ia.get("modelo") and ia.get("lideres_ia"):
                     out.append(cls._danger_ranking(ia))
 
+                continue
+            if key.startswith("perfil_ameaca::"):
+                continue                                     # usados dentro do plano conjunto
+            if key == "plano_conjunto":
+                prof = {k.split("::", 1)[1]: v for k, v in blocks.items() if k.startswith("perfil_ameaca::")}
+                out.append(cls._plan_multi(b, prof))
+                if b.get("abastecedor_comum"):
+                    summary.append(f"o caminho mais curto é secar {next(iter(b['abastecedor_comum']))}, que abastece mais de um deles")
+                elif b.get("ligacoes_entre_eles"):
+                    l0 = b["ligacoes_entre_eles"][0]
+                    summary.append(f"cortar a ligação {l0['de']} → {l0['para']}")
                 continue
             if key.startswith("plano_jogador::"):
                 out.append(cls._plan_player(b))
@@ -481,11 +535,61 @@ class LocalScopedWriter:
         "contexto": "público, clima, gramado e salários não constam nas fontes de lances e estatísticas",
     }
 
+    @staticmethod
+    def _lineup_text(b: Dict[str, Any]) -> Tuple[str, str]:
+        team, want = b["equipe"], b["pedido"]
+
+        def who(r):
+            extra = (f", entrou aos {r['entrou_aos']}'" if r.get("entrou_aos") else "") + \
+                    (f", saiu aos {r['saiu_aos']}'" if r.get("saiu_aos") else "")
+            return f"**{r['jogador']}** ({r['posicao']}{extra})"
+        if want != "escalacao" and b["encontrados"]:
+            h = b["encontrados"]
+            if want == "goleiro":
+                main = h[0]
+                txt = f"O goleiro de {team} foi **{main['jogador']}**" + (
+                    " — jogou a partida inteira." if not main.get("saiu_aos") and not main.get("entrou_aos") else
+                    f" ({main['minutos']} min)." )
+                if len(h) > 1:
+                    txt += " Também atuou no gol: " + ", ".join(who(r) for r in h[1:]) + "."
+                return txt, f"{main['jogador']} foi o goleiro de {team}"
+            return (f"{want.capitalize()}s de {team} nesta partida: " + "; ".join(who(r) for r in h) + ".",
+                    f"{len(h)} jogador(es) de {team} atuaram como {want}")
+        if want != "escalacao":
+            return (f"Não encontrei ninguém de {team} registrado como {want} nos lances desta partida. "
+                    "A posição vem do que a fonte marca em cada lance — sem esse registro, prefiro não chutar.", "")
+        xi = b["titulares"]
+        lines = [f"**Titulares de {team}:** " + "; ".join(f"{r['jogador']} ({r['posicao']})" for r in xi) + "."]
+        if b["entraram"]:
+            lines.append("**Entraram:** " + "; ".join(f"{r['jogador']} ({r['entrou_aos']}')" for r in b["entraram"]) + ".")
+        if b.get("banco_nao_utilizado"):
+            lines.append("**No banco, sem entrar:** " + ", ".join(b["banco_nao_utilizado"]) + ".")
+        return "\n\n".join(lines), f"{team} começou com {len(xi)} titulares registrados"
+
     @classmethod
     def _unavailable(cls, b: Dict[str, Any]) -> str:
         ped = str(b.get("pedido") or "")
+        fis = b.get("fisico") or {}
+        if fis.get("ranking"):
+            lab = fis["rotulo"]
+            rows = "\n".join(f"{i}. {r['jogador']} ({r['equipe']}): {_fmt(r['valor'])} {fis['unidade']}"
+                              for i, r in enumerate(fis["ranking"][:6], 1))
+            first = fis["ranking"][0]
+            return (f"**{first['jogador']}** ({first['equipe']}) foi quem mais teve {lab}: {_fmt(first['valor'])} {fis['unidade']}.\n\n"
+                    f"**{lab.capitalize()} — medição física da liga, publicada pela FotMob:**\n{rows}\n\n"
+                    "_Dado físico real (rastreamento da liga), não estimado a partir dos lances._")
         kind = ("distancia" if re.search(r"distanc|km|quilometr|corr|velocid|sprint|acelera", ped) else
                 "fisico" if re.search(r"peso|pesa|batiment|cardiac|lesa|lesion|machuc", ped) else "contexto")
+        if kind == "distancia":
+            return ("**Não dá para saber quem correu mais ou fez mais sprints: essa informação não existe na base desta "
+                    "partida.** Sprint, distância e "
+                    "velocidade só existem com dados físicos (rastreamento por câmera/GPS), e esta partida não tem esse "
+                    "dado em nenhuma fonte da base. Os lances registram o que acontece COM a bola — uma condução longa "
+                    "ou uma corrida para receber nas costas não é um sprint medido, então não vou usar isso como se fosse.\n\n"
+                    "Onde existe: algumas ligas (como a Premier League) publicam distância e sprints na FotMob — baixe os "
+                    "jogos com `python -m src.data_hub.sync --only fotmob_jogos` e a resposta passa a vir com o número real.\n\n"
+                    "Perto disso, com dado real deste jogo, consigo responder: quem mais conduziu a bola para frente, "
+                    "quem mais atacou o espaço nas costas da defesa e quem mais pressionou.")
         return (f"**Essa informação não existe na base desta partida.** O pedido (\"{ped}\") não é registrado: "
                 f"{cls.UNAVAILABLE_WHY[kind]}. Não vou estimar um número sem dado.\n\n"
                 "O que dá para responder com dados reais deste jogo: posse e circulação, finalizações e xG, gols e "
@@ -611,11 +715,20 @@ class LocalScopedWriter:
     def _presence(cls, b: Dict[str, Any], sc: QueryScope) -> str:
         asked = b.get("pedido") or "esse jogador"
         if not b.get("jogou"):
+            if b.get("relacionado") and not b.get("titular_na_lista"):
+                return (f"**Não entrou em campo.** {b['jogador']} estava entre os reservas de {b['equipe']} na escalação "
+                        "publicada, mas não tem nenhum lance nem entrada registrada — ficou no banco.")
+            if b.get("relacionado"):
+                return (f"**Inconclusivo.** {b['jogador']} aparece como titular na escalação publicada de {b['equipe']}, "
+                        "mas não tem nenhum lance registrado nos dados de eventos. As fontes divergem — prefiro não cravar.")
             if b.get("jogador"):
                 return f"**Não.** {b['jogador']} não tem nenhum lance registrado nesta partida."
+            if b.get("lista_de_relacionados"):
+                return (f"**Não.** \u201c{asked}\u201d não está nem entre os titulares nem entre os reservas da escalação "
+                        "publicada desta partida — não foi relacionado. O motivo (lesão, suspensão, opção) não está nos dados.")
             return (f"**Não encontrei \u201c{asked}\u201d entre os jogadores desta partida.** Ninguém com esse nome tem lance, "
-                    "entrada ou saída registrados — ou não jogou, ou ficou no banco sem entrar. "
-                    "Os dados de lances não trazem a lista de reservas não utilizados nem o motivo da ausência (lesão, suspensão).")
+                    "entrada ou saída registrados. Como não tenho a lista de reservas deste jogo, não dá para dizer se ele "
+                    "ficou no banco ou nem foi relacionado — e o motivo da ausência não está nos dados.")
         p, tm = b["jogador"], b.get("equipe") or ""
         if b.get("entrou_aos"):
             how = f"entrou no decorrer do jogo, aos {b['entrou_aos']}'"
@@ -818,6 +931,98 @@ class LocalScopedWriter:
                 f"de chance, segundo a rede neural, de a posse terminar em finalização):\n{rows}") + cls._model_line(b["modelo"])
 
     @staticmethod
+    def profile_moves(b: Dict[str, Any]) -> List[Tuple[str, str]]:
+        """
+        Estratégias escolhidas pelo PERFIL medido do jogador (oposição) e como explorá-lo quando ele defende
+        (proposição). Cada uma só entra se o número que a justifica passar do mínimo — nada de roteiro fixo.
+        """
+        f = b.get("perfil") or {}
+        p, r = b["jogador"], b.get("quem_defende", "o rival")
+        rec = b.get("passes_recebidos") or 0
+        out: List[Tuple[str, str]] = []
+        if f.get("recebe_entre_linhas", 0) >= 6:
+            out.append(("Fechar a zona 14", f"{f['recebe_entre_linhas']} das {rec} bolas que {p} recebeu foram entre a defesa e o "
+                        f"meio. Volante fixo à frente da área e zagueiro autorizado a sair na antecipação — ele não pode receber de frente."))
+        if f.get("recebe_nas_costas", 0) >= 3:
+            out.append(("Controlar a profundidade", f"{p} recebeu {f['recebe_nas_costas']} bolas já dentro da área/nas costas. "
+                        f"Linha um passo mais baixa quando o passador estiver sem pressão e cobertura do lateral do lado oposto."))
+        if f.get("dribles_tentados", 0) >= 4:
+            ok = f.get("dribles_certos")
+            out.append(("Não dar o bote", f"Tentou {f['dribles_tentados']} dribles" + (f" ({ok} certos)" if ok is not None else "")
+                        + ". Temporizar, mostrar o lado do pé "
+                        f"mais fraco e esperar a dobra; a falta tática no meio-campo é melhor do que o 1 contra 1 perto da área."))
+        if f.get("conducoes_progressivas", 0) >= 5:
+            out.append(("Cortar a condução", f"{f['conducoes_progressivas']} conduções para frente. Fechar o corredor interno com o "
+                        f"meia do lado e não deixar o campo aberto à frente dele depois que ele recebe."))
+        if f.get("chutes_de_fora", 0) >= 2:
+            out.append(("Bloquear o chute de fora", f"{f['chutes_de_fora']} finalizações de fora da área. Quem marca precisa encurtar "
+                        f"rápido e ficar de frente, sem se virar."))
+        if f.get("cruzamentos", 0) >= 4:
+            out.append(("Impedir o cruzamento", f"Cruzou {f['cruzamentos']} vezes. Lateral fechado na linha de fundo e ponta voltando "
+                        f"para fazer a dobra antes que ele ajeite."))
+        if f.get("aereos_ganhos", 0) >= 3:
+            out.append(("Disputa aérea antecipada", f"Ganhou {f['aereos_ganhos']} bolas pelo alto. Marcação na frente dele nas bolas "
+                        f"longas e cruzamentos, e alguém na segunda bola."))
+        if f.get("recebe_aberto", 0) >= max(5, 0.5 * rec) and rec:
+            out.append(("Dobrar pelo lado", f"{f['recebe_aberto']} das {rec} bolas chegaram aberto, na beirada. Lateral e ponta "
+                        f"juntos quando a bola for nele; o meia do lado fecha a diagonal para dentro."))
+        mins = f.get("minutos") or 0
+        if mins >= 45 and f.get("acoes_defensivas", 99) <= max(3, mins / 30):
+            side = f.get("lado_habitual")
+            out.append(("Proposição: atacar o lado dele", f"{p} fez só {f['acoes_defensivas']} ações defensivas em ~{int(mins)} min"
+                        + (f" e joga mais pela {side}" if side and side != "centro" else "")
+                        + f". Quando {r} recuperar a bola, acelerar por ali: o lateral dele fica sozinho."))
+        if (b.get("perdas_de_posse") or 0) >= 8:
+            out.append(("Pressionar no domínio", f"Perdeu a bola {b['perdas_de_posse']} vezes — pressão no primeiro toque rende "
+                        f"recuperação perto da área dele."))
+        return out
+
+    @staticmethod
+    def _plan_multi(b: Dict[str, Any], profiles: Dict[str, Dict[str, Any]]) -> str:
+        names = b.get("jogadores") or []
+        if len(b.get("validos", names)) < 2 and "equipe" not in b:
+            return ("Para montar um plano conjunto preciso de pelo menos dois desses jogadores em campo nesta partida; "
+                    f"encontrei {', '.join(b.get('validos') or []) or 'nenhum'}.")
+        r, team = b["quem_defende"], b["equipe"]
+        who = ", ".join(names[:-1]) + " e " + names[-1]
+        share = b.get("fatia_somada_pct")
+        lines = [f"**Para parar {who}, {r} precisa atacar o que liga os três (ou dois), não cada um separado.**"
+                 if len(names) > 2 else f"**Para parar {who}, {r} precisa atacar o que liga os dois, não cada um separado.**"]
+        if share:
+            lines.append(f"Juntos eles responderam por {_fmt(share)}% da ameaça criada por {team} (xT).")
+        steps = []
+        sh = b.get("abastecedor_comum") or {}
+        if sh:
+            f, hit = max(sh.items(), key=lambda kv: sum(kv[1].values()))
+            det = ", ".join(f"{_fmt(v)} para {k}" for k, v in hit.items())
+            steps.append(f"**Secar a fonte comum:** {f} abasteceu mais de um deles ({det}). Pressionar {f} na hora do passe "
+                         f"tira a bola de vários ao mesmo tempo — é a peça mais rentável para marcar.")
+        lk = b.get("ligacoes_entre_eles") or []
+        if lk:
+            l0 = lk[0]
+            steps.append(f"**Cortar a ligação entre eles:** {l0['de']} → {l0['para']} foi a conexão mais usada ({l0['passes']} passes). "
+                         f"Quem marca {l0['para']} joga entre ele e {l0['de']}, não atrás.")
+        dom, pct = b.get("corredor_dominante"), b.get("pct_corredor_dominante")
+        if dom and pct and pct >= 40:
+            free = b.get("corredor_livre")
+            steps.append(f"**Inclinar o bloco para a {dom}:** {_fmt(pct)}% das bolas que eles receberam foram por esse corredor. "
+                         f"Bascular a linha para lá e aceitar deixar a {free} menos protegida — foi por onde eles menos receberam.")
+        elif dom:
+            steps.append("**Bloco compacto por dentro:** as recepções deles se espalharam pelos corredores — "
+                         "melhor encurtar a distância entre defesa e meio do que perseguir um lado.")
+        indiv = []
+        for p in names:
+            mv = LocalScopedWriter.profile_moves(profiles.get(p) or {"jogador": p})
+            if mv:
+                indiv.append(f"- **{p}:** {mv[0][0].lower()} — {mv[0][1]}")
+        out = "\n".join(lines) + "\n\n" + "\n".join(f"{i}. {s_}" for i, s_ in enumerate(steps, 1))
+        if indiv:
+            out += "\n\n**Ajuste específico para cada um (pelo perfil medido):**\n" + "\n".join(indiv)
+        out += ("\n\n💡 _Hipótese de equilíbrio: fechar esses caminhos com o bloco inteiro, e não com marcação individual, "
+                "evita abrir buracos atrás. Não dá para provar com os dados que funcionaria — é a leitura dos números._")
+        return out
+
+    @staticmethod
     def _plan_player(b: Dict[str, Any]) -> str:
         p = b["jogador"]
         if not b.get("jogou"):
@@ -844,11 +1049,13 @@ class LocalScopedWriter:
             tg = ", ".join(f"{k} ({v})" for k, v in (b.get("para_quem_mais_passa") or {}).items())
             steps.append(f"**O perigo dele veio do passe, não do chute:** nenhuma finalização, mas xT {_fmt(b.get('xt_gerado'))} "
                          f"em passes" + (f", sobretudo para {tg}" if tg else "") + ". Marcar também quem recebe dele.")
-        if (b.get("dribles") or 0) >= 3 or (b.get("faltas_sofridas") or 0) >= 3:
-            steps.append(f"**Evitar o bote precipitado:** tentou {_pl(b['dribles'], 'drible', 'dribles')} e sofreu "
-                         f"{_pl(b['faltas_sofridas'], 'falta', 'faltas')}. Defender de frente e com cobertura.")
-        if (b.get("perdas_de_posse") or 0) >= 5:
-            steps.append(f"**Pressionar depois do domínio:** ele perdeu a bola {b['perdas_de_posse']} vezes.")
+        moves = LocalScopedWriter.profile_moves(b)
+        titles = {t for t, _ in moves}
+        if "Não dar o bote" not in titles and (b.get("faltas_sofridas") or 0) >= 3:
+            steps.append(f"**Evitar o bote precipitado:** sofreu {_pl(b['faltas_sofridas'], 'falta', 'faltas')}. "
+                         "Defender de frente e com cobertura.")
+        for title, txt in moves[:4]:
+            steps.append(f"**{title}:** {txt}")
         ia = b.get("ia") or {}
         if ia.get("acoes_perigosas"):
             zz = ia.get("zonas_das_acoes_perigosas") or []
