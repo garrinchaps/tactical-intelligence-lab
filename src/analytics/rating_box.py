@@ -58,7 +58,7 @@ def indicators(rows: pd.DataFrame, positions: Optional[Dict[str, str]] = None) -
         row = {"jogador": r.player_name, "equipe": r.team_name, "funcao": fun,
                "role_mix": {fun: 1.0}, "minutos": m,
                "gols": int(_num(s.get("totalGoals")) or 0) if s.get("totalGoals") is not None else 0,
-               "gols_penalti": int(_num(s.get("penalty_goals")) or 0) if s.get("penalty_goals") is not None else 0,
+               "gols_penalti": _num(s.get("penalty_goals")) if s.get("penalty_goals") is not None else None,
                "assistencias": int(_num(s.get("goalAssists")) or 0) if s.get("goalAssists") is not None else 0,
                "xg": s.get("xg"), "xa": s.get("xa"), "amarelos": s.get("yellow_cards"),
                "vermelhos": int(_num(s.get("red_cards")) or 0) if s.get("red_cards") is not None else 0,
