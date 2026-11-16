@@ -66,7 +66,7 @@ def recent_lineups(db, team_names: Sequence[str], n: int = 10) -> pd.DataFrame:
          f"m.competition_name, l.team_name, l.player_name AS jogador, l.position AS pos, l.is_starter AS titular, l.formation "
          f"FROM match_lineups l JOIN matches m ON m.match_id = l.match_id WHERE l.team_name IN ({ph}) AND m.match_id IN ("
          f"SELECT DISTINCT l2.match_id FROM match_lineups l2 JOIN matches m2 ON m2.match_id = l2.match_id "
-         f"WHERE l2.team_name IN ({ph}) ORDER BY m2.match_date DESC LIMIT {int(n)})")
+         f"WHERE l2.team_name IN ({ph}) ORDER BY m2.match_date DESC LIMIT {int(n) * 2})")
     try:
         with db.connect() as conn:
             lu = pd.read_sql_query(q, conn, params=ps * 2)
@@ -74,22 +74,12 @@ def recent_lineups(db, team_names: Sequence[str], n: int = 10) -> pd.DataFrame:
         return pd.DataFrame()
     if lu.empty:
         return lu
-    lu["papel"] = lu["pos"].map(lambda p: ESPN_ROLE.get(str(p).upper()))
-    # a ESPN usa LM/RM com sentidos diferentes conforme o desenho: no 4-2-3-1 são os DOIS VOLANTES (os abertos vêm
-    # como AM-L/AM-R); no 4-3-3, meias centrais; com 3 zagueiros, os ALAS. Corrigido jogo a jogo pela formação.
-    for mid, g in lu.groupby("match_id"):
-        pos = set(g["pos"].astype(str).str.upper())
-        form = str(g["formation"].dropna().iloc[0]) if g["formation"].notna().any() else ""
-        wide_fwd = bool(pos & {"AM-L", "AM-R", "LW", "RW", "LF", "RF"})
-        lm = g.index[g["pos"].astype(str).str.upper().isin(["LM", "RM"])]
-        if not len(lm):
-            continue
-        if form.startswith("3") or form.startswith("5"):
-            lu.loc[lm, "papel"] = lu.loc[lm, "pos"].str.upper().map({"LM": "LWB", "RM": "RWB"})
-        elif wide_fwd and form.startswith("4-2"):
-            lu.loc[lm, "papel"] = "DM"
-        elif wide_fwd:
-            lu.loc[lm, "papel"] = "CM"
+    # rodada 5: posição PRECISA × genérica por fonte, LM/RM da ESPN pelo desenho, mesmo jogo de 2 fontes conta 1 vez
+    from src.squad.positions import resolve_lineups
+
+    lu = resolve_lineups(lu)
+    keep = lu.drop_duplicates("match_id").sort_values("data", ascending=False)["match_id"].head(int(n))
+    lu = lu[lu["match_id"].isin(set(keep))].copy()
     lu["adversario"] = [a if h in team_names else h for h, a in zip(lu["home_team_name"], lu["away_team_name"])]
     return lu.sort_values("data", ascending=False)
 
@@ -164,14 +154,23 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
     if not lu.empty:
         names |= set(lu["jogador"])
     starters = lu[lu["titular"] == 1] if not lu.empty else lu
+    from src.data_lake.ids import player_core
+    from src.squad.formations import natural_role
+    from src.squad.positions import player_roles
+
+    tm_roles: Dict[str, str] = {}
+    if tm_values is not None and not tm_values.empty and ("funcao" in tm_values or "posicao" in tm_values):
+        for r in tm_values.itertuples():
+            nr = natural_role(getattr(r, "funcao", ""), getattr(r, "posicao", ""))
+            if nr:
+                tm_roles.setdefault(player_core(r.nome), nr)
     G, G5 = max(len(games), 1), max(len(last5), 1)
     out = []
     for p in sorted(names):
         st = starters[starters["jogador"] == p] if not lu.empty else starters
         apps = lu[lu["jogador"] == p] if not lu.empty else lu
-        roles = Counter([r for r in st["papel"].dropna()]) if len(st) else Counter()
         r_ros = ros[ros["name"] == p].iloc[0] if not ros.empty and (ros["name"] == p).any() else None
-        role = roles.most_common(1)[0][0] if roles else ESPN_ROLE.get(str(r_ros["position"]).upper()) if r_ros is not None else None
+        roles, role, pos_src = player_roles(st, tm_roles.get(player_core(p)), r_ros["position"] if r_ros is not None else None)
         ss = stats_season[stats_season["jogador"] == p].iloc[0] if not stats_season.empty and (stats_season["jogador"] == p).any() else None
         s5 = stats_5[stats_5["jogador"] == p].iloc[0] if not stats_5.empty and (stats_5["jogador"] == p).any() else None
         n_start = int(len(st))
@@ -182,7 +181,7 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
         g5, a5 = (int(s5["gols"]), int(s5["assistencias"])) if s5 is not None else (0, 0)
         share = n_start / G
         prob = 0.5 * share + 0.35 * start5 / G5 + 0.15 * float(started_last)
-        out.append({"nome": p, "papel": role, "lado": SIDE.get(role or "", ""), "setor": SECTOR.get(role or "", ""),
+        out.append({"nome": p, "papel": role, "lado": SIDE.get(role or "", ""), "setor": SECTOR.get(role or "", "") or {"D?": "defesa", "M?": "meio", "F?": "ataque"}.get(role or "", ""),
                     "titular_temporada": n_start, "jogos_temporada": G, "titular_ult5": start5, "titular_ultimos": n_start,
                     "comecou_ultimo": started_last, "jogos_relacionado": int(apps["match_id"].nunique()) if len(apps) else 0,
                     "gols": g, "assistencias": a, "gols_ult5": g5, "assist_ult5": a5,
@@ -190,7 +189,7 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
                     "amarelos": int(ss["amarelos"]) if ss is not None else 0,
                     "indisponivel": unavailable, "no_elenco_atual": r_ros is not None if not ros.empty else None,
                     "idade": _age(r_ros["birth"]) if r_ros is not None else None,
-                    "posicoes": dict(roles), "prob_titular": round(100 * (0 if unavailable else prob))})
+                    "posicoes": dict(roles), "origem_posicao": pos_src, "prob_titular": round(100 * (0 if unavailable else prob))})
     df = pd.DataFrame(out)
     if df.empty:
         return {"jogadores": df, "jogos": games, "formacao": None, "fonte_elenco": "—", "escalacoes": lu}
@@ -290,6 +289,9 @@ def multi_fit(slot_role: str, posicoes: Dict[str, int], main: Optional[str]) -> 
 
     if not posicoes:
         return fit(slot_role, main or "")
+    precise = {k: v for k, v in posicoes.items() if not str(k).endswith("?")}
+    if precise:                                        # posição genérica só vale quando não há nenhuma precisa
+        posicoes = precise
     tot = sum(posicoes.values())
     best = 0.0
     for r, k in posicoes.items():
@@ -467,16 +469,15 @@ def official_xi(info: Dict[str, Any], lineup: Dict[str, Any]) -> Tuple[List[Dict
     pl = info.get("jogadores")
     byname = {r["nome"]: r for r in pl.to_dict("records")} if pl is not None and not pl.empty else {}
     # lê LM/RM pela formação, como nas escalações passadas
-    poss = {str(p["pos"]).upper() for p in starters}
-    wide = bool(poss & {"AM-L", "AM-R", "LW", "RW"})
+    from src.squad.positions import classify, espn_lm_rm
+
+    how = espn_lm_rm(form, [p["pos"] for p in starters])
 
     def role(pos):
-        r = ESPN_ROLE.get(str(pos).upper())
-        if str(pos).upper() in ("LM", "RM"):
-            if form.startswith(("3", "5")):
-                return "LWB" if str(pos).upper() == "LM" else "RWB"
-            if wide:
-                return "DM" if form.startswith("4-2") else "CM"
+        up = str(pos).upper()
+        if up in ("LM", "RM") and how:
+            return {"ala": "LWB" if up == "LM" else "RWB", "volante": "DM", "meia": "CM"}[how]
+        r, _ok = classify(pos, "espn")
         return r
     pool = [(p["jogador"], role(p["pos"])) for p in starters]
     xi, used = [], set()

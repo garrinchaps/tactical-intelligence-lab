@@ -49,7 +49,9 @@ FORMATIONS: Dict[str, List[Slot]] = {
 
 ROLE_PT = {"GK": "Goleiro", "CB": "Zagueiro", "LB": "Lateral esq.", "RB": "Lateral dir.", "LWB": "Ala esq.",
            "RWB": "Ala dir.", "DM": "Volante", "CM": "Meio-campo", "AM": "Meia", "LM": "Meia esq.", "RM": "Meia dir.",
-           "LW": "Ponta esq.", "RW": "Ponta dir.", "ST": "Centroavante"}
+           "LW": "Ponta esq.", "RW": "Ponta dir.", "ST": "Centroavante",
+           "D?": "Defensor (lado não informado)", "M?": "Meio-campista (função não informada)",
+           "F?": "Atacante (ponta ou centroavante — fonte genérica)"}
 
 # posição detalhada do Transfermarkt (sub_position) e de outras fontes → papel principal
 SUBPOS_ROLE = {
@@ -57,13 +59,16 @@ SUBPOS_ROLE = {
     "central midfield": "CM", "attacking midfield": "AM", "left midfield": "LM", "right midfield": "RM",
     "left winger": "LW", "right winger": "RW", "second striker": "ST", "centre-forward": "ST",
     # rótulos de escalação (ESPN, API-Football, StatsBomb) e em português
-    "g": "GK", "gk": "GK", "goleiro": "GK", "d": "CB", "cb": "CB", "zagueiro": "CB", "lb": "LB", "rb": "RB",
-    "lateral esquerdo": "LB", "lateral direito": "RB", "m": "CM", "cm": "CM", "dm": "DM", "cdm": "DM", "volante": "DM",
-    "am": "AM", "cam": "AM", "meia": "AM", "lm": "LM", "rm": "RM", "lw": "LW", "rw": "RW", "f": "ST", "fw": "ST",
-    "st": "ST", "cf": "ST", "atacante": "ST", "centroavante": "ST", "ponta esquerda": "LW", "ponta direita": "RW",
-    "defender": "CB", "midfield": "CM", "attack": "ST", "lwb": "LWB", "rwb": "RWB",
+    "g": "GK", "gk": "GK", "goleiro": "GK", "d": "D?", "cb": "CB", "zagueiro": "CB", "lb": "LB", "rb": "RB",
+    "lateral esquerdo": "LB", "lateral direito": "RB", "m": "M?", "cm": "CM", "dm": "DM", "cdm": "DM", "volante": "DM",
+    "am": "AM", "cam": "AM", "meia": "AM", "lm": "LM", "rm": "RM", "lw": "LW", "rw": "RW", "f": "F?", "fw": "F?",
+    "st": "ST", "cf": "ST", "atacante": "F?", "centroavante": "ST", "ponta esquerda": "LW", "ponta direita": "RW",
+    "defender": "D?", "midfield": "M?", "attack": "F?", "lwb": "LWB", "rwb": "RWB",
+    # rodada 5: códigos genéricos (só o setor) e códigos já resolvidos
+    "d?": "D?", "m?": "M?", "f?": "F?", "cd-l": "CB", "cd-r": "CB", "am-l": "LW", "am-r": "RW", "lf": "LW", "rf": "RW",
+    "right winger": "RW", "left winger": "LW", "centre-forward": "ST",
 }
-GROUP_ROLE = {"goalkeeper": "GK", "defender": "CB", "midfield": "CM", "attack": "ST"}
+GROUP_ROLE = {"goalkeeper": "GK", "defender": "D?", "midfield": "M?", "attack": "F?"}
 
 # encaixe papel-da-vaga × papel-natural (1 = posição de origem; o resto é adaptação)
 _FIT = {
@@ -95,6 +100,10 @@ def natural_role(sub_position: object = "", position: object = "") -> str:
 
 
 def fit(slot_role: str, player_role: str) -> float:
-    if not player_role:
+    if not isinstance(player_role, str) or not player_role:
         return 0.35                                   # posição desconhecida: possível, mas último recurso
+    if player_role.endswith("?"):                     # só o setor é conhecido (fonte com posição genérica)
+        from src.squad.positions import GENERIC_FIT
+
+        return GENERIC_FIT.get(player_role, {}).get(slot_role, 0.15 if slot_role != "GK" else 0.0)
     return _FIT.get(slot_role, {}).get(player_role, 0.15 if "GK" not in (slot_role, player_role) else 0.0)

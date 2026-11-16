@@ -28,7 +28,7 @@ def _tm():
 
 
 def test_positions_and_fit():
-    assert natural_role("Left Winger") == "LW" and natural_role("", "Defender") == "CB" and natural_role("ST") == "ST"
+    assert natural_role("Left Winger") == "LW" and natural_role("", "Defender") == "D?" and natural_role("ST") == "ST"
     assert fit("LB", "LB") == 1.0 and fit("LB", "LWB") > fit("LB", "CB") > fit("LB", "ST") and fit("GK", "ST") == 0
     assert all(len(v) == 11 and sum(r == "GK" for r, _, _ in v) == 1 for v in FORMATIONS.values())
 

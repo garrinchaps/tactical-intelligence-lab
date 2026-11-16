@@ -161,7 +161,7 @@ def db_lineups(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFrame
         return pd.DataFrame()
     ph = ",".join("?" * len(team_names))
     q = f"""SELECT l.match_id AS jogo, m.match_date AS data, l.player_name AS jogador, l.is_starter AS titular,
-                   l.position AS posicao
+                   l.position AS posicao, l.formation AS formacao
             FROM match_lineups l JOIN matches m ON m.match_id = l.match_id
             WHERE l.team_name IN ({ph}) AND m.match_id IN (
                 SELECT match_id FROM matches WHERE home_team_name IN ({ph}) OR away_team_name IN ({ph})
@@ -211,9 +211,17 @@ def squad_from_db(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFr
     if lu.empty:
         return pd.DataFrame()
     g = lu.groupby("jogador")
+    # rodada 5: posição precisa × genérica por fonte (G/D/M/F da API-Football não vira centroavante/zagueiro)
+    from src.squad.positions import player_roles, resolve_lineups
+
+    rl = resolve_lineups(lu.rename(columns={"jogo": "match_id", "posicao": "pos", "formacao": "formation"}))
+    main = {}
+    for nome, gp in rl.groupby("jogador"):
+        st = gp[gp["titular"] == 1]
+        main[nome] = player_roles(st if len(st) else gp)[1] or ""
     df = pd.DataFrame({"nome": list(g.groups), "posicao": g["posicao"].agg(
         lambda s: s.dropna().astype(str).mode().iloc[0] if s.dropna().size else "").tolist()})
-    df["funcao"] = df["posicao"]
+    df["funcao"] = df["nome"].map(main).fillna("")
     df["clube"] = team_names[0]
     df["jogos_recentes"] = g.size().values
     return df

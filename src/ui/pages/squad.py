@@ -234,7 +234,7 @@ def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
     from src.ui.pages.clubs import same_team_names
 
     names = same_team_names(team)
-    tm = D.table("tm_jogadores", ["nome", "valor_mercado_eur", "ultima_temporada"])
+    tm = D.table("tm_jogadores", ["nome", "valor_mercado_eur", "ultima_temporada", "funcao", "posicao"])
     if not tm.empty:
         tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= date.today().year - 2]
     info = M.player_table(get_service().db, names, n=n, tm_values=tm)
