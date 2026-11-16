@@ -163,51 +163,75 @@ def label(n: Optional[float]) -> str:
 
 # ------------------------------------------------------------------ momentos decisivos observáveis
 def _shootout_contributions(df: pd.DataFrame) -> Dict[str, Dict[str, int]]:
-    """Atribui defesas da disputa ao goleiro identificado na própria partida; não confunde chute para fora com defesa."""
+    """Atribui tentativas, conversões e defesas da disputa aos atletas identificáveis."""
     from src.metrics.match_facts import _regular
 
     result: Dict[str, Dict[str, int]] = {}
-    if df is None or df.empty or not {"period", "type_name", "team_name", "player_name"}.issubset(df.columns):
+    required = {"period", "type_name", "team_name", "player_name"}
+    if df is None or df.empty or not required.issubset(df.columns):
         return result
     regular = _regular(df)
     teams = [str(x) for x in df["team_name"].dropna().unique()]
     goalkeepers: Dict[str, str] = {}
     if "position_name" in regular:
         is_gk = regular["position_name"].map(role_of).eq("goleiro")
-        gks = regular[is_gk & regular["player_name"].notna()]
-        for team, group in gks.groupby("team_name"):
-            counts = group["player_name"].value_counts()
-            if not counts.empty:
-                goalkeepers[str(team)] = str(counts.index[0])
+        gks = regular[is_gk & regular["player_name"].notna()].copy()
+        if not gks.empty:
+            order = [c for c in ("period", "minute", "second", "index_num") if c in gks.columns]
+            if order:
+                gks = gks.sort_values(order, kind="stable")
+            # Prioriza o goleiro com a ação registrada mais recente, aproximando quem terminou a partida.
+            for team, group in gks.groupby("team_name", sort=False):
+                goalkeepers[str(team)] = str(group.iloc[-1]["player_name"])
     # Algumas fontes não anotam position_name, mas registram ações próprias do goleiro.
     if "type_name" in regular:
         actions = regular[regular["type_name"].astype(str).str.lower().isin(["goal keeper", "goalkeeper"])]
-        for team, group in actions.groupby("team_name"):
+        for team, group in actions.groupby("team_name", sort=False):
             if str(team) not in goalkeepers:
-                counts = group["player_name"].dropna().value_counts()
-                if not counts.empty:
-                    goalkeepers[str(team)] = str(counts.index[0])
+                order = [c for c in ("period", "minute", "second", "index_num") if c in group.columns]
+                if order:
+                    group = group.sort_values(order, kind="stable")
+                if not group["player_name"].dropna().empty:
+                    goalkeepers[str(team)] = str(group.iloc[-1]["player_name"])
 
-    attempts = df[(df["period"] == 5) & (df["type_name"] == "Shot")]
-    for shot in attempts.itertuples():
-        shooter = str(getattr(shot, "player_name", "") or "")
-        shooting_team = str(getattr(shot, "team_name", "") or "")
-        outcome = str(getattr(shot, "shot_outcome_name", "") or "")
-        if not shooter or not shooting_team:
+    attempts = df[(df["period"] == 5) & (df["type_name"] == "Shot")].copy()
+    order = [c for c in ("minute", "second", "index_num") if c in attempts.columns]
+    if order:
+        attempts = attempts.sort_values(order, kind="stable")
+    valid_attempts = []
+    known_misses = {"off t", "wayward", "post", "miss", "missed", "saved", "saved to post",
+                    "saved off target", "blocked"}
+    for _, shot in attempts.iterrows():
+        shooter = str(shot.get("player_name") or "")
+        shooting_team = str(shot.get("team_name") or "")
+        outcome = str(shot.get("shot_outcome_name") or "").strip()
+        normalized = outcome.lower()
+        if not shooter or not shooting_team or (outcome != "Goal" and normalized not in known_misses):
+            # Sem resultado explícito, não inventa conversão nem pênalti perdido.
             continue
         row = result.setdefault(shooter, {"shootout_penaltis_marcados": 0, "shootout_penaltis_perdidos": 0,
-                                          "shootout_saves": 0})
+                                          "shootout_saves": 0, "shootout_penalti_decisivo": 0})
         if outcome == "Goal":
             row["shootout_penaltis_marcados"] += 1
         else:
             row["shootout_penaltis_perdidos"] += 1
-        if "saved" in outcome.lower():
+        if "saved" in normalized:
             defending = next((team for team in teams if team != shooting_team), None)
             keeper = goalkeepers.get(defending or "")
             if keeper:
                 gk_row = result.setdefault(keeper, {"shootout_penaltis_marcados": 0,
-                                                    "shootout_penaltis_perdidos": 0, "shootout_saves": 0})
+                                                    "shootout_penaltis_perdidos": 0, "shootout_saves": 0,
+                                                    "shootout_penalti_decisivo": 0})
                 gk_row["shootout_saves"] += 1
+        valid_attempts.append((shooter, shooting_team, outcome))
+
+    # O último pênalti convertido, se encerra a disputa com vantagem, recebe crédito de decisão.
+    if valid_attempts:
+        shooter, winning_team, outcome = valid_attempts[-1]
+        scores = {team: sum(1 for _, t, o in valid_attempts if t == team and o == "Goal") for team in teams}
+        if outcome == "Goal" and scores.get(winning_team, 0) > max(
+                (score for team, score in scores.items() if team != winning_team), default=0):
+            result[shooter]["shootout_penalti_decisivo"] = 1
     return result
 
 
@@ -431,7 +455,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             extra = shootout.get(str(player), {})
             for key, value in extra.items():
                 out.loc[idx, key] = value
-        for key in ("shootout_penaltis_marcados", "shootout_penaltis_perdidos", "shootout_saves"):
+        for key in ("shootout_penaltis_marcados", "shootout_penaltis_perdidos", "shootout_saves", "shootout_penalti_decisivo"):
             if key not in out:
                 out[key] = 0
             out[key] = pd.to_numeric(out[key], errors="coerce").fillna(0).astype(int)
@@ -625,6 +649,7 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
                 "defesas_chave": int(_as_float(row.get("key_saves"))),
                 "penaltis_convertidos_disputa": int(_as_float(row.get("shootout_penaltis_marcados"))),
                 "penaltis_perdidos_disputa": int(_as_float(row.get("shootout_penaltis_perdidos"))),
+                "penalti_decisivo_disputa": int(_as_float(row.get("shootout_penalti_decisivo"))),
                 "grandes_chances_desperdicadas": int(_as_float(row.get("chances_claras_perdidas"))),
                 "erros_que_geraram_chance": int(_as_float(row.get("erros_que_viraram_chance"))),
                 "expulsoes": int(_as_float(row.get("vermelhos"))),
@@ -656,6 +681,7 @@ def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) 
         prevented = max(_as_float(row.get("gols_evitados")), 0.0)
         bonus += min(0.45, 0.25 * prevented)
     bonus += min(0.30, 0.10 * _as_float(row.get("shootout_penaltis_marcados")))
+    bonus += 0.65 * min(1.0, _as_float(row.get("shootout_penalti_decisivo")))
     bonus -= min(0.70, 0.35 * _as_float(row.get("shootout_penaltis_perdidos")))
     bonus -= min(0.90, 0.45 * _as_float(row.get("chances_claras_perdidas")))
     bonus -= 0.80 * _as_float(row.get("erros_que_viraram_chance"))
@@ -685,7 +711,7 @@ def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
         rows.append({**{k: r.get(k) for k in ("jogador", "equipe", "posicao", "funcao", "minutos", "gols", "assistencias",
                                               "xg", "xa", "defesas", "gols_sofridos", "gols_evitados",
                                               "key_saves", "shootout_saves", "shootout_penaltis_marcados",
-                                              "shootout_penaltis_perdidos", "role_mix")},
+                                              "shootout_penaltis_perdidos", "shootout_penalti_decisivo", "role_mix")},
                      "desempenho": ev["desempenho"], "impacto": ev["impacto"], "nota": ev["nota"],
                      "nota_final": ev["nota_final"], "confianca": ev["confianca"],
                      "confianca_pct": ev["confianca_pct"], "classificacao": ev["classificacao"], "amostra": ev["amostra"],
