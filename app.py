@@ -214,7 +214,7 @@ def top_bar(focused: bool = False) -> None:
         favorite_labels = {f"{x.get('nome')} · {x.get('clube') or 'clube não informado'}": x for x in favorites}
         fa, fb = st.columns([5, 1])
         selected_favorite = fa.selectbox("Alvos de análise", list(favorite_labels),
-                                         key="til_favorite_choice_" + str(len(favorites)),
+                                         key="til_favorite_choice_" + "_".join(str(x.get("core")) for x in favorites),
                                          label_visibility="collapsed", help="Jogadores fixados nos seus alvos de análise.")
         if fb.button("Abrir perfil", key="til_favorite_open", use_container_width=True):
             item = favorite_labels[selected_favorite]
