@@ -174,6 +174,21 @@ Rodada 3 (16/11/2026, 247 testes verdes; testes não acessam a rede — `tests/c
 - Observação: a ESPN lista o volante Rodri (nasc. 22/06/1996) no elenco do Barcelona hoje; o usuário disse que ele não
   é do Barcelona — fontes divergem; a interface mostra a fonte do elenco.
 
+Rodada 4 (16/11/2026, 259 testes verdes):
+- ✅ Avaliação individual 2.0 (`src/analytics/rating_v2.py`): 7 dimensões na linha com pesos por função, 6 no goleiro
+  (30/15/10/15/20/10), percentil contra pares da mesma função → nota (P5=2,0 … P99=10), encolhimento pelos minutos,
+  confiança %, desempenho × impacto separados, nota 10 rara, teto 9,5 com pouca cobertura, "não observado" sem tracking.
+  Referência: `python -m src.analytics.rating_v2 --referencia 300` (cache em data/processed). Aba Jogadores com radar.
+- ✅ Fortes e fracos: aba "📊 Todas as métricas (fora da curva)" — ~35 indicadores por jogador contra a mesma função,
+  só o que está ≥ P85 ou ≤ P15; no modo equipe, o indicador mais fora da curva de cada titular (`outliers`).
+- ✅ Próximo jogo: provável = 0,5 temporada + 0,35 últimos 5 + 0,15 último jogo (titular que faltou 1 jogo continua
+  provável, marcado "dúvida"); suspensão por acúmulo de amarelos (`YELLOW_LIMIT`, conferir regra da competição);
+  encaixe por posição real das escalações (LM/RM da ESPN corrigidos pela formação, `multi_fit`, encaixe ao cubo);
+  escalação OFICIAL da ESPN substitui a provável (~1 h antes) e notícias que citam os clubes (`espn.preview`).
+- ✅ Assistente: duas perguntas na mesma mensagem, "foi bom ou ruim?", quem merecia ganhar (xG/xT), principal criador,
+  quem mais atacou as costas, quem menos marcou, jogador ausente explicado, respostas com abertura direta e "Em resumo".
+- Limitação: abaixo da Série B não há fonte aberta acessível (OpenLigaDB é alemã; football-data.org grátis só Série A).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

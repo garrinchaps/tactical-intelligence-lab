@@ -128,7 +128,10 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
     from src.ui.glossary import what_is
 
     what_is(["Percentil", "xT", "PPDA", "Field Tilt", "xG"], key=f"sw_gloss_{entity}")
-    tab1, tab2, tab3 = st.tabs(["🟢🔴 Fortes e fracos", "🧠 Gráfico e interpretação", "🔬 Métricas avançadas"])
+    tab1, tab4, tab2, tab3 = st.tabs(["🟢🔴 Fortes e fracos", "📊 Todas as métricas (fora da curva)",
+                                      "🧠 Gráfico e interpretação", "🔬 Métricas avançadas"])
+    with tab4:
+        _outlier_tab(ctx, mode, entity)
     with tab1:
         s, w = st.columns(2)
         with s:
@@ -151,3 +154,60 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
         if an.get("insufficient"):
             comparison_table(_items_df(an["insufficient"], technical=True), f"n < {MIN_GROUP_SAMPLE}: sem percentil.")
     provenance_panel(ctx.registry)
+
+
+def _outlier_tab(ctx, mode: str, entity: str) -> None:
+    """
+    Todos os indicadores da avaliação 2.0 (≈35 por jogador), cada um contra jogadores da MESMA função, mostrando só o que
+    foge da curva (≥ P85 ou ≤ P15). No modo equipe, a mesma régua aplicada a cada titular: quem puxa o time para cima/baixo.
+    """
+    from src.analytics.rating_v2 import outliers
+    from src.ui.components import metric_bars
+    from src.ui.context import match_ratings_v2
+
+    v2 = match_ratings_v2(ctx.match_id, ctx.df)
+    if v2.empty:
+        st.caption("Sem lances suficientes para a avaliação 2.0.")
+        return
+    if mode == "Atleta":
+        hit = v2[v2["jogador"] == entity]
+        if hit.empty:
+            st.caption("Atleta sem avaliação nesta partida (pouco tempo em campo).")
+            return
+        ev = hit.iloc[0]["_detalhe"]
+        o = outliers(ev)
+        st.caption(f"{len(ev['base'])} indicadores comparados com {ev['pares']} atuações de {ev['funcao']}s. "
+                   "Só aparece o que está acima do P85 ou abaixo do P15 (já no sentido 'bom': menos perdas = melhor).")
+        a, b = st.columns(2)
+        to_items = lambda xs: [{"label": x["rotulo"], "value": round(float(x["valor"]), 2) if x["valor"] is not None else "—",
+                                "percentile": x["percentil"], "reference_median": round(float(x["mediana_pares"]), 2)
+                                if x.get("mediana_pares") is not None else "—"} for x in xs]
+        with a:
+            st.markdown("#### 🟢 Fora da curva para cima")
+            metric_bars(to_items(o["fortes"]), "forte", "Nada acima do P85 nesta partida.")
+        with b:
+            st.markdown("#### 🔴 Fora da curva para baixo")
+            metric_bars(to_items(o["fracos"]), "fraco", "Nada abaixo do P15 nesta partida.")
+        return
+    team = v2[(v2["equipe"] == entity) & v2["desempenho"].notna()]
+    rows = []
+    for r in team.itertuples():
+        o = outliers(r._detalhe)
+        if o["fortes"]:
+            x = o["fortes"][0]
+            rows.append({"label": f"{r.jogador}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
+                         "reference_median": round(float(x["mediana_pares"]), 2) if x.get("mediana_pares") is not None else "—",
+                         "_kind": "forte"})
+        if o["fracos"]:
+            x = o["fracos"][0]
+            rows.append({"label": f"{r.jogador}: {x['rotulo']}", "value": round(float(x['valor']), 2), "percentile": x["percentil"],
+                         "reference_median": round(float(x["mediana_pares"]), 2) if x.get("mediana_pares") is not None else "—",
+                         "_kind": "fraco"})
+    a, b = st.columns(2)
+    with a:
+        st.markdown(f"#### 🟢 Quem puxou {entity} para cima")
+        metric_bars(sorted([r for r in rows if r["_kind"] == "forte"], key=lambda r: -r["percentile"]), "forte")
+    with b:
+        st.markdown(f"#### 🔴 Onde {entity} ficou abaixo")
+        metric_bars(sorted([r for r in rows if r["_kind"] == "fraco"], key=lambda r: r["percentile"]), "fraco")
+    st.caption("Cada linha = o indicador mais fora da curva de cada titular, comparado com jogadores da mesma função.")

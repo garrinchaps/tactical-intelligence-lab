@@ -854,3 +854,14 @@ def test_espn_preview_official_lineup_and_filtered_news(db):
     out, form = M.official_xi({"jogadores": None, "formacao": None}, pv["oficial"]["Cruzeiro"])
     roles = {p_["jogador"]: p_["papel"] for p_ in out}
     assert form == "4-2-3-1" and roles["V1"] == "DM" and roles["PE"] == "LW" and roles["CA"] == "ST"
+
+
+def test_rating_v2_outliers_only_far_from_peers():
+    from src.analytics.rating_v2 import outliers
+    ev = {"base": [{"rotulo": "a", "percentil": 95, "valor": 1, "mediana_pares": 0.5},
+                   {"rotulo": "b", "percentil": 50, "valor": 1, "mediana_pares": 1},
+                   {"rotulo": "c", "percentil": 5, "valor": 0, "mediana_pares": 1},
+                   {"rotulo": "d", "percentil": 88, "valor": 2, "mediana_pares": 1}]}
+    o = outliers(ev)
+    assert [x["rotulo"] for x in o["fortes"]] == ["a", "d"]
+    assert [x["rotulo"] for x in o["fracos"]] == ["c"]

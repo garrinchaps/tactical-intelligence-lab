@@ -74,6 +74,35 @@ GK_INDICATORS: Dict[str, tuple] = {
 }
 
 
+IND_PT = {
+    "gols_np90": "Gols (sem pênalti) /90", "gols_pen90": "Gols de pênalti /90", "xg90": "xG /90", "no_alvo90": "Finalizações no alvo /90",
+    "fin_area90": "Finalizações de dentro da área /90", "chances_perdidas_xg90": "xG desperdiçado em chances claras /90",
+    "assist90": "Assistências /90", "xa90": "xA (assistências esperadas) /90", "decisivos90": "Passes para finalização /90",
+    "passes_area90": "Passes para dentro da área /90", "quebra_linha90": "Passes que quebram linhas /90",
+    "cruz_certos90": "Cruzamentos certos /90", "enfiadas90": "Bolas enfiadas /90", "prog_passes90": "Passes progressivos /90",
+    "prog_carries90": "Conduções progressivas /90", "xt90": "Ameaça criada (xT) /90", "dribles90": "Dribles /90",
+    "entradas_terco90": "Entradas no terço final /90", "entradas_area90": "Entradas na área /90",
+    "desarmes_ganhos90": "Desarmes ganhos /90", "intercept90": "Interceptações /90", "cortes90": "Cortes /90",
+    "bloqueios90": "Bloqueios /90", "recup90": "Recuperações /90", "aereos_ganhos90": "Duelos aéreos ganhos /90",
+    "driblado90": "Vezes driblado /90", "passe_pct_dificil": "Acerto em passes difíceis (%)", "passe_pct": "Acerto de passe (%)",
+    "perdas_por_toque": "Perdas por toque na bola", "perdas_perigosas90": "Perdas no próprio campo /90",
+    "amarelos": "Cartões amarelos", "faltas90": "Faltas cometidas /90", "entre_linhas90": "Bolas recebidas entre linhas /90",
+    "participacao_pct": "Participação na troca de passes (%)", "pressao_campo_rival90": "Pressões no campo rival /90",
+    "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (xG no alvo − gols)",
+    "saidas_aereas90": "Ações de goleiro na área /90", "gk_passe_pct": "Acerto de passe (%)", "gk_longos_pct": "Acerto em bolas longas (%)",
+    "gk_prog90": "Passes progressivos /90", "gk_perdas90": "Perdas /90", "gk_erros": "Erros que deram chance",
+    "gk_acoes_fora_area90": "Ações fora da área /90",
+}
+
+
+def outliers(ev: Dict[str, Any], high: float = 85, low: float = 15) -> Dict[str, List[Dict[str, Any]]]:
+    """Só o que FOGE da média dos pares: percentil ≥ 85 (força) ou ≤ 15 (fraqueza), já no sentido 'bom'."""
+    base = ev.get("base") or []
+    fortes = sorted([b for b in base if b["percentil"] >= high], key=lambda b: -b["percentil"])
+    fracos = sorted([b for b in base if b["percentil"] <= low], key=lambda b: b["percentil"])
+    return {"fortes": fortes, "fracos": fracos}
+
+
 def role_of(position: Any) -> str:
     p = str(position or "").lower()
     if "goalkeeper" in p or "goleiro" in p:
@@ -317,14 +346,18 @@ def _peer_group(ref: pd.DataFrame, funcao: str) -> pd.DataFrame:
     return g
 
 
-def _score(v, series: pd.Series, higher: bool) -> Optional[float]:
+def _pct(v, series: pd.Series) -> Optional[float]:
     if v is None or (isinstance(v, float) and np.isnan(v)):
         return None
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) < 5:
         return None
-    pct = 100.0 * ((s < v).sum() + 0.5 * (s == v).sum()) / len(s)
-    return pct_to_score(pct if higher else 100 - pct)
+    return 100.0 * ((s < v).sum() + 0.5 * (s == v).sum()) / len(s)
+
+
+def _score(v, series: pd.Series, higher: bool) -> Optional[float]:
+    pct = _pct(v, series)
+    return None if pct is None else pct_to_score(pct if higher else 100 - pct)
 
 
 # ------------------------------------------------------------------ nota
@@ -338,10 +371,14 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     acc: Dict[str, List[tuple]] = {k: [] for k in dims}
     detail = []
     for k, (dim, w, hi) in inds.items():
-        sc = _score(row.get(k), peers[k] if k in peers else pd.Series(dtype=float), hi)
+        pc = _pct(row.get(k), peers[k] if k in peers else pd.Series(dtype=float))
+        sc = None if pc is None else pct_to_score(pc if hi else 100 - pc)
         if sc is not None:
             acc[dim].append((sc, w))
-            detail.append({"indicador": k, "dimensao": dim, "valor": row.get(k), "nota": round(sc, 1)})
+            ref_med = pd.to_numeric(peers[k], errors="coerce").median() if k in peers else None
+            detail.append({"indicador": k, "rotulo": IND_PT.get(k, k), "dimensao": dim, "valor": row.get(k),
+                           "nota": round(sc, 1), "percentil": round(pc if hi else 100 - pc), "mediana_pares": ref_med,
+                           "maior_melhor": hi})
     dim_score = {k: (sum(s * w for s, w in v) / sum(w for _, w in v)) if v else None for k, v in acc.items()}
     if not gk:
         # disciplina: expulsão é penalização severa (consequência independente — não é dupla contagem)
