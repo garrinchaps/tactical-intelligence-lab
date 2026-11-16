@@ -226,6 +226,112 @@ def _traits_table(items: List[Dict[str, Any]], better_word: str) -> pd.DataFrame
                           better_word: f"{d['dif_pct']:+.0f}%", "Jogos": d["jogos"]} for d in items])
 
 
+# ------------------------------------------------------------------------------------------------ próximo jogo
+@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
+    from src.squad import matchday as M
+    from src.ui.context import get_service
+    from src.ui.pages.clubs import same_team_names
+
+    names = same_team_names(team)
+    tm = D.table("tm_jogadores", ["nome", "valor_mercado_eur", "ultima_temporada"])
+    if not tm.empty:
+        tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= date.today().year - 2]
+    info = M.player_table(get_service().db, names, n=n, tm_values=tm)
+    return {"info": info, "names": names}
+
+
+def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
+    rows = []
+    for p in sorted(xi, key=lambda q: -q["x"]):
+        if not p.get("jogador"):
+            continue
+        why = " · ".join(p.get("porque") or [])
+        rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:8px 12px;'
+                    f'margin-bottom:6px"><b>{p["papel_pt"]}: {p["jogador"]}</b> <span style="color:#94A3B8">· nota '
+                    f'{p.get("nota") if p.get("nota") is not None else "—"}</span><br><span style="color:#CBD5E1;'
+                    f'font-size:.85rem">{why}</span></div>')
+    st.markdown("".join(rows), unsafe_allow_html=True)
+
+
+def _next_match_tab(team: str, version: str, n: int) -> None:
+    from src.squad import matchday as M
+    from src.ui.context import get_service
+
+    me = _matchday(team, version, n)
+    fx = M.next_fixtures(get_service().db, me["names"])
+    if fx.empty:
+        empty_state("Sem próximos jogos no calendário", "O calendário vem da ESPN (temporada atual).", "📅",
+                    "python -m src.data_hub.sync --only espn_temporada")
+        return
+    labels = [f"{r.kickoff[:10]} {r.kickoff[11:16]} · {r.home} x {r.away} · {r.competition}" for r in fx.itertuples()]
+    lab = st.selectbox("Próximo jogo", labels, key=f"nx_pick_{team}")
+    f = fx.iloc[labels.index(lab)]
+    rival = f["away"] if f["home"] in me["names"] else f["home"]
+    rv = _matchday(rival, version, n)
+    a, b = me["info"], rv["info"]
+    if (a["jogadores"] is None or a["jogadores"].empty) or (b["jogadores"] is None or b["jogadores"].empty):
+        note("Faltam escalações recentes", "Baixe os resumos dos jogos (estatísticas + escalações): "
+             "`python -m src.data_hub.sync --only espn_resumos` e os elencos: `--only espn_elencos`.", "warn")
+    st.caption(f"Base: últimos {len(a['jogos'])} jogos de {team} e {len(b['jogos'])} de {rival} com escalação · "
+               f"elenco: {a['fonte_elenco']} / {b['fonte_elenco']}. Provável = quem tem começado jogando, sem lesionados "
+               "e suspensos — a escalação oficial só sai cerca de 1 h antes do jogo.")
+    c1, c2 = st.columns(2)
+    xr, fr = M.xi_for(b, None, "provavel")
+    weak = M.sector_weaknesses(b, rival)
+    with c2:
+        st.markdown(f"#### 🔴 {rival} provável ({fr})")
+        st.plotly_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})"), use_container_width=True, key="nx_pitch_r")
+        out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
+        if len(out):
+            st.markdown("**Desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+        with st.expander("Por que cada jogador do rival deve começar"):
+            _xi_cards(xr, "#EF4444")
+    form_me = st.session_state.get("nx_form") or None
+    mode = c1.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key="nx_mode")
+    xm, fm = M.xi_for(a, form_me, "provavel" if mode == "Provável" else "melhor")
+    with c1:
+        st.markdown(f"#### 🔵 {team} — {mode.lower()} ({fm})")
+        tips = M.weakness_tips(weak, b)
+        from src.ui.drag_pitch import pitch_tips  # noqa: F401  (mesmo estilo de marcas do campinho principal)
+
+        fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})")
+        for t in tips:
+            fig.add_trace(go.Scatter(x=[t["x"]], y=[t["y"]], mode="markers+text", text=[t["marca"]], showlegend=False,
+                                     marker=dict(size=22, color=t["cor"], line=dict(color="#090D16", width=1)),
+                                     textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
+        st.plotly_chart(fig, use_container_width=True, key="nx_pitch_m")
+        st.caption("Marcas F = fragilidades do rival, no lado do campo em que vamos atacá-las (passe o mouse).")
+        out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
+        if len(out):
+            st.markdown("**Nossos desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+        with st.expander("Por que cada jogador nosso foi escolhido", expanded=True):
+            _xi_cards(xm, "#22D3EE")
+    st.markdown(f"### 🔍 Leitura de {rival}")
+    k1, k2 = st.columns(2)
+    with k1:
+        st.markdown("**Fragilidades por setor (dados dos últimos jogos)**")
+        for w in weak[:6] or []:
+            st.markdown(f'<div class="fm-card" style="border-left:4px solid #F59E0B;border-radius:14px;padding:.55rem .9rem;'
+                        f'margin-bottom:.45rem">⚠️ {w["texto"]}</div>', unsafe_allow_html=True)
+        if not weak:
+            st.caption("Nenhuma fragilidade clara por setor nos jogos recentes (sem desfalques, posições estáveis).")
+    with k2:
+        st.markdown("**Quem decide do lado deles**")
+        for t in M.threats(b):
+            st.markdown(f'<div class="fm-card" style="border-left:4px solid #EF4444;border-radius:14px;padding:.55rem .9rem;'
+                        f'margin-bottom:.45rem">🎯 <b>{t["nome"]}</b> ({t["papel"] or "?"}{", lado " + t["lado"] if t["lado"] else ""}): '
+                        f'{t["gols"]} gols e {t["assistencias"]} assistências nos últimos {len(b["jogos"])} jogos</div>',
+                        unsafe_allow_html=True)
+    lu = b["escalacoes"]
+    if lu is not None and not lu.empty:
+        with st.expander(f"Últimos jogos de {rival} usados na leitura"):
+            g = lu.drop_duplicates("match_id")[["data", "adversario", "home_score", "away_score", "competition_name", "formation"]]
+            comparison_table(g.rename(columns={"data": "Data", "adversario": "Adversário", "home_score": "Mandante",
+                                               "away_score": "Visitante", "competition_name": "Competição",
+                                               "formation": "Formação"}))
+
+
 # ------------------------------------------------------------------------------------------------ página
 def render(_ctx=None) -> None:
     from src.ui.context import get_service
@@ -255,8 +361,15 @@ def render(_ctx=None) -> None:
     squad = sq["squad"]
     plan = matchup_plan(mine, theirs, team, rival) if theirs else None
 
-    t1, t2, t3, t4, t5 = st.tabs(["🧩 Campinho", "🎯 Plano de jogo", "👥 Elenco e notas", "➕ Adicionar atleta",
-                                  "💾 Escalações salvas"])
+    t0, t1, t2, t3, t4, t5 = st.tabs(["🔭 Próximo jogo", "🧩 Campinho", "🎯 Plano de jogo", "👥 Elenco e notas",
+                                      "➕ Adicionar atleta", "💾 Escalações salvas"])
+    with t0:
+        try:
+            _next_match_tab(team, version, max(n, 10))
+        except Exception as exc:
+            from src.ui.components import error_state
+
+            error_state("Próximo jogo indisponível", exc)
     with t1:
         if squad.empty:
             empty_state("Sem elenco para este time", f"Fonte procurada: Transfermarkt e escalações da base.", "👥",
@@ -265,7 +378,20 @@ def render(_ctx=None) -> None:
         else:
             why: List[str] = []
             info: Dict[str, Any] = {}
-            if mode == "Provável":
+            md = _matchday(team, version, max(n, 10))["info"]
+            has_recent = md["jogadores"] is not None and not md["jogadores"].empty and len(md["jogos"]) >= 3
+            info = {}
+            pool = squad
+            if has_recent and mode in ("Provável", "Melhor possível"):
+                # v36: escalações reais recentes (ESPN) — titularidade, posição, gols/assistências, lesões e suspensões
+                from src.squad import matchday as M
+
+                xi, _f = M.xi_for(md, formation, "provavel" if mode == "Provável" else "melhor")
+                info = {"jogos_considerados": len(md["jogos"])}
+                pool = md["jogadores"]
+                st.caption(f"Baseado nos últimos {len(md['jogos'])} jogos com escalação ({md['fonte_elenco']}). "
+                           "Lesionados e suspensos ficam de fora. O porquê de cada escolha está logo abaixo do campinho.")
+            elif mode == "Provável":
                 lu = D.club_lineups(sq["club"]["transfermarkt_id"], n) if sq["club"] else pd.DataFrame()
                 if lu.empty:
                     lu = D.db_lineups(get_service().db, sq["names"], n)
@@ -276,14 +402,14 @@ def render(_ctx=None) -> None:
             else:
                 xi = best_xi(squad, formation)
             with st.expander("✏️ Ajustar à mão (troque qualquer vaga)"):
-                names = ["—"] + squad.sort_values("nota", ascending=False, na_position="last")["nome"].tolist()
+                names = ["—"] + pool.sort_values("nota", ascending=False, na_position="last")["nome"].tolist()
                 cols = st.columns(4)
                 for i, p in enumerate(xi):
                     k = f"sq_slot_{team}_{formation}_{mode}_{i}"
                     cur = p["jogador"] if p["jogador"] in names else "—"
                     pick = cols[i % 4].selectbox(f"{p['papel_pt']} ({i + 1})", names, index=names.index(cur), key=k)
                     if pick != p["jogador"]:
-                        row = squad[squad["nome"] == pick]
+                        row = pool[pool["nome"] == pick]
                         p.update(jogador=None if pick == "—" else pick,
                                  nota=None if row.empty or pd.isna(row.iloc[0]["nota"]) else float(row.iloc[0]["nota"]),
                                  encaixe=None if row.empty else round(fit(p["papel"], row.iloc[0]["papel"]), 2),
@@ -299,12 +425,15 @@ def render(_ctx=None) -> None:
                 in_xi = {p["jogador"] for p in xi if p.get("jogador")}
                 bench = [{"nome": r["nome"], "nota": None if pd.isna(r.get("nota")) else float(r["nota"]),
                           "papel_pt": ROLE_PT.get(r.get("papel"), "")}
-                         for r in squad.sort_values("nota", ascending=False).to_dict("records") if r["nome"] not in in_xi]
+                         for r in pool.sort_values("nota", ascending=False).to_dict("records") if r["nome"] not in in_xi]
                 components.html(drag_pitch.html(team, formation, xi, bench, drag_pitch.pitch_tips(plan, corr)), height=760)
                 st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
                            "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
             else:
                 st.plotly_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                if any(p.get("porque") for p in xi):
+                    with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
+                        _xi_cards(xi, "#22D3EE")
                 if plan:
                     st.caption("Marcas no campo (passe o mouse): E = explorar a fraqueza do rival · N = neutralizar a força "
                                "dele · F = nossa força · C = cuidado com o nosso ponto fraco.")

@@ -729,3 +729,47 @@ def test_tactical_questions_have_own_answer(final_df, q, ask, needle):
     assert not (r["evidence"] or {}).get("escopo", {}).get("resumo_generico")
     assert "Com a bola — " not in md                                     # sem despejar o bloco do time
     assert r["hallucination_audit"]["is_grounded"]
+
+
+# ------------------------------------------------------------------ escalação com dados reais recentes
+def test_matchday_probable_xi_uses_recent_lineups_and_excludes_injured(db):
+    import json as _j
+
+    from src.data_hub.registry import DataLevel
+    from src.squad import matchday as M
+
+    xi_pos = [("Goleiro", "G"), ("LatEsq", "LB"), ("Zag1", "CD-L"), ("Zag2", "CD-R"), ("LatDir", "RB"), ("Vol1", "DM"),
+              ("Vol2", "CM-L"), ("Meia", "AM"), ("PontaE", "AM-L"), ("PontaD", "AM-R"), ("Centroavante", "F")]
+    recs, n = [], 6
+    for i in range(n):
+        mid = 500_100_000 + i
+        recs.append({"match_id": mid, "home_team_name": "Cruzeiro", "away_team_name": f"R{i}", "match_date": f"2026-10-{10 + i}",
+                     "home_score": 1, "away_score": 0, "competition_name": "Brasileirão", "season_name": "2026",
+                     "status": "FT", "data_source": "espn", "data_level": DataLevel.BOXSCORE})
+    db.upsert_matches(recs)
+    for i in range(n):
+        mid = 500_100_000 + i
+        lu = [{"team_name": "Cruzeiro", "player_name": p, "shirt_number": "", "position": pos, "is_starter": 1,
+               "formation": "4-2-3-1", "coach": ""} for p, pos in xi_pos]
+        lu.append({"team_name": "Cruzeiro", "player_name": "Reserva", "shirt_number": "", "position": "SUB", "is_starter": 0,
+                   "formation": "4-2-3-1", "coach": ""})
+        ps = [{"team_name": "Cruzeiro", "player_name": "Centroavante", "position": "F", "minutes": None, "rating": None,
+               "stats": {"totalGoals": 1, "goalAssists": 0}}]
+        db.save_boxscore(mid, {"team_stats": [], "lineups": lu, "timeline": [], "player_stats": ps})
+    with db.connect() as c:
+        c.execute("CREATE TABLE IF NOT EXISTS espn_rosters (team_id INTEGER, team TEXT, league TEXT, athlete_id INTEGER, "
+                  "name TEXT, birth TEXT, citizenship TEXT, position TEXT, jersey TEXT, status TEXT, injuries TEXT, "
+                  "fetched_at TEXT, PRIMARY KEY (team_id, athlete_id))")
+        rows = [(1, "Cruzeiro", "bra.1", k, p, "2000-01-01", "Brazil", pos, "", "Active",
+                 _j.dumps([{"status": "Out"}]) if p == "PontaD" else "[]", "2026-11-16") for k, (p, pos) in enumerate(xi_pos)]
+        rows.append((1, "Cruzeiro", "bra.1", 99, "Reserva", "2001-01-01", "Brazil", "M", "", "Active", "[]", "2026-11-16"))
+        c.executemany("INSERT INTO espn_rosters VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)
+    info = M.player_table(db, ["Cruzeiro"], n=10)
+    assert info["formacao"] == "4-2-3-1" and len(info["jogos"]) == n
+    pl = info["jogadores"].set_index("nome")
+    assert pl.loc["Centroavante", "gols"] == n and pl.loc["PontaD", "indisponivel"]
+    xi, form = M.xi_for(info, None, "provavel")
+    names = {p["jogador"] for p in xi}
+    assert form == "4-2-3-1" and "PontaD" not in names and "Centroavante" in names          # lesionado fora
+    st = next(p for p in xi if p["jogador"] == "Centroavante")
+    assert any("titular em 5 dos últimos 5" in r for r in st["porque"]) and any("gol" in r for r in st["porque"])
