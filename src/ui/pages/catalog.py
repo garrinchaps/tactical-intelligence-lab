@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.canonical.provenance import ProvenanceRecord, ProvenanceRegistry
 from src.canonical.schema import CANONICAL_AGGREGATE_SCHEMA, CANONICAL_EVENT_SCHEMA, schema_table
 from src.connectors.catalog import CatalogError, CompetitionCatalog
@@ -165,7 +167,7 @@ def _scout_upload(reg: ProvenanceRegistry) -> None:
         st.markdown(f"**Tabela: {kind}** — {len(d)} linhas")
         if kind == "xt_zonas":
             for t in d["equipe"].unique():
-                st.plotly_chart(charts.heatmap_grid(ScoutFileParser.xt_grid(d, t), f"xT por zona — {t}", "xT"),
+                render_chart(charts.heatmap_grid(ScoutFileParser.xt_grid(d, t), f"xT por zona — {t}", "xT"),
                                 use_container_width=True)
         elif kind == "matriz_passes":
             for t in d["equipe"].unique():
