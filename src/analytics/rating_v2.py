@@ -271,7 +271,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         carries = e[et == "Carry"]
         touches = int(et.isin(["Pass", "Carry", "Shot", "Dribble", "Ball Receipt*", "Miscontrol", "Dispossessed"]).sum())
         turn = e[e.get("is_turnover", 0) == 1] if "is_turnover" in e else e.iloc[0:0]
-        own_half_turn = turn[turn["x"] < 50]
+        own_half_turn = turn[turn["x"] < 50] if "x" in turn else turn.iloc[0:0]
         duels = e[et == "Duel"]
         has_receipt_data = {"pass_recipient_name", "is_pass_completed", "type_name", "end_x", "end_y"}.issubset(df.columns)
         rec = (df[(df["pass_recipient_name"] == p) & (df["type_name"] == "Pass")
@@ -290,8 +290,10 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
             ga = int((on_t.get("shot_outcome_name") == "Goal").sum())
             saves = int(len(on_t) - ga)
+            has_faced_xg = ("shot_statsbomb_xg" in on_t.columns
+                             and pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").notna().any())
             xg_on = (float(pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").fillna(0).sum())
-                     if has_match_xg and "shot_statsbomb_xg" in on_t else None)
+                     if has_faced_xg else None)
             longp = (ps[pd.to_numeric(ps["pass_length"], errors="coerce").fillna(0) >= 32]
                      if "pass_length" in ps else ps.iloc[0:0])
             longp_ok = longp[longp.get("pass_outcome_name").isna()] if "pass_outcome_name" in longp else longp
@@ -311,8 +313,9 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                   "key_saves": key_saves,
                   "finalizacoes_no_alvo_enfrentadas": int(len(on_t)), "xg_no_alvo_enfrentado": round(xg_on, 2),
                   "saidas_aereas90": int((et == "Goal Keeper").sum()) * f if (et == "Goal Keeper").any() else None,
-                  "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) else None,
-                  "gk_longos_pct": 100 * len(longp_ok) / len(longp) if len(longp) >= 3 else None,
+                  "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 and "pass_outcome_name" in ps else None,
+                  "gk_longos_pct": (100 * len(longp_ok) / len(longp)
+                                    if len(longp) >= 3 and "pass_outcome_name" in longp else None),
                   "gk_prog90": int((ok["is_progressive_action"] == 1).sum()) * f
                       if "is_progressive_action" in ok else None,
                   "gk_perdas90": len(turn) * f if "is_turnover" in e else None,
@@ -347,11 +350,16 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "xa90": xa.get(p, 0.0) * f if has_xa_inputs else None,
             "xa": round(xa.get(p, 0.0), 2) if has_xa_inputs else None,
             "decisivos90": 0.0,
-            "passes_area90": int((ok["end_in_box"] == 1).sum()) * f if "end_in_box" in ok else None,
-            "quebra_linha90": int((ok["is_line_breaking_pass"] == 1).sum()) * f if "is_line_breaking_pass" in ok else None,
-            "cruz_certos90": int(ok["is_pass_cross"].fillna(0).astype(bool).sum()) * f if "is_pass_cross" in ok else None,
-            "enfiadas90": int(ok["is_pass_through_ball"].fillna(0).astype(bool).sum()) * f if "is_pass_through_ball" in ok else None,
-            "prog_passes90": int((ok["is_progressive_action"] == 1).sum()) * f if "is_progressive_action" in ok else None,
+            "passes_area90": int((ok["end_in_box"] == 1).sum()) * f
+                if "end_in_box" in ok and "pass_outcome_name" in ok else None,
+            "quebra_linha90": int((ok["is_line_breaking_pass"] == 1).sum()) * f
+                if "is_line_breaking_pass" in ok and "pass_outcome_name" in ok else None,
+            "cruz_certos90": int(ok["is_pass_cross"].fillna(0).astype(bool).sum()) * f
+                if "is_pass_cross" in ok and "pass_outcome_name" in ok else None,
+            "enfiadas90": int(ok["is_pass_through_ball"].fillna(0).astype(bool).sum()) * f
+                if "is_pass_through_ball" in ok and "pass_outcome_name" in ok else None,
+            "prog_passes90": int((ok["is_progressive_action"] == 1).sum()) * f
+                if "is_progressive_action" in ok and "pass_outcome_name" in ok else None,
             "prog_carries90": int((carries["is_progressive_action"] == 1).sum()) * f if "is_progressive_action" in carries else None,
             "xt90": float(pd.to_numeric(e["delta_xt"], errors="coerce").fillna(0).clip(lower=0).sum()) * f
                 if "delta_xt" in e else None,
@@ -366,10 +374,13 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "aereos_ganhos90": int(((et == "Duel") & (e.get("duel_type_name") == "Aerial Won")).sum()) * f
             if "duel_type_name" in e else None,
             "driblado90": int((et == "Dribbled Past").sum()) * f,
-            "passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 else None,
-            "passe_pct_dificil": 100 * len(hard_ok) / len(hard) if len(hard) >= 4 else None,
-            "perdas_por_toque": len(turn) / touches if touches >= 10 else None,
-            "perdas_perigosas90": len(own_half_turn) * f,
+            "passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 and "pass_outcome_name" in ps else None,
+            "passe_pct_dificil": (100 * len(hard_ok) / len(hard)
+                                  if len(hard) >= 4 and "pass_outcome_name" in hard else None),
+            "perdas_por_toque": (len(turn) / touches
+                                 if touches >= 10 and "is_turnover" in e else None),
+            "perdas_perigosas90": (len(own_half_turn) * f
+                                   if "is_turnover" in e and "x" in e else None),
             "amarelos": int((e["foul_committed_card_name"] == "Yellow Card").sum()) if "foul_committed_card_name" in e else None,
             "vermelhos": int(e["foul_committed_card_name"].isin(["Red Card", "Second Yellow"]).sum())
                 if "foul_committed_card_name" in e else None,
