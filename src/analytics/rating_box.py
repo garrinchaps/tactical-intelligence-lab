@@ -1,9 +1,9 @@
 """
-Avaliação 2.0 a partir das ESTATÍSTICAS por jogador (rodada 5) — para jogos sem lances com coordenadas
+Avaliação 3.0 a partir das ESTATÍSTICAS por jogador (rodada 5) — para jogos sem lances com coordenadas
 (Brasileirão, Série B, Libertadores…), usando os números por jogador da FotMob.
 
 Mesmo motor (`rating_v2.evaluate`: dimensões, pesos por função, percentil → nota, encolhimento por minutos,
-confiança, desempenho × impacto), mas com:
+confiança, desempenho-base + ajuste decisivo, mas com:
   * indicadores que a fonte de estatísticas realmente traz (xG, xA, chances criadas, passes no terço final,
     desarmes, interceptações, recuperações, duelos, perdas…). O que ela não traz (xT, quebra de linhas, entre linhas,
     pressão) fica de fora — a dimensão sem dado NÃO vira zero, só reduz a cobertura e a confiança;
@@ -213,7 +213,7 @@ def main() -> None:
 
     from src.data_hub.db import DataHubDB
 
-    ap = argparse.ArgumentParser(description="Régua da nota 2.0 por estatísticas (FotMob).")
+    ap = argparse.ArgumentParser(description="Régua da nota 3.0 por estatísticas (FotMob).")
     ap.add_argument("--referencia", type=int, default=400, help="quantos jogos recentes com números por jogador usar")
     a = ap.parse_args()
     n = build_reference(DataHubDB(), a.referencia)
