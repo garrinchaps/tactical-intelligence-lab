@@ -181,6 +181,13 @@ def render(ctx=None) -> None:
     use_proxy = t2.toggle("Incluir também jogos sem 360 (densidade estimada por eventos)", value=True,
                           help="Amplia a base com eventos do OpenPlay, Wyscout e StatsBomb sem freeze frame. O campo "
                                "density_is_360 informa a origem; a estimativa não é apresentada como tracking medido.")
+    st.caption(
+        "Importante: esta rede prevê se uma posse termina em finalização e precisa de eventos em sequência. "
+        "Por isso usa partidas com lances (StatsBomb, Wyscout e OpenPlay), não jogos que tenham apenas placar ou "
+        "estatísticas agregadas da FotMob. A conversão prepara até 500 partidas inéditas por rodada; as já "
+        "convertidas ficam no cache e entram nos treinos seguintes. Os jogos só com estatísticas continuam "
+        "disponíveis para o Analista FotMob, ratings e comparações."
+    )
     from src.machine_learning.model_registry import (EXP_BATCH, EXP_EPOCHS, EXP_PATIENCE, EXPERIMENT_ORDER,
                                                      EXPERIMENTS, class_balance, feature_report)
 
