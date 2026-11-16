@@ -98,7 +98,10 @@ FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors",
 def _wants_fotmob_supplement(query: str, sc: Any) -> bool:
     """Só consulta a fonte complementar quando ela pode acrescentar um indicador que os eventos não trazem."""
     q = norm_q(query)
-    physical = bool(re.search(r"\bcorr\w*|\bsprint\w*|\bdistanci\w*|\bkm\b|\bvelocidade", q))
+    physical = bool(re.search(
+        r"\b(correu|correr|corrida|corridas|correndo|sprint\w*|distanci\w*|quilometr\w*|km|velocidade)",
+        q,
+    ))
     fotmob_only = bool(re.search(r"\bxa\b|\bxgot\b|nota (da )?fotmob", q))
     return "fotmob" in q or fotmob_only or (getattr(sc, "ask", None) == "unavailable" and physical)
 
