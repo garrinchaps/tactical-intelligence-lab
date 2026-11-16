@@ -34,7 +34,7 @@ FULL = Path("data/processed/danger_full.csv.gz")      # gerado por `python -m sr
 MIN_360_SHARE = 0.8                                    # partidas do banco só entram se tiverem densidade medida (360)
 MIN_IMPROVEMENT = 0.0005        # redução mínima de log-loss para promover (evita "melhora" por ruído)
 MAX_CV_AUC_STD = 0.05           # estabilidade: AUC das dobras do GroupKFold não pode variar mais que isso
-MAX_AUC_DROP = 0.005            # e a AUC no teste isolado não pode cair mais que isso em relação ao campeão
+MAX_AUC_DROP = 0.005            # e a AUC no validação fixa não pode cair mais que isso em relação ao campeão
 VAL_FRACTION = 0.25
 
 # v36 — os 4 experimentos controlados pedidos pelo usuário (todos: Adam, até 100 épocas, lote 256, parada
@@ -266,7 +266,7 @@ class DangerModelRegistry:
     @staticmethod
     def paired_gain(champ: NeuralNetwork, chall: NeuralNetwork, test: pd.DataFrame, n_boot: int = 400,
                     seed: int = 7) -> Dict[str, float]:
-        """Ganho de log-loss no teste isolado (campeão − desafiante) com bootstrap por PARTIDA (IC 95%)."""
+        """Ganho de log-loss no validação fixa (campeão − desafiante) com bootstrap por PARTIDA (IC 95%)."""
         y = test["target"].to_numpy(int)
         pc = np.clip(champ.predict_proba(DangerModelRegistry._model_matrix(champ, test)), 1e-6, 1 - 1e-6)
         pn = np.clip(chall.predict_proba(DangerModelRegistry._model_matrix(chall, test)), 1e-6, 1 - 1e-6)
@@ -297,7 +297,7 @@ class DangerModelRegistry:
              generalização da configuração e exige ESTABILIDADE (AUC das dobras com desvio ≤ MAX_CV_AUC_STD);
           2. treino final com Adam e parada antecipada numa fatia de partidas separada do próprio treino; se a
              arquitetura for a do campeão, começa dos pesos dele (ajuste fino com os dados novos — evolução contínua);
-          3. comparação PAREADA com o campeão no TESTE ISOLADO (partidas que nunca treinam): promove se o ganho de
+          3. comparação PAREADA com o campeão no VALIDAÇÃO FIXA (partidas que nunca treinam): promove se o ganho de
              log-loss ≥ MIN_IMPROVEMENT, o IC 95% do bootstrap por partida ficar acima de zero e a AUC não cair mais
              que MAX_AUC_DROP. Toda tentativa é registrada.
         O desvio entre dobras NÃO é usado como barreira de ganho: ele mede quanto as partidas diferem entre si
@@ -348,7 +348,7 @@ class DangerModelRegistry:
             ok_stable = cv_auc_std is None or cv_auc_std <= MAX_CV_AUC_STD
             ok_auc = m["auc"] >= champ_now["auc"] - MAX_AUC_DROP
             promoted = bool(ok_min and ok_ci and ok_stable and ok_auc)
-            detail = (f"ganho no teste isolado {gain:+.5f} (IC 95% por partida {pg['ci_low']:+.5f} a {pg['ci_high']:+.5f}); "
+            detail = (f"ganho no validação fixa {gain:+.5f} (IC 95% por partida {pg['ci_low']:+.5f} a {pg['ci_high']:+.5f}); "
                       f"GroupKFold: perda {cv_mean if cv_mean is not None else '—'} ± {cv_std if cv_std is not None else '—'}, "
                       f"desvio da AUC entre dobras {cv_auc_std if cv_auc_std is not None else '—'}")
             if promoted:
