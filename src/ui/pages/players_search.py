@@ -463,12 +463,13 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
     trend = "▲" if fase - q >= 0.3 else "▼" if q - fase >= 0.3 else "●"
     tcol = "#22C55E" if trend == "▲" else "#EF4444" if trend == "▼" else "#94A3B8"
     spark_df = f.copy()
-    spark_df["_score"] = pd.to_numeric(spark_df[score_col], errors="coerce")
-    spark_df = spark_df.dropna(subset=["_score"])
-    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * r._score)}px;'
-                     f'background:{"#22C55E" if r._score >= 7.0 else "#F59E0B" if r._score >= 5.5 else "#EF4444"};'
+    spark_df["score_value"] = pd.to_numeric(spark_df[score_col], errors="coerce")
+    spark_df = spark_df.dropna(subset=["score_value"])
+    spark = " ".join(f'<span title="{game} ({day})" style="display:inline-block;width:10px;height:{int(6 + 5 * score)}px;'
+                     f'background:{"#22C55E" if score >= 7.0 else "#F59E0B" if score >= 5.5 else "#EF4444"};'
                      f'border-radius:3px;margin-right:2px;vertical-align:bottom"></span>'
-                     for r in spark_df.iloc[::-1].itertuples())
+                     for game, day, score in zip(spark_df.iloc[::-1]["jogo"], spark_df.iloc[::-1]["data"],
+                                                 spark_df.iloc[::-1]["score_value"]))
     st.markdown(
         f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:stretch;margin:.4rem 0 1rem">'
         f'<div style="width:190px;background:linear-gradient(160deg,{tier}33,#0F1626 55%);border:2px solid {tier};'
@@ -479,7 +480,7 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<div style="flex:1;min-width:240px;background:#0F1626;border:1px solid #1E2A44;border-radius:18px;padding:14px 16px">'
         f'<div style="color:#94A3B8;font-size:.8rem">QUALIDADE (média de {len(f)} jogos)</div>'
         f'<div style="font-size:1.6rem;font-weight:700">{q:.1f}</div>'
-        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {min(5, len(f))}) '
+        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {len(recent_scores)} jogos com nota) '
         f'<span style="color:{tcol}">{trend}</span></div><div style="font-size:1.3rem;font-weight:700">{fase:.1f}</div>'
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
         f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
