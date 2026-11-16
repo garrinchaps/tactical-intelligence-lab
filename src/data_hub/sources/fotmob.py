@@ -94,7 +94,7 @@ PLAYER_MAP = {"goals": "totalGoals", "assists": "goalAssists", "total_shots": "t
               "physical_metrics_distance_covered": "distance_m", "physical_metrics_topspeed": "top_speed_kmh",
               "errors_led_to_goal": "errors_led_to_goal", "defensive_actions": "defensive_actions",
               "physical_metrics_number_of_sprints": "sprints", "expected_goals_on_target_faced": "xgot_faced",
-              "yellow_cards": "yellow_cards", "red_cards": "red_cards", "defensive_actions": "defensive_actions"}
+              "yellow_cards": "yellow_cards", "red_cards": "red_cards"}
 GENERIC_POS = {0: "G", 1: "D", 2: "M", 3: "F"}
 DROP_KEYS = {"fantasy_points", "xg_and_xa", "rating_title"}       # redundantes (somas, pontos de fantasy)
 
