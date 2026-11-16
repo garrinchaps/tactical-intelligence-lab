@@ -255,11 +255,14 @@ def _fotmob_shots(ctx: MatchContext, home: str) -> None:
 
 
 def _box_ratings(ctx: MatchContext) -> None:
-    """Nota 2.0 por ESTATÍSTICAS (sem lances): régua própria, das atuações com números por jogador da mesma fonte."""
+    """Nota 3.0 por ESTATÍSTICAS (sem lances): régua própria, das atuações com números por jogador da mesma fonte."""
     from src.analytics import rating_box as RB
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+    from src.ui.context import get_service
 
+    db_version = get_service().db.stable_version()
     for mid in _sibling_ids(ctx):
-        r = _box_ratings_cached(int(mid))
+        r = _box_ratings_cached(int(mid), db_version, RATING_ENGINE_VERSION)
         if r is not None and not r.empty:
             break
     else:
@@ -279,7 +282,7 @@ def _box_ratings(ctx: MatchContext) -> None:
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
-def _box_ratings_cached(match_id: int):
+def _box_ratings_cached(match_id: int, db_version: str, rating_version: str):
     from src.analytics import rating_box as RB
     from src.ui.context import get_service
 
