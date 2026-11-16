@@ -445,7 +445,7 @@ _REF_CACHE: Dict[str, pd.DataFrame] = {}
 def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
     """
     Base de comparação: indicadores de jogadores com ≥ 30 min nas partidas com lances disponíveis (cache em disco em
-    data/processed/rating_ref_v2.parquet; sem cache, as partidas de demonstração). Quanto mais partidas, melhor.
+    data/processed/rating_ref_v3_0_1.parquet; sem cache, as partidas de demonstração). Quanto mais partidas, melhor.
     """
     from pathlib import Path
 
@@ -453,7 +453,7 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
     if key not in _REF_CACHE:
         p = Path("data/processed/rating_ref_v2.parquet")
         ref = pd.DataFrame()
-        if not p.exists() and p.with_name("rating_ref_v2_demo.parquet").exists():
+        if not p.exists() and p.with_name("rating_ref_v3_0_1_demo.parquet").exists():
             p = p.with_name("rating_ref_v2_demo.parquet")
         if p.exists():
             try:
@@ -493,7 +493,7 @@ def _demo_reference() -> pd.DataFrame:
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
 
 
-def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_ref_v2.parquet") -> int:
+def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_ref_v3_0_1.parquet") -> int:
     """Grava a base de referência a partir de várias partidas com lances (rode com muitas partidas para calibrar)."""
     from pathlib import Path
 
