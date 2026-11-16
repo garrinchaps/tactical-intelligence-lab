@@ -195,7 +195,6 @@ def zebra(df: pd.DataFrame):
 
         # Números legíveis: inteiros sem casas; demais valores com até duas casas.
         fmt = {}
-        bar_candidates = []
         rating_cols = []
         for col_name in df.columns:
             series = pd.to_numeric(df[col_name], errors="coerce")
@@ -205,17 +204,13 @@ def zebra(df: pd.DataFrame):
             low = str(col_name).strip().lower()
             if any(token in low for token in ("nota", "rating", "avaliação", "avaliacao")):
                 rating_cols.append(col_name)
-                if len(vals) and vals.min() >= 0:
-                    bar_candidates.append((col_name, 10.0))
             elif any(token in low for token in ("percent", "_pct", "pct", "taxa", "auc", "precisão", "precisao", "recall", "f1")):
-                if len(vals) and vals.min() >= 0:
-                    vmax = 1.0 if vals.max() <= 1.0 else 100.0
-                    bar_candidates.append((col_name, vmax))
+                # As barras reais são configuradas por st.column_config.ProgressColumn abaixo;
+                # pandas.Styler.bar não é renderizado pelo st.dataframe do Streamlit 1.36.
+                pass
         if fmt:
             sty = sty.format(fmt, na_rep="—")
 
-        for col_name, vmax in bar_candidates:
-            sty = sty.bar(subset=[col_name], color="rgba(34,211,238,0.30)", vmin=0, vmax=vmax)
         if rating_cols:
             def rating_color(value):
                 try:
@@ -234,8 +229,31 @@ def zebra(df: pd.DataFrame):
 
 
 def styled_dataframe(data, *args, **kwargs):
-    """Renderiza qualquer DataFrame do painel com o mesmo acabamento, preservando seleção e opções."""
+    """Renderiza DataFrames no padrão visual do laboratório, sem perder ordenação ou seleção."""
     if isinstance(data, pd.DataFrame):
+        # ProgressColumn é nativo do Streamlit 1.36 e desenha barras reais dentro da tabela.
+        config = dict(kwargs.get("column_config") or {})
+        for col_name in data.columns:
+            low = str(col_name).strip().lower()
+            is_rating = any(token in low for token in ("nota", "rating", "avaliação", "avaliacao"))
+            is_rate = any(token in low for token in (
+                "percent", "percentil", "_pct", "pct", "taxa", "auc", "precisão", "precisao",
+                "recall", "f1", "probabilidade",
+            ))
+            if not (is_rating or is_rate) or col_name in config:
+                continue
+            values = pd.to_numeric(data[col_name], errors="coerce").dropna()
+            if values.empty or values.min() < 0:
+                continue
+            maximum = 10.0 if is_rating and values.max() <= 10 else (
+                1.0 if values.max() <= 1 else (100.0 if values.max() <= 100 else float(values.max()))
+            )
+            config[col_name] = st.column_config.ProgressColumn(
+                str(col_name), min_value=0, max_value=maximum,
+                format="%.2f" if maximum <= 1 else "%.1f",
+            )
+        if config:
+            kwargs["column_config"] = config
         data = zebra(data)
     kwargs.setdefault("use_container_width", True)
     kwargs.setdefault("hide_index", True)
