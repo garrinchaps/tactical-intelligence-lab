@@ -1,23 +1,23 @@
 """
-Modelo de avaliação individual 2.0 — motor estatístico TRANSPARENTE (sem caixa-preta).
+Modelo de avaliação individual 3.0 — motor estatístico TRANSPARENTE (sem caixa-preta).
 
 Jogadores de linha: 7 dimensões (0–10) — produção ofensiva, criação, progressão, defesa, eficiência, disciplina e
-impacto tático — com pesos pela FUNÇÃO exercida no jogo (não só a posição cadastrada).
+trabalho coletivo observável — com pesos pela FUNÇÃO exercida no jogo e blend de papéis quando os eventos documentam mudanças de função.
 Goleiros: 6 dimensões — defesa de finalizações 30%, posicionamento 15%, jogo aéreo 10%, distribuição 15%,
 decisões/segurança 20%, cobertura 10%.
 
 Como cada número vira nota:
 1. Indicador por 90 min (ou taxa) → percentil contra jogadores da MESMA função na base de referência.
-2. Percentil → nota pela tabela P5=2,0 · P10=3,0 · P25=4,5 · P50=5,5 · P75=7,0 · P90=8,5 · P95=9,2 · P99=10
+2. Percentil → nota pela régua 3.0: P5=3,8 · P10=4,5 · P25=5,5 · P50=6,4 · P75=7,4 · P90=8,6 · P95=9,25 · P99=10
    (invertida em indicadores negativos, como perdas e erros).
 3. Dimensão = média ponderada dos indicadores que EXISTEM. Indicador sem dado não vira zero: fica fora e a confiança cai.
 4. Nota = Σ peso × dimensão (pesos renormalizados sobre as dimensões observadas).
-5. Pouca amostra puxa a nota para a referência: S = c·S_obs + (1−c)·5,5, c pelos minutos.
-6. Saídas separadas: DESEMPENHO (qualidade da atuação), IMPACTO (quanto mudou o jogo) e CONFIANÇA (evidência).
+5. Pouca amostra puxa o desempenho para a referência neutra 6,4, conforme minutos observados.
+6. Nota final = desempenho + ajuste limitado de momentos decisivos; também são reportados desempenho-base, impacto e confiança.
 
-Limites honestos: sem tracking nem vídeo, "impacto tático" é INFERIDO de eventos (recepções entre linhas, participação
-na troca de passes, pressão no campo rival) e o posicionamento/jogo aéreo do goleiro não é observado — aparecem como
-"inferido" / "não observado", nunca como certeza. xGOT não existe nas fontes abertas: usa-se o xG das finalizações no alvo.
+Limites honestos: papel misto é aproximado pela distribuição das posições anotadas nos eventos, não por tracking minuto
+a minuto. Sem tracking nem vídeo, fechamentos de linhas, movimentos de atração e coberturas sem ação registrada não são
+observáveis. Gols evitados em fontes sem xGOT são identificados como proxy de xG pré-chute, nunca como xGOT.
 """
 
 from __future__ import annotations
@@ -91,7 +91,9 @@ IND_PT = {
     "driblado90": "Vezes driblado /90", "passe_pct_dificil": "Acerto em passes difíceis (%)", "passe_pct": "Acerto de passe (%)",
     "perdas_por_toque": "Perdas por toque na bola", "perdas_perigosas90": "Perdas no próprio campo /90",
     "amarelos": "Cartões amarelos", "faltas90": "Faltas cometidas /90", "entre_linhas90": "Bolas recebidas entre linhas /90",
-    "participacao_pct": "Participação na troca de passes (%)", "pressao_campo_rival90": "Pressões no campo rival /90",
+    "participacao_pct": "Participação na troca de passes (%)", "pressao90": "Pressões /90",
+    "acoes_defensivas90": "Ações defensivas /90", "sprints90": "Sprints /90",
+    "pressao_campo_rival90": "Pressões no campo rival /90",
     "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (xG no alvo − gols)",
     "saidas_aereas90": "Ações de goleiro na área /90", "gk_passe_pct": "Acerto de passe (%)", "gk_longos_pct": "Acerto em bolas longas (%)",
     "gk_prog90": "Passes progressivos /90", "gk_perdas90": "Perdas /90", "gk_erros": "Erros que deram chance",
@@ -156,24 +158,25 @@ def _shootout_contributions(df: pd.DataFrame) -> Dict[str, Dict[str, int]]:
     if df is None or df.empty or not {"period", "type_name", "team_name", "player_name"}.issubset(df.columns):
         return result
     regular = _regular(df)
+    teams = [str(x) for x in df["team_name"].dropna().unique()]
     goalkeepers: Dict[str, str] = {}
     if "position_name" in regular:
-        is_gk = regular["position_name"].astype(str).str.contains("goalkeeper|goleiro", case=False, na=False)
+        is_gk = regular["position_name"].map(role_of).eq("goleiro")
         gks = regular[is_gk & regular["player_name"].notna()]
         for team, group in gks.groupby("team_name"):
             counts = group["player_name"].value_counts()
             if not counts.empty:
                 goalkeepers[str(team)] = str(counts.index[0])
     # Algumas fontes não anotam position_name, mas registram ações próprias do goleiro.
-    if "type_name" in regular and not goalkeepers:
+    if "type_name" in regular:
         actions = regular[regular["type_name"].astype(str).str.lower().isin(["goal keeper", "goalkeeper"])]
         for team, group in actions.groupby("team_name"):
-            counts = group["player_name"].dropna().value_counts()
-            if not counts.empty:
-                goalkeepers[str(team)] = str(counts.index[0])
+            if str(team) not in goalkeepers:
+                counts = group["player_name"].dropna().value_counts()
+                if not counts.empty:
+                    goalkeepers[str(team)] = str(counts.index[0])
 
     attempts = df[(df["period"] == 5) & (df["type_name"] == "Shot")]
-    teams = [str(x) for x in df["team_name"].dropna().unique()]
     for shot in attempts.itertuples():
         shooter = str(getattr(shot, "player_name", "") or "")
         shooting_team = str(getattr(shot, "team_name", "") or "")
@@ -245,8 +248,9 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         rec = df[(df.get("pass_recipient_name") == p) & (df["type_name"] == "Pass") & (df.get("is_pass_completed", 0) == 1)]
         between = rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))] if len(rec) else rec
         gk = {}
-        if "goalkeeper" in str(e.get("position_name", pd.Series([""])).mode().iloc[0] if e.get("position_name") is not None
-                               and not e["position_name"].dropna().empty else "").lower():
+        position_mode = (e["position_name"].dropna().mode().iloc[0]
+                         if "position_name" in e and not e["position_name"].dropna().empty else "")
+        if role_of(position_mode) == "goleiro":
             faced = d[(d["team_name"] != team) & (d["type_name"] == "Shot")]
             fo = faced.get("shot_outcome_name", pd.Series(dtype=object))
             on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
@@ -316,9 +320,10 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "amarelos": int((e.get("foul_committed_card_name") == "Yellow Card").sum()) if "foul_committed_card_name" in e else 0,
             "vermelhos": int(e.get("foul_committed_card_name", pd.Series(dtype=object)).isin(["Red Card", "Second Yellow"]).sum()),
             "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": errors_to_chance,
-            "pressao90": int((et == "Pressure").sum()) * f,
-            "acoes_defensivas90": int(pd.to_numeric(e.get("is_defensive_action", 0), errors="coerce").fillna(0).sum()) * f
+            "pressao90": int((et == "Pressure").sum()) * f if (t == "Pressure").any() else None,
+            "acoes_defensivas90": int(pd.to_numeric(e["is_defensive_action"], errors="coerce").fillna(0).sum()) * f
                 if "is_defensive_action" in e else None,
+            "sprints90": None,
             "entre_linhas90": len(between) * f,
             "participacao_pct": 100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1),
             "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f if (t == "Pressure").any() else None,
