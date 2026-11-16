@@ -31,7 +31,7 @@ import pandas as pd
 # com cauda alta mais exigente. P99 continua raro; os percentis são calibrados por função.
 PCT_TABLE = [(0, 3.0), (5, 3.8), (10, 4.5), (25, 5.5), (50, 6.4), (75, 7.4), (90, 8.6), (95, 9.25), (99, 10.0), (100, 10.0)]
 REF_SCORE = 6.4
-RATING_ENGINE_VERSION = "3.0"
+RATING_ENGINE_VERSION = "3.0.1"
 
 DIMS = ["ofensiva", "criacao", "progressao", "defesa", "eficiencia", "disciplina", "tatica"]
 DIM_PT = {"ofensiva": "Produção ofensiva", "criacao": "Criação e construção", "progressao": "Progressão",
@@ -505,7 +505,7 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
     c_min = min(1.0, mins / 60.0)
     c_pool = min(1.0, len(peers) / 40.0)
-    conf = round(100 * (0.5 * c_min + 0.3 * cover + 0.2 * c_pool))
+    conf = round(100 * (0.35 * c_min + 0.35 * cover + 0.30 * c_pool))
     if mins < 15 or raw is None:
         perf = None
     else:
@@ -562,7 +562,7 @@ def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[st
 
 
 def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
-    """Avaliação 2.0 de todos os jogadores de uma partida com lances (a própria partida entra na referência)."""
+    """Avaliação 3.0 de todos os jogadores de uma partida com lances (a própria partida entra na referência)."""
     ind = indicators(df)
     if ind.empty:
         return ind
@@ -593,7 +593,8 @@ def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
         before = dict(score)
         score[team] = score.get(team, 0) + 1
         mine, other = before.get(team, 0), max([v for k, v in before.items() if k != team] or [0])
-        if mine <= other and not g.get("gol_contra"):
+        # Só marca quando empata ou passa à frente; gol que apenas diminui uma desvantagem não vira "decisivo".
+        if mine <= other and mine + 1 >= other and not g.get("gol_contra"):
             out[g["jogador"]] = out.get(g["jogador"], 0) + 1
     return out
 
@@ -645,13 +646,13 @@ def build_reference_from_db(limit: int = 300, progress=None) -> int:
         if i % 25 == 0:
             say(f"  {i}/{len(ids)} partidas")
     n = build_reference(dfs)
-    say(f"referência da nota 2.0: {n} atuações de {len(dfs)} partidas")
+    say(f"referência da nota 3.0: {n} atuações de {len(dfs)} partidas")
     return n
 
 
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Base de referência (percentis por função) da nota 2.0.")
+    ap = argparse.ArgumentParser(description="Base de referência (percentis por função) da nota 3.0.")
     ap.add_argument("--referencia", type=int, default=300, help="quantas partidas com lances usar")
     build_reference_from_db(ap.parse_args().referencia)
