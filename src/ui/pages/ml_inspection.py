@@ -7,6 +7,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart, styled_dataframe
+
 from src.evaluation.inspection import (centrality_comparison, dbscan_points, kmeans_points, load_danger_models,
                                        load_protocol_report, xgb_inspection)
 from src.machine_learning.danger_dataset import FEATURES
@@ -67,7 +69,7 @@ def _baselines(ctx: MatchContext, report) -> None:
               "pressão — tem efeito pequeno aqui." if g["sobre_logistica"] < 0.03 else ""), kind)
     folds = pd.DataFrame(d["folds"])
     with st.expander("AUC por fold"):
-        st.dataframe(folds, use_container_width=True, hide_index=True)
+        styled_dataframe(folds, use_container_width=True, hide_index=True)
     g = report.get("grafo_de_passes", {})
     if g.get("equipes_partidas"):
         st.markdown("### Protocolo de avaliação — grafo de passes")
@@ -128,9 +130,9 @@ def _clusters(ctx: MatchContext) -> None:
         a, b = st.columns([1.4, 1])
         a.plotly_chart(charts.kmeans_scatter(km, f"Clusters de perdas (k = {km['k']}) com centróides"), use_container_width=True)
         with b:
-            st.dataframe(km["centroides"].rename(columns={"x": "centróide x (jd)", "y": "centróide y (jd)", "n": "perdas"}),
+            styled_dataframe(km["centroides"].rename(columns={"x": "centróide x (jd)", "y": "centróide y (jd)", "n": "perdas"}),
                          use_container_width=True, hide_index=True)
-            st.dataframe(pd.DataFrame({"k": list(km["silhouette"]), "silhouette": list(km["silhouette"].values())}),
+            styled_dataframe(pd.DataFrame({"k": list(km["silhouette"]), "silhouette": list(km["silhouette"].values())}),
                          use_container_width=True, hide_index=True)
 
     st.markdown(f"### DBSCAN — armadilhas de pressing (recuperações de {ctx.target_team})")
@@ -142,14 +144,14 @@ def _clusters(ctx: MatchContext) -> None:
         empty_state("Sem recuperações de bola registradas para esta equipe.", icon="🟠")
     else:
         ctx.prov("dbscan", "DBSCAN", f"{db['n_clusters']} núcleos", f"DBSCAN em (x, y) das recuperações, eps={eps}, min_samples={mins}")
-        st.plotly_chart(charts.dbscan_scatter(db, f"DBSCAN: {db['n_clusters']} armadilhas · {db['n_ruido']} pontos de ruído "
+        render_chart(charts.dbscan_scatter(db, f"DBSCAN: {db['n_clusters']} armadilhas · {db['n_ruido']} pontos de ruído "
                                                   f"(eps = {eps} jd, min_samples = {mins})"), use_container_width=True)
 
     st.markdown("### NetworkX — grau × betweenness ponderada por xT")
     comp = centrality_comparison(ctx.df, ctx.target_team)
     if not comp.empty:
         ctx.prov("centr_insp", "Centralidades", len(comp), "grau ponderado e betweenness com distância 1/(passes·(1+10·xT))")
-        st.plotly_chart(charts.centrality_compare(comp, "Lado a lado, normalizado pelo máximo da equipe"), use_container_width=True)
+        render_chart(charts.centrality_compare(comp, "Lado a lado, normalizado pelo máximo da equipe"), use_container_width=True)
 
 
 def render(ctx: MatchContext) -> None:
