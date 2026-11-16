@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.evaluation.inspection import centrality_comparison
 from src.ingestion.brazil_and_multi_source import PlayerNameNormalizer
 from src.metrics.xt_model import ExpectedThreatModel
@@ -88,7 +90,7 @@ def render(ctx: MatchContext) -> None:
     subs_set = set(came_in) if view == "all" else set()
     l, r = st.columns(2)
     with l:
-        st.plotly_chart(charts.pass_network(net, f"Troca de passes — {team}", subs=subs_set), use_container_width=True)
+        render_chart(charts.pass_network(net, f"Troca de passes — {team}", subs=subs_set), use_container_width=True)
         st.caption("Bolinha maior = mais passes; verde mais forte = mais importante para ligar o time; linha mais grossa "
                    "= mais passes entre os dois.")
         if view == "all" and came_in:
@@ -98,7 +100,7 @@ def render(ctx: MatchContext) -> None:
             st.caption(f"Mostrando só quem começou jogando ({len(starters)}). Quem entrou depois: "
                        + ", ".join(came_in) + ".")
     with r:
-        st.plotly_chart(charts.xt_progression(df, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
+        render_chart(charts.xt_progression(df, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
                         use_container_width=True)
         st.caption("As 60 ações com maior ganho de ameaça (xT). Verde: passe · amarelo: condução.")
 
