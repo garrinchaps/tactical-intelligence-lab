@@ -269,7 +269,7 @@ def _box_ratings(ctx: MatchContext) -> None:
                "passes no terço final, desarmes, recuperações, duelos, perdas e, quando disponíveis, sprints e ações "
                "defensivas) comparados com jogadores da MESMA função. O que a fonte não mede não entra e reduz a confiança — nunca vira zero. "
                "Nota final = desempenho estatístico + ajuste limitado para eventos decisivos que a fonte registra.")
-    show = r.drop(columns=["_detalhe"]).rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
+    show = r.drop(columns=["_detalhe", "nota_final"], errors="ignore").rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
                                                         "minutos": "Min", "gols": "Gols", "assistencias": "Assist.",
                                                         "nota": "Nota final", "nota_final": "Nota final",
                                                         "desempenho": "Desempenho base", "impacto": "Impacto",
