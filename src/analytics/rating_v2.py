@@ -235,8 +235,10 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             c = passes[(passes["team_name"] == s.team_name) & (passes["pass_recipient_name"] == s.player_name)
                        & (passes.index < s.Index) & (passes["possession"] == s.possession)]
             if len(c):
-                p = str(c.iloc[-1]["player_name"])
-                xa[p] = xa.get(p, 0.0) + float(getattr(s, "shot_statsbomb_xg", 0) or 0)
+                shot_xg = getattr(s, "shot_statsbomb_xg", None)
+                if shot_xg is not None and pd.notna(shot_xg):
+                    p = str(c.iloc[-1]["player_name"])
+                    xa[p] = xa.get(p, 0.0) + float(shot_xg)
     team_pass = d[t == "Pass"].groupby("team_name").size()
     rows = []
     for (p, team), e in d.groupby(["player_name", "team_name"]):
@@ -286,10 +288,15 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                          if "position_name" in e and not e["position_name"].dropna().empty else "")
         if role_of(position_mode) == "goleiro":
             faced = d[(d["team_name"] != team) & (d["type_name"] == "Shot")]
-            fo = faced.get("shot_outcome_name", pd.Series(dtype=object))
-            on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
-            ga = int((on_t.get("shot_outcome_name") == "Goal").sum())
-            saves = int(len(on_t) - ga)
+            has_faced_outcome = "shot_outcome_name" in faced.columns
+            if has_faced_outcome:
+                fo = faced["shot_outcome_name"]
+                on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
+                ga = int(on_t["shot_outcome_name"].eq("Goal").sum())
+                saves = int(len(on_t) - ga)
+            else:
+                on_t = faced.iloc[0:0]
+                ga = saves = 0
             has_faced_xg = ("shot_statsbomb_xg" in on_t.columns
                              and pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").notna().any())
             xg_on = (float(pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").fillna(0).sum())
@@ -305,13 +312,14 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                          if "minute" in saved_shots else pd.Series(dtype=float))
             key_saves = (int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
                          if has_faced_xg and "minute" in saved_shots else None)
-            gk = {"defesas90": saves * f if has_shot_outcome else None,
-                  "pct_defesas": 100 * saves / len(on_t) if has_shot_outcome and len(on_t) else None,
+            gk = {"defesas90": saves * f if has_faced_outcome else None,
+                  "pct_defesas": 100 * saves / len(on_t) if has_faced_outcome and len(on_t) else None,
                   "gols_evitados": xg_on - ga if xg_on is not None else None,
-                  "gols_sofridos": ga if has_shot_outcome else None,
-                  "defesas": saves if has_shot_outcome else None,
+                  "gols_sofridos": ga if has_faced_outcome else None,
+                  "defesas": saves if has_faced_outcome else None,
                   "key_saves": key_saves,
-                  "finalizacoes_no_alvo_enfrentadas": int(len(on_t)), "xg_no_alvo_enfrentado": round(xg_on, 2),
+                  "finalizacoes_no_alvo_enfrentadas": int(len(on_t)) if has_faced_outcome else None,
+                  "xg_no_alvo_enfrentado": round(xg_on, 2) if xg_on is not None else None,
                   "saidas_aereas90": int((et == "Goal Keeper").sum()) * f if (et == "Goal Keeper").any() else None,
                   "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 and "pass_outcome_name" in ps else None,
                   "gk_longos_pct": (100 * len(longp_ok) / len(longp)
