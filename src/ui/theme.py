@@ -94,10 +94,47 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
   background: #0B1120 !important; border-radius: 12px !important; border-color: {P['border']} !important; color: {P['text']} !important; }}
 .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {{ border-color: {P['primary']} !important; }}
 .stTextInput input:focus {{ box-shadow: 0 0 0 2px rgba(59,130,246,0.45) !important; }}
-[data-testid="stDataFrame"], [data-testid="stTable"] {{ border-radius: 14px; overflow: hidden; border: 1px solid {P['border']}; }}
+/* tabelas: moldura de painel, sem aparência crua do Streamlit */
+[data-testid="stDataFrame"], [data-testid="stTable"] {{
+  border-radius: 18px !important; overflow: hidden; border: 1px solid {P['border']};
+  background: linear-gradient(145deg, rgba(17,26,46,0.92), rgba(9,13,22,0.96));
+  box-shadow: 0 10px 28px rgba(0,0,0,0.24);
+  padding: 6px;
+}}
+[data-testid="stDataFrame"] [data-testid="glideDataEditor"] {{
+  border-radius: 12px; background: rgba(11,17,32,0.78);
+}}
+[data-testid="stDataFrame"] canvas {{ border-radius: 10px; }}
+[data-testid="stTable"] table {{
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  color: {P['text']}; font-family: Inter, 'Segoe UI', sans-serif;
+}}
+[data-testid="stTable"] thead th {{
+  background: #172641; color: {P['text']}; font-size: .72rem; font-weight: 800;
+  text-transform: uppercase; letter-spacing: .06em; border-bottom: 2px solid {P['accent']};
+  padding: 12px 14px;
+}}
+[data-testid="stTable"] tbody td {{
+  background: #0D1424; color: #DCE6F4; font-size: .86rem;
+  border-bottom: 1px solid {P['border']}; padding: 10px 14px;
+}}
+[data-testid="stTable"] tbody tr:nth-child(even) td {{ background: #111C30; }}
+[data-testid="stTable"] tbody tr:hover td {{ background: rgba(34,211,238,.10); }}
 [data-testid="stExpander"] {{ border-radius: 14px; border: 1px solid {P['border']}; background: rgba(11,17,32,0.6); }}
-[data-testid="stPlotlyChart"] {{ border-radius: 16px; overflow: hidden; border: 1px solid {P['border']};
-  background: rgba(11,17,32,0.55); }}
+/* gráficos: cartão elevado, fundo consistente e bordas suaves */
+[data-testid="stPlotlyChart"] {{
+  position: relative; border-radius: 18px; overflow: hidden;
+  border: 1px solid {P['border']};
+  background: linear-gradient(145deg, rgba(17,26,46,0.78), rgba(9,13,22,0.84));
+  box-shadow: 0 10px 28px rgba(0,0,0,0.26);
+  padding: 7px 9px 2px; margin: 8px 0 18px;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}}
+[data-testid="stPlotlyChart"]:hover {{
+  border-color: rgba(34,211,238,0.52);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.34), 0 0 18px rgba(34,211,238,0.07);
+}}
+[data-testid="stPlotlyChart"] .js-plotly-plot {{ border-radius: 12px; }}
 [data-testid="stAlert"] {{ border-radius: 14px; }}
 /* chat */
 [data-testid="stChatMessage"] {{ background: rgba(17,26,46,0.65); border: 1px solid {P['border']}; border-radius: 18px;
