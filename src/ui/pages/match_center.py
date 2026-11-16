@@ -264,14 +264,15 @@ def _box_ratings(ctx: MatchContext) -> None:
             break
     else:
         return
-    st.markdown("##### 🏅 Avaliação 2.0 dos jogadores (por estatísticas)")
+    st.markdown("##### 🏅 Avaliação 3.0 dos jogadores (por estatísticas)")
     st.caption("Sem lances com coordenadas neste jogo: a nota usa os números por jogador (xG, xA, chances criadas, "
-               "passes no terço final, desarmes, recuperações, duelos, perdas…) comparados com jogadores da MESMA função "
-               "em outros jogos da mesma fonte. O que a fonte não mede (xT, pressão, entre linhas) não entra e reduz a "
-               "confiança — nunca vira zero.")
+               "passes no terço final, desarmes, recuperações, duelos, perdas e, quando disponíveis, sprints e ações "
+               "defensivas) comparados com jogadores da MESMA função. O que a fonte não mede não entra e reduz a confiança — nunca vira zero. "
+               "Nota final = desempenho estatístico + ajuste limitado para eventos decisivos que a fonte registra.")
     show = r.drop(columns=["_detalhe"]).rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
                                                         "minutos": "Min", "gols": "Gols", "assistencias": "Assist.",
-                                                        "desempenho": "Desempenho", "impacto": "Impacto",
+                                                        "nota": "Nota final", "nota_final": "Nota final",
+                                                        "desempenho": "Desempenho base", "impacto": "Impacto",
                                                         "confianca": "Confiança", "confianca_pct": "Conf. %",
                                                         "classificacao": "Leitura", "pares": "Pares"})
     comparison_table(show)
