@@ -94,7 +94,7 @@ IND_PT = {
     "participacao_pct": "Participação na troca de passes (%)", "pressao90": "Pressões /90",
     "acoes_defensivas90": "Ações defensivas /90", "sprints90": "Sprints /90",
     "pressao_campo_rival90": "Pressões no campo rival /90",
-    "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (xG no alvo − gols)",
+    "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (proxy informado pela fonte)",
     "saidas_aereas90": "Ações de goleiro na área /90", "gk_passe_pct": "Acerto de passe (%)", "gk_longos_pct": "Acerto em bolas longas (%)",
     "gk_prog90": "Passes progressivos /90", "gk_perdas90": "Perdas /90", "gk_erros": "Erros que deram chance",
     "gk_acoes_fora_area90": "Ações fora da área /90",
@@ -130,6 +130,16 @@ def role_of(position: Any) -> str:
     if "forward" in p or "striker" in p:
         return "centroavante"
     return "meia central"
+
+
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Converte estatística opcional sem propagar NaN para o cálculo da nota."""
+    try:
+        if value is None or pd.isna(value):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
 
 
 def pct_to_score(p: float) -> float:
@@ -467,7 +477,7 @@ def _score(v, series: pd.Series, higher: bool) -> Optional[float]:
 def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Desempenho, impacto e confiança de UMA atuação, com as dimensões e a base de cada uma."""
     funcao = row.get("funcao") or role_of(row.get("posicao"))
-    mins = float(row.get("minutos") or 0)
+    mins = max(0.0, _as_float(row.get("minutos")))
     role_mix = row.get("role_mix")
     peers = _peer_group(ref, funcao, role_mix)
     gk = funcao == "goleiro"
@@ -476,7 +486,7 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     )
     wts = list(base_wts)
     if not gk and isinstance(role_mix, dict) and role_mix:
-        mix = {str(k): max(float(v), 0.0) for k, v in role_mix.items() if k in WEIGHTS}
+        mix = {str(k): max(_as_float(v), 0.0) for k, v in role_mix.items() if k in WEIGHTS}
         total_mix = sum(mix.values())
         if total_mix > 0:
             wts = [
@@ -503,7 +513,7 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     obs = [(dim_score[k], w) for k, w in zip(dims, wts) if dim_score[k] is not None]
     raw = sum(s * w for s, w in obs) / sum(w for _, w in obs) if obs else None
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
-    c_min = min(1.0, mins / 60.0)
+    c_min = min(1.0, max(0.0, mins / 60.0))
     c_pool = min(1.0, len(peers) / 40.0)
     conf = round(100 * (0.35 * c_min + 0.35 * cover + 0.30 * c_pool))
     if mins < 15 or raw is None:
@@ -522,15 +532,15 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
             "dimensoes_pt": DIM_PT if not gk else GK_DIM_PT, "pesos": dict(zip(dims, wts)), "base": detail,
             "role_mix": (dict(role_mix) if isinstance(role_mix, dict) else {}),
             "eventos_decisivos": {
-                "gols": int(row.get("gols", 0) or 0), "assistencias": int(row.get("assistencias", 0) or 0),
-                "gols_decisivos": int((context or {}).get("gols_decisivos", 0) or 0),
-                "penaltis_defendidos_disputa": int(row.get("shootout_saves", 0) or 0),
-                "defesas_chave": int(row.get("key_saves", 0) or 0),
-                "penaltis_convertidos_disputa": int(row.get("shootout_penaltis_marcados", 0) or 0),
-                "penaltis_perdidos_disputa": int(row.get("shootout_penaltis_perdidos", 0) or 0),
-                "grandes_chances_desperdicadas": int(row.get("chances_claras_perdidas", 0) or 0),
-                "erros_que_geraram_chance": int(row.get("erros_que_viraram_chance", 0) or 0),
-                "expulsoes": int(row.get("vermelhos", 0) or 0),
+                "gols": int(_as_float(row.get("gols"))), "assistencias": int(_as_float(row.get("assistencias"))),
+                "gols_decisivos": int(_as_float((context or {}).get("gols_decisivos"))),
+                "penaltis_defendidos_disputa": int(_as_float(row.get("shootout_saves"))),
+                "defesas_chave": int(_as_float(row.get("key_saves"))),
+                "penaltis_convertidos_disputa": int(_as_float(row.get("shootout_penaltis_marcados"))),
+                "penaltis_perdidos_disputa": int(_as_float(row.get("shootout_penaltis_perdidos"))),
+                "grandes_chances_desperdicadas": int(_as_float(row.get("chances_claras_perdidas"))),
+                "erros_que_geraram_chance": int(_as_float(row.get("erros_que_viraram_chance"))),
+                "expulsoes": int(_as_float(row.get("vermelhos"))),
             },
             "pares": int(len(peers))}
 
@@ -538,31 +548,31 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
 def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> float:
     """Ajuste decisivo em pontos (não é uma segunda nota). Intervalo limitado a −1,5…+2,5."""
     ctx = context or {}
-    total_goals = max(float(row.get("gols", 0) or 0), 0.0)
+    total_goals = max(_as_float(row.get("gols")), 0.0)
     raw_penalties = row.get("gols_penalti")
     if raw_penalties is None or pd.isna(raw_penalties):
         # Fontes de boxscore podem não separar pênaltis de bola rolando: usa-se peso intermediário,
         # sem fingir que a distinção foi observada.
         goal_bonus = 0.42 * total_goals
     else:
-        penalty_goals = min(max(float(raw_penalties or 0), 0.0), total_goals)
+        penalty_goals = min(max(_as_float(raw_penalties), 0.0), total_goals)
         open_goals = max(total_goals - penalty_goals, 0.0)
         goal_bonus = 0.48 * open_goals + 0.30 * penalty_goals
     bonus = min(1.45, goal_bonus)
-    bonus += min(0.70, 0.35 * float(row.get("assistencias", 0) or 0))
-    bonus += min(0.40, 0.20 * float(ctx.get("gols_decisivos", 0) or 0))
+    bonus += min(0.70, 0.35 * _as_float(row.get("assistencias")))
+    bonus += min(0.40, 0.20 * _as_float(ctx.get("gols_decisivos")))
     # Defesas de pênalti na disputa e defesas de chances claras em momento de alta alavancagem.
     if row.get("funcao") == "goleiro":
-        bonus += min(1.50, 0.90 * float(row.get("shootout_saves", 0) or 0))
-        bonus += min(0.90, 0.65 * float(row.get("key_saves", 0) or 0))
-        # gols_evitados é proxy derivado de xG do chute, NÃO xGOT; só usamos valores positivos e com peso moderado.
-        prevented = max(float(row.get("gols_evitados", 0) or 0), 0.0)
+        bonus += min(1.50, 0.90 * _as_float(row.get("shootout_saves")))
+        bonus += min(0.90, 0.65 * _as_float(row.get("key_saves")))
+        # Em fontes sem xGOT, gols evitados pode ser um proxy baseado em xG pré-chute.
+        prevented = max(_as_float(row.get("gols_evitados")), 0.0)
         bonus += min(0.45, 0.25 * prevented)
-    bonus += min(0.30, 0.10 * float(row.get("shootout_penaltis_marcados", 0) or 0))
-    bonus -= min(0.70, 0.35 * float(row.get("shootout_penaltis_perdidos", 0) or 0))
-    bonus -= min(0.90, 0.45 * float(row.get("chances_claras_perdidas", 0) or 0))
-    bonus -= 0.80 * float(row.get("erros_que_viraram_chance", 0) or 0)
-    bonus -= 0.60 * float(row.get("vermelhos", 0) or 0)
+    bonus += min(0.30, 0.10 * _as_float(row.get("shootout_penaltis_marcados")))
+    bonus -= min(0.70, 0.35 * _as_float(row.get("shootout_penaltis_perdidos")))
+    bonus -= min(0.90, 0.45 * _as_float(row.get("chances_claras_perdidas")))
+    bonus -= 0.80 * _as_float(row.get("erros_que_viraram_chance"))
+    bonus -= 0.60 * _as_float(row.get("vermelhos"))
     return round(float(np.clip(bonus, -1.5, 2.5)), 1)
 
 
