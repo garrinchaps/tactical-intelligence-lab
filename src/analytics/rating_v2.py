@@ -751,10 +751,10 @@ def build_reference_from_db(limit: int = 300, progress=None) -> int:
     svc = MatchDataService()
     with svc.db.connect() as conn:
         ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT e.match_id FROM events e "
+            "SELECT e.match_id FROM events e "
             "JOIN matches m ON m.match_id = e.match_id "
             "WHERE m.data_level = 'EVENTS' "
-            "ORDER BY m.match_date DESC LIMIT ?",
+            "GROUP BY e.match_id ORDER BY MAX(m.match_date) DESC LIMIT ?",
             (int(limit),),
         )]
     dfs = []
