@@ -27,13 +27,16 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-PCT_TABLE = [(0, 0.5), (5, 2.0), (10, 3.0), (25, 4.5), (50, 5.5), (75, 7.0), (90, 8.5), (95, 9.2), (99, 10.0), (100, 10.0)]
-REF_SCORE = 5.5
+# Régua 3.0: centro neutro próximo de 6,4 (entre as bases divulgadas de 6,0–6,5),
+# com cauda alta mais exigente. P99 continua raro; os percentis são calibrados por função.
+PCT_TABLE = [(0, 3.0), (5, 3.8), (10, 4.5), (25, 5.5), (50, 6.4), (75, 7.4), (90, 8.6), (95, 9.25), (99, 10.0), (100, 10.0)]
+REF_SCORE = 6.4
+RATING_ENGINE_VERSION = "3.0"
 
 DIMS = ["ofensiva", "criacao", "progressao", "defesa", "eficiencia", "disciplina", "tatica"]
 DIM_PT = {"ofensiva": "Produção ofensiva", "criacao": "Criação e construção", "progressao": "Progressão",
           "defesa": "Contribuição defensiva", "eficiencia": "Eficiência técnica", "disciplina": "Disciplina e segurança",
-          "tatica": "Impacto tático (inferido)"}
+          "tatica": "Trabalho coletivo e sem bola (observável)"}
 WEIGHTS = {   # % por função (cada linha soma 100)
     "centroavante": [35, 15, 12, 8, 15, 5, 10], "ponta": [27, 18, 20, 10, 12, 5, 8],
     "meia ofensivo": [20, 25, 18, 10, 12, 5, 10], "meia central": [14, 22, 20, 17, 12, 5, 10],
@@ -63,7 +66,8 @@ INDICATORS: Dict[str, tuple] = {
     "perdas_por_toque": ("eficiencia", 1.0, False), "perdas_perigosas90": ("eficiencia", 1.0, False),
     "amarelos": ("disciplina", 1.0, False), "faltas90": ("disciplina", 0.6, False),
     "entre_linhas90": ("tatica", 1.0, True), "participacao_pct": ("tatica", 1.0, True),
-    "pressao_campo_rival90": ("tatica", 0.8, True),
+    "pressao90": ("tatica", 0.8, True), "pressao_campo_rival90": ("tatica", 0.9, True),
+    "acoes_defensivas90": ("tatica", 0.7, True), "sprints90": ("tatica", 0.35, True),
 }
 GK_INDICATORS: Dict[str, tuple] = {
     "defesas90": ("defesas", 0.8, True), "pct_defesas": ("defesas", 1.0, True), "gols_evitados": ("defesas", 1.6, True),
@@ -143,6 +147,55 @@ def label(n: Optional[float]) -> str:
             "razoável" if n < 7 else "boa" if n < 8 else "muito boa" if n < 9 else "excelente" if n < 9.6 else "excepcional")
 
 
+# ------------------------------------------------------------------ momentos decisivos observáveis
+def _shootout_contributions(df: pd.DataFrame) -> Dict[str, Dict[str, int]]:
+    """Atribui defesas da disputa ao goleiro identificado na própria partida; não confunde chute para fora com defesa."""
+    from src.metrics.match_facts import _regular
+
+    result: Dict[str, Dict[str, int]] = {}
+    if df is None or df.empty or not {"period", "type_name", "team_name", "player_name"}.issubset(df.columns):
+        return result
+    regular = _regular(df)
+    goalkeepers: Dict[str, str] = {}
+    if "position_name" in regular:
+        is_gk = regular["position_name"].astype(str).str.contains("goalkeeper|goleiro", case=False, na=False)
+        gks = regular[is_gk & regular["player_name"].notna()]
+        for team, group in gks.groupby("team_name"):
+            counts = group["player_name"].value_counts()
+            if not counts.empty:
+                goalkeepers[str(team)] = str(counts.index[0])
+    # Algumas fontes não anotam position_name, mas registram ações próprias do goleiro.
+    if "type_name" in regular and not goalkeepers:
+        actions = regular[regular["type_name"].astype(str).str.lower().isin(["goal keeper", "goalkeeper"])]
+        for team, group in actions.groupby("team_name"):
+            counts = group["player_name"].dropna().value_counts()
+            if not counts.empty:
+                goalkeepers[str(team)] = str(counts.index[0])
+
+    attempts = df[(df["period"] == 5) & (df["type_name"] == "Shot")]
+    teams = [str(x) for x in df["team_name"].dropna().unique()]
+    for shot in attempts.itertuples():
+        shooter = str(getattr(shot, "player_name", "") or "")
+        shooting_team = str(getattr(shot, "team_name", "") or "")
+        outcome = str(getattr(shot, "shot_outcome_name", "") or "")
+        if not shooter or not shooting_team:
+            continue
+        row = result.setdefault(shooter, {"shootout_penaltis_marcados": 0, "shootout_penaltis_perdidos": 0,
+                                          "shootout_saves": 0})
+        if outcome == "Goal":
+            row["shootout_penaltis_marcados"] += 1
+        else:
+            row["shootout_penaltis_perdidos"] += 1
+        if "saved" in outcome.lower():
+            defending = next((team for team in teams if team != shooting_team), None)
+            keeper = goalkeepers.get(defending or "")
+            if keeper:
+                gk_row = result.setdefault(keeper, {"shootout_penaltis_marcados": 0,
+                                                    "shootout_penaltis_perdidos": 0, "shootout_saves": 0})
+                gk_row["shootout_saves"] += 1
+    return result
+
+
 # ------------------------------------------------------------------ indicadores por jogador e partida
 def indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Indicadores brutos (por 90 e taxas) de cada jogador numa partida com lances."""
@@ -202,8 +255,13 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             xg_on = float(pd.to_numeric(on_t.get("shot_statsbomb_xg", 0), errors="coerce").fillna(0).sum())
             longp = ps[pd.to_numeric(ps.get("pass_length", 0), errors="coerce").fillna(0) >= 32]
             longp_ok = longp[longp.get("pass_outcome_name").isna()] if "pass_outcome_name" in longp else longp
+            saved_shots = on_t[on_t.get("shot_outcome_name", pd.Series(dtype=object)).astype(str).str.contains("Saved", case=False)]
+            saved_xg = pd.to_numeric(saved_shots.get("shot_statsbomb_xg", pd.Series(dtype=float)), errors="coerce").fillna(0)
+            saved_min = pd.to_numeric(saved_shots.get("minute", pd.Series(dtype=float)), errors="coerce").fillna(0)
+            key_saves = int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
             gk = {"defesas90": saves * f, "pct_defesas": 100 * saves / len(on_t) if len(on_t) else None,
                   "gols_evitados": xg_on - ga if len(on_t) else None, "gols_sofridos": ga, "defesas": saves,
+                  "key_saves": key_saves,
                   "finalizacoes_no_alvo_enfrentadas": int(len(on_t)), "xg_no_alvo_enfrentado": round(xg_on, 2),
                   "saidas_aereas90": int((et == "Goal Keeper").sum()) * f if (et == "Goal Keeper").any() else None,
                   "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) else None,
@@ -214,10 +272,19 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                                                                        "Goal Keeper"])).sum()) * f}
         np_goals = int((is_goal & ~is_pen).sum())
         pen_goals = int((is_goal & is_pen).sum())
-        own_goal_after_error = int((et == "Error").sum())
+        # Só penaliza erro que o provedor marque explicitamente como causador de finalização/gol.
+        # Um evento genérico "Error" não prova, sozinho, que o erro gerou uma chance.
+        error_flag = next((k for k in ("is_error_leading_to_shot", "is_error_leading_to_goal") if k in e), None)
+        errors_to_chance = int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum()) if error_flag else 0
+        pos_series = e["position_name"].dropna().astype(str) if "position_name" in e else pd.Series(dtype=str)
+        role_counts = pos_series.map(role_of).value_counts() if not pos_series.empty else pd.Series(dtype=float)
+        role_mix = ({str(k): float(v / role_counts.sum()) for k, v in role_counts.items()}
+                    if not role_counts.empty and role_counts.sum() else {})
+        primary_role = max(role_mix, key=role_mix.get) if role_mix else role_of(
+            e["position_name"].dropna().mode().iloc[0] if "position_name" in e and not e["position_name"].dropna().empty else "")
         rows.append({
             "jogador": p, "equipe": team, "posicao": e["position_name"].dropna().mode().iloc[0] if "position_name" in e
-            and not e["position_name"].dropna().empty else "", "minutos": m,
+            and not e["position_name"].dropna().empty else "", "funcao": primary_role, "role_mix": role_mix, "minutos": m,
             "gols": np_goals + pen_goals, "gols_penalti": pen_goals,
             "assistencias": sum(1 for g in gl if g.get("assistencia") == p),
             "gols_np90": np_goals * f, "gols_pen90": pen_goals * f, "xg90": float(sxg.sum()) * f, "xg": round(float(sxg.sum()), 2),
@@ -248,7 +315,10 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "perdas_perigosas90": len(own_half_turn) * f,
             "amarelos": int((e.get("foul_committed_card_name") == "Yellow Card").sum()) if "foul_committed_card_name" in e else 0,
             "vermelhos": int(e.get("foul_committed_card_name", pd.Series(dtype=object)).isin(["Red Card", "Second Yellow"]).sum()),
-            "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": own_goal_after_error,
+            "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": errors_to_chance,
+            "pressao90": int((et == "Pressure").sum()) * f,
+            "acoes_defensivas90": int(pd.to_numeric(e.get("is_defensive_action", 0), errors="coerce").fillna(0).sum()) * f
+                if "is_defensive_action" in e else None,
             "entre_linhas90": len(between) * f,
             "participacao_pct": 100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1),
             "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f if (t == "Pressure").any() else None,
@@ -263,7 +333,21 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             kp = dict(zip(pm["jogador"], pm["passes_decisivos"]))
             out["decisivos90"] = [kp.get(p, 0) * 90 / max(m, 1) for p, m in zip(out["jogador"], out["minutos"])]
             out["passes_decisivos"] = out["jogador"].map(kp).fillna(0).astype(int)
-        out["funcao"] = out["posicao"].map(role_of)
+        # A distribuição de papéis vem das posições registradas nos eventos. É uma aproximação pela participação
+        # das ações em cada posição, não tracking minuto a minuto.
+        if "funcao" not in out:
+            out["funcao"] = out["posicao"].map(role_of)
+        else:
+            out["funcao"] = out["funcao"].fillna(out["posicao"].map(role_of))
+        shootout = _shootout_contributions(df)
+        for idx, player in out["jogador"].items():
+            extra = shootout.get(str(player), {})
+            for key, value in extra.items():
+                out.loc[idx, key] = value
+        for key in ("shootout_penaltis_marcados", "shootout_penaltis_perdidos", "shootout_saves"):
+            if key not in out:
+                out[key] = 0
+            out[key] = pd.to_numeric(out[key], errors="coerce").fillna(0).astype(int)
     return out
 
 
@@ -367,7 +451,20 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     mins = float(row.get("minutos") or 0)
     peers = _peer_group(ref, funcao)
     gk = funcao == "goleiro"
-    inds, dims, wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (INDICATORS, DIMS, WEIGHTS.get(funcao, WEIGHTS["meia central"]))
+    inds, dims, base_wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (
+        INDICATORS, DIMS, WEIGHTS.get(funcao, WEIGHTS["meia central"])
+    )
+    wts = list(base_wts)
+    role_mix = row.get("role_mix")
+    if not gk and isinstance(role_mix, dict) and role_mix:
+        mix = {str(k): max(float(v), 0.0) for k, v in role_mix.items() if k in WEIGHTS}
+        total_mix = sum(mix.values())
+        if total_mix > 0:
+            wts = [
+                sum(WEIGHTS[role][i] * share for role, share in
+                    ((role, weight / total_mix) for role, weight in mix.items()))
+                for i in range(len(DIMS))
+            ]
     acc: Dict[str, List[tuple]] = {k: [] for k in dims}
     detail = []
     for k, (dim, w, hi) in inds.items():
@@ -399,8 +496,11 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
         if perf >= 9.6 and (cover < 0.85 or mins < 75):
             perf = 9.5                               # 10 exige atuação completa e bem observada
     imp = impact(row, perf, context)
+    # A nota principal incorpora momentos decisivos. "desempenho" continua disponível como base estatística,
+    # enquanto "impacto" e "nota" refletem também gols, assistências, defesas-chave e pênaltis defendidos.
+    nota = imp
     return {"jogador": row.get("jogador"), "equipe": row.get("equipe"), "funcao": funcao, "minutos": mins,
-            "desempenho": perf, "classificacao": label(perf), "impacto": imp,
+            "desempenho": perf, "nota": nota, "nota_final": nota, "classificacao": label(nota), "impacto": imp,
             "confianca_pct": conf, "confianca": "alta" if conf >= 75 else "média" if conf >= 50 else "baixa",
             "amostra": minutes_tier(mins), "dimensoes": {k: (round(v, 1) if v is not None else None) for k, v in dim_score.items()},
             "dimensoes_pt": DIM_PT if not gk else GK_DIM_PT, "pesos": dict(zip(dims, wts)), "base": detail,
@@ -408,23 +508,29 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
 
 
 def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[str, Any]] = None) -> Optional[float]:
-    """
-    Impacto na partida (0–10): parte do desempenho e soma o que MUDOU o jogo — gols (pênalti vale menos), gol que
-    decidiu/empatou, assistências, xG+xA criados; erros que viraram gol e expulsão tiram muito. O resultado do time
-    não entra (um zagueiro impecável numa derrota não perde nota por isso).
-    """
+    """Ajuste decisivo da nota (0–10), limitado para que um único evento não apague os 90 minutos."""
     if perf is None:
         return None
     ctx = context or {}
-    s = perf
-    s += 0.9 * (row.get("gols", 0) - row.get("gols_penalti", 0)) + 0.4 * row.get("gols_penalti", 0)
-    s += 0.5 * ctx.get("gols_decisivos", 0)
-    s += 0.6 * row.get("assistencias", 0)
-    s += 0.6 * min(float(row.get("xg", 0) or 0) + float(row.get("xa", 0) or 0), 2.0)
-    if row.get("funcao") == "goleiro" and row.get("gols_evitados") is not None:
-        s += 0.8 * float(row["gols_evitados"])
-    s -= 1.5 * row.get("vermelhos", 0) + 1.0 * row.get("erros_que_viraram_chance", 0)
-    return round(float(np.clip(s, 0, 10)), 1)
+    open_goals = max(float(row.get("gols", 0) or 0) - float(row.get("gols_penalti", 0) or 0), 0.0)
+    penalty_goals = max(float(row.get("gols_penalti", 0) or 0), 0.0)
+    bonus = min(1.45, 0.48 * open_goals + 0.30 * penalty_goals)
+    bonus += min(0.70, 0.35 * float(row.get("assistencias", 0) or 0))
+    bonus += min(0.40, 0.20 * float(ctx.get("gols_decisivos", 0) or 0))
+    # Defesas de pênalti na disputa e defesas de chances claras em momento de alta alavancagem.
+    if row.get("funcao") == "goleiro":
+        bonus += min(1.50, 0.90 * float(row.get("shootout_saves", 0) or 0))
+        bonus += min(0.90, 0.65 * float(row.get("key_saves", 0) or 0))
+        # gols_evitados é proxy derivado de xG do chute, NÃO xGOT; só usamos valores positivos e com peso moderado.
+        prevented = max(float(row.get("gols_evitados", 0) or 0), 0.0)
+        bonus += min(0.45, 0.25 * prevented)
+    bonus += min(0.30, 0.10 * float(row.get("shootout_penaltis_marcados", 0) or 0))
+    bonus -= min(0.70, 0.35 * float(row.get("shootout_penaltis_perdidos", 0) or 0))
+    bonus -= min(0.90, 0.45 * float(row.get("chances_claras_perdidas", 0) or 0))
+    bonus -= 0.80 * float(row.get("erros_que_viraram_chance", 0) or 0)
+    bonus -= 0.60 * float(row.get("vermelhos", 0) or 0)
+    # O ajuste de eventos é importante, mas tem limite para não virar uma nota de gols e assistências.
+    return round(float(np.clip(perf + np.clip(bonus, -1.5, 2.5), 0, 10)), 1)
 
 
 def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
@@ -440,11 +546,14 @@ def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
     for r in ind.to_dict("records"):
         ev = evaluate(r, ref, {"gols_decisivos": decisive.get(r["jogador"], 0)})
         rows.append({**{k: r.get(k) for k in ("jogador", "equipe", "posicao", "funcao", "minutos", "gols", "assistencias",
-                                              "xg", "xa", "defesas", "gols_sofridos", "gols_evitados")},
-                     "desempenho": ev["desempenho"], "impacto": ev["impacto"], "confianca": ev["confianca"],
+                                              "xg", "xa", "defesas", "gols_sofridos", "gols_evitados",
+                                              "key_saves", "shootout_saves", "shootout_penaltis_marcados",
+                                              "shootout_penaltis_perdidos", "role_mix")},
+                     "desempenho": ev["desempenho"], "impacto": ev["impacto"], "nota": ev["nota"],
+                     "nota_final": ev["nota_final"], "confianca": ev["confianca"],
                      "confianca_pct": ev["confianca_pct"], "classificacao": ev["classificacao"], "amostra": ev["amostra"],
                      **{f"dim_{k}": v for k, v in ev["dimensoes"].items()}, "_detalhe": ev})
-    return pd.DataFrame(rows).sort_values(["desempenho"], ascending=False, na_position="last").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(["nota"], ascending=False, na_position="last").reset_index(drop=True)
 
 
 def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
