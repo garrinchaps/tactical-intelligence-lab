@@ -107,7 +107,20 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
   ~1 pedido por liga/ano), `--only espn_resumos --limite N` (estatísticas + escalações + números por jogador, ~1 s
   cada, Brasil e Europa principal primeiro, continua de onde parou), `--only espn_elencos` (elenco atual + lesões).
   A ESPN agora vem LIGADA por padrão (ENABLE_ESPN_PUBLIC_FEED=false desliga).
-- Understat: deu 0 partidas; a v35 não guarda mais resposta vazia em cache e mostra o motivo — conferir.
+- Understat: deu 0 partidas porque o SITE ESTÁ FORA DO AR ("We will come back soon", conferido em 16/11/2026) — não é
+  defeito do PC nem do conector.
+- **FotMob (rodada 5, NOVA)**: JSON público do site (`/api/data/leagues`, `/api/data/matchDetails`), sem chave. ~100
+  competições (`LEAGUES` em `src/data_hub/sources/fotmob.py`: Série A–D, Copa do Brasil, estaduais, Copa do Nordeste,
+  sul-americanas, 1ª/2ª divisões europeias e copas, feminino, MLS, Liga MX), até 5 temporadas. Por jogo: estatísticas
+  com xG/xGOT/xG de bola parada (distância/sprints só onde a liga mede, ex. Premier League), escalação com posição
+  EXATA (layout), números por jogador (xA, chances criadas, passes no terço final, recuperações, duelos, nota da
+  FotMob, id do atleta), mapa de chutes (`match_shots`), cartões, gols, substituições, desfalques. ~35 KB por jogo.
+  Comandos: `--only fotmob_temporada --temporadas N` (resultados + calendário), `--only fotmob_jogos --limite N`
+  (detalhes, retomável). Automático só com `ENABLE_FOTMOB=true` no .env (o usuário põe; nunca abrir o .env).
+  Ids: faixa 12B. Uso pessoal e não comercial.
+- Bloqueiam robôs (403, não contornar): FBref, Sofascore, zerozero/ogol, worldfootball. Pagas/sob contrato (não
+  integradas, exigem chave/plano): Sportmonks, Sportradar, Opta/Stats Perform (Opta Vision), Wyscout (só o dataset
+  aberto 17/18 que já temos), StatsBomb comercial. football-data.org precisa de chave (conector já existe).
 - Nenhuma fonte aberta tem lances com coordenadas do Brasileirão nem dados físicos (velocidade, distância, mapa de
   calor de tracking).
 
@@ -188,6 +201,29 @@ Rodada 4 (16/11/2026, 259 testes verdes):
 - ✅ Assistente: duas perguntas na mesma mensagem, "foi bom ou ruim?", quem merecia ganhar (xG/xT), principal criador,
   quem mais atacou as costas, quem menos marcou, jogador ausente explicado, respostas com abertura direta e "Em resumo".
 - Limitação: abaixo da Série B não há fonte aberta acessível (OpenLigaDB é alemã; football-data.org grátis só Série A).
+
+Rodada 5 (16/11/2026, 276 testes verdes):
+- ✅ URGENTE posições: `src/squad/positions.py` — posição precisa × genérica por fonte (G/D/M/F da API-Football só diz o
+  setor, não vira centroavante/zagueiro), LM/RM da ESPN pelo desenho, mesmo jogo de 2 fontes conta 1 vez, cadastro do
+  Transfermarkt como desempate; `squad_from_db` usa a mesma regra. Era a causa de Yamal no meio e Koundé na zaga.
+- ✅ Escalação: jogo HIPOTÉTICO contra qualquer time com escalação; campinho em pé (nota no círculo, anel de encaixe,
+  sigla, nome em etiqueta); próximos jogos sem duplicar ESPN × FotMob; pré-jogo do rival com estilo e problemas recorrentes.
+- ✅ Fonte FotMob (ver seção 6) + nota 2.0 por estatísticas (`src/analytics/rating_box.py`, régua própria
+  `python -m src.analytics.rating_box --referencia 400`), mapa de chutes e notas na página de jogos sem lances, cartão
+  do jogador estilo FC (qualidade, fase, regularidade).
+- ✅ Assistente: por que venceu (`src/intelligence/match_story.py`: fatos → leitura → hipóteses), parar vários jogadores
+  (fonte comum, ligação, corredor), estratégias pelo perfil medido (zona 14, profundidade, drible, condução, cruzamento,
+  aéreo, proposição), perigo por critérios separados, goleiro/escalação direto, presença (banco/não relacionado),
+  sprints só com dado físico real, pronome = jogador anterior, perguntas de substituição/placar/estilo/jogos parecidos.
+  Disputa de pênaltis fora dos blocos táticos.
+- ✅ Rodada 5 tática: `src/analytics/match_patterns.py` (bola parada, impacto das substituições — associação, não causa —,
+  estado do jogo) e `src/analytics/team_history.py` (identidade com consistência, problemas que se repetem ≥4 jogos e
+  ≥60%, pós-jogo × habitual, jogos parecidos); seção "🧩 Padrões e histórico" no jogo; aba "🧬 Estilo e tendências" no clube.
+- ✅ `python -m src.machine_learning.benchmark`: na amostra da Copa (64 jogos) a regressão logística com distância/ângulo/
+  passes (AUC 0,640) é estatisticamente MELHOR que a rede (0,623); zonas e placar quase não ajudam. Modelo em uso não
+  foi trocado (decisão do usuário); painel nos Bastidores.
+- Não feito: padrões ofensivos por sequência (terceiro homem etc.), perfil de treinador (fontes não trazem treinador de
+  forma confiável), tracking/360 de outras ligas (não existe aberto), estaduais/Série D por notícia de escalação.
 
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
