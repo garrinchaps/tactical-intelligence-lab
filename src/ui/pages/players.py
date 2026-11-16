@@ -6,6 +6,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.metrics.player_evaluator import PlayerTacticalEvaluator
 from src.reports.report_builder import TacticalReportBuilder
 from src.ui.components import comparison_table, empty_state, error_state, note, page_header, provenance_panel, source_gap
@@ -91,7 +93,7 @@ def _scout(ctx: MatchContext, players_df: pd.DataFrame) -> None:
         pa = c1.selectbox("Atleta A", names, index=0)
         pb = c2.selectbox("Atleta B", names, index=1)
         ctx.prov("radar", "Radar comparativo", f"{pa} x {pb}", "percentual do máximo da equipe na partida")
-        st.plotly_chart(_radar(players_df, pa, pb), use_container_width=True)
+        render_chart(_radar(players_df, pa, pb), use_container_width=True)
         if ctx.is_sim:
             note("Partida simulada", "Os valores individuais vêm do gerador por perfis: comparação ilustrativa.", "warn")
 
