@@ -694,3 +694,38 @@ def test_guard_count_never_derives_from_a_decimal():
           "blocos": {"x": {"eventos": 948, "xt": 39.23, "passes": 51}}}
     assert not G.audit_text_numbers("O Matheus Pereira cometeu 987 perdas de posse.", ev)["is_grounded"]  # 948 + 39,23
     assert G.audit_text_numbers("Foram 999 ações no total.", ev)["is_grounded"]                         # 948 + 51
+
+
+# ------------------------------------------------------------------ rodada 3: perguntas táticas reais do usuário
+TACTICAL_QS = [
+    ("como eu poderia fazer para explorar mais as dificuldades defensivas da frança?", "attack_plan", "explorar a defesa"),
+    ("como eu poderia anular o harry kane nessa partida?", "plan", "não está nesta partida"),
+    ("como o messi foi? ele fez gol?", None, "Sim, Lionel Messi marcou"),
+    ("Em quais corredores a França conseguiu progredir com mais facilidade: lateral, central ou meio-espaço?", "corridors", "Por onde"),
+    ("A Argentina sofreu mais com bolas nas costas da defesa, infiltrações entre os zagueiros ou jogadas pelos lados?",
+     "conceded_how", "Como Argentina sofreu"),
+    ("Quais defensores argentinos tiveram maior participação nos erros que originaram situações perigosas?", "ranking", "Erros dos defensores"),
+    ("Como a França explorou os espaços deixados entre a linha defensiva e os meio-campistas argentinos?", "between_lines", "entre as linhas"),
+    ("A França teve menos posse mas marcou três. O que explica essa diferença de eficiência?", "efficiency", "Eficiência"),
+    ("Em quais momentos da partida a França conseguiu quebrar a organização defensiva argentina?", "moments", "Momentos do jogo"),
+    ("Identifique os padrões de movimentação que antecederam os gols franceses.", "goal_buildup", "Como nasceram os gols"),
+    ("Construa um diagnóstico individual dos defensores argentinos, apontando vulnerabilidades e possíveis correções.",
+     "defenders_diag", "Diagnóstico individual"),
+    ("Identifique quais combinações de jogadores produziram maior progressão territorial e perigo ofensivo.", "combinations", "Duplas"),
+    ("Compare os comportamentos ofensivos de Messi e Di María nessa partida.", None, "Lado a lado"),
+]
+
+
+@pytest.mark.parametrize("q,ask,needle", TACTICAL_QS)
+def test_tactical_questions_have_own_answer(final_df, q, ask, needle):
+    from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+    from src.preprocessing.event_cleaner import EventPreprocessor
+
+    meta = {"match_id": 3869685, "data_level": "EVENTS", "home_team_name": "Argentina", "away_team_name": "France"}
+    r = DynamicTacticalAnalyst(api_key="").answer(q, "Argentina", meta, final_df, EventPreprocessor.build_possession_chains(final_df),
+                                                  prefer_llm=False)
+    md = r["report_markdown"]
+    assert r["scope"]["ask"] == ask and needle in md, md[:300]
+    assert not (r["evidence"] or {}).get("escopo", {}).get("resumo_generico")
+    assert "Com a bola — " not in md                                     # sem despejar o bloco do time
+    assert r["hallucination_audit"]["is_grounded"]

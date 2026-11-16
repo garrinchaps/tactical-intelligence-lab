@@ -37,6 +37,10 @@ def _pct(a: float, b: float) -> Optional[float]:
     return round(100.0 * a / b, 1) if b else None
 
 
+TACTICAL_ASKS = {"corridors", "conceded_how", "between_lines", "efficiency", "moments", "goal_buildup",
+                 "defenders_diag", "combinations", "attack_plan"}
+
+
 class ScopedEvidenceBuilder:
     # ----------------------------------------------------------- filtros
     @staticmethod
@@ -274,6 +278,12 @@ class ScopedEvidenceBuilder:
             "duelos_aereos_perdidos": int(((ev["type_name"] == "Duel") & (ev.get("duel_type_name") == "Aerial Lost")).sum()),
             "perdas_de_posse": int((ev["is_turnover"] == 1).sum()),
             "recuperacoes": int((ev["is_ball_recovery"] == 1).sum()),
+            "gols": int(((shots.get("shot_outcome_name") == "Goal")).sum()) if len(shots) else 0,
+            "minutos_dos_gols": [int(m) + 1 for m in shots.loc[shots.get("shot_outcome_name") == "Goal", "minute"]] if len(shots) else [],
+            "finalizacoes_no_alvo": int(shots.get("shot_outcome_name", pd.Series(dtype=object)).isin(["Goal", "Saved", "Saved To Post"]).sum()),
+            "finalizacoes_dentro_da_area": int(((shots["x"] >= 102) & (shots["y"].between(18, 62))).sum()) if len(shots) else 0,
+            "zonas_onde_mais_atuou": cls._top_zones(ev, "x", "y", 2),
+            "zonas_onde_recebeu": cls._top_zones(received, "end_x", "end_y", 2) if "end_x" in received else [],
             "quem_mais_o_abastece": received.groupby("player_name").size().sort_values(ascending=False).head(2).to_dict(),
             "para_quem_mais_passa": comp.groupby("pass_recipient_name").size().sort_values(ascending=False).head(2).to_dict(),
             "amostra_N": int(len(ev)),
@@ -309,6 +319,13 @@ class ScopedEvidenceBuilder:
 
         metric = sc.ranking_metric or "xt"
         w = df[cls._time_mask(df, sc)]
+        if metric == "erros_perigosos":
+            from src.intelligence.tactical_blocks import dangerous_errors
+
+            scope = team if sc.team_named else None
+            return {"metrica": "Erros que viraram finalização do rival", "chave": metric,
+                    "erros_perigosos": dangerous_errors(w, scope, sc.position_filter), "lideres": [],
+                    "equipes_consideradas": scope or f"{team} e {opp}", "amostra_N": int(len(w))}
         if metric == "perigo_ia":
             return cls.block_danger_ranking(w, sc, team, opp, top)
         if sc.side or sc.third:
@@ -329,6 +346,10 @@ class ScopedEvidenceBuilder:
         st = player_match_stats(w, scope_team)
         if st.empty:
             return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0}
+        if sc.position_filter:
+            from src.metrics.player_rating import sector
+
+            st = st[st["posicao"].map(sector) == sc.position_filter]
         st = st[st[metric].fillna(0) > 0].sort_values([metric, "minutos"], ascending=[False, True]).head(top)
         extra = {"finalizacoes_no_alvo": "finalizacoes", "passes_certos": "passes", "gols": "finalizacoes",
                  "assistencias": "passes_decisivos", "perigo": "xg", "passes_errados": "passes"}.get(metric)
@@ -703,6 +724,55 @@ class ScopedEvidenceBuilder:
         return {"equipe": team, "adversario": opp, "fortes": issues[:4], "amostra_N": int(len(df)),
                 "criterio": "o que a equipe impôs ao rival no mesmo jogo (mesma régua das falhas, lado trocado)"}
 
+    @staticmethod
+    def _defender(sc: QueryScope, team: str, other: str) -> str:
+        """Quem DEFENDE na pergunta: o time citado depois de 'defesa/dificuldades/fraquezas/espaços'."""
+        import re as _re
+
+        from src.intelligence.query_understanding import DEMONYMS, QueryUnderstanding, norm as _n
+
+        t = _n(sc.raw)
+        for rx, c in DEMONYMS.items():
+            t = _re.sub(rx, c, t)
+        m = _re.search(r"(defesa|defensiv\w*|dificuldades?|fraquezas?|fragilidades?|espacos?|linha defensiva|zaga)", t)
+        if m:
+            tail = t[m.start():]
+            pos = {tm: QueryUnderstanding._team_position(tail, tm) for tm in (team, other)}
+            hit = [tm for tm, p in sorted(pos.items(), key=lambda kv: (kv[1] is None, kv[1] or 0)) if p is not None]
+            if hit:
+                return hit[0]
+        return team
+
+    @classmethod
+    def block_tactical(cls, df: pd.DataFrame, sc: QueryScope, team: str, other: str) -> Dict[str, Any]:
+        from src.intelligence import tactical_blocks as T
+
+        w = df[cls._time_mask(df, sc)]
+        a = sc.ask
+        if a == "corridors":
+            return {"corredores": T.corridors(w, team)}
+        if a == "conceded_how":
+            dfd = cls._defender(sc, team, other) if sc.team_named else team
+            return {"como_sofreu": T.conceded_how(w, dfd, other if dfd == team else team)}
+        if a == "between_lines":
+            dfd = cls._defender(sc, team, other)
+            att = other if dfd == team else team
+            return {"entre_linhas": T.between_lines(w, att, dfd)}
+        if a == "efficiency":
+            return {"eficiencia": T.efficiency(w, [team, other])}
+        if a == "moments":
+            return {"momentos": {**T.moments(w, [team, other]), "foco": team}}
+        if a == "goal_buildup":
+            return {"jogadas_dos_gols": T.goal_buildup(w, team)}
+        if a == "defenders_diag":
+            return {"defensores": T.defenders_diag(w, team)}
+        if a == "combinations":
+            return {"duplas": T.combinations(w, team if sc.team_named else None)}
+        if a == "attack_plan":
+            dfd = cls._defender(sc, team, other)
+            return {"plano_ataque": T.attack_plan(w, other if dfd == team else team, dfd)}
+        return {}
+
     # ------------------------------------------------------- montagem
     @classmethod
     def build(cls, df: pd.DataFrame, sc: QueryScope, target_team: str, meta: Dict[str, Any]) -> Dict[str, Any]:
@@ -711,6 +781,9 @@ class ScopedEvidenceBuilder:
         team, other = (opp, target_team) if sc.team_focus == "opponent" else (target_team, opp)
 
         blocks: Dict[str, Any] = {"contexto": cls.block_context(df, sc, team, other)}
+        if sc.absent and not sc.players and sc.ask in (None, "plan", "presence"):
+            blocks["ausente"] = {"nomes": sc.absent, "elenco_da_partida": int(df["player_name"].nunique())}
+            return cls._wrap(df, sc, team, other, meta, blocks)
         if sc.ask == "profile":
             blocks["perfil"] = cls.block_profile(df, team, other, sc.attribute or "altura", meta)
         elif sc.ask == "unavailable":
@@ -728,6 +801,8 @@ class ScopedEvidenceBuilder:
         elif sc.ask == "errors":
             for p in sc.players[:2]:
                 blocks[f"erros::{p}"] = cls.block_errors(df, sc, p)
+        elif sc.ask in TACTICAL_ASKS:
+            blocks.update(cls.block_tactical(df, sc, team, other))
         elif sc.ask == "weakness":
             blocks["falhas"] = cls.block_weakness(df, sc, team, other)
         elif sc.ask == "strength":
@@ -739,12 +814,22 @@ class ScopedEvidenceBuilder:
             else:
                 blocks["plano_equipe"] = cls.block_plan_team(df, sc, team, other)
         if sc.ask:
+            if sc.also_weakness:
+                blocks["falhas"] = cls.block_weakness(df, sc, team, other)
             return cls._wrap(df, sc, team, other, meta, blocks)
         m = set(sc.metrics)
         phase = sc.phase
         if sc.players:
             for p in sc.players:
                 blocks[f"jogador::{p}"] = cls.block_player(df, sc, p)
+            if len(sc.players) >= 2:
+                blocks["comparacao"] = {"jogadores": sc.players[:3]}
+            if sc.also_weakness:
+                wk_team = team
+                blocks["falhas"] = cls.block_weakness(df, sc, wk_team, other)
+            # pergunta sobre jogador: NÃO despeja o bloco do time junto (só se a pergunta pedir a equipe explicitamente)
+            if not (sc.team_named and phase and not sc.also_weakness):
+                return cls._wrap(df, sc, team, other, meta, blocks)
         if phase in ("defensive", "both") or (m & {"compactness"}) or (not phase and sc.side and not sc.players):
             blocks["defesa_no_recorte"] = cls.block_defense(df, sc, team, other)
         if phase in ("offensive", "both") or (not phase and m & {"shots", "passing", "progression", "crosses"}):

@@ -40,9 +40,36 @@ FOOTBALL_TERMS = {
     "decisivo", "virada", "classificou", "eliminou", "final", "semifinal", "jogada", "lance", "lances",
     "estrategia", "goleada", "perigo", "perigoso", "perigosa", "tocou", "toques", "anular", "parar", "neutralizar", "plano", "jogar",
 }
+# gentílicos → nome do país (para "defesa francesa", "jogadores ingleses" acharem a seleção certa)
+DEMONYMS = {
+    r"\bingles(a|es|as)?\b": "inglaterra", r"\bfrances(a|es|as)?\b": "franca", r"\bbrasileir[oa]s?\b": "brasil",
+    r"\bargentin[oa]s?\b": "argentina", r"\bespanh(ol|ola|ois|olas)\b": "espanha", r"\balem(ao|aes|a|as)\b": "alemanha",
+    r"\bitalian[oa]s?\b": "italia", r"\bportugues(a|es|as)?\b": "portugal", r"\bholandes(a|es|as)?\b": "holanda",
+    r"\bcroat[ao]s?\b": "croacia", r"\buruguai[oa]s?\b": "uruguai", r"\bbelg[ao]s?\b": "belgica",
+    r"\bmarroquin[oa]s?\b": "marrocos", r"\bjapones(a|es|as)?\b": "japao", r"\bamerican[oa]s?\b": "estados unidos",
+}
+# perguntas analíticas com resposta própria (v36, rodada 3)
+ANALYSIS_RX = [
+    ("goal_buildup", r"antecede\w*|antes dos gols|(como|de onde) (sairam|nasceram|surgiram|foram construidos) os gols|"
+                     r"jogadas? d\w* gols|padr\w* .*gols|mecanismos? ofensiv|lances? dos gols"),
+    ("moments", r"em (quais|que) momentos?|em que periodo|quando .* (conseguiu|dominou|pressionou|quebrou|cresceu|caiu)|"
+                r"minutos? em que|fases? do jogo"),
+    ("defenders_diag", r"(diagnostico|avaliacao|analise|desempenho|nota)\w* (individual )?d?[oa]s? (defensores|zagueiros|laterais|"
+                       r"jogadores da defesa|defesa)"),
+    ("combinations", r"combina\w*|duplas?|parcerias?|tabelas? entre|conex\w* entre|sociedades?|trio"),
+    ("conceded_how", r"sofreu (mais )?(com|por|de)|como sofreu|(costas da defesa|infiltra\w*|bolas? (longa|em profundidade))"),
+    ("between_lines", r"entre (as )?linhas|entre a linha defensiva e|entre (os )?(zagueiros|defensores) e (os )?(volantes|meio)"),
+    ("corridors", r"(quais|qual|em que|por quais|por qual) (corredor|lado|faixa|setor|zona)\w*|meio-espaco|meio espaco|"
+                  r"corredores?\b.*\b(progred|atac|chega|entr|avan)"),
+    ("efficiency", r"eficien\w*|aproveitamento|conver(sao|teu|ter)|pontaria|xg .*gols|gols .*xg"),
+    ("attack_plan", r"\b(explorar|aproveitar|atacar|furar|machucar)\b.*\b(dificuldades?|fraquezas?|defesa|defensiv\w*|espacos?|"
+                    r"fragilidades?|lado|setor)"),
+]
+
 # alvos específicos da pergunta (v36): nunca cair no resumo genérico quando um destes aparece
 ERROR_RX = r"\berr(o|os|ou|aram|ar|ando)\b|\bfalh(a|as|ou|aram)\b|\bvacil|\bmancad|\bpisou na bola"
-WEAK_RX = (r"falha|falhou|erro tatic|errou tatic|ponto(s)? fraco|fraqueza|deficien|vulnerab|deixou a desejar|"
+WEAK_RX = (r"falha|falhou|erro tatic|errou tatic|erro estrutural|principal erro|maior erro|fragilidade|"
+           r"ponto(s)? fraco|fraqueza|deficien|vulnerab|deixou a desejar|"
            r"onde (errou|pecou|sofreu)|pecou|o que (deu|saiu) errado|pior (setor|parte|coisa)|calcanhar|"
            r"problema(s)? (tatic|do|da|no|na)|maior(es)? (erro|problema|defeito)|defeito")
 STRENGTH_RX = (r"ponto(s)? forte|fortaleza|acerto(s)? tatic|maior(es)? (acerto|virtude|qualidade|trunfo|arma)|"
@@ -52,6 +79,9 @@ PRESENCE_RX = (r"\b(jogou|atuou|entrou|participou|esteve em campo|estava em camp
 
 # perguntas que pedem um fato ou um ranking de atletas (respondidas com tabela curta, não com visão geral)
 RANKING_METRICS: Tuple[Tuple[str, str], ...] = (
+    (r"erros? que (originaram|geraram|deram|resultaram|levaram)|participa\w* nos erros|erros? perigos|erros? decisiv",
+     "erros_perigosos"),
+
     (r"assist", "assistencias"), (r"passe.*(decisiv|para finaliz|para chute)|criou mais chances", "passes_decisivos"),
     (r"(rede neural|segundo a ia|pela ia|modelo).*perig|perig\w*.*(rede neural|pela ia|segundo a ia)", "perigo_ia"),
     (r"perig|chance de (gol|finaliza)|ameaca", "perigo"),
@@ -118,6 +148,9 @@ class QueryScope:
     attribute: Optional[str] = None     # profile: altura | idade | valor  ·  unavailable: o que foi pedido
     ranking_metric: Optional[str] = None
     team_named: bool = False            # a pergunta cita uma das equipes pelo nome
+    absent: List[str] = field(default_factory=list)   # jogadores citados que não estão nesta partida
+    position_filter: Optional[str] = None             # "defesa" | "meio" | "ataque" (ex.: "quais defensores...")
+    also_weakness: bool = False                       # pergunta dupla: jogador + "a fragilidade foi em qual setor?"
 
     @property
     def in_scope(self) -> bool:
@@ -143,6 +176,8 @@ class QueryUnderstanding:
         """`teams` = [equipe analisada, adversário] para detectar quando a pergunta cita o adversário."""
         sc = QueryScope(raw=text or "")
         t = norm(text)
+        for rx, country in DEMONYMS.items():
+            t = re.sub(rx, country, t)
         words = set(re.findall(r"[a-z0-9\-]+", t))
 
         # ---- atletas citados (nome completo, sobrenome ou nome comum)
@@ -284,7 +319,12 @@ class QueryUnderstanding:
                    r"conter|segurar|evitar|vencer|ganhar d|explorar|superar)|o que (o|a|deveria|devia|poderia)\b.*\b(fazer|ter feito|mudar)|"
                    r"(poderia|deveria|podia|devia) ter (vencido|ganhado|evitado|empatado|jogado)|plano de jogo|para evitar|como (deveria|devia|poderia) jogar|o que fazer|como enfrentar")
         many = re.search(r"\b(mais|maior|maiores|menos|ranking)\b", t)
-        if re.search(plan_rx, t):
+        plan_rx += (r"|\b(como|o que)\b[^?]{0,45}\b(anula\w*|parar|parad[oa]|neutraliz\w*|marca(r|do|da)|cont(er|ido)|"
+                    r"segur\w*|evit\w*|vence\w*|super(ar|ado)|enfrent\w*|limit\w*)\b|tres mudancas|mudancas taticas|plano de jogo|revanche|se (voce|eu) fosse o (treinador|tecnico)")
+        analysis = next((k for k, rx in ANALYSIS_RX if re.search(rx, t)), None)
+        if analysis == "attack_plan" or (analysis and not (sc.players and analysis in ("corridors", "efficiency"))):
+            sc.ask = analysis
+        elif re.search(plan_rx, t):
             sc.ask = "plan"
         elif sc.players and re.search(ERROR_RX, t) and not many:
             sc.ask = "errors"                         # "quantos erros o Gerard Martín teve?"
@@ -302,7 +342,9 @@ class QueryUnderstanding:
                      r"gols? (da|do|desta|dessa|nessa|nesta) (partida|jogo)|como (foram|sairam|saiu) os gols|quando (foi|foram|sairam) os gols", t):
             sc.ask = "goals"
         elif re.search(r"(quem|qual (jogador|atleta)|que jogador|jogador que|atleta que)\b.*\b(mais|maior|maiores|menos)\b|"
-                       r"\b(qual|quais|que)\b[^?]*\b(jogador|jogadores|atleta|atletas)\b[^?]*\b(mais|maior|maiores|lider\w*)\b|"
+                       r"\b(qual|quais|que)\b[^?]*\b(jogador|jogadores|atleta|atletas|defensores|zagueiros|laterais|"
+                       r"meio-campistas|volantes|meias|atacantes|pontas)\b[^?]*\b(mais|maior|maiores|lider\w*|responsaveis|"
+                       r"fundamentais|decisivos)\b|"
                        r"\b(mais|maior|maiores) .*(jogador|atleta)|"
                        r"(melhor|destaque|craque|principal) (jogador|atleta|em campo|da partida|do jogo)|ranking", t):
             sc.ask = "ranking"
@@ -311,7 +353,7 @@ class QueryUnderstanding:
                 sc.ranking_metric = "xt"
             if sc.ranking_metric is None and re.search(r"posse|dominou|controlou", t):
                 sc.ask = None           # "quem teve mais posse" é sobre as equipes, não um ranking de atletas
-        elif re.search(r"(ganh|venc|perd|empat)\w*.*(partida|jogo|confronto)|por que (ganh|venc|perd)|como (ganh|venc)|"
+        elif not sc.players and re.search(r"(ganh|venc|perd|empat)\w*.*(partida|jogo|confronto)|por que (ganh|venc|perd)|como (ganh|venc)|"
                        r"o que .* fez para|motivo d\w* (vitoria|derrota)|resultado", t):
             sc.ask = "result"
 
@@ -319,17 +361,56 @@ class QueryUnderstanding:
 
     @staticmethod
     def _finish(sc: QueryScope, t: str) -> QueryScope:
+        if sc.players and re.search(WEAK_RX, t) and sc.ask not in ("weakness", "errors"):
+            sc.also_weakness = True
+        if re.search(r"defensores|zagueiros|laterais|jogadores da defesa|linha defensiva", t):
+            sc.position_filter = "defesa"
+        elif re.search(r"meio-campistas|meias|volantes", t):
+            sc.position_filter = "meio"
+        elif re.search(r"atacantes|pontas|centroavantes", t):
+            sc.position_filter = "ataque"
         # ---- métricas
         for key, kws in METRIC_KEYWORDS.items():
             if any(k in t for k in kws):
                 sc.metrics.append(key)
-        if sc.players and sc.ask not in ("ranking", "profile", "unavailable", "goals", "presence", "errors"):
+        if sc.players and sc.ask not in ("ranking", "profile", "unavailable", "goals", "presence", "errors") and \
+                sc.ask not in dict(ANALYSIS_RX):
             sc.category = "player" if sc.category != "full_report" else sc.category
             sc.descriptors.insert(0, " / ".join(sc.players))
 
         sc.needs_spatial = bool(sc.side or sc.third or (set(sc.metrics) & SPATIAL_METRICS) or
                                 sc.phase in ("defensive", "transition") and "compactness" in sc.metrics)
         return sc
+
+    @staticmethod
+    def absent_names(raw: str, t: str, roster: List[str], teams: Optional[List[str]] = None) -> List[str]:
+        """
+        Nomes de jogador citados que NÃO estão nesta partida (ex.: "anular o Harry Kane" num jogo sem o Kane).
+        Detecta nomes com maiúscula (2+ palavras) e o alvo de verbos como anular/marcar/utilizou.
+        """
+        import difflib
+
+        cands = set(re.findall(r"(?<![.?!]\s)(?<!^)\b([A-ZÁ-Ú][a-zá-ú'\-]+(?:\s+(?:de |da |do |dos )?[A-ZÁ-Ú][a-zá-ú'\-]+)+)", raw or ""))
+        for m in re.finditer(r"\b(?:anular|marcar|parar|neutralizar|conter|segurar|utilizou|usou|usar|utilizar)\s+(?:o|a)\s+"
+                             r"([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?)", t):
+            cands.add(m.group(1))
+        rn = [norm(r) for r in roster if isinstance(r, str)]
+        tn = [norm(x) for x in (teams or []) if x]
+        stop = {"como", "qual", "quais", "se", "em", "o", "a", "por", "que", "compare", "identifique", "construa", "elabore"}
+        out = []
+        for c in cands:
+            n = norm(c)
+            if not n or n.split()[0] in stop or any(n in x or x in n for x in tn):
+                continue
+            last = n.split()[-1]
+            if any(n in r or last in r.split() for r in rn) or difflib.get_close_matches(n, rn, n=1, cutoff=0.8):
+                continue
+            from src.data_hub.search import TEAM_ALIASES
+
+            if n in TEAM_ALIASES or any(n == norm(a) for v in TEAM_ALIASES.values() for a in v):
+                continue
+            out.append(c)
+        return out[:2]
 
     @staticmethod
     def _presence_name(t: str) -> Optional[str]:

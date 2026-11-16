@@ -441,6 +441,7 @@ class NumericHallucinationGuard:
     STRUCTURAL_CONSTANTS: Set[str] = {
         "0", "1", "2", "3", "4", "5", "10", "10.5", "10,5", "14", "16", "18",
         "20", "40", "45", "60", "80", "90", "100", "105", "120",
+        "32", "62", "72", "102",          # regras de método: bola longa ≥ 32 m; zona entre linhas x 72–102, y 18–62
     }
     # Minutos de referência aceitos mesmo em contexto de "minuto"
     MINUTE_CONSTANTS: Set[str] = {"15", "30", "45", "60", "70", "75", "80", "90", "120"}

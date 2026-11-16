@@ -27,6 +27,7 @@ from dotenv import load_dotenv
 from src.intelligence.query_understanding import QueryScope, QueryUnderstanding
 from src.intelligence.query_understanding import norm as norm_q
 from src.intelligence.scoped_evidence import ScopedEvidenceBuilder
+from src.intelligence.tactical_writers import TACTICAL_WRITERS
 from src.reports.report_builder import NumericHallucinationGuard, TacticalReportBuilder
 
 load_dotenv()
@@ -68,7 +69,8 @@ Não cite números nem estatísticas."""
 
 
 MISSES_PATH = "data/assistente_sem_alvo.jsonl"
-FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors"}
+FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how",
+             "between_lines", "efficiency", "moments", "goal_buildup", "defenders_diag", "combinations"}
 
 
 def log_generic_fallback(query: str, sc: Any, path: Optional[str] = None) -> None:
@@ -218,6 +220,37 @@ class LocalScopedWriter:
                 if items:
                     summary.append(cls.ISSUE_SHORT[key].get(items[0]["tipo"], "").format(t=b["equipe"], o=b["adversario"]))
                 continue
+            if key in TACTICAL_WRITERS:
+                txt, summ = TACTICAL_WRITERS[key](cls, b, sc)
+                out.append(txt)
+                if summ:
+                    summary.append(summ)
+                continue
+            if key == "ausente":
+                nomes = [n.title() if n.islower() else n for n in b["nomes"]]
+                out.append(f"**{' e '.join(nomes)} não {'está' if len(nomes) == 1 else 'estão'} nesta partida** — "
+                           f"nenhum lance, entrada ou saída registrados entre os {b['elenco_da_partida']} jogadores que atuaram. "
+                           "Não dá para analisar o que ele fez neste jogo; se quiser, cite outro jogo dele ou um jogador que "
+                           "esteve em campo.")
+                continue
+            if key == "comparacao":
+                continue                                     # a comparação é escrita depois dos blocos dos jogadores
+            if key == "ranking" and b.get("chave") == "erros_perigosos":
+                e = b["erros_perigosos"]
+                rows = [r for r in e["jogadores"] if r["perdas"]]
+                if not rows:
+                    out.append("Nenhuma perda de bola desse grupo virou finalização do rival em até 15 s.")
+                    continue
+                filt = {"defesa": "defensores", "meio": "meio-campistas", "ataque": "atacantes"}.get(e.get("filtro"), "jogadores")
+                lines = "\n".join(f"{i}. {r['jogador']} ({r['equipe']}): {_pl(r['perdas'], 'perda', 'perdas')}, "
+                                  f"{r['viraram_finalizacao']} virou(aram) finalização do rival (xG {_fmt(r['xg_cedido'])}"
+                                  + (f", {_pl(r['gols_sofridos'], 'gol', 'gols')}" if r['gols_sofridos'] else "") + ")"
+                                  for i, r in enumerate(rows, 1))
+                out.append(f"**Erros dos {filt} de {e['equipe']} que deram chance ao rival** ({e['criterio']}):\n{lines}")
+                top = rows[0]
+                summary.append(f"{top['jogador']} foi quem mais errou com custo: "
+                               f"{_pl(top['viraram_finalizacao'], 'perda virou', 'perdas viraram')} finalização do rival")
+                continue
             if key == "ranking" and b.get("chave") == "perigo_ia":
                 out.append(cls._danger_ranking(b))
                 if b.get("lideres_ia"):
@@ -366,19 +399,48 @@ class LocalScopedWriter:
             elif key.startswith("jogador::"):
                 feed = ", ".join(f"{k} ({v})" for k, v in (b.get("quem_mais_o_abastece") or {}).items())
                 tgt = ", ".join(f"{k} ({v})" for k, v in (b.get("para_quem_mais_passa") or {}).items())
-                out.append(
+                gl = b.get("gols") or 0
+                head_goal = ""
+                if re.search(r"\bgol", norm_q(sc.raw)):
+                    head_goal = (f"**{'Sim' if gl else 'Não'}, {b['jogador']} {'marcou ' + _pl(gl, 'gol', 'gols') if gl else 'não marcou'}"
+                                 + (f" ({', '.join(str(m) + chr(39) for m in b.get('minutos_dos_gols') or [])})" if gl else "") + ".** ")
+                zs = b.get("zonas_onde_recebeu") or b.get("zonas_onde_mais_atuou") or []
+                where = (" Recebeu mais " + " e ".join(cls._att(z["zona"]) for z in zs[:2]) + "." if zs else "")
+                out.append(head_goal +
                     f"**{b['jogador']}** ({b['equipe']}): {b['acoes']} ações no recorte — {b['passes']} passes "
                     f"({_fmt(b['precisao_passe_pct'])}%), {b['passes_progressivos']} progressivos, {b['quebras_de_linha']} quebras de linha, "
                     f"xT {_fmt(b['xt_gerado'])}; {_pl(b['finalizacoes'], 'finalização', 'finalizações')} (xG {_fmt(b['xg'])}); "
                     + (f"{_pl(b['duelos'], 'desarme disputado', 'desarmes disputados')} ({_fmt(b['duelos_ganhos_pct'])}% ganhos); " if b['duelos'] else "")
                     + (f"{_pl(b.get('dribles_tentados', 0), 'drible tentado', 'dribles tentados')}; " if b.get('dribles_tentados') else "")
                     + f"{b['perdas_de_posse']} perdas e {b['recuperacoes']} recuperações."
+                    + (f" {b.get('finalizacoes_dentro_da_area', 0)} das finalizações foram de dentro da área, "
+                       f"{b.get('finalizacoes_no_alvo', 0)} no alvo." if b.get("finalizacoes") else "")
+                    + where
                     + (f" Quem mais o abastece: {feed}." if feed else "") + (f" Para quem mais passa: {tgt}." if tgt else "")
                     + cls._small_sample(b.get("amostra_N")))
                 if feed:
                     summary.append(f"a bola chega em {b['jogador']} principalmente por {list((b.get('quem_mais_o_abastece') or {}).keys())[0]}")
                 else:
                     summary.append(f"{b['jogador']} participou de {b['acoes']} ações no recorte")
+        if "comparacao" in blocks:
+            ps = [blocks.get(f"jogador::{p}") for p in blocks["comparacao"]["jogadores"]]
+            ps = [p for p in ps if p]
+            if len(ps) >= 2:
+                rows = [("Ações", "acoes"), ("Passes", "passes"), ("Precisão de passe (%)", "precisao_passe_pct"),
+                        ("Passes progressivos", "passes_progressivos"), ("xT gerado", "xt_gerado"), ("Finalizações", "finalizacoes"),
+                        ("xG", "xg"), ("Gols", "gols"), ("Dribles tentados", "dribles_tentados"), ("Perdas", "perdas_de_posse")]
+                head = "| | " + " | ".join(p["jogador"] for p in ps) + " |\n|---|" + "---|" * len(ps)
+                body = "\n".join(f"| {lab} | " + " | ".join(_fmt(p.get(k)) for p in ps) + " |" for lab, k in rows)
+                a, b2 = ps[0], ps[1]
+                diff = []
+                if (a.get("xg") or 0) != (b2.get("xg") or 0):
+                    hi = a if (a.get("xg") or 0) > (b2.get("xg") or 0) else b2
+                    diff.append(f"{hi['jogador']} chegou mais em condição de gol (xG {_fmt(hi['xg'])})")
+                if (a.get("xt_gerado") or 0) != (b2.get("xt_gerado") or 0):
+                    hi = a if (a.get("xt_gerado") or 0) > (b2.get("xt_gerado") or 0) else b2
+                    diff.append(f"{hi['jogador']} empurrou mais o time para frente com passes e conduções (xT {_fmt(hi['xt_gerado'])})")
+                out.append("**Lado a lado:**\n" + head + "\n" + body + ("\n\n" + "; ".join(diff) + "." if diff else ""))
+                summary.insert(0, diff[0] if diff else f"{a['jogador']} e {b2['jogador']} lado a lado")
         if summary:
             joined = "; ".join(summary[:2])
             out.append("\n**Resumo:** " + joined[:1].upper() + joined[1:] + ".")
@@ -949,7 +1011,12 @@ class DynamicTacticalAnalyst:
 
         import time as _time
 
-        budget = float(os.getenv("GEMINI_TIMEOUT_S", "20"))   # teto rígido para TODA a resposta (todas as tentativas)
+        budget = float(os.getenv("GEMINI_TIMEOUT_S", "8"))    # teto por chamada
+        deadline = getattr(self, "_deadline", None)          # teto da PERGUNTA inteira (todas as tentativas, ~10 s)
+        if deadline is not None:
+            budget = min(budget, deadline - _time.time())
+            if budget <= 1.5:
+                raise TimeoutError("Tempo da pergunta esgotado — resposta redigida localmente.")
 
         def client_for(remaining: float):
             try:                                         # cada tentativa só recebe o tempo que ainda resta
@@ -1037,6 +1104,8 @@ class DynamicTacticalAnalyst:
             teams_in_match = [meta.get("home_team_name", ""), meta.get("away_team_name", "")]
         ordered = [target_team] + [t for t in teams_in_match if t != target_team][:1]
         sc = QueryUnderstanding.parse(query, roster, ordered if len(ordered) == 2 else None)
+        if not sc.players:                                    # jogador citado que não está nesta partida (ex.: Kane)
+            sc.absent = QueryUnderstanding.absent_names(query, norm_q(query), roster, ordered)
         use_llm = prefer_llm and self.api_key is not None and self.cloud_ready()
 
         # 1) fora do escopo / saudação / ajuda
@@ -1100,6 +1169,10 @@ class DynamicTacticalAnalyst:
                     f"- Usuário: {h['q']}" for h in history[-3:]) + "\n\n"
             prompt = (f"{ctx}PERGUNTA: {query}\nRECORTE INTERPRETADO: {sc.describe()}\n\n"
                       f"EVIDÊNCIAS (JSON):\n{json.dumps(evidence, ensure_ascii=False, indent=1, default=str)}")
+
+            import time as _time
+
+            self._deadline = _time.time() + float(os.getenv("ASSISTENTE_TETO_S", "10"))
 
             def generate(extra: Optional[str]) -> str:
                 return self._llm(DYNAMIC_SYSTEM, prompt if not extra else f"{extra}\n\n{prompt}")
