@@ -150,6 +150,9 @@ def _stats_table(ctx: MatchContext) -> None:
     if s.empty:
         empty_state("Sem atletas com eventos.")
         return
+    # A nota antiga não é uma reserva silenciosa: se a régua 3.0 não produzir resultado,
+    # exibimos ausência em vez de rotular uma avaliação anterior como se fosse nova.
+    s["nota"] = pd.NA
     if mode == "Por 90 minutos":
         s = per90(s)
         note("Por 90 minutos", "As estatísticas são normalizadas por 90 minutos; nota, desempenho, impacto e confiança continuam na escala 0–10 original.", "warn")
