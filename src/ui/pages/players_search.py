@@ -131,7 +131,9 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
 
 
 def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
-    key = "pl_ratings_" + "|".join(sorted(names))
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+
+    key = "pl_ratings_" + RATING_ENGINE_VERSION + "_" + "|".join(sorted(names))
     if st.button("🏅 Calcular a nota em cada jogo (até os 10 mais recentes)", key=key + "_go"):
         out = {}
         bar = st.progress(0.0, text="abrindo as partidas…")
