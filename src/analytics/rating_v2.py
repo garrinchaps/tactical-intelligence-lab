@@ -222,10 +222,14 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     gl = goals(df)
     col = lambda c, v=0: d[c] if c in d else pd.Series(v, index=d.index)
     t = d["type_name"]
-    xg = pd.to_numeric(col("shot_statsbomb_xg"), errors="coerce").fillna(0)
-    # xA: xG das finalizações que vieram do último passe do jogador na mesma posse
+    shot_rows = d[d["type_name"] == "Shot"]
+    has_match_xg = ("shot_statsbomb_xg" in d.columns
+                    and pd.to_numeric(shot_rows["shot_statsbomb_xg"], errors="coerce").notna().any())
+    has_xa_inputs = has_match_xg and {"possession", "pass_recipient_name", "pass_outcome_name"}.issubset(d.columns)
+    # xA: xG das finalizações que vieram do último passe do jogador na mesma posse.
+    # Sem xG/posse/recebedor, xA fica ausente, não zero.
     xa: Dict[str, float] = {}
-    if "possession" in d:
+    if has_xa_inputs:
         passes = d[(t == "Pass") & col("pass_outcome_name").isna()]
         for s in d[t == "Shot"].itertuples():
             c = passes[(passes["team_name"] == s.team_name) & (passes["pass_recipient_name"] == s.player_name)
@@ -241,15 +245,26 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         et = e["type_name"]
         ps = e[et == "Pass"]
         ok = ps[ps.get("pass_outcome_name").isna()] if "pass_outcome_name" in ps else ps
-        hard = ps[(pd.to_numeric(ps.get("pass_length", 0), errors="coerce").fillna(0) >= 25)
-                  | (pd.to_numeric(ps.get("end_x", 0), errors="coerce") - pd.to_numeric(ps.get("x", 0), errors="coerce") >= 15)]
+        hard_mask = pd.Series(False, index=ps.index)
+        if "pass_length" in ps:
+            hard_mask |= pd.to_numeric(ps["pass_length"], errors="coerce").fillna(0) >= 25
+        if {"end_x", "x"}.issubset(ps.columns):
+            hard_mask |= (pd.to_numeric(ps["end_x"], errors="coerce")
+                          - pd.to_numeric(ps["x"], errors="coerce")) >= 15
+        hard = ps[hard_mask]
         hard_ok = hard[hard.get("pass_outcome_name").isna()] if "pass_outcome_name" in hard else hard
         shots = e[et == "Shot"]
-        sxg = pd.to_numeric(shots.get("shot_statsbomb_xg", 0), errors="coerce").fillna(0)
-        is_goal = shots.get("shot_outcome_name", pd.Series(dtype=object)) == "Goal"
-        is_pen = shots.get("shot_type_name", pd.Series(dtype=object)) == "Penalty"
-        on = shots.get("shot_outcome_name", pd.Series(dtype=object)).isin(["Goal", "Saved", "Saved To Post"])
-        outcomes = shots.get("shot_outcome_name", pd.Series("", index=shots.index)).astype(str)
+        has_player_xg = ("shot_statsbomb_xg" in shots.columns
+                         and pd.to_numeric(shots["shot_statsbomb_xg"], errors="coerce").notna().any())
+        sxg = (pd.to_numeric(shots["shot_statsbomb_xg"], errors="coerce").fillna(0)
+               if "shot_statsbomb_xg" in shots else pd.Series(0.0, index=shots.index))
+        has_shot_outcome = "shot_outcome_name" in shots.columns
+        shot_outcomes = (shots["shot_outcome_name"].astype(str) if has_shot_outcome
+                         else pd.Series("", index=shots.index, dtype=object))
+        is_goal = shot_outcomes.eq("Goal")
+        is_pen = shots["shot_type_name"].eq("Penalty") if "shot_type_name" in shots else pd.Series(False, index=shots.index)
+        on = shot_outcomes.isin(["Goal", "Saved", "Saved To Post"]) if has_shot_outcome else pd.Series(False, index=shots.index)
+        outcomes = shot_outcomes
         # Finalização defendida não é erro do atacante: só desvios/traves entram como chance desperdiçada.
         missed = outcomes.str.lower().isin(["off t", "wayward", "post", "miss", "missed"])
         big_missed = sxg[(sxg >= 0.3) & missed].sum()
@@ -258,10 +273,14 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         turn = e[e.get("is_turnover", 0) == 1] if "is_turnover" in e else e.iloc[0:0]
         own_half_turn = turn[turn["x"] < 50]
         duels = e[et == "Duel"]
-        rec = df[(df.get("pass_recipient_name") == p) & (df["type_name"] == "Pass") & (df.get("is_pass_completed", 0) == 1)]
-        between = rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))] if len(rec) else rec
+        has_receipt_data = {"pass_recipient_name", "is_pass_completed", "type_name", "end_x", "end_y"}.issubset(df.columns)
+        rec = (df[(df["pass_recipient_name"] == p) & (df["type_name"] == "Pass")
+                  & (df["is_pass_completed"] == 1)] if has_receipt_data else df.iloc[0:0])
+        between = (rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))]
+                   if has_receipt_data else rec)
         error_flag = next((k for k in ("is_error_leading_to_shot", "is_error_leading_to_goal") if k in e), None)
-        errors_to_chance = int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum()) if error_flag else 0
+        errors_to_chance = (int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum())
+                            if error_flag else None)
         gk = {}
         position_mode = (e["position_name"].dropna().mode().iloc[0]
                          if "position_name" in e and not e["position_name"].dropna().empty else "")
@@ -271,24 +290,36 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
             ga = int((on_t.get("shot_outcome_name") == "Goal").sum())
             saves = int(len(on_t) - ga)
-            xg_on = float(pd.to_numeric(on_t.get("shot_statsbomb_xg", 0), errors="coerce").fillna(0).sum())
-            longp = ps[pd.to_numeric(ps.get("pass_length", 0), errors="coerce").fillna(0) >= 32]
+            xg_on = (float(pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").fillna(0).sum())
+                     if has_match_xg and "shot_statsbomb_xg" in on_t else None)
+            longp = (ps[pd.to_numeric(ps["pass_length"], errors="coerce").fillna(0) >= 32]
+                     if "pass_length" in ps else ps.iloc[0:0])
             longp_ok = longp[longp.get("pass_outcome_name").isna()] if "pass_outcome_name" in longp else longp
-            saved_shots = on_t[on_t.get("shot_outcome_name", pd.Series(dtype=object)).astype(str).str.contains("Saved", case=False)]
-            saved_xg = pd.to_numeric(saved_shots.get("shot_statsbomb_xg", pd.Series(dtype=float)), errors="coerce").fillna(0)
-            saved_min = pd.to_numeric(saved_shots.get("minute", pd.Series(dtype=float)), errors="coerce").fillna(0)
-            key_saves = int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
-            gk = {"defesas90": saves * f, "pct_defesas": 100 * saves / len(on_t) if len(on_t) else None,
-                  "gols_evitados": xg_on - ga if len(on_t) else None, "gols_sofridos": ga, "defesas": saves,
+            saved_shots = (on_t[on_t["shot_outcome_name"].astype(str).str.contains("Saved", case=False)]
+                           if "shot_outcome_name" in on_t else on_t.iloc[0:0])
+            saved_xg = (pd.to_numeric(saved_shots["shot_statsbomb_xg"], errors="coerce").fillna(0)
+                        if "shot_statsbomb_xg" in saved_shots else pd.Series(dtype=float))
+            saved_min = (pd.to_numeric(saved_shots["minute"], errors="coerce").fillna(0)
+                         if "minute" in saved_shots else pd.Series(dtype=float))
+            key_saves = (int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
+                         if has_match_xg and "minute" in saved_shots else None)
+            gk = {"defesas90": saves * f if has_shot_outcome else None,
+                  "pct_defesas": 100 * saves / len(on_t) if has_shot_outcome and len(on_t) else None,
+                  "gols_evitados": xg_on - ga if xg_on is not None else None,
+                  "gols_sofridos": ga if has_shot_outcome else None,
+                  "defesas": saves if has_shot_outcome else None,
                   "key_saves": key_saves,
                   "finalizacoes_no_alvo_enfrentadas": int(len(on_t)), "xg_no_alvo_enfrentado": round(xg_on, 2),
                   "saidas_aereas90": int((et == "Goal Keeper").sum()) * f if (et == "Goal Keeper").any() else None,
                   "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) else None,
                   "gk_longos_pct": 100 * len(longp_ok) / len(longp) if len(longp) >= 3 else None,
-                  "gk_prog90": int((ok.get("is_progressive_action", 0) == 1).sum()) * f if len(ok) else 0.0,
-                  "gk_perdas90": len(turn) * f, "gk_erros": errors_to_chance,
+                  "gk_prog90": int((ok["is_progressive_action"] == 1).sum()) * f
+                      if "is_progressive_action" in ok else None,
+                  "gk_perdas90": len(turn) * f if "is_turnover" in e else None,
+                  "gk_erros": errors_to_chance,
                   "gk_acoes_fora_area90": int(((e["x"] > 18) & et.isin(["Clearance", "Interception", "Ball Recovery",
-                                                                       "Goal Keeper"])).sum()) * f}
+                                                                       "Goal Keeper"])).sum()) * f
+                      if "x" in e else None}
         np_goals = int((is_goal & ~is_pen).sum())
         pen_goals = int((is_goal & is_pen).sum())
         # Só penaliza erro que o provedor marque explicitamente como causador de finalização/gol.
@@ -304,17 +335,26 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             and not e["position_name"].dropna().empty else "", "funcao": primary_role, "role_mix": role_mix, "minutos": m,
             "gols": np_goals + pen_goals, "gols_penalti": pen_goals,
             "assistencias": sum(1 for g in gl if g.get("assistencia") == p),
-            "gols_np90": np_goals * f, "gols_pen90": pen_goals * f, "xg90": float(sxg.sum()) * f, "xg": round(float(sxg.sum()), 2),
-            "no_alvo90": int(on.sum()) * f, "fin_area90": int(((shots["x"] >= 102) & shots["y"].between(18, 62)).sum()) * f,
-            "chances_perdidas_xg90": float(big_missed) * f, "chances_claras_perdidas": int(((sxg >= 0.3) & missed).sum()),
-            "assist90": sum(1 for g in gl if g.get("assistencia") == p) * f, "xa90": xa.get(p, 0.0) * f, "xa": round(xa.get(p, 0.0), 2),
-            "decisivos90": 0.0, "passes_area90": int((ok.get("end_in_box", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "quebra_linha90": int((ok.get("is_line_breaking_pass", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "cruz_certos90": int((ok.get("is_pass_cross", 0).fillna(0).astype(bool)).sum()) * f if len(ok) else 0.0,
-            "enfiadas90": int((ok.get("is_pass_through_ball", 0).fillna(0).astype(bool)).sum()) * f if len(ok) else 0.0,
-            "prog_passes90": int((ok.get("is_progressive_action", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "prog_carries90": int((carries.get("is_progressive_action", 0) == 1).sum()) * f if len(carries) else 0.0,
-            "xt90": float(pd.to_numeric(e.get("delta_xt", 0), errors="coerce").fillna(0).clip(lower=0).sum()) * f,
+            "gols_np90": np_goals * f, "gols_pen90": pen_goals * f,
+            "xg90": float(sxg.sum()) * f if has_player_xg else None,
+            "xg": round(float(sxg.sum()), 2) if has_player_xg else None,
+            "no_alvo90": int(on.sum()) * f if has_shot_outcome else None,
+            "fin_area90": int(((shots["x"] >= 102) & shots["y"].between(18, 62)).sum()) * f
+                if {"x", "y"}.issubset(shots.columns) else None,
+            "chances_perdidas_xg90": float(big_missed) * f if has_player_xg and has_shot_outcome else None,
+            "chances_claras_perdidas": int(((sxg >= 0.3) & missed).sum()) if has_player_xg and has_shot_outcome else None,
+            "assist90": sum(1 for g in gl if g.get("assistencia") == p) * f,
+            "xa90": xa.get(p, 0.0) * f if has_xa_inputs else None,
+            "xa": round(xa.get(p, 0.0), 2) if has_xa_inputs else None,
+            "decisivos90": 0.0,
+            "passes_area90": int((ok["end_in_box"] == 1).sum()) * f if "end_in_box" in ok else None,
+            "quebra_linha90": int((ok["is_line_breaking_pass"] == 1).sum()) * f if "is_line_breaking_pass" in ok else None,
+            "cruz_certos90": int(ok["is_pass_cross"].fillna(0).astype(bool).sum()) * f if "is_pass_cross" in ok else None,
+            "enfiadas90": int(ok["is_pass_through_ball"].fillna(0).astype(bool).sum()) * f if "is_pass_through_ball" in ok else None,
+            "prog_passes90": int((ok["is_progressive_action"] == 1).sum()) * f if "is_progressive_action" in ok else None,
+            "prog_carries90": int((carries["is_progressive_action"] == 1).sum()) * f if "is_progressive_action" in carries else None,
+            "xt90": float(pd.to_numeric(e["delta_xt"], errors="coerce").fillna(0).clip(lower=0).sum()) * f
+                if "delta_xt" in e else None,
             "dribles90": int((et == "Dribble").sum()) * f,
             "entradas_terco90": int((e.get("is_final_third_entry", 0) == 1).sum()) * f if "is_final_third_entry" in e else None,
             "entradas_area90": int((e.get("is_box_entry", 0) == 1).sum()) * f if "is_box_entry" in e else None,
@@ -330,16 +370,20 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "passe_pct_dificil": 100 * len(hard_ok) / len(hard) if len(hard) >= 4 else None,
             "perdas_por_toque": len(turn) / touches if touches >= 10 else None,
             "perdas_perigosas90": len(own_half_turn) * f,
-            "amarelos": int((e.get("foul_committed_card_name") == "Yellow Card").sum()) if "foul_committed_card_name" in e else 0,
-            "vermelhos": int(e.get("foul_committed_card_name", pd.Series(dtype=object)).isin(["Red Card", "Second Yellow"]).sum()),
-            "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": errors_to_chance,
+            "amarelos": int((e["foul_committed_card_name"] == "Yellow Card").sum()) if "foul_committed_card_name" in e else None,
+            "vermelhos": int(e["foul_committed_card_name"].isin(["Red Card", "Second Yellow"]).sum())
+                if "foul_committed_card_name" in e else None,
+            "faltas90": int((et == "Foul Committed").sum()) * f,
+            "erros_que_viraram_chance": errors_to_chance,
             "pressao90": int((et == "Pressure").sum()) * f if "Pressure" in set(d["type_name"].dropna().astype(str)) else None,
             "acoes_defensivas90": int(pd.to_numeric(e["is_defensive_action"], errors="coerce").fillna(0).sum()) * f
                 if "is_defensive_action" in e else None,
             "sprints90": None,
-            "entre_linhas90": len(between) * f,
-            "participacao_pct": 100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1),
-            "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f if (t == "Pressure").any() else None,
+            "entre_linhas90": len(between) * f if has_receipt_data else None,
+            "participacao_pct": (100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1)
+                                 if has_receipt_data else None),
+            "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f
+                if (t == "Pressure").any() and "x" in e else None,
             **gk,
         })
     out = pd.DataFrame(rows)
