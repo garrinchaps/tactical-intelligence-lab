@@ -320,7 +320,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "amarelos": int((e.get("foul_committed_card_name") == "Yellow Card").sum()) if "foul_committed_card_name" in e else 0,
             "vermelhos": int(e.get("foul_committed_card_name", pd.Series(dtype=object)).isin(["Red Card", "Second Yellow"]).sum()),
             "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": errors_to_chance,
-            "pressao90": int((et == "Pressure").sum()) * f if (t == "Pressure").any() else None,
+            "pressao90": int((et == "Pressure").sum()) * f if "Pressure" in set(d["type_name"].dropna().astype(str)) else None,
             "acoes_defensivas90": int(pd.to_numeric(e["is_defensive_action"], errors="coerce").fillna(0).sum()) * f
                 if "is_defensive_action" in e else None,
             "sprints90": None,
@@ -425,13 +425,24 @@ def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_
     return int(len(ref))
 
 
-def _peer_group(ref: pd.DataFrame, funcao: str) -> pd.DataFrame:
+def _peer_group(ref: pd.DataFrame, funcao: str, role_mix: Optional[Dict[str, float]] = None) -> pd.DataFrame:
     near = {"centroavante": ["centroavante", "ponta"], "ponta": ["ponta", "meia ofensivo", "centroavante"],
             "meia ofensivo": ["meia ofensivo", "meia central", "ponta"], "meia central": ["meia central", "volante", "meia ofensivo"],
             "volante": ["volante", "meia central"], "lateral": ["lateral"], "zagueiro": ["zagueiro"], "goleiro": ["goleiro"]}
-    g = ref[ref["funcao"] == funcao]
+    # Atuação híbrida: compara com a união controlada dos setores que tiveram participação relevante.
+    roles = {r for r, share in (role_mix or {}).items() if r in near and float(share) >= 0.20}
+    if len(roles) > 1:
+        candidates = set(roles)
+        for role in roles:
+            candidates.update(near.get(role, [role]))
+        g = ref[ref["funcao"].isin(candidates)]
+    else:
+        g = ref[ref["funcao"] == funcao]
     if len(g) < 12:                                  # poucos pares: amplia para funções vizinhas
-        g = ref[ref["funcao"].isin(near.get(funcao, [funcao]))]
+        candidates = set(near.get(funcao, [funcao]))
+        for role in roles:
+            candidates.update(near.get(role, [role]))
+        g = ref[ref["funcao"].isin(candidates)]
     return g
 
 
@@ -454,13 +465,13 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     """Desempenho, impacto e confiança de UMA atuação, com as dimensões e a base de cada uma."""
     funcao = row.get("funcao") or role_of(row.get("posicao"))
     mins = float(row.get("minutos") or 0)
-    peers = _peer_group(ref, funcao)
+    role_mix = row.get("role_mix")
+    peers = _peer_group(ref, funcao, role_mix)
     gk = funcao == "goleiro"
     inds, dims, base_wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (
         INDICATORS, DIMS, WEIGHTS.get(funcao, WEIGHTS["meia central"])
     )
     wts = list(base_wts)
-    role_mix = row.get("role_mix")
     if not gk and isinstance(role_mix, dict) and role_mix:
         mix = {str(k): max(float(v), 0.0) for k, v in role_mix.items() if k in WEIGHTS}
         total_mix = sum(mix.values())
@@ -517,9 +528,17 @@ def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[st
     if perf is None:
         return None
     ctx = context or {}
-    open_goals = max(float(row.get("gols", 0) or 0) - float(row.get("gols_penalti", 0) or 0), 0.0)
-    penalty_goals = max(float(row.get("gols_penalti", 0) or 0), 0.0)
-    bonus = min(1.45, 0.48 * open_goals + 0.30 * penalty_goals)
+    total_goals = max(float(row.get("gols", 0) or 0), 0.0)
+    raw_penalties = row.get("gols_penalti")
+    if raw_penalties is None or pd.isna(raw_penalties):
+        # Fontes de boxscore podem não separar pênaltis de bola rolando: usa-se peso intermediário,
+        # sem fingir que a distinção foi observada.
+        goal_bonus = 0.42 * total_goals
+    else:
+        penalty_goals = min(max(float(raw_penalties or 0), 0.0), total_goals)
+        open_goals = max(total_goals - penalty_goals, 0.0)
+        goal_bonus = 0.48 * open_goals + 0.30 * penalty_goals
+    bonus = min(1.45, goal_bonus)
     bonus += min(0.70, 0.35 * float(row.get("assistencias", 0) or 0))
     bonus += min(0.40, 0.20 * float(ctx.get("gols_decisivos", 0) or 0))
     # Defesas de pênalti na disputa e defesas de chances claras em momento de alta alavancagem.
