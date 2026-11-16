@@ -143,7 +143,8 @@ def _stats_table(ctx: MatchContext) -> None:
     try:
         from src.ui.context import match_ratings_v2
 
-        v2 = match_ratings_v2(ctx.match_id, ctx.df)
+        from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+        v2 = match_ratings_v2(ctx.match_id, ctx.df, rating_version=RATING_ENGINE_VERSION)
     except Exception:
         v2 = pd.DataFrame()
     if s.empty:
