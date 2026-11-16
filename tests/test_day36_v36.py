@@ -835,7 +835,8 @@ def test_rating_v2_rules(final_df):
     assert role_of("Left Center Back") == "zagueiro" and role_of("Right Back") == "lateral" and role_of("Goalkeeper") == "goleiro"
     r = match_ratings_v2(final_df).set_index("jogador")
     assert r.loc["Lionel Messi", "desempenho"] > r.loc["Nicolás Otamendi", "desempenho"]
-    assert r.loc["Kylian Mbappé", "impacto"] > r.loc["Kylian Mbappé", "desempenho"]  # gols elevam a nota final
+    assert r.loc["Kylian Mbappé", "nota"] > r.loc["Kylian Mbappé", "desempenho"]  # gols elevam a nota final
+    assert r.loc["Kylian Mbappé", "impacto"] > 0  # ajuste decisivo separado, em pontos
     assert pd_isna(r.loc["Germán Pezzella", "desempenho"])                              # 10 min: sem nota
     assert r["nota"].dropna().between(0, 10).all()
     # A final precisa reconhecer o hat-trick de Mbappé, a criação/gol de Messi e as ações decisivas de Dibu.
