@@ -159,6 +159,7 @@ def _stats_table(ctx: MatchContext) -> None:
         s = s.merge(v2[cols_v2].drop_duplicates("jogador"), on="jogador", how="left", suffixes=("", "_v3"))
         if "nota_v3" in s:
             s["nota"] = s["nota_v3"]
+            s = s.drop(columns=["nota_v3"])
         if "funcao" in s:
             s["setor"] = s["funcao"]
     ctx.prov("ps_table", "Estatísticas individuais", len(s), "contagem de eventos por atleta; minutos estimados pelas substituições")
