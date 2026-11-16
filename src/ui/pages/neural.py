@@ -63,11 +63,12 @@ def _didactic() -> None:
          "que teve e é ajustado um pouquinho na direção que diminui o erro (<b>descida do gradiente</b>). Repetir isso "
          "milhares de vezes é o que chamamos de treinar. Tudo foi escrito do zero, sem biblioteca pronta de IA."),
         ("Uma prova que a rede nunca viu",
-         "16 jogos ficam separados desde o início e <b>nunca</b> entram no treino. Toda versão nova faz a mesma prova. "
-         "Assim “melhorou” quer dizer melhorou de verdade, e não decorou as respostas."),
+         "Uma parte das partidas fica separada do treino e forma uma <b>validação fixa</b>. Todas as versões são comparadas "
+         "nessas mesmas partidas. Como essa validação orienta várias tentativas, ela não equivale a um teste final "
+         "intocado: resultados de promoção ainda podem sofrer sobreajuste à validação."),
         ("Guardamos sempre a melhor",
-         "Cada treino gera uma versão. Ela só vira a <b>versão oficial</b> se errar menos na prova do que a atual; senão "
-         "fica registrada como rejeitada. O Assistente sempre usa a oficial e diz qual é em cada resposta."),
+         "Cada treino gera uma versão. Ela só vira a <b>versão oficial</b> se cumprir os critérios de promoção na validação "
+         "fixa; senão fica registrada como rejeitada. O Assistente sempre usa a oficial e diz qual é em cada resposta."),
         ("Por que ela melhora",
          "Treinar de novo nos mesmos dados quase não muda nada (a prova mostra isso). O que faz a rede aprender é ter "
          "<b>mais jogos</b> para estudar — a curva de aprendizado lá embaixo mostra o erro caindo quando entram mais partidas."),
@@ -129,8 +130,8 @@ def render(ctx=None) -> None:
         st.markdown(r"""
 - **Inicialização de He:** $W \sim \mathcal{N}(0, \sqrt{2/n_{entrada}})$ — mantém a variância das ativações com ReLU; vieses = 0.
 - **Forward:** $Z_l = A_{l-1}W_l + b_l$; $A_l = \mathrm{ReLU}(Z_l)$ nas ocultas e $\sigma(Z_L)$ na saída.
-- **Perda:** entropia cruzada binária $-\frac{1}{m}\sum y\log\hat y + (1-y)\log(1-\hat y)$ + $\frac{\lambda}{2m}\sum\|W\|^2$.
-- **Backpropagation:** $dZ_L = \hat y - y$; $dW_l = A_{l-1}^\top dZ_l/m + \lambda W_l/m$; $db_l = \sum dZ_l/m$;
+- **Perda:** entropia cruzada binária $-\frac{1}{m}\sum [y\log\hat y + (1-y)\log(1-\hat y)]$ + $\frac{\lambda}{2}\sum\|W\|^2$.
+- **Backpropagation:** $dZ_L = \hat y - y$; $dW_l = A_{l-1}^\top dZ_l/m + \lambda W_l$; $db_l = \sum dZ_l/m$;
   $dZ_{l-1} = (dZ_l W_l^\top)\odot \mathbb{1}[Z_{l-1}>0]$.
 - **Atualização:** $W \leftarrow W - \eta\, dW$ em mini-lotes.
 - **Verificação:** o teste `test_gradient_check` compara o gradiente analítico com diferenças centrais
@@ -144,9 +145,9 @@ def render(ctx=None) -> None:
     st.markdown("### Hiperparâmetros")
     a, b, c, d, e = st.columns(5)
     hidden_txt = a.text_input("Neurônios por camada oculta", "32, 16", help="ex.: 32, 16  ou  8")
-    lr = b.select_slider("Taxa de aprendizado (η, Adam)", [0.001, 0.003, 0.005, 0.01, 0.02, 0.05], value=0.01,
+    lr = b.select_slider("Taxa de aprendizado (η, Adam)", [0.0005, 0.001, 0.003, 0.005, 0.01, 0.02], value=0.003,
                          help="Otimizador Adam: converge em poucas épocas; a parada antecipada guarda a melhor época.")
-    epochs = c.slider("Épocas", 5, 80, 30)
+    epochs = c.slider("Épocas", 5, 100, 50)
     l2 = d.select_slider("Regularização L2 (λ)", [0.0, 1e-4, 1e-3, 1e-2], value=1e-3)
     batch = e.select_slider("Tamanho do lote", [64, 128, 256, 512], value=256)
     try:
@@ -178,7 +179,7 @@ def render(ctx=None) -> None:
         st.caption(f"Conjunto: {full['match_id'].nunique()} partidas · {len(full):,} ações".replace(",", "."))
         with st.spinner("Treinando (forward → perda → backpropagation → atualização) e comparando com o campeão..."):
             if train_now:
-                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch)]
+                rounds = [reg.train_round(full, hidden, lr, epochs, l2, batch, patience=8)]
             else:
                 rounds = reg.auto_search(full, trials=3, epochs=epochs)
         last = rounds[-1]
@@ -216,8 +217,8 @@ def render(ctx=None) -> None:
         kpi("perda final (treino)", f"{net.history['train_loss'][-1]:.4f}", prov)
     with k[4]:
         kpi("AUC na validação fixa", f"{(live['auc'] if live else ci.get('val_auc', 0)):.3f}", prov)
-    st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas separadas na primeira rodada e nunca usadas "
-               "no treino — todas as versões são medidas nas mesmas ações.")
+    st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas fora do treino. Ela é reutilizada para comparar versões; "
+               "não deve ser interpretada como teste final intocado.")
     l, r = st.columns([1, 1.3])
     l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), use_container_width=True)
     with r:
@@ -265,11 +266,12 @@ def _versions_and_usage(ctx, reg, live) -> None:
                             "n_samples_train", "val_auc", "val_logloss", "cv_logloss_std", "test_gain", "gain_ci_low",
                             "promoted", "reason"]].rename(columns={
             "created": "criada", "origin": "origem", "hidden": "ocultas", "learning_rate": "η", "n_matches_train": "partidas",
-            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (teste)", "cv_logloss_std": "σ dobras/sementes",
+            "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (validação)", "cv_logloss_std": "σ dobras/sementes",
             "test_gain": "ganho", "gain_ci_low": "IC95% inferior", "promoted": "promovida", "reason": "decisão"}),
-            "Promoção rigorosa: validação GroupKFold por partida (5 dobras × 2 sementes) mede a variação σ; a nova versão "
-            "só vira campeã se, no teste isolado (partidas que nunca treinam), o ganho de perda sobre o campeão for maior "
-            "que σ e o IC 95% do bootstrap por partida ficar acima de zero. Todas as tentativas ficam registradas.")
+            "Promoção: GroupKFold por partida estima a estabilidade durante o desenvolvimento; a decisão final compara o desafiante "
+            "com o campeão na validação fixa e usa bootstrap agrupado por partida para quantificar a incerteza. Como a "
+            "mesma validação é consultada em várias tentativas, o intervalo não elimina o risco de sobreajuste por seleção. "
+            "Todas as tentativas ficam registradas.")
     with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
         if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
             with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):
