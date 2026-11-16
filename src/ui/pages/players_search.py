@@ -93,7 +93,7 @@ def player_matches(name: str) -> pd.DataFrame:
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
 def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
     """Nota 0–10 do atleta numa partida com lances (None = a partida não tem lances dele → fora da média)."""
-    from src.metrics.player_rating import match_ratings
+    from src.analytics.rating_v2 import match_ratings_v2
     from src.ui.context import load_bundle, processed_events
 
     try:
@@ -101,7 +101,7 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
         if b.events is None or b.events.empty:
             return None
         df, _ = processed_events(int(match_id), b.events)
-        r = match_ratings(df)
+        r = match_ratings_v2(df)
     except Exception:
         return None
     hit = r[r["jogador"].isin(names)] if not r.empty else r
@@ -119,7 +119,15 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
     if hit.empty:
         return None
     x = hit.iloc[0]
-    return {"nota": None if pd.isna(x["nota"]) else float(x["nota"]), "minutos": float(x["minutos"]), "setor": x["setor"]}
+    value = x.get("nota", x.get("nota_final"))
+    return {
+        "nota": None if value is None or pd.isna(value) else float(value),
+        "desempenho": None if pd.isna(x.get("desempenho")) else float(x.get("desempenho")),
+        "impacto": None if pd.isna(x.get("impacto")) else float(x.get("impacto")),
+        "confianca": x.get("confianca"),
+        "minutos": float(x["minutos"]),
+        "setor": x.get("funcao", x.get("posicao", "")),
+    }
 
 
 def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
@@ -148,7 +156,7 @@ def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
         if avg["aviso"]:
             st.warning(avg["aviso"].capitalize() + (f" — média provisória {avg['media_bruta']:.1f}." if avg["media_bruta"] else "."))
         st.caption((f"{skipped} jogo(s) sem lances do jogador ficaram fora da média (nunca contam como zero). " if skipped else "")
-                   + "A nota de cada jogo usa pesos do setor em que ele jogou.")
+                   + "Nota 3.0: desempenho por função + impacto decisivo (gols, defesas-chave e disputa de pênaltis), sem transformar dado ausente em zero.")
     return got
 
 
@@ -421,7 +429,7 @@ def _form_data(names: tuple, version: str, club: str = "") -> pd.DataFrame:
 
 
 DIM_SHORT = [("ofensiva", "ATA"), ("criacao", "CRI"), ("progressao", "PRO"), ("defesa", "DEF"), ("eficiencia", "TEC"),
-             ("disciplina", "DIS")]
+             ("disciplina", "DIS"), ("tatica", "TRB")]
 GK_SHORT = [("defesas", "DEF"), ("aereo", "AER"), ("distribuicao", "DIS"), ("seguranca", "SEG"), ("cobertura", "COB")]
 
 
@@ -436,9 +444,13 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
     f = _form_data(names, get_service().db.stable_version(), club or "")
     if f is None or f.empty or len(f) < 2:
         return
-    q = float(f["desempenho"].mean())
-    fase = float(f.head(5)["desempenho"].mean())
-    sd = float(f["desempenho"].std() or 0)
+    score_col = "nota" if "nota" in f and f["nota"].notna().any() else "desempenho"
+    scored = pd.to_numeric(f[score_col], errors="coerce").dropna()
+    if scored.empty:
+        return
+    q = float(scored.mean())
+    fase = float(pd.to_numeric(f.head(5)[score_col], errors="coerce").mean())
+    sd = float(scored.std() or 0)
     reg = "muito regular" if sd < 0.6 else "regular" if sd < 1.0 else "oscila bastante"
     fun = f["funcao"].mode().iloc[0]
     dims = GK_SHORT if fun == "goleiro" else DIM_SHORT
@@ -448,8 +460,8 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<b>{int(round(9.9 * float(f[k].dropna().mean())))}</b></div>' for k, lab in dims if k in f and f[k].notna().any())
     trend = "▲" if fase - q >= 0.3 else "▼" if q - fase >= 0.3 else "●"
     tcol = "#22C55E" if trend == "▲" else "#EF4444" if trend == "▼" else "#94A3B8"
-    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * r.desempenho)}px;'
-                     f'background:{"#22C55E" if r.desempenho >= 6.5 else "#F59E0B" if r.desempenho >= 5 else "#EF4444"};'
+    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * getattr(r, score_col))}px;'
+                     f'background:{"#22C55E" if getattr(r, score_col) >= 7.0 else "#F59E0B" if getattr(r, score_col) >= 5.5 else "#EF4444"};'
                      f'border-radius:3px;margin-right:2px;vertical-align:bottom"></span>'
                      for r in f.iloc[::-1].itertuples())
     st.markdown(
@@ -466,5 +478,4 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<span style="color:{tcol}">{trend}</span></div><div style="font-size:1.3rem;font-weight:700">{fase:.1f}</div>'
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
         f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
-    st.caption("Cartão = nota 2.0 por estatísticas (FotMob), contra jogadores da mesma função. Número grande = qualidade × 9,9 "
-               "(escala 0–99, estilo jogo de videogame). Fase ≠ qualidade: um bom jogador pode estar em má fase.")
+    st.caption("Cartão = nota 3.0 por estatísticas individuais (FotMob), comparada com jogadores da mesma função. A qualidade e a fase usam a nota final; os atributos mostram as dimensões observadas. Sem dados de tracking, trabalho sem bola não observado não é inventado.")
