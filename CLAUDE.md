@@ -225,6 +225,24 @@ Rodada 5 (16/11/2026, 276 testes verdes):
 - Não feito: padrões ofensivos por sequência (terceiro homem etc.), perfil de treinador (fontes não trazem treinador de
   forma confiável), tracking/360 de outras ligas (não existe aberto), estaduais/Série D por notícia de escalação.
 
+Rodada 6 (16/11/2026, 278 testes verdes) — correções pedidas com prints:
+- ✅ Escalação: `canonical_names` (matchday) unifica o mesmo atleta entre fontes (Konaté/Konate, Van Dijk, Alisson ×
+  Alisson Becker; dois "Gabriel" não se juntam) — acabou a "dúvida" falsa; quem não está no elenco atual sai mesmo com
+  escalações velhas na base; "% das vezes que começou"; rival ≠ próprio time; pontos fortes/fracos de cada jogador em
+  blocos verdes/vermelhos (`player_highlights`, temporada × mesma função); aviso de escalações velhas/ausentes.
+- ✅ FotMob AUTOMÁTICA: thread `til-fotmob` (autosync.py) com o app aberto — calendário diário (1ª vez com
+  FOTMOB_TEMPORADAS=2), jogos dos últimos 10 dias, histórico de 5 temporadas em lotes de 300; ~0,7 s por pedido
+  (FOTMOB_INTERVALO); jogo sem dado não repete por 7 dias (`fotmob_tried`); status na barra do topo. ENABLE_FOTMOB=false
+  desliga. Sob demanda: jogo sem detalhes busca a versão FotMob na hora; Escalação de time sem escalações recentes baixa
+  os últimos 12 jogos. CLI `--only fotmob_tudo` (5 temporadas, tudo, retomável).
+- ✅ Profundidade FotMob: `match_extra` (momentum, corredores de ataque, desfalques, craque); jogo sem lances ganha
+  "O jogo pelos dados da FotMob" (`src/ui/pages/fotmob_depth.py`) e Fortes e fracos (`fotmob_strengths.py`); Assistente
+  em jogo sem lances usa `src/intelligence/box_analyst.py` (ranking de qualquer número, nota, anular criador, como evitar
+  gols, por que venceu, físico só se a liga mede); Comparar jogador × jogador pela FotMob.
+- ✅ Classificação desenhada (escudo, faixas, últimos 5); linha do tempo sem "****" quando a fonte não traz o autor;
+  erro `_detalhe` em Fortes e fracos (modo Equipe) corrigido.
+- Pendente: erro do treino da rede nos Bastidores ("parou com erro") — pedir o texto do registro ao usuário.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

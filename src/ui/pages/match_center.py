@@ -393,8 +393,14 @@ def render_boxscore(ctx: MatchContext) -> None:
                 if pd.notna(r.extra_minute) and r.extra_minute:
                     minute += f"+{int(r.extra_minute)}"
                 ic = next((v for k, v in icon.items() if k in str(r.event_type).lower()), "•")
-                extra = f" ({r.related_player})" if r.related_player else ""
-                st.markdown(f"`{minute:>6}` {ic} **{r.player_name}**{extra} — {r.team_name} · {r.detail or r.event_type}")
+                extra = f" ({r.related_player})" if isinstance(r.related_player, str) and r.related_player.strip() else ""
+                who = r.player_name if isinstance(r.player_name, str) and r.player_name.strip() else None
+                team_txt = r.team_name if isinstance(r.team_name, str) and r.team_name.strip() else ""
+                desc = str(r.detail or r.event_type).replace("Normal Goal", "Gol")
+                # fonte sem autor/time (ex.: open-matchday): mostra só o que existe, sem asteriscos vazios
+                st.markdown(f"`{minute:>6}` {ic} " + (f"**{who}**{extra} — " if who else "")
+                            + (f"{team_txt} · " if team_txt else "") + desc
+                            + ("" if who else " _(a fonte não informa o autor)_"))
     if not lineups.empty:
         st.markdown("##### Escalações")
         cols = st.columns(2)
