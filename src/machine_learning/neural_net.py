@@ -12,7 +12,7 @@ Arquitetura: perceptron multicamadas totalmente conectado.
   de perda por época (treino e validação).
 * Backpropagation explícito (sem diferenciação automática):
       saída:   dZ_L = A_L − y                       (sigmoide + BCE simplificam assim)
-      camada:  dW_l = A_{l−1}ᵀ · dZ_l / m + λ·W_l/m
+      camada:  dW_l = A_{l−1}ᵀ · dZ_l / m + λ·W_l
                db_l = soma(dZ_l) / m
                dA_{l−1} = dZ_l · W_lᵀ
                dZ_{l−1} = dA_{l−1} ⊙ 1[Z_{l−1} > 0]   (derivada da ReLU)
@@ -243,6 +243,7 @@ class NeuralNetwork:
         return self
 
     def _weighted_backward(self, y, Zs, A, w):
+        """Backpropagation da BCE ponderada; L2 usa a mesma escala da perda não ponderada."""
         m = A[0].shape[0]
         y = y.reshape(-1, 1)
         dW = [np.zeros_like(W) for W in self.weights]
