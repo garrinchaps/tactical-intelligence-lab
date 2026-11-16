@@ -100,9 +100,13 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
 **Fontes com limitação conhecida:**
 - API-Football (plano grátis): só temporadas 2022–2024, sem `?ids=` (1 jogo por requisição), 100 req/dia; o app
   guarda isso em `source_state` e não gasta cota redescobrindo.
-- ESPN histórico: dá HTTP 400 para `bra.1` em períodos antigos. Na v36 o 400 não é mais repetido com espera (era o
-  "travado 10 min"): a recusa fica lembrada 7 dias, cada mês mostra progresso e, depois de 6 meses recusados, pula
-  para o ano seguinte. Conferir no PC quais anos a ESPN realmente entrega.
+- ESPN: **causa raiz achada em 16/11/2026** — a ESPN passou a RECUSAR qualquer intervalo de datas
+  (`dates=20251001-20251007` → HTTP 400 em TODAS as ligas). Aceita só dia (`20251004`), mês (`202510`) ou ano (`2025`).
+  O conector agora pede por ano/mês. Validado daqui: 52 ligas com jogos 2025/2026 (~25 mil encerrados); fora:
+  `bra.supercopa`, `kor.1`; Série C 2026 vazia. Comandos: `--only espn_temporada` (resultados + próximos jogos,
+  ~1 pedido por liga/ano), `--only espn_resumos --limite N` (estatísticas + escalações + números por jogador, ~1 s
+  cada, Brasil e Europa principal primeiro, continua de onde parou), `--only espn_elencos` (elenco atual + lesões).
+  A ESPN agora vem LIGADA por padrão (ENABLE_ESPN_PUBLIC_FEED=false desliga).
 - Understat: deu 0 partidas; a v35 não guarda mais resposta vazia em cache e mostra o motivo — conferir.
 - Nenhuma fonte aberta tem lances com coordenadas do Brasileirão nem dados físicos (velocidade, distância, mapa de
   calor de tracking).
@@ -154,15 +158,29 @@ Lista A–J do usuário (sessão 2, 16/11/2026) — 233 testes verdes:
   "o que é isto?" (`src/ui/glossary.py`) · F8 comparar qualquer jogador.
 - ✅ G painel de fontes (aba 🩺 em Dados & Fontes, `src/data_hub/health.py`, ações em segundo plano).
 
+Rodada 3 (16/11/2026, 247 testes verdes; testes não acessam a rede — `tests/conftest.py`):
+- ✅ ESPN por ano/mês + fixtures (`fixtures`) + elencos (`espn_rosters`) + resumos priorizados; atualização automática
+  (QUICK `espn` = temporada do ano + resumos da última semana; DAILY `espn_elencos`; ao vivo pela ESPN).
+- ✅ Busca de jogos ordenada por data (o nome só filtra).
+- ✅ Assistente: blocos táticos novos (`src/intelligence/tactical_blocks.py` + `tactical_writers.py`): corredores,
+  como sofreu, entre linhas, eficiência, momentos, jogadas dos gols, diagnóstico dos defensores, duplas, erros que
+  viraram perigo, plano para explorar a defesa; jogador ausente; gentílicos; pergunta de jogador sem bloco do time;
+  teto de 10 s por pergunta para o Gemini (antes até ~58 s). Guard: inteiro só deriva de dois inteiros.
+- ✅ Treino da rede em processo separado (`src/machine_learning/train_job.py`), andamento ao vivo, parar; float32.
+- ✅ Escalação: aba 🔭 Próximo jogo (`src/squad/matchday.py`): calendário real, provável dos dois times pelas escalações
+  recentes (posição e lado), lesões (ESPN) e suspensões (vermelho no último jogo), fragilidades por setor no campinho,
+  quem decide, porquê de cada jogador; Provável/Melhor usam escalações reais quando há ≥ 3 jogos; 16 formações.
+- ✅ Comparar em cartões (`duel_bars`), tabelas com 2 casas, campinho sem eixos de jardas, gramado listrado.
+- Observação: a ESPN lista o volante Rodri (nasc. 22/06/1996) no elenco do Barcelona hoje; o usuário disse que ele não
+  é do Barcelona — fontes divergem; a interface mostra a fonte do elenco.
+
 Pendente / limitações honestas:
-- B1: muitas ligas novas da ESPN estão marcadas "(a validar)" — códigos não conferidos (a nuvem não alcança a ESPN).
-  Ao vivo só existe pela ESPN. Cobertura de estaduais além de SP/RJ/MG/RS, Série D, feminino e base depende de
-  fontes ainda não integradas (avaliar OpenLigaDB, football-data.org, RSSSF, MinuteLab no PC).
-- F: tradução cobre menus, títulos e textos principais (o resto e as respostas do Assistente seguem em português);
-  F5 (gráficos só com dado real) não foi auditado tela a tela; F6 sub-abas só em Fortes e fracos; F7 só nas tabelas.
-- C2 só age quando há ≥ 20 atuações do mesmo setor e competição no conjunto avaliado.
-- Recalibrar `EXPECTED_PER90` da nota com mais partidas (hoje 3 jogos).
-- Conferir no PC: ESPN (`--only espn_historico --desde 2019`), Understat, experimentos B/A/C/D da rede.
+- Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
+- "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
+  a ESPN publica ~1 h antes. Acúmulo de amarelos não é calculado (só vermelho no último jogo).
+- Estaduais além de SP/RJ/MG/RS, Série D, feminino e base: fora da ESPN; avaliar football-data.org (responde daqui),
+  OpenLigaDB (responde), RSSSF.
+- F5/F6/F7 parciais; recalibrar `EXPECTED_PER90`; conferir no PC Understat e os experimentos B/A/C/D.
 
 ## 8. Ao final de cada sessão
 
