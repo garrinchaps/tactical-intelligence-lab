@@ -97,8 +97,7 @@ FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors",
 
 def log_generic_fallback(query: str, sc: Any, path: Optional[str] = None) -> None:
     """
-    Aprender com as interações: toda pergunta que caiu no resumo genérico fica registrada (sem dados pessoais)
-    para virar caso de teste. A tela Bastidores lista esse arquivo.
+    Registra perguntas sem alvo como casos de teste. Isso melhora a cobertura, mas não treina pesos automaticamente.
     """
     import datetime
     import os
@@ -1487,6 +1486,17 @@ class DynamicTacticalAnalyst:
         secs = round(_time.perf_counter() - t0, 2)
         res["latency_s"] = secs
         log_latency(query, secs, res.get("engine_used", ""), (res.get("scope") or {}).get("ask"))
+        # Todas as perguntas entram no registro central, inclusive as que tiveram resposta específica.
+        # O registro é telemetria/feedback; nenhum peso muda apenas por uma pergunta.
+        try:
+            from src.intelligence.learning_hub import record_interaction
+
+            interaction_meta = kwargs.get("meta")
+            if not isinstance(interaction_meta, dict) and len(args) > 1 and isinstance(args[1], dict):
+                interaction_meta = args[1]
+            res["interaction_id"] = record_interaction(query, res, interaction_meta or {})
+        except Exception:
+            res["interaction_id"] = None
         return res
 
     def _answer(
