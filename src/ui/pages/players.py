@@ -169,7 +169,7 @@ def _stats_table(ctx: MatchContext) -> None:
     s = _with_market_value(s, ctx)
     labels = {**PLAYER_STAT_LABELS, "nota": "Nota final 3.0 (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
               "desempenho": "Desempenho base (0–10)", "funcao": "Função predominante",
-              "impacto": "Impacto (0–10)", "confianca": "Confiança", "confianca_pct": "Confiança (%)",
+              "impacto": "Ajuste decisivo (pts)", "confianca": "Confiança", "confianca_pct": "Confiança (%)",
               "defesas_goleiro": "Defesas (goleiro)", "gols_sofridos_goleiro": "Gols sofridos (goleiro)"}
     base = ["jogador", "equipe", "posicao", "setor", "nota", "minutos"]
     if cat == "Nota":
