@@ -831,15 +831,38 @@ def test_two_questions_in_one_message_get_two_answers(final_df):
 def test_rating_v2_rules(final_df):
     from src.analytics.rating_v2 import evaluate, match_ratings_v2, pct_to_score, role_of
 
-    assert pct_to_score(50) == 5.5 and pct_to_score(90) == 8.5 and pct_to_score(99) == 10.0
+    assert pct_to_score(50) == 6.4 and pct_to_score(90) == 8.6 and pct_to_score(99) == 10.0
     assert role_of("Left Center Back") == "zagueiro" and role_of("Right Back") == "lateral" and role_of("Goalkeeper") == "goleiro"
     r = match_ratings_v2(final_df).set_index("jogador")
     assert r.loc["Lionel Messi", "desempenho"] > r.loc["Nicolás Otamendi", "desempenho"]
-    assert r.loc["Kylian Mbappé", "impacto"] > r.loc["Kylian Mbappé", "desempenho"]            # gols pesam no IMPACTO
-    assert pd_isna(r.loc["Germán Pezzella", "desempenho"])                                        # 10 min: sem nota
+    assert r.loc["Kylian Mbappé", "impacto"] > r.loc["Kylian Mbappé", "desempenho"]  # gols elevam a nota final
+    assert pd_isna(r.loc["Germán Pezzella", "desempenho"])                              # 10 min: sem nota
+    assert r["nota"].dropna().between(0, 10).all()
+    # A final precisa reconhecer o hat-trick de Mbappé, a criação/gol de Messi e as ações decisivas de Dibu.
+    assert r.loc["Kylian Mbappé", "nota"] >= 7.5
+    assert r.loc["Lionel Messi", "nota"] >= 7.5
+    dibu = r.loc["Emiliano Martínez"]
+    assert dibu["shootout_saves"] >= 1
+    assert dibu["nota"] >= 7.5 and dibu["nota"] > dibu["desempenho"]
     gk = r.loc["Hugo Lloris", "_detalhe"]
-    assert gk["dimensoes"]["posicionamento"] is None                                              # não observado ≠ zero
-    assert r["desempenho"].dropna().max() < 9.6                                                   # 10 é raríssimo
+    assert gk["dimensoes"]["posicionamento"] is None  # não observado ≠ zero
+    assert r["desempenho"].dropna().max() < 9.6       # desempenho 10 continua raríssimo
+
+
+def test_rating_v3_blends_distinct_roles_in_the_same_match(final_df):
+    from src.analytics.rating_v2 import indicators
+
+    d = final_df.copy()
+    mask = d["player_name"].eq("Ángel Di María")
+    indices = list(d.index[mask])
+    assert len(indices) >= 4
+    split = len(indices) // 2
+    d.loc[indices[:split], "position_name"] = "Right Wing"
+    d.loc[indices[split:], "position_name"] = "Center Midfield"
+    scored = indicators(d).set_index("jogador")
+    mix = scored.loc["Ángel Di María", "role_mix"]
+    assert set(mix) == {"ponta", "meia central"}
+    assert sum(mix.values()) == pytest.approx(1.0)
 
 
 def pd_isna(v):
