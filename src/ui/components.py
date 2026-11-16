@@ -207,6 +207,13 @@ def zebra(df: pd.DataFrame):
         if fmt:
             sty = sty.format(fmt, na_rep="—")
 
+        # Realce cromático sutil para leitura comparativa: gradiente azul por coluna numérica,
+        # sem declarar automaticamente que o maior valor é "melhor" (ex.: perdas, faltas, xGA).
+        numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])
+                        and df[col].notna().sum() > 1]
+        if numeric_cols and len(numeric_cols) <= 32:
+            sty = sty.background_gradient(cmap="PuBu", subset=numeric_cols, axis=0, low=0.08, high=0.18)
+
         if rating_cols:
             def rating_color(value):
                 try:
