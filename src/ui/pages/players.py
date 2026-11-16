@@ -197,19 +197,25 @@ def _stats_table(ctx: MatchContext) -> None:
 
 def _rating_report(ctx: MatchContext) -> None:
     """Relatório da atuação (avaliação 2.0): três números, radar das dimensões e o porquê."""
-    from src.analytics.rating_v2 import report
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION, report
     from src.ui.context import match_ratings_v2
 
-    v2 = match_ratings_v2(ctx.match_id, ctx.df)
+    v2 = match_ratings_v2(ctx.match_id, ctx.df, rating_version=RATING_ENGINE_VERSION)
     if v2.empty:
         return
     st.markdown("#### 🏅 Relatório da atuação")
     pick = st.selectbox("Jogador", v2["jogador"].tolist(), key="rr_pick")
     ev = v2[v2["jogador"] == pick].iloc[0]["_detalhe"]
-    k = st.columns(3)
-    for col, lab, val, sub in ((k[0], "Desempenho", ev["desempenho"], ev["classificacao"]),
-                               (k[1], "Impacto na partida", ev["impacto"], "gols, assistências e erros decisivos"),
-                               (k[2], "Confiança", f"{ev['confianca_pct']}%", f"{ev['confianca']} · {ev['amostra']}")):
+    k = st.columns(4)
+    delta = ev.get("impacto")
+    delta_text = "—" if delta is None else f"{delta:+.1f} pts"
+    items = (
+        (k[0], "Nota final", ev.get("nota"), ev["classificacao"]),
+        (k[1], "Desempenho-base", ev["desempenho"], "percentis por função e dimensão"),
+        (k[2], "Ajuste decisivo", delta_text, "gols, assistências, defesas-chave e erros explícitos"),
+        (k[3], "Confiança", f"{ev['confianca_pct']}%", f"{ev['confianca']} · {ev['amostra']}"),
+    )
+    for col, lab, val, sub in items:
         col.markdown(f'<div class="til-card" style="min-height:auto"><div class="label">{lab}</div><div class="value">'
                      f'{val if val is not None else "—"}</div><div style="color:#94A3B8;font-size:.82rem">{sub}</div></div>',
                      unsafe_allow_html=True)
