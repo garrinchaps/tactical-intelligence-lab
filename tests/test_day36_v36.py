@@ -850,6 +850,16 @@ def test_rating_v3_rules(final_df):
     assert r["desempenho"].dropna().max() < 9.6       # desempenho 10 continua raríssimo
 
 
+def test_rating_v3_does_not_turn_missing_xg_into_zero(final_df):
+    from src.analytics.rating_v2 import indicators
+
+    without_xg = final_df.drop(columns=["shot_statsbomb_xg"], errors="ignore")
+    scores = indicators(without_xg)
+    assert not scores.empty
+    assert scores["xg90"].isna().all()
+    assert scores["xa90"].isna().all()
+
+
 def test_rating_v3_missing_optional_values_do_not_create_penalties():
     import numpy as np
 
