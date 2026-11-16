@@ -673,6 +673,25 @@ def render(_ctx=None) -> None:
                             f'{d["origem"]}</span></div>', unsafe_allow_html=True)
                     if not items:
                         st.caption("Nada claro o bastante nos jogos recentes.")
+            from src.squad.planner import deep_tactical_signals
+            signals = deep_tactical_signals(theirs)
+            if signals:
+                st.markdown("##### 🧪 Sinais derivados — além do volume bruto")
+                st.caption("Indicadores calculados jogo a jogo. Não representam tracking posicional; só aparecem quando há "
+                           "amostra mínima e estatísticas pareadas.")
+                signal_cols = st.columns(min(3, len(signals)))
+                for col, signal in zip(signal_cols, signals):
+                    with col:
+                        val = signal["valor"]
+                        shown = f"{val:.2f} {signal['unidade']}"
+                        st.markdown(
+                            f'<div class="fm-card" style="border-top:3px solid #38BDF8;border-radius:12px;padding:.8rem;'
+                            f'min-height:170px"><div style="font-size:.78rem;color:#94A3B8">{signal["titulo"]}</div>'
+                            f'<div style="font-size:1.45rem;font-weight:800;color:#E0F2FE">{shown}</div>'
+                            f'<div style="font-size:.78rem;color:#94A3B8">{signal["jogos"]} jogos pareados</div>'
+                            f'<div style="margin-top:.55rem;font-size:.84rem">{signal["leitura"]}</div>'
+                            f'<div style="margin-top:.4rem;font-size:.72rem;color:#64748B">{signal["evidencia"]}</div></div>',
+                            unsafe_allow_html=True)
             st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
             x, y = st.columns(2)
             with x:
