@@ -159,7 +159,8 @@ def zebra(df: pd.DataFrame):
     try:
         sty = df.style.apply(
             lambda row: [
-                "background-color: #0D1424" if row.name % 2 == 0 else "background-color: #111C30"
+                "background-color: #0D1424" if isinstance(row.name, int) and row.name % 2 == 0
+                else ("background-color: #111C30" if isinstance(row.name, int) else "")
             ] * len(row),
             axis=1,
         )
@@ -249,10 +250,10 @@ def render_chart(figure, *args, **kwargs):
         fig = go.Figure(figure)
         fig.update_layout(
             template=PLOTLY_LAYOUT["template"],
-            paper_bgcolor=PLOTLY_LAYOUT["paper_bgcolor"],
-            plot_bgcolor=PLOTLY_LAYOUT["plot_bgcolor"],
+            paper_bgcolor=fig.layout.paper_bgcolor or PLOTLY_LAYOUT["paper_bgcolor"],
+            plot_bgcolor=fig.layout.plot_bgcolor or PLOTLY_LAYOUT["plot_bgcolor"],
             font=dict(family="Inter, Segoe UI, sans-serif", color=PALETTE["text"], size=13),
-            colorway=PLOTLY_LAYOUT["colorway"],
+            colorway=fig.layout.colorway or PLOTLY_LAYOUT["colorway"],
             hoverlabel=PLOTLY_LAYOUT["hoverlabel"],
         )
         if fig.layout.title and fig.layout.title.text:
