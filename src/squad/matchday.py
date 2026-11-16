@@ -286,24 +286,34 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
         val = dict(zip(tv["core"], pd.to_numeric(tv["valor_mercado_eur"], errors="coerce")))
         df["valor"] = df["nome"].map(lambda nm: val.get(player_core(nm)))
     vmax = pd.to_numeric(df["valor"], errors="coerce").max() if df["valor"].notna().any() else None
+    try:
+        dest = player_highlights(db, games, team_names, {r.nome: r.papel for r in df.itertuples()
+                                                         if isinstance(r.papel, str) and not r.papel.endswith("?")}, canon)
+    except Exception:
+        dest = {}
     q, f, base = [], [], []
     for r in df.itertuples():
         share = r.titular_temporada / G
         ga = (r.gols + 0.7 * r.assistencias) / G
         v = (float(r.valor) / vmax) ** 0.5 if vmax and r.valor and r.valor == r.valor else None
         parts = [(0.6, share), (0.3, min(ga / 0.5, 1.0))] + ([(0.1, v)] if v is not None else [])
-        q.append(round(10 * sum(w * x for w, x in parts) / sum(w for w, _ in parts), 1))
+        base_quality = 10 * sum(w * x for w, x in parts) / sum(w for w, _ in parts)
+        stat = dest.get(r.nome) or {}
+        stat_score, stat_conf, stat_peers = stat.get("desempenho"), stat.get("confianca_pct"), stat.get("pares", 0)
+        # A régua compartilhada só influencia a escolha quando a amostra de pares e a confiança são adequadas.
+        if stat_score is not None and pd.notna(stat_score) and (stat_conf or 0) >= 50 and (stat_peers or 0) >= 20:
+            q.append(round(0.65 * base_quality + 0.35 * float(stat_score), 1))
+            base.append("titularidade/produção + nota 2.0 por estatísticas da mesma função"
+                        + (" + valor de mercado (desempate)" if v is not None else ""))
+        else:
+            q.append(round(base_quality, 1))
+            base.append("titularidade e gols/assistências da temporada"
+                        + (" + valor de mercado (desempate)" if v is not None else ""))
         ga5 = (r.gols_ult5 + 0.7 * r.assist_ult5) / G5
         f.append(round(10 * (0.6 * r.titular_ult5 / G5 + 0.4 * min(ga5 / 0.5, 1.0)), 1))
-        base.append("titularidade e gols/assistências da temporada" + (" + valor de mercado (desempate)" if v is not None else ""))
     df["qualidade"], df["fase"], df["nota_base"] = q, f, base
     df["nota"] = (df["qualidade"] * 10).round()                  # compatibilidade com as telas antigas (0–100)
     forms = Counter(lu.drop_duplicates("match_id").head(3)["formation"].dropna()) if not lu.empty else Counter()
-    try:
-        dest = player_highlights(db, games, team_names, {r.nome: r.papel for r in df.itertuples()
-                                                         if isinstance(r.papel, str) and not r.papel.endswith("?")}, canon)
-    except Exception:
-        dest = {}
     newest = pd.to_datetime(lu["data"], errors="coerce").max() if not lu.empty else None
     stale = None if newest is None or pd.isna(newest) else int((pd.Timestamp(date.today()) - newest).days)
     return {"jogadores": df.sort_values(["prob_titular", "qualidade"], ascending=False).reset_index(drop=True),
@@ -376,7 +386,7 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
     if not games:
         return {}
     from src.analytics import rating_box as RB
-    from src.analytics.rating_v2 import INDICATORS, GK_INDICATORS, IND_PT, _peer_group, _pct
+    from src.analytics.rating_v2 import INDICATORS, GK_INDICATORS, IND_PT, _peer_group, _pct, evaluate
 
     ref = RB.reference()
     if ref.empty:
@@ -417,6 +427,7 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
         if ind.empty:
             continue
         r = ind.iloc[0].to_dict()
+        model_score = evaluate(r, ref)
         peers = _peer_group(ref, r["funcao"])
         inds = GK_INDICATORS if r["funcao"] == "goleiro" else INDICATORS
         scored = []
@@ -433,7 +444,10 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
         scored.sort(key=lambda x: -x[0])
         fortes = [{"rotulo": IND_PT.get(k, k), "valor": round(float(v), 2), "percentil": round(p)} for p, k, v in scored if p >= 75][:3]
         fracos = [{"rotulo": IND_PT.get(k, k), "valor": round(float(v), 2), "percentil": round(p)} for p, k, v in reversed(scored) if p <= 25][:2]
-        out[name] = {"fortes": fortes, "fracos": fracos, "jogos": n_games, "minutos": int(agg["minutes"]), "funcao": r["funcao"]}
+        out[name] = {"fortes": fortes, "fracos": fracos, "jogos": n_games, "minutos": int(agg["minutes"]),
+                     "funcao": r["funcao"], "desempenho": model_score.get("desempenho"),
+                     "impacto": model_score.get("impacto"), "confianca_pct": model_score.get("confianca_pct"),
+                     "pares": model_score.get("pares", 0)}
     return out
 
 
