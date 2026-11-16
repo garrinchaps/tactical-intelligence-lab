@@ -84,7 +84,7 @@ def _simulator() -> None:
     """Uma jogada inventada pelo usuário → chance de terminar em chute segundo a versão oficial."""
     import numpy as np
 
-    from src.machine_learning.danger_dataset import ZONE_COLS, _zone_onehot
+    from src.machine_learning.danger_dataset import FEATURES, LEGACY_FEATURES, ZONE_COLS, _zone_onehot
     from src.machine_learning.model_registry import champion_cached
 
     st.markdown("### 🎮 Teste a rede com uma jogada")
@@ -113,7 +113,7 @@ def _simulator() -> None:
     from src.machine_learning.danger_dataset import LEGACY_FEATURES
     names = list(getattr(net, "feature_names", []) or [])
     if not names or any(name.startswith("x") for name in names):
-        names = LEGACY_FEATURES if net.layer_sizes[0] == len(LEGACY_FEATURES) else list(values)
+        names = FEATURES if net.layer_sizes[0] == len(FEATURES) else LEGACY_FEATURES
     feats = [values.get(name, 0.0) for name in names]
     p = float(net.predict_proba(np.array([feats]))[0])
     col1, col2 = st.columns([1, 2])
@@ -177,7 +177,7 @@ def render(ctx=None) -> None:
     reg = DangerModelRegistry()
     champion_cached()                                    # garante a v001 na primeira execução
     t1, t2 = st.columns(2)
-    use_db = t1.toggle("Incluir partidas do banco com tracking 360 (o conjunto cresce com a sincronização)", value=True)
+    use_db = t1.toggle("Incluir partidas do banco com eventos (o conjunto cresce com a sincronização)", value=True)
     use_proxy = t2.toggle("Incluir também jogos sem 360 (densidade estimada por eventos)", value=True,
                           help="Amplia a base com eventos do OpenPlay, Wyscout e StatsBomb sem freeze frame. O campo "
                                "density_is_360 informa a origem; a estimativa não é apresentada como tracking medido.")
@@ -262,7 +262,7 @@ def render(ctx=None) -> None:
     else:
         from src.canonical.provenance import ProvenanceRecord
 
-        prov = ProvenanceRecord("nn", "Rede neural", net.summary()["arquitetura"], "StatsBomb Open Data + 360 (Copa 2022)",
+        prov = ProvenanceRecord("nn", "Rede neural", net.summary()["arquitetura"], "Eventos do banco + Estatísticas StatsBomb 360 quando disponíveis",
                                 "danger_dataset", "crédito à StatsBomb", "DERIVED", f"rede NumPy — {origin}")
     s = net.summary()
     k = st.columns(5)
