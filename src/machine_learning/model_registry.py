@@ -520,11 +520,10 @@ def bootstrap_registry(progress: Optional[Callable[[str], None]] = None) -> Dang
     return reg
 
 
-def db_rows(db, max_new: int = 25, progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
+def db_rows(db, max_new: int = 500, progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """
-    Linhas de treino das partidas com eventos já no banco (cache incremental em data/processed): a cada treino,
-    as partidas novas que a sincronização trouxe entram no conjunto. Densidade de adversários pela proxy
-    (o 360 só existe para parte do StatsBomb).
+    Linhas de treino de partidas com eventos. Inclui eventos já cacheados e jogos OpenPlay catalogados cujos
+    lances ainda estão nos arquivos Parquet locais; a conversão é incremental e retomável.
     """
     cached = pd.read_csv(ROWS_CACHE) if ROWS_CACHE.exists() else pd.DataFrame()
     if not cached.empty and "density_is_360" not in cached:
@@ -532,10 +531,14 @@ def db_rows(db, max_new: int = 25, progress: Optional[Callable[[str], None]] = N
     have = set(cached["match_id"].unique()) if not cached.empty else set()
     demo = set(pd.read_csv(DEMO, usecols=["match_id"])["match_id"].unique()) if DEMO.exists() else set()
     with db.connect() as conn:
-        ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT e.match_id FROM events e JOIN matches m ON m.match_id = e.match_id "
-            "WHERE m.data_level = 'EVENTS'")]
-    todo = [m for m in ids if m not in have and m not in demo][:max_new]
+        rows = conn.execute(
+            "SELECT m.match_id, m.data_source FROM matches m LEFT JOIN events e ON e.match_id = m.match_id "
+            "WHERE m.data_level = 'EVENTS' GROUP BY m.match_id "
+            "HAVING COUNT(e.match_id) > 0 OR m.data_source = 'openplay' ORDER BY m.match_date DESC"
+        ).fetchall()
+    source_by_id = {int(mid): str(src or "") for mid, src in rows}
+    ids = list(source_by_id)
+    todo = [m for m in ids if m not in have and m not in demo][:max(0, int(max_new))]
     parts = [cached] if not cached.empty else []
     try:
         from src.data_hub.sources.statsbomb import StatsBombProvider
@@ -544,18 +547,34 @@ def db_rows(db, max_new: int = 25, progress: Optional[Callable[[str], None]] = N
         sb = StatsBombProvider(db)
     except Exception:
         sb = None
+    openplay = None
+    if any(source_by_id.get(int(mid)) == "openplay" for mid in todo):
+        try:
+            from src.data_hub.sources.openplay import OpenPlayProvider
+
+            openplay = OpenPlayProvider(db)
+        except Exception:
+            openplay = None
     for i, mid in enumerate(todo):
         try:
             fr = None
-            if sb is not None and int(mid) < 10_000_000:      # StatsBomb: tenta o 360 (cache local; baixa se faltar)
+            if sb is not None and int(mid) < 10_000_000:      # StatsBomb 360, quando existe
                 try:
                     fr = sb.load_360(int(mid))
                 except Exception:
                     fr = None
-            r = build_match_rows(db.load_events(int(mid)), opponents_from_360(fr) if fr else None)
+            events = db.load_events(int(mid))
+            if (events is None or events.empty) and source_by_id.get(int(mid)) == "openplay" and openplay is not None:
+                events = openplay.load_events(int(mid))
+            r = build_match_rows(events, opponents_from_360(fr) if fr is not None and not fr.empty else None)
             if not r.empty:
                 parts.append(r)
         except Exception as exc:
+            if source_by_id.get(int(mid)) == "openplay":
+                try:
+                    db.set_state("openplay", f"prefetch_failed_{int(mid)}", str(time.time()))
+                except Exception:
+                    pass
             if progress:
                 progress(f"partida {mid} ignorada: {exc}")
         if progress:
@@ -627,7 +646,7 @@ def main() -> None:
     ap.add_argument("--treinar", action="store_true")
     ap.add_argument("--tentativas", type=int, default=3)
     ap.add_argument("--epocas", type=int, default=30)
-    ap.add_argument("--partidas-novas", type=int, default=200, help="partidas do banco preparadas nesta rodada")
+    ap.add_argument("--partidas-novas", type=int, default=500, help="partidas do banco preparadas nesta rodada (OpenPlay é convertido sob demanda)")
     ap.add_argument("--com-estimadas", action="store_true", help="compatibilidade: inclui também densidade estimada")
     ap.add_argument("--somente-360", action="store_true", help="restringe o treino às partidas com tracking 360 medido")
     ap.add_argument("--experimentos", default="", help="ex.: B ou B,A,C,D — experimentos controlados (v36)")
