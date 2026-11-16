@@ -836,3 +836,21 @@ def pd_isna(v):
     import pandas as pd
 
     return pd.isna(v)
+
+
+def test_espn_preview_official_lineup_and_filtered_news(db):
+    from src.data_hub.sources.espn import EspnProvider
+    from src.squad import matchday as M
+
+    p = EspnProvider(db, enabled=True)
+    xi = [("Goleiro", "G"), ("LE", "LB"), ("Z1", "CD-L"), ("Z2", "CD-R"), ("LD", "RB"), ("V1", "LM"), ("V2", "RM"),
+          ("Meia", "AM"), ("PE", "AM-L"), ("PD", "AM-R"), ("CA", "F")]
+    p._get = lambda *a, **k: {"rosters": [{"team": {"displayName": "Cruzeiro"}, "formation": "4-2-3-1", "roster": [
+        {"athlete": {"displayName": n}, "position": {"abbreviation": pos}, "starter": True} for n, pos in xi]}],
+        "news": {"articles": [{"headline": "Cruzeiro terá desfalque", "description": "x", "published": "2026-11-17T10:00Z"},
+                              {"headline": "Neymar suspenso", "description": "Santos", "published": "2026-10-28T10:00Z"}]}}
+    pv = p.preview(500_123_456, "bra.1", ["Cruzeiro", "Palmeiras"])
+    assert list(pv["oficial"]) == ["Cruzeiro"] and [n["titulo"] for n in pv["noticias"]] == ["Cruzeiro terá desfalque"]
+    out, form = M.official_xi({"jogadores": None, "formacao": None}, pv["oficial"]["Cruzeiro"])
+    roles = {p_["jogador"]: p_["papel"] for p_ in out}
+    assert form == "4-2-3-1" and roles["V1"] == "DM" and roles["PE"] == "LW" and roles["CA"] == "ST"

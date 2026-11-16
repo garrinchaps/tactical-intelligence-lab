@@ -116,9 +116,10 @@ def _with_market_value(s: pd.DataFrame, ctx: MatchContext) -> pd.DataFrame:
     return out
 
 
-RATING_HELP = ("Nota própria do laboratório, de 0 a 10, só com os lances desta partida: parte de 6,0, soma os acertos "
-               "e desconta os erros com peso menor, com pesos diferentes para goleiro, defesa, meio e ataque (o zagueiro "
-               "não perde nota por não finalizar). Menos de 30 min: nota puxada para 6,0; menos de 10 min: sem nota.")
+RATING_HELP = ("Avaliação 2.0: 7 dimensões (6 para goleiros), cada indicador comparado com jogadores da MESMA função "
+               "(percentil → nota: P50 = 5,5 · P90 = 8,5), pesos pela função exercida no jogo. Desempenho = qualidade da "
+               "atuação; impacto = quanto mudou o jogo (gols, assistências, erros decisivos); confiança = quanto de "
+               "evidência existe. Menos de 15 min: sem nota. Dado ausente nunca vira zero.")
 
 
 def _stats_table(ctx: MatchContext) -> None:
@@ -135,6 +136,15 @@ def _stats_table(ctx: MatchContext) -> None:
     from src.ui.context import match_ratings
 
     s = match_ratings(ctx.match_id, None if who == "Ambas as equipes" else who, ctx.df)
+    try:                                                 # v36: avaliação 2.0 (desempenho, impacto, confiança)
+        from src.ui.context import match_ratings_v2
+
+        v2 = match_ratings_v2(ctx.match_id, ctx.df)
+        if not v2.empty:
+            s = s.merge(v2[["jogador", "desempenho", "impacto", "confianca"]], on="jogador", how="left")
+            s["nota"] = s["desempenho"]
+    except Exception:
+        pass
     if s.empty:
         empty_state("Sem atletas com eventos.")
         return
@@ -145,11 +155,12 @@ def _stats_table(ctx: MatchContext) -> None:
         note("Por 90 minutos", "Atletas com poucos minutos têm valores por 90 instáveis: veja a coluna de minutos.", "warn")
     s = _with_market_value(s, ctx)
     labels = {**PLAYER_STAT_LABELS, "nota": "Nota (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
+              "impacto": "Impacto (0–10)", "confianca": "Confiança",
               "defesas_goleiro": "Defesas (goleiro)", "gols_sofridos_goleiro": "Gols sofridos (goleiro)"}
     base = ["jogador", "equipe", "posicao", "setor", "nota", "minutos"]
     if cat == "Nota":
-        cols = base + ["gols", "assistencias", "xg", "xt", "passes_certos", "acoes_defensivas", "passes_errados",
-                       "perdas_de_posse", "obs_nota"]
+        cols = base + ["impacto", "confianca", "gols", "assistencias", "xg", "xt", "passes_certos", "acoes_defensivas",
+                       "passes_errados", "perdas_de_posse"]
     elif cat == "Tudo":
         cols = list(s.columns)
     else:
@@ -167,6 +178,42 @@ def _stats_table(ctx: MatchContext) -> None:
                     "Contagens diretas dos eventos da partida. Assistência = último passe certo para o autor do gol.")
     st.download_button("Baixar tabela (.csv)", view.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"atletas_{ctx.match_id}.csv", mime="text/csv")
+    _rating_report(ctx)
+
+
+def _rating_report(ctx: MatchContext) -> None:
+    """Relatório da atuação (avaliação 2.0): três números, radar das dimensões e o porquê."""
+    from src.analytics.rating_v2 import report
+    from src.ui.context import match_ratings_v2
+
+    v2 = match_ratings_v2(ctx.match_id, ctx.df)
+    if v2.empty:
+        return
+    st.markdown("#### 🏅 Relatório da atuação")
+    pick = st.selectbox("Jogador", v2["jogador"].tolist(), key="rr_pick")
+    ev = v2[v2["jogador"] == pick].iloc[0]["_detalhe"]
+    k = st.columns(3)
+    for col, lab, val, sub in ((k[0], "Desempenho", ev["desempenho"], ev["classificacao"]),
+                               (k[1], "Impacto na partida", ev["impacto"], "gols, assistências e erros decisivos"),
+                               (k[2], "Confiança", f"{ev['confianca_pct']}%", f"{ev['confianca']} · {ev['amostra']}")):
+        col.markdown(f'<div class="til-card" style="min-height:auto"><div class="label">{lab}</div><div class="value">'
+                     f'{val if val is not None else "—"}</div><div style="color:#94A3B8;font-size:.82rem">{sub}</div></div>',
+                     unsafe_allow_html=True)
+    a, b = st.columns([1, 1.1])
+    dims = [(ev["dimensoes_pt"][d], v) for d, v in ev["dimensoes"].items()]
+    obs = [(lab, v) for lab, v in dims if v is not None]
+    if len(obs) >= 3:
+        fig = go.Figure(go.Scatterpolar(r=[v for _, v in obs] + [obs[0][1]], theta=[l for l, _ in obs] + [obs[0][0]],
+                                        fill="toself", fillcolor="rgba(34,211,238,0.25)", line=dict(color="#22D3EE", width=2),
+                                        hovertemplate="%{theta}: %{r:.1f}<extra></extra>"))
+        fig.update_layout(**PLOTLY_LAYOUT, height=380, title=f"Dimensões — {pick} ({ev['funcao']})",
+                          polar=dict(bgcolor=PALETTE["surface"], radialaxis=dict(range=[0, 10], color=PALETTE["muted"])))
+        a.plotly_chart(fig, use_container_width=True)
+    with b:
+        st.markdown(report(ev))
+        w = ev["pesos"]
+        rows = [{"Dimensão": ev["dimensoes_pt"][d], "Nota": v, "Peso na função": f"{w[d]}%"} for d, v in ev["dimensoes"].items()]
+        comparison_table(pd.DataFrame(rows), "Dimensão sem dado aparece vazia e não entra na conta (o peso é redistribuído).")
 
 
 def render(ctx: MatchContext) -> None:

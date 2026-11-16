@@ -241,6 +241,21 @@ def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
     return {"info": info, "names": names}
 
 
+@st.cache_data(show_spinner=False, ttl=900, max_entries=32)
+def _preview(match_id: int, league: str, names: tuple) -> Dict[str, Any]:
+    """Pré-jogo da ESPN (escalação oficial ~1 h antes + notícias dos clubes); cache de 15 min."""
+    from src.ui.context import get_service
+
+    try:
+        svc = get_service()
+        if not svc.espn.enabled:
+            return {}
+        roster_names = []
+        return svc.espn.preview(match_id, league, list(names) + roster_names)
+    except Exception:
+        return {}
+
+
 def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
     rows = []
     for p in sorted(xi, key=lambda q: -q["x"]):
@@ -281,8 +296,14 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     st.caption(f"Base: últimos {len(a['jogos'])} jogos de {team} e {len(b['jogos'])} de {rival} com escalação · "
                f"elenco: {a['fonte_elenco']} / {b['fonte_elenco']}. Provável = quem tem começado jogando, sem lesionados "
                "e suspensos — a escalação oficial só sai cerca de 1 h antes do jogo.")
+    pv = _preview(int(f["match_id"]), str(f["league"]), tuple(me["names"] + rv["names"]))
+    off = pv.get("oficial") or {}
+    off_me = next((v for k, v in off.items() if k in me["names"]), None)
+    off_rv = next((v for k, v in off.items() if k in rv["names"]), None)
+    if off:
+        st.success("✅ A ESPN já publicou a escalação OFICIAL deste jogo — ela substitui a provável abaixo.")
     c1, c2 = st.columns(2)
-    xr, fr = M.xi_for(b, None, "provavel")
+    xr, fr = M.official_xi(b, off_rv) if off_rv else M.xi_for(b, None, "provavel")
     weak = M.sector_weaknesses(b, rival)
     with c2:
         st.markdown(f"#### 🔴 {rival} provável ({fr})")
@@ -297,7 +318,10 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
             _xi_cards(xr, "#EF4444")
     form_me = st.session_state.get("nx_form") or None
     mode = c1.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key="nx_mode")
-    xm, fm = M.xi_for(a, form_me, "provavel" if mode == "Provável" else "melhor")
+    if off_me and mode == "Provável":
+        xm, fm = M.official_xi(a, off_me)
+    else:
+        xm, fm = M.xi_for(a, form_me, "provavel" if mode == "Provável" else "melhor")
     with c1:
         st.markdown(f"#### 🔵 {team} — {mode.lower()} ({fm})")
         tips = M.weakness_tips(weak, b)
@@ -318,6 +342,10 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
             st.markdown("**Nossas dúvidas:** " + "; ".join(f"{r.nome} ({r.duvida})" for r in dv.itertuples()))
         with st.expander("Por que cada jogador nosso foi escolhido", expanded=True):
             _xi_cards(xm, "#22D3EE")
+    if pv.get("noticias"):
+        with st.expander(f"📰 Notícias que citam os clubes ({len(pv['noticias'])}) — notícia, não dado confirmado"):
+            for nw in pv["noticias"]:
+                st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
     st.markdown(f"### 🔍 Leitura de {rival}")
     k1, k2 = st.columns(2)
     with k1:

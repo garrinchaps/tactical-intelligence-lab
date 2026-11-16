@@ -304,6 +304,33 @@ class EspnProvider:
         say(f"  resumos baixados: {tot['resumos']} · ainda faltam {tot['pendentes']} (rode de novo para continuar)")
         return tot
 
+    def preview(self, match_id: int, league: str, names: Optional[List[str]] = None) -> Dict[str, Any]:
+        """
+        Pré-jogo de uma partida FUTURA: escalação OFICIAL (a ESPN publica ~1 h antes; antes disso vem vazia) e notícias
+        que citam os clubes ou seus jogadores (marcadas como notícia, não como dado confirmado). Cache de 15 min.
+        """
+        ev_id = int(match_id) - 500_000_000
+        try:
+            s = self._get(f"{BASE}/{league}/summary", {"event": ev_id}, max_age_s=900)
+        except Exception as exc:
+            return {"oficial": {}, "noticias": [], "erro": str(exc)}
+        oficial: Dict[str, Any] = {}
+        for r in s.get("rosters", []) or []:
+            team = (r.get("team") or {}).get("displayName", "")
+            xi = [{"jogador": (p.get("athlete") or {}).get("displayName", ""), "pos": (p.get("position") or {}).get("abbreviation", ""),
+                   "titular": bool(p.get("starter"))} for p in r.get("roster", []) or []]
+            if any(x["titular"] for x in xi):
+                oficial[team] = {"formacao": r.get("formation") or "", "jogadores": xi}
+        keys = [k.lower() for k in (names or []) if k and len(k) >= 4]
+        news = []
+        arts = (s.get("news") or {}).get("articles", []) if isinstance(s.get("news"), dict) else []
+        for a in arts:
+            txt = f"{a.get('headline', '')} {a.get('description', '')}".lower()
+            if not keys or any(k in txt for k in keys):
+                news.append({"titulo": a.get("headline", ""), "resumo": (a.get("description") or "")[:240],
+                             "data": (a.get("published") or "")[:10]})
+        return {"oficial": oficial, "noticias": news[:6]}
+
     def team_ids(self, league: str) -> Dict[str, int]:
         data = self._get(f"{BASE}/{league}/teams", {"limit": 100}, max_age_s=7 * 24 * 3600)
         teams = ((data.get("sports") or [{}])[0].get("leagues") or [{}])[0].get("teams") or []

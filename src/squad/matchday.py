@@ -455,3 +455,40 @@ def weakness_tips(weak: List[Dict[str, Any]], info: Dict[str, Any]) -> List[Dict
         x = {"defesa": 110, "gol": 116, "meio": 84, "ataque": 66}.get(w.get("setor") or "", 106)
         out.append({"x": x - (i // 2) * 3, "y": y, "marca": f"F{i}", "cor": "#F59E0B", "texto": "Fragilidade do rival: " + w["texto"]})
     return out
+
+
+def official_xi(info: Dict[str, Any], lineup: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    """Escalação OFICIAL publicada (ESPN) no lugar da provável: cada titular na vaga da sua posição oficial."""
+    from src.squad.formations import FORMATIONS, ROLE_PT
+
+    form = lineup.get("formacao") if lineup.get("formacao") in FORMATIONS else (info.get("formacao") or "4-3-3")
+    form = form if form in FORMATIONS else "4-3-3"
+    starters = [p for p in lineup.get("jogadores", []) if p.get("titular")]
+    pl = info.get("jogadores")
+    byname = {r["nome"]: r for r in pl.to_dict("records")} if pl is not None and not pl.empty else {}
+    # lê LM/RM pela formação, como nas escalações passadas
+    poss = {str(p["pos"]).upper() for p in starters}
+    wide = bool(poss & {"AM-L", "AM-R", "LW", "RW"})
+
+    def role(pos):
+        r = ESPN_ROLE.get(str(pos).upper())
+        if str(pos).upper() in ("LM", "RM"):
+            if form.startswith(("3", "5")):
+                return "LWB" if str(pos).upper() == "LM" else "RWB"
+            if wide:
+                return "DM" if form.startswith("4-2") else "CM"
+        return r
+    pool = [(p["jogador"], role(p["pos"])) for p in starters]
+    xi, used = [], set()
+    for i, (slot, x, y) in enumerate(FORMATIONS[form]):
+        cand = next((n for n, r in pool if r == slot and n not in used), None) or \
+            next((n for n, r in pool if n not in used and SECTOR.get(r or "") == SECTOR.get(slot)), None) or \
+            next((n for n, r in pool if n not in used), None)
+        if cand:
+            used.add(cand)
+        r = byname.get(cand, {})
+        xi.append({"vaga": i, "papel": slot, "papel_pt": ROLE_PT[slot], "x": x, "y": y, "jogador": cand,
+                   "nota": r.get("qualidade"), "qualidade": r.get("qualidade"), "fase": r.get("fase"), "prob_titular": 100,
+                   "encaixe": 1.0, "papel_natural": ROLE_PT.get(r.get("papel"), "—"),
+                   "porque": ["✅ escalação oficial publicada pela ESPN"]})
+    return xi, form
