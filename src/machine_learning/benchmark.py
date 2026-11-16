@@ -66,7 +66,11 @@ def run(data: pd.DataFrame, k: int = 5, seed: int = 42, mlp_hidden: Optional[Lis
 
     from src.machine_learning.neural_net import NeuralNetwork
 
-    d = data.dropna(subset=FEATURES + ["target"]).reset_index(drop=True)
+    d = data.copy()
+    # Amostras anteriores à v37 não têm o indicador de origem da densidade.
+    if "density_is_360" not in d:
+        d["density_is_360"] = d["density_source"].eq("statsbomb_360").astype(float) if "density_source" in d else 0.0
+    d = d.dropna(subset=FEATURES + ["target"]).reset_index(drop=True)
     X, Xb = d[FEATURES].to_numpy(float), d[BASELINE_FEATURES].to_numpy(float)
     y, g = d["target"].to_numpy(int), d["match_id"].to_numpy()
     k = min(k, len(np.unique(g)))
