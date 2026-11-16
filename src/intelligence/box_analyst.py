@@ -21,7 +21,8 @@ import pandas as pd
 
 PSTATS: List[Tuple[str, str, str]] = [  # (regex da pergunta, chave, rótulo)
     (r"finaliz|chut", "totalShots", "Finalizações"), (r"no alvo|no gol", "shotsOnTarget", "Finalizações no alvo"),
-    (r"\bxa\b|assistenc\w* esperad", "xa", "xA (assistências esperadas)"), (r"\bxg\b|gols esperad", "xg", "xG"),
+    (r"\bxa\b|assistenc\w* esperad", "xa", "xA (assistências esperadas)"), (r"\bxgot\b|gols? esperados? no alvo", "_xgot", "xGOT"),
+    (r"\bxg\b|gols esperad", "xg", "xG"),
     (r"cri(ou|a|ar|acao)|chances? criad|passes? decisiv|passe para finaliz", "chances_created", "Chances criadas"),
     (r"assist", "goalAssists", "Assistências"), (r"\bgols?\b|marcou|artilheir", "totalGoals", "Gols"),
     (r"terco final|progred|progress", "passes_into_final_third", "Passes no terço final"),
