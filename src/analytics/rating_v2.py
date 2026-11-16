@@ -508,8 +508,8 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     dim_score = {k: (sum(s * w for s, w in v) / sum(w for _, w in v)) if v else None for k, v in acc.items()}
     if not gk:
         # disciplina: expulsão é penalização severa (consequência independente — não é dupla contagem)
-        if row.get("vermelhos"):
-            dim_score["disciplina"] = min(dim_score["disciplina"] if dim_score["disciplina"] is not None else 5.5, 1.0)
+        if _as_float(row.get("vermelhos")) > 0:
+            dim_score["disciplina"] = min(dim_score["disciplina"] if dim_score["disciplina"] is not None else REF_SCORE, 1.0)
     obs = [(dim_score[k], w) for k, w in zip(dims, wts) if dim_score[k] is not None]
     raw = sum(s * w for s, w in obs) / sum(w for _, w in obs) if obs else None
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
