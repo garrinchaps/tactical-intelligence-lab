@@ -146,7 +146,11 @@ def top_bar(focused: bool = False) -> None:
         st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
         return
     if focused:
-        _logo(st.columns([3, 7])[0])
+        a, b = st.columns([7, 1])
+        _logo(a)
+        if b.button("⛶ Foco", key="til_focus_enter_focused"):
+            st.session_state["til_focus_mode"] = True
+            st.rerun()
         st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
         return
     cols = st.columns([2.3] + [1.15] * len(MAIN) + [1.35])
@@ -200,10 +204,21 @@ def top_bar(focused: bool = False) -> None:
                 continue
         if recent_labels:
             ra, rb = st.columns([5, 1])
-            label = ra.selectbox("Partidas recentes", list(recent_labels), key="til_recent_match",
+            label = ra.selectbox("Partidas recentes", list(recent_labels),
+                                 key="til_recent_match_" + "_".join(str(x) for x in recent_ids[:5]),
                                  label_visibility="collapsed", help="Últimas cinco partidas abertas nesta sessão.")
             if rb.button("Reabrir", key="til_recent_open", use_container_width=True):
                 nav.open_view("jogo", match_id=recent_labels[label])
+    favorites = st.session_state.get("til_favorite_players", [])
+    if favorites:
+        favorite_labels = {f"{x.get('nome')} · {x.get('clube') or 'clube não informado'}": x for x in favorites}
+        fa, fb = st.columns([5, 1])
+        selected_favorite = fa.selectbox("Alvos de análise", list(favorite_labels),
+                                         key="til_favorite_choice_" + str(len(favorites)),
+                                         label_visibility="collapsed", help="Jogadores fixados nos seus alvos de análise.")
+        if fb.button("Abrir perfil", key="til_favorite_open", use_container_width=True):
+            item = favorite_labels[selected_favorite]
+            nav.open_view("jogador", name=item["nome"], core=item["core"])
     if st.button("⛶ Foco tático", key="til_focus_enter", help="Oculta navegação e busca para ampliar a área de análise."):
         st.session_state["til_focus_mode"] = True
         st.rerun()
