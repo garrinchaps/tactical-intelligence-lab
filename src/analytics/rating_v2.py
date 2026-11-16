@@ -696,14 +696,26 @@ def report(ev: Dict[str, Any]) -> str:
          + f"; menor dimensão observada: {pt[low[0][0]].lower()} ({low[0][1]:.1f}).")
     events = ev.get("eventos_decisivos") or {}
     moments = []
+    if events.get("gols"):
+        moments.append(f"{events['gols']} gol(s)")
+    if events.get("assistencias"):
+        moments.append(f"{events['assistencias']} assistência(s)")
     if events.get("penaltis_defendidos_disputa"):
         moments.append(f"{events['penaltis_defendidos_disputa']} pênalti(s) defendido(s) na disputa")
+    if events.get("penaltis_convertidos_disputa"):
+        moments.append(f"{events['penaltis_convertidos_disputa']} pênalti(s) convertido(s) na disputa")
+    if events.get("penaltis_perdidos_disputa"):
+        moments.append(f"{events['penaltis_perdidos_disputa']} pênalti(s) perdido(s) na disputa")
     if events.get("defesas_chave"):
         moments.append(f"{events['defesas_chave']} defesa(s) de alto impacto")
     if events.get("gols_decisivos"):
         moments.append(f"{events['gols_decisivos']} gol(s) que empatou(aram) ou virou(aram) o placar")
     if events.get("grandes_chances_desperdicadas"):
         moments.append(f"{events['grandes_chances_desperdicadas']} grande(s) chance(s) desperdiçada(s)")
+    if events.get("erros_que_geraram_chance"):
+        moments.append(f"{events['erros_que_geraram_chance']} erro(s) que geraram chance")
+    if events.get("expulsoes"):
+        moments.append(f"{events['expulsoes']} expulsão(ões)")
     if moments:
         s += " Momentos decisivos contabilizados: " + "; ".join(moments) + "."
     if len(ev.get("role_mix") or {}) > 1:
