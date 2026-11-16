@@ -200,6 +200,16 @@ def render(_ctx=None) -> None:
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
                 f'<div class="d">{p["nome_longo"] if p["nome_longo"] != p["nome"] else ""} · {p["clube"]} · fontes: {p["fontes"]}</div>'
                 f'</div></div>', unsafe_allow_html=True)
+    favorites = st.session_state.setdefault("til_favorite_players", [])
+    is_favorite = any(x.get("core") == p["core"] for x in favorites)
+    if st.button("⭐ Remover dos alvos" if is_favorite else "☆ Adicionar aos alvos de análise",
+                 key=f"til_fav_{p['core']}"):
+        if is_favorite:
+            st.session_state["til_favorite_players"] = [x for x in favorites if x.get("core") != p["core"]]
+        else:
+            st.session_state["til_favorite_players"] = favorites + [{"core": p["core"], "nome": p["nome"],
+                                                                       "clube": p["clube"]}]
+        st.rerun()
     if p["clube"]:
         nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
     _player_card(p["nome"], tuple(names), p["clube"])
