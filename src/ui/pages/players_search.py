@@ -21,7 +21,7 @@ def _norm(s: str) -> str:
 
 @st.cache_data(show_spinner=False, ttl=900)
 def player_index(version: str) -> pd.DataFrame:
-    """Uma linha por (nome, fonte): eventos do banco + Transfermarkt + Understat + Simonetti (quando houver)."""
+    """Uma linha por (nome, fonte): eventos do banco + FotMob (boxscore) + Transfermarkt + Understat + Simonetti (quando houver)."""
     from src.ui.context import get_service
 
     rows: List[Dict] = []
@@ -31,6 +31,17 @@ def player_index(version: str) -> pd.DataFrame:
                                    "FROM events WHERE player_name IS NOT NULL GROUP BY player_name, team_name", conn)
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "eventos (StatsBomb/Wyscout)", "jogos": int(r.jogos)}
                      for r in ev.itertuples()]
+        except Exception:
+            pass
+        # Índice também inclui atletas com estatísticas de boxscore (FotMob), mesmo sem eventos com coordenadas.
+        try:
+            fm = pd.read_sql_query(
+                "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos "
+                "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+                "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
+                "GROUP BY s.player_name, s.team_name", conn)
+            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "FotMob (estatísticas)", "jogos": int(r.jogos)}
+                     for r in fm.itertuples()]
         except Exception:
             pass
     try:
