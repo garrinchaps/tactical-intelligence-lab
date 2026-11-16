@@ -110,7 +110,9 @@ def outliers(ev: Dict[str, Any], high: float = 85, low: float = 15) -> Dict[str,
 
 
 def role_of(position: Any) -> str:
-    p = str(position or "").lower()
+    p = str(position or "").strip().lower()
+    if not p or p in {"unknown", "não identificado", "nao identificado", "not available", "n/a", "none"}:
+        return "não identificado"
     if "goalkeeper" in p or "goleiro" in p:
         return "goleiro"
     if "center back" in p or "centre back" in p or "zagueiro" in p:
@@ -336,7 +338,9 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         # Só penaliza erro que o provedor marque explicitamente como causador de finalização/gol.
         # Um evento genérico "Error" não prova, sozinho, que o erro gerou uma chance.
         pos_series = e["position_name"].dropna().astype(str) if "position_name" in e else pd.Series(dtype=str)
-        role_counts = pos_series.map(role_of).value_counts() if not pos_series.empty else pd.Series(dtype=float)
+        mapped_roles = pos_series.map(role_of) if not pos_series.empty else pd.Series(dtype=str)
+        mapped_roles = mapped_roles[mapped_roles.isin([*WEIGHTS.keys(), "goleiro"])]
+        role_counts = mapped_roles.value_counts() if not mapped_roles.empty else pd.Series(dtype=float)
         role_mix = ({str(k): float(v / role_counts.sum()) for k, v in role_counts.items()}
                     if not role_counts.empty and role_counts.sum() else {})
         primary_role = max(role_mix, key=role_mix.get) if role_mix else role_of(
