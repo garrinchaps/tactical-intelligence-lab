@@ -12,6 +12,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.squad import data as D
 from src.squad.formations import FORMATIONS, ROLE_PT, fit, natural_role
 from src.squad.planner import (apply_transfers, best_xi, lab_rating, matchup_plan, plan_bonus, probable_xi, season_usage,
@@ -406,7 +408,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     weak = M.sector_weaknesses(b, rival)
     with c2:
         st.markdown(f"#### 🔴 {rival} provável ({fr})")
-        st.plotly_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
+        render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
                         use_container_width=True, key="nx_pitch_r")
         st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
@@ -433,7 +435,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
             fig.add_trace(go.Scatter(x=[t["y"]], y=[t["x"]], mode="markers+text", text=[t["marca"]], showlegend=False,
                                      marker=dict(size=22, color=t["cor"], line=dict(color="#090D16", width=1)),
                                      textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
-        st.plotly_chart(fig, use_container_width=True, key="nx_pitch_m")
+        render_chart(fig, use_container_width=True, key="nx_pitch_m")
         st.caption("Marcas F = fragilidades do rival, no lado do campo em que vamos atacá-las (passe o mouse).")
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
@@ -593,7 +595,7 @@ def render(_ctx=None) -> None:
                 st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
                            "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
             else:
-                st.plotly_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
                 if any(p.get("porque") for p in xi):
                     with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
                         _xi_cards(xi, "#22D3EE")
@@ -684,7 +686,7 @@ def render(_ctx=None) -> None:
             if corr.get("ataca_por"):
                 st.markdown(f"**Por onde {rival} chega ao último terço** ({corr['jogos']} jogo(s) com lances, "
                             f"{corr['acoes_ataque']} ações)")
-                st.plotly_chart(_corridor_bars(corr), use_container_width=True)
+                render_chart(_corridor_bars(corr), use_container_width=True)
             st.markdown("**Jogos considerados**")
             comparison_table(pd.DataFrame(theirs["jogos"]).drop(columns=["match_id"]), "")
     with t3:
@@ -775,7 +777,7 @@ def _bars(mine: Dict[str, Any], theirs: Dict[str, Any], team: str, rival: str) -
                              marker=dict(symbol="line-ew-open", size=28, color=P["warning"], line=dict(width=3))))
     from src.ui.charts import _layout
 
-    st.plotly_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), use_container_width=True)
+    render_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), use_container_width=True)
 
 
 def _corridor_bars(corr: Dict[str, Any]) -> go.Figure:
