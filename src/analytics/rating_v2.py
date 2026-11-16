@@ -250,6 +250,8 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         duels = e[et == "Duel"]
         rec = df[(df.get("pass_recipient_name") == p) & (df["type_name"] == "Pass") & (df.get("is_pass_completed", 0) == 1)]
         between = rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))] if len(rec) else rec
+        error_flag = next((k for k in ("is_error_leading_to_shot", "is_error_leading_to_goal") if k in e), None)
+        errors_to_chance = int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum()) if error_flag else 0
         gk = {}
         position_mode = (e["position_name"].dropna().mode().iloc[0]
                          if "position_name" in e and not e["position_name"].dropna().empty else "")
@@ -274,15 +276,13 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
                   "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) else None,
                   "gk_longos_pct": 100 * len(longp_ok) / len(longp) if len(longp) >= 3 else None,
                   "gk_prog90": int((ok.get("is_progressive_action", 0) == 1).sum()) * f if len(ok) else 0.0,
-                  "gk_perdas90": len(turn) * f, "gk_erros": int((et == "Error").sum()),
+                  "gk_perdas90": len(turn) * f, "gk_erros": errors_to_chance,
                   "gk_acoes_fora_area90": int(((e["x"] > 18) & et.isin(["Clearance", "Interception", "Ball Recovery",
                                                                        "Goal Keeper"])).sum()) * f}
         np_goals = int((is_goal & ~is_pen).sum())
         pen_goals = int((is_goal & is_pen).sum())
         # Só penaliza erro que o provedor marque explicitamente como causador de finalização/gol.
         # Um evento genérico "Error" não prova, sozinho, que o erro gerou uma chance.
-        error_flag = next((k for k in ("is_error_leading_to_shot", "is_error_leading_to_goal") if k in e), None)
-        errors_to_chance = int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum()) if error_flag else 0
         pos_series = e["position_name"].dropna().astype(str) if "position_name" in e else pd.Series(dtype=str)
         role_counts = pos_series.map(role_of).value_counts() if not pos_series.empty else pd.Series(dtype=float)
         role_mix = ({str(k): float(v / role_counts.sum()) for k, v in role_counts.items()}
@@ -450,7 +450,7 @@ def _peer_group(ref: pd.DataFrame, funcao: str, role_mix: Optional[Dict[str, flo
 
 
 def _pct(v, series: pd.Series) -> Optional[float]:
-    if v is None or (isinstance(v, float) and np.isnan(v)):
+    if v is None or pd.isna(v):
         return None
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) < 5:
@@ -500,8 +500,6 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
         # disciplina: expulsão é penalização severa (consequência independente — não é dupla contagem)
         if row.get("vermelhos"):
             dim_score["disciplina"] = min(dim_score["disciplina"] if dim_score["disciplina"] is not None else 5.5, 1.0)
-        if row.get("erros_que_viraram_chance"):
-            dim_score["disciplina"] = max((dim_score["disciplina"] or 5.5) - 2.0 * row["erros_que_viraram_chance"], 0.0)
     obs = [(dim_score[k], w) for k, w in zip(dims, wts) if dim_score[k] is not None]
     raw = sum(s * w for s, w in obs) / sum(w for _, w in obs) if obs else None
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
