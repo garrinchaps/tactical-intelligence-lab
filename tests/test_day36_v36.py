@@ -772,4 +772,29 @@ def test_matchday_probable_xi_uses_recent_lineups_and_excludes_injured(db):
     names = {p["jogador"] for p in xi}
     assert form == "4-2-3-1" and "PontaD" not in names and "Centroavante" in names          # lesionado fora
     st = next(p for p in xi if p["jogador"] == "Centroavante")
-    assert any("titular em 5 dos últimos 5" in r for r in st["porque"]) and any("gol" in r for r in st["porque"])
+    assert any("5 dos últimos 5 como titular" in r for r in st["porque"]) and any("gol" in r for r in st["porque"])
+    # só a vaga do lesionado (sem outro ponta no elenco) precisa de adaptação; o resto na posição de origem
+    assert sum((p["encaixe"] or 0) >= 0.85 for p in xi if p["jogador"]) >= 10
+
+
+def test_key_starter_who_missed_last_game_stays_probable():
+    import pandas as pd
+
+    from src.squad import matchday as M
+
+    base = dict(lado="", setor="meio", jogos_temporada=10, jogos_relacionado=10, gols_ult5=0, assist_ult5=0,
+                finalizacoes=0, amarelos=0, indisponivel="", no_elenco_atual=True, idade=28, valor=None, nota_base="")
+    rows = [dict(base, nome="Matheus Pereira", papel="AM", titular_temporada=9, titular_ult5=4, titular_ultimos=9,
+                 comecou_ultimo=False, gols=5, assistencias=6, posicoes={"AM": 9}, qualidade=9.0, fase=7.0),
+            dict(base, nome="Reserva Meia", papel="AM", titular_temporada=2, titular_ult5=1, titular_ultimos=2,
+                 comecou_ultimo=True, gols=0, assistencias=0, posicoes={"AM": 2}, qualidade=2.0, fase=3.0),
+            dict(base, nome="Zagueiro Bom", papel="CB", titular_temporada=10, titular_ult5=5, titular_ultimos=10,
+                 comecou_ultimo=True, gols=0, assistencias=0, posicoes={"CB": 10}, qualidade=8.0, fase=8.0)]
+    df = pd.DataFrame(rows)
+    df["prob_titular"] = [round(100 * (0.5 * r.titular_temporada / 10 + 0.35 * r.titular_ult5 / 5 + 0.15 * r.comecou_ultimo))
+                          for r in df.itertuples()]
+    xi, _ = M.xi_for({"jogadores": df, "jogos": list(range(10)), "formacao": "4-2-3-1"}, "4-2-3-1", "provavel")
+    am = next(p for p in xi if p["papel"] == "AM")
+    assert am["jogador"] == "Matheus Pereira"                                        # não perde a vaga por 1 jogo
+    st_ = next(p for p in xi if p["papel"] == "ST")
+    assert st_["jogador"] != "Zagueiro Bom"                                          # zagueiro não vira centroavante

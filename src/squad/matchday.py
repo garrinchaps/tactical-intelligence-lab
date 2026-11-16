@@ -75,6 +75,21 @@ def recent_lineups(db, team_names: Sequence[str], n: int = 10) -> pd.DataFrame:
     if lu.empty:
         return lu
     lu["papel"] = lu["pos"].map(lambda p: ESPN_ROLE.get(str(p).upper()))
+    # a ESPN usa LM/RM com sentidos diferentes conforme o desenho: no 4-2-3-1 são os DOIS VOLANTES (os abertos vêm
+    # como AM-L/AM-R); no 4-3-3, meias centrais; com 3 zagueiros, os ALAS. Corrigido jogo a jogo pela formação.
+    for mid, g in lu.groupby("match_id"):
+        pos = set(g["pos"].astype(str).str.upper())
+        form = str(g["formation"].dropna().iloc[0]) if g["formation"].notna().any() else ""
+        wide_fwd = bool(pos & {"AM-L", "AM-R", "LW", "RW", "LF", "RF"})
+        lm = g.index[g["pos"].astype(str).str.upper().isin(["LM", "RM"])]
+        if not len(lm):
+            continue
+        if form.startswith("3") or form.startswith("5"):
+            lu.loc[lm, "papel"] = lu.loc[lm, "pos"].str.upper().map({"LM": "LWB", "RM": "RWB"})
+        elif wide_fwd and form.startswith("4-2"):
+            lu.loc[lm, "papel"] = "DM"
+        elif wide_fwd:
+            lu.loc[lm, "papel"] = "CM"
     lu["adversario"] = [a if h in team_names else h for h, a in zip(lu["home_team_name"], lu["away_team_name"])]
     return lu.sort_values("data", ascending=False)
 
@@ -119,21 +134,37 @@ def suspensions(db, last_match_id: Optional[int], team_names: Sequence[str]) -> 
     return {p[0]: "suspenso (expulso no último jogo)" for p in r if p[0]}
 
 
-def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
+def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional[pd.DataFrame] = None,
+                 season_games: int = 40) -> Dict[str, Any]:
     """
-    Tabela por jogador do elenco: papel mais jogado e lado, titularidades nos últimos n jogos, gols/assistências,
-    disponibilidade (lesão/suspensão) e nota 0–100 do laboratório com a base da conta.
+    Tabela por jogador com conceitos SEPARADOS (v36, avaliação 2.0):
+      qualidade (0–10)  = temporada: fatia de jogos como titular + gols/assistências por jogo (+ valor de mercado, só
+                          como desempate, quando existe) — sem lances do Brasileirão nas fontes abertas, é o melhor sinal;
+      fase (0–10)       = últimos 5 jogos (titularidade + produção);
+      prob_titular (%)  = 50% temporada + 35% últimos 5 + 15% último jogo — quem é titular da temporada e só não jogou o
+                          último (ex.: poupado) continua provável;
+      disponivel        = sem lesão (ESPN) e sem suspensão (vermelho no último jogo ou acúmulo de amarelos);
+      posicoes          = todas as posições em que começou jogando, com a frequência (base do encaixe).
     """
     ros = roster(db, team_names)
-    lu = recent_lineups(db, team_names, n)
+    lu = recent_lineups(db, team_names, season_games)
     games = lu["match_id"].drop_duplicates().tolist() if not lu.empty else []
-    stats = recent_player_stats(db, games, team_names)
+    if not lu.empty:                                   # temporada = últimos 365 dias a partir do jogo mais recente
+        d = pd.to_datetime(lu["data"], errors="coerce")
+        lu = lu[d >= d.max() - pd.Timedelta(days=365)]
+        games = lu["match_id"].drop_duplicates().tolist()
+    recent = games[:max(n, 5)]
+    last5 = set(games[:5])
+    stats_season = recent_player_stats(db, games, team_names)
+    stats_5 = recent_player_stats(db, list(last5), team_names)
     last_id = games[0] if games else None
     susp = suspensions(db, last_id, team_names)
+    susp.update(yellow_suspensions(db, games, team_names))
     names = set(ros["name"]) if not ros.empty else set()
     if not lu.empty:
         names |= set(lu["jogador"])
     starters = lu[lu["titular"] == 1] if not lu.empty else lu
+    G, G5 = max(len(games), 1), max(len(last5), 1)
     out = []
     for p in sorted(names):
         st = starters[starters["jogador"] == p] if not lu.empty else starters
@@ -141,53 +172,130 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
         roles = Counter([r for r in st["papel"].dropna()]) if len(st) else Counter()
         r_ros = ros[ros["name"] == p].iloc[0] if not ros.empty and (ros["name"] == p).any() else None
         role = roles.most_common(1)[0][0] if roles else ESPN_ROLE.get(str(r_ros["position"]).upper()) if r_ros is not None else None
-        s = stats[stats["jogador"] == p].iloc[0] if not stats.empty and (stats["jogador"] == p).any() else None
+        ss = stats_season[stats_season["jogador"] == p].iloc[0] if not stats_season.empty and (stats_season["jogador"] == p).any() else None
+        s5 = stats_5[stats_5["jogador"] == p].iloc[0] if not stats_5.empty and (stats_5["jogador"] == p).any() else None
         n_start = int(len(st))
-        last5 = set(lu["match_id"].drop_duplicates().head(5)) if not lu.empty else set()
         start5 = int(st["match_id"].isin(last5).sum()) if len(st) else 0
+        started_last = bool(len(st) and last_id in set(st["match_id"]))
         unavailable = (r_ros["lesao"] if r_ros is not None and r_ros["lesao"] else "") or susp.get(p, "")
+        g, a = (int(ss["gols"]), int(ss["assistencias"])) if ss is not None else (0, 0)
+        g5, a5 = (int(s5["gols"]), int(s5["assistencias"])) if s5 is not None else (0, 0)
+        share = n_start / G
+        prob = 0.5 * share + 0.35 * start5 / G5 + 0.15 * float(started_last)
         out.append({"nome": p, "papel": role, "lado": SIDE.get(role or "", ""), "setor": SECTOR.get(role or "", ""),
-                    "titular_ultimos": n_start, "titular_ult5": start5, "jogos_relacionado": int(apps["match_id"].nunique()) if len(apps) else 0,
-                    "gols": int(s["gols"]) if s is not None else 0, "assistencias": int(s["assistencias"]) if s is not None else 0,
-                    "finalizacoes": int(s["finalizacoes"]) if s is not None else 0, "amarelos": int(s["amarelos"]) if s is not None else 0,
+                    "titular_temporada": n_start, "jogos_temporada": G, "titular_ult5": start5, "titular_ultimos": n_start,
+                    "comecou_ultimo": started_last, "jogos_relacionado": int(apps["match_id"].nunique()) if len(apps) else 0,
+                    "gols": g, "assistencias": a, "gols_ult5": g5, "assist_ult5": a5,
+                    "finalizacoes": int(ss["finalizacoes"]) if ss is not None else 0,
+                    "amarelos": int(ss["amarelos"]) if ss is not None else 0,
                     "indisponivel": unavailable, "no_elenco_atual": r_ros is not None if not ros.empty else None,
                     "idade": _age(r_ros["birth"]) if r_ros is not None else None,
-                    "posicoes": dict(roles)})
+                    "posicoes": dict(roles), "prob_titular": round(100 * (0 if unavailable else prob))})
     df = pd.DataFrame(out)
     if df.empty:
         return {"jogadores": df, "jogos": games, "formacao": None, "fonte_elenco": "—", "escalacoes": lu}
-    if not ros.empty:                                   # saiu do clube (não está no elenco atual): fora
-        df = df[df["no_elenco_atual"].fillna(True)]
-    G = max(len(games), 1)
-    val = {}
+    df["duvida"] = ""
+    if not ros.empty:
+        # fora da lista de elenco da ESPN: só sai se NÃO jogou pelo clube nos últimos 60 dias (a lista da ESPN às vezes
+        # omite lesionados de longo prazo ou atualiza atrasada). Quem jogou recentemente fica como DÚVIDA, com o motivo.
+        last_play = lu.groupby("jogador")["data"].max() if not lu.empty else pd.Series(dtype=str)
+        newest = pd.to_datetime(lu["data"], errors="coerce").max() if not lu.empty else None
+        recent_cut = (newest - pd.Timedelta(days=60)) if newest is not None else None
+        keep = []
+        for r in df.itertuples():
+            if r.no_elenco_atual is not False:
+                keep.append(True)
+                continue
+            lp = pd.to_datetime(last_play.get(r.nome), errors="coerce")
+            keep.append(bool(recent_cut is not None and pd.notna(lp) and lp >= recent_cut))
+        df = df[keep].copy()
+        miss = df["no_elenco_atual"] == False  # noqa: E712
+        df.loc[miss, "duvida"] = "não aparece na lista de elenco da ESPN (pode estar lesionado ou a lista desatualizada)"
+    if not lu.empty:                                    # sumiu dos últimos jogos sem lesão informada → dúvida
+        recent_ids = games[:3]
+        for i, r in df.iterrows():
+            if r["titular_temporada"] / G >= 0.5 and not r["indisponivel"]:
+                played = lu[(lu["jogador"] == r["nome"]) & lu["match_id"].isin(recent_ids)]
+                if played.empty and len(recent_ids) == 3:
+                    df.at[i, "duvida"] = (df.at[i, "duvida"] + "; " if df.at[i, "duvida"] else "") + \
+                        "fora dos 3 últimos jogos sem motivo informado"
+    # dúvida não zera a chance de jogar: reduz pela metade (a decisão final é sua)
+    df.loc[df["duvida"] != "", "prob_titular"] = (df.loc[df["duvida"] != "", "prob_titular"] * 0.5).round()
+    df["valor"] = None
     if tm_values is not None and not tm_values.empty:
         from src.data_lake.ids import player_core
 
         tv = tm_values.assign(core=tm_values["nome"].map(player_core))
         val = dict(zip(tv["core"], pd.to_numeric(tv["valor_mercado_eur"], errors="coerce")))
-        df["valor"] = df["nome"].map(lambda n: val.get(player_core(n)))
-    else:
-        df["valor"] = None
+        df["valor"] = df["nome"].map(lambda nm: val.get(player_core(nm)))
     vmax = pd.to_numeric(df["valor"], errors="coerce").max() if df["valor"].notna().any() else None
-    notes = []
+    q, f, base = [], [], []
     for r in df.itertuples():
-        start_part = 55 * min(r.titular_ultimos / G, 1.0)
+        share = r.titular_temporada / G
         ga = (r.gols + 0.7 * r.assistencias) / G
-        ga_part = 20 * min(ga / 0.6, 1.0)
-        v_part = 25 * (float(r.valor) / vmax) ** 0.5 if vmax and r.valor and r.valor == r.valor else None
-        if v_part is None:                              # sem valor de mercado: a titularidade pesa o resto
-            score = (start_part + ga_part) / 75 * 100
-            base = "titularidade + gols/assistências (sem valor de mercado)"
-        else:
-            score = start_part + ga_part + v_part
-            base = "titularidade + gols/assistências + valor de mercado"
-        notes.append((round(score), base))
-    df["nota"] = [x[0] for x in notes]
-    df["nota_base"] = [x[1] for x in notes]
+        v = (float(r.valor) / vmax) ** 0.5 if vmax and r.valor and r.valor == r.valor else None
+        parts = [(0.6, share), (0.3, min(ga / 0.5, 1.0))] + ([(0.1, v)] if v is not None else [])
+        q.append(round(10 * sum(w * x for w, x in parts) / sum(w for w, _ in parts), 1))
+        ga5 = (r.gols_ult5 + 0.7 * r.assist_ult5) / G5
+        f.append(round(10 * (0.6 * r.titular_ult5 / G5 + 0.4 * min(ga5 / 0.5, 1.0)), 1))
+        base.append("titularidade e gols/assistências da temporada" + (" + valor de mercado (desempate)" if v is not None else ""))
+    df["qualidade"], df["fase"], df["nota_base"] = q, f, base
+    df["nota"] = (df["qualidade"] * 10).round()                  # compatibilidade com as telas antigas (0–100)
     forms = Counter(lu.drop_duplicates("match_id").head(3)["formation"].dropna()) if not lu.empty else Counter()
-    return {"jogadores": df.sort_values("nota", ascending=False).reset_index(drop=True), "jogos": games,
-            "formacao": forms.most_common(1)[0][0] if forms else None, "escalacoes": lu,
+    return {"jogadores": df.sort_values(["prob_titular", "qualidade"], ascending=False).reset_index(drop=True),
+            "jogos": games, "formacao": forms.most_common(1)[0][0] if forms else None, "escalacoes": lu,
             "fonte_elenco": "ESPN (elenco atual)" if not ros.empty else "escalações recentes"}
+
+
+# regra de suspensão por acúmulo de amarelos (estimativa pela regra da competição; zera em fases que o regulamento manda)
+YELLOW_LIMIT = {"Brasileirão Série A": 3, "Brasileirão Série B": 3, "Copa do Brasil": 3, "Premier League": 5, "La Liga": 5,
+                "Serie A": 5, "Bundesliga": 5, "Ligue 1": 3, "Primeira Liga": 5, "CONMEBOL Libertadores": 3,
+                "CONMEBOL Sul-Americana": 3, "UEFA Champions League": 3}
+
+
+def yellow_suspensions(db, games: Sequence[int], team_names: Sequence[str]) -> Dict[str, str]:
+    """
+    Pendurado que levou o amarelo que completa o ciclo no último jogo da competição = suspenso no próximo dela.
+    É ESTIMATIVA pela regra geral da competição (o regulamento pode zerar cartões em certas fases).
+    """
+    if not games:
+        return {}
+    ph, ps = _names_sql([int(x) for x in games])
+    th, ts = _names_sql(team_names)
+    try:
+        with db.connect() as conn:
+            t = pd.read_sql_query(f"SELECT t.match_id, m.match_date, m.competition_name, t.player_name, t.event_type "
+                                  f"FROM match_timeline t JOIN matches m ON m.match_id = t.match_id WHERE t.match_id IN ({ph}) "
+                                  f"AND t.team_name IN ({th}) AND t.event_type LIKE '%Yellow%'", conn, params=ps + ts)
+    except Exception:
+        return {}
+    if t.empty:
+        return {}
+    out = {}
+    for comp, g in t.groupby("competition_name"):
+        lim = YELLOW_LIMIT.get(comp)
+        if not lim:
+            continue
+        last_game = g["match_date"].max()
+        for p, gp in g.groupby("player_name"):
+            n = len(gp)
+            if n % lim == 0 and (gp["match_date"] == last_game).any():
+                out[p] = f"suspenso por acúmulo de amarelos ({n}º amarelo em {comp}) — estimativa pela regra da competição"
+    return out
+
+
+def multi_fit(slot_role: str, posicoes: Dict[str, int], main: Optional[str]) -> float:
+    """Encaixe na vaga por TODAS as posições em que o jogador começou jogando (peso pela frequência)."""
+    from src.squad.formations import fit
+
+    if not posicoes:
+        return fit(slot_role, main or "")
+    tot = sum(posicoes.values())
+    best = 0.0
+    for r, k in posicoes.items():
+        share = k / tot
+        best = max(best, fit(slot_role, r) * (0.75 + 0.25 * min(share * 2, 1.0)))
+    return best
 
 
 def _age(b) -> Optional[int]:
@@ -203,23 +311,27 @@ def reasons(row: Dict[str, Any], slot_role: str, bench: pd.DataFrame, n_games: i
     from src.squad.formations import ROLE_PT
 
     out = []
-    if row.get("titular_ult5"):
-        out.append(f"titular em {row['titular_ult5']} dos últimos 5 jogos")
+    G = row.get("jogos_temporada") or n_games
+    if row.get("titular_temporada"):
+        out.append(f"titular em {row['titular_temporada']} de {G} jogos da temporada")
+    if row.get("titular_ult5") is not None:
+        out.append(f"{row['titular_ult5']} dos últimos 5 como titular"
+                   + ("" if row.get("comecou_ultimo") else " (não começou o último jogo, mas segue entre os titulares da temporada)"
+                      if (row.get("titular_temporada") or 0) / max(G, 1) >= 0.5 else ""))
     pos = row.get("posicoes") or {}
     if pos.get(slot_role):
-        out.append(f"jogou de {ROLE_PT.get(slot_role, slot_role).lower()} em {pos[slot_role]} jogo(s) recente(s)")
+        out.append(f"jogou de {ROLE_PT.get(slot_role, slot_role).lower()} em {pos[slot_role]} jogo(s)")
     elif row.get("papel") and row["papel"] != slot_role:
-        out.append(f"improvisado: costuma jogar de {ROLE_PT.get(row['papel'], row['papel']).lower()}")
+        out.append(f"adaptado: costuma jogar de {ROLE_PT.get(row['papel'], row['papel']).lower()}")
     if row.get("gols") or row.get("assistencias"):
-        out.append(f"{row.get('gols', 0)} gol(s) e {row.get('assistencias', 0)} assistência(s) nos últimos {n_games} jogos")
-    if row.get("lado") and slot_role in SIDE and SIDE[slot_role] == row["lado"]:
-        out.append(f"atua pelo lado {row['lado']}")
+        out.append(f"{row.get('gols', 0)} gol(s) e {row.get('assistencias', 0)} assistência(s) na temporada")
+    out.append(f"qualidade {row.get('qualidade')} · fase {row.get('fase')}")
+    if row.get("duvida"):
+        out.append(f"⚠️ dúvida: {row['duvida']}")
     rivals = bench[(bench["papel"] == slot_role) & (bench["nome"] != row["nome"])] if not bench.empty else bench
     if len(rivals):
         alt = rivals.iloc[0]
-        out.append(f"nota {row.get('nota')} contra {alt['nota']} de {alt['nome']} (opção na posição)")
-    if not out:
-        out.append("melhor opção disponível para a vaga (pouco dado recente)")
+        out.append(f"à frente de {alt['nome']} (qualidade {alt['qualidade']}, fase {alt['fase']})")
     return out
 
 
@@ -282,32 +394,49 @@ def next_fixtures(db, team_names: Sequence[str], limit: int = 5) -> pd.DataFrame
 
 def xi_for(info: Dict[str, Any], formation: Optional[str], mode: str = "provavel") -> Tuple[List[Dict[str, Any]], str]:
     """
-    XI para a formação (padrão: a mais usada nos últimos 3 jogos). mode="provavel": quem tem começado jogando;
-    mode="melhor": maior nota do laboratório. Lesionados e suspensos ficam de fora. Cada vaga traz o PORQUÊ.
+    XI para a formação (padrão: a mais usada nos últimos 3 jogos), por atribuição ótima (algoritmo húngaro):
+      provável → chance de ser titular; melhor → 60% qualidade + 40% fase.
+    O encaixe pesa ao CUBO: jogador fora de posição só entra se não houver ninguém minimamente adequado.
+    Lesionados e suspensos ficam de fora. Cada vaga traz o PORQUÊ.
     """
-    from src.squad.formations import FORMATIONS
-    from src.squad.planner import best_xi
+    import numpy as np
+    from scipy.optimize import linear_sum_assignment
+
+    from src.squad.formations import FORMATIONS, ROLE_PT
 
     pl = info["jogadores"]
     form = formation if formation in FORMATIONS else (info.get("formacao") if info.get("formacao") in FORMATIONS else "4-3-3")
+    slots = FORMATIONS[form]
     if pl is None or pl.empty:
-        return best_xi(pd.DataFrame(), form), form
-    ok = pl[~pl["indisponivel"].astype(bool) & pl["papel"].notna()].copy()
-    if mode == "provavel":
-        ok["nota_escolha"] = ok["titular_ult5"] * 18 + ok["titular_ultimos"] * 4 + ok["nota"] * 0.1
-    else:
-        ok["nota_escolha"] = ok["nota"]
-    sq = ok.assign(nota=ok["nota_escolha"])
-    xi = best_xi(sq, form)
-    chosen = {p["jogador"] for p in xi if p.get("jogador")}
-    bench = ok[~ok["nome"].isin(chosen)].sort_values("nota", ascending=False)
-    byname = {r["nome"]: r for r in pl.to_dict("records")}
+        return [{"vaga": i, "papel": r, "papel_pt": ROLE_PT[r], "x": x, "y": y, "jogador": None, "nota": None,
+                 "encaixe": None, "papel_natural": None} for i, (r, x, y) in enumerate(slots)], form
+    ok = pl[~pl["indisponivel"].astype(bool) & pl["papel"].notna()].reset_index(drop=True)
+    val = (ok["prob_titular"] / 10.0 + 0.15 * ok["qualidade"]) if mode == "provavel" else (0.6 * ok["qualidade"] + 0.4 * ok["fase"])
+    val = val.to_numpy(float) + 0.5
+    score = np.zeros((len(slots), len(ok)))
+    fits = np.zeros_like(score)
+    for i, (role, _, _) in enumerate(slots):
+        for j, r in enumerate(ok.itertuples()):
+            fits[i, j] = multi_fit(role, r.posicoes, r.papel)
+            score[i, j] = val[j] * fits[i, j] ** 3
+    ri, ci = linear_sum_assignment(-score)
+    pick = dict(zip(ri, ci))
+    chosen = {ok.iloc[j]["nome"] for j in pick.values()}
+    bench = ok[~ok["nome"].isin(chosen)].sort_values("qualidade", ascending=False)
     G = len(info.get("jogos") or []) or 1
-    for p in xi:
-        r = byname.get(p.get("jogador"))
+    xi = []
+    for i, (role, x, y) in enumerate(slots):
+        j = pick.get(i)
+        r = ok.iloc[j].to_dict() if j is not None else None
+        p = {"vaga": i, "papel": role, "papel_pt": ROLE_PT[role], "x": x, "y": y,
+             "jogador": r["nome"] if r else None, "nota": r["qualidade"] if r else None,
+             "qualidade": r["qualidade"] if r else None, "fase": r["fase"] if r else None,
+             "prob_titular": r["prob_titular"] if r else None,
+             "encaixe": round(float(fits[i, j]), 2) if r else None,
+             "papel_natural": ROLE_PT.get(r["papel"], "—") if r else None}
         if r:
-            p["nota"] = r["nota"]
-            p["porque"] = reasons(r, p["papel"], bench, G)
+            p["porque"] = reasons(r, role, bench, G)
+        xi.append(p)
     return xi, form
 
 

@@ -247,9 +247,14 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
         if not p.get("jogador"):
             continue
         why = " · ".join(p.get("porque") or [])
+        chips = "".join(
+            f'<span style="background:#111A2E;border:1px solid #1E2A44;border-radius:999px;padding:1px 8px;margin-left:6px;'
+            f'font-size:.75rem;color:{c}">{lab} {v}</span>'
+            for lab, v, c in (("qualidade", p.get("qualidade"), "#22D3EE"), ("fase", p.get("fase"), "#A78BFA"),
+                              ("titular", f'{p.get("prob_titular")}%' if p.get("prob_titular") is not None else None, "#FBBF24"),
+                              ("encaixe", p.get("encaixe"), "#22C55E")) if v is not None)
         rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:8px 12px;'
-                    f'margin-bottom:6px"><b>{p["papel_pt"]}: {p["jogador"]}</b> <span style="color:#94A3B8">· nota '
-                    f'{p.get("nota") if p.get("nota") is not None else "—"}</span><br><span style="color:#CBD5E1;'
+                    f'margin-bottom:6px"><b>{p["papel_pt"]}: {p["jogador"]}</b>{chips}<br><span style="color:#CBD5E1;'
                     f'font-size:.85rem">{why}</span></div>')
     st.markdown("".join(rows), unsafe_allow_html=True)
 
@@ -285,6 +290,9 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
         if len(out):
             st.markdown("**Desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+        dv = b["jogadores"][b["jogadores"].get("duvida", "").astype(bool)] if "duvida" in b["jogadores"] else b["jogadores"].iloc[0:0]
+        if len(dv):
+            st.markdown("**Dúvidas:** " + "; ".join(f"{r.nome} ({r.duvida})" for r in dv.itertuples()))
         with st.expander("Por que cada jogador do rival deve começar"):
             _xi_cards(xr, "#EF4444")
     form_me = st.session_state.get("nx_form") or None
@@ -305,6 +313,9 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
             st.markdown("**Nossos desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+        dv = a["jogadores"][a["jogadores"]["duvida"].astype(bool)] if "duvida" in a["jogadores"] else a["jogadores"].iloc[0:0]
+        if len(dv):
+            st.markdown("**Nossas dúvidas:** " + "; ".join(f"{r.nome} ({r.duvida})" for r in dv.itertuples()))
         with st.expander("Por que cada jogador nosso foi escolhido", expanded=True):
             _xi_cards(xm, "#22D3EE")
     st.markdown(f"### 🔍 Leitura de {rival}")
