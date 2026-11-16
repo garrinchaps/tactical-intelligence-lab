@@ -79,6 +79,8 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS idx_events_match_team ON events(match_id, team_name);
 CREATE INDEX IF NOT EXISTS idx_events_type ON events(match_id, type_name);
 CREATE INDEX IF NOT EXISTS idx_events_possession ON events(match_id, possession);
+-- v36: busca/scout por jogador sem varrer a tabela inteira de lances
+CREATE INDEX IF NOT EXISTS idx_events_player ON events(player_name, team_name, match_id);
 
 CREATE TABLE IF NOT EXISTS tactical_diagnostics_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

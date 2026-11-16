@@ -107,6 +107,11 @@ CREATE INDEX IF NOT EXISTS idx_matches_teams ON matches(home_team_name, away_tea
 CREATE INDEX IF NOT EXISTS idx_matches_date ON matches(match_date);
 CREATE INDEX IF NOT EXISTS idx_matches_level_source ON matches(data_level, data_source);
 CREATE INDEX IF NOT EXISTS idx_team_stats_match ON match_team_stats(match_id);
+-- v36 (velocidade): jogador na busca/scout, escalações por time, números por jogador, fonte+data
+CREATE INDEX IF NOT EXISTS idx_lineups_team ON match_lineups(team_name, match_id);
+CREATE INDEX IF NOT EXISTS idx_lineups_player ON match_lineups(player_name);
+CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team_name);
+CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
 """
 
 
@@ -139,7 +144,9 @@ class DataHubDB:
         # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
-        conn.execute("PRAGMA cache_size = -20000;")
+        conn.execute("PRAGMA cache_size = -64000;")         # 64 MB de cache por conexão (o PC tem 16 GB)
+        conn.execute("PRAGMA temp_store = MEMORY;")
+        conn.execute("PRAGMA mmap_size = 268435456;")      # 256 MB mapeados: leituras grandes sem copiar
         try:
             yield conn
             conn.commit()
