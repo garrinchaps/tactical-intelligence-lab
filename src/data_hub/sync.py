@@ -35,7 +35,7 @@ ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", 
                "open_sources", "lake"]
 # cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
 HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil", "espn_temporada", "espn_resumos",
-                 "espn_elencos", "fotmob_temporada", "fotmob_jogos", "fotmob_recentes"]
+                 "espn_elencos", "fotmob_temporada", "fotmob_jogos", "fotmob_recentes", "fotmob_tudo"]
 # --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
 # bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
 EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
@@ -81,6 +81,8 @@ def run_sync(
         # e, por jogo, estatísticas com xG, escalação com posição exata, números por jogador e mapa de chutes
         "fotmob_temporada": lambda: svc.fotmob.sync_seasons(_fotmob_ids(espn_leagues), seasons_back=fotmob_seasons,
                                                             progress=say),
+        # TUDO de uma vez: 5 temporadas de todas as competições + detalhes de todos os jogos, em lotes, até acabar
+        "fotmob_tudo": lambda: _fotmob_all(svc, say),
         # automático (diário): só os jogos dos últimos 10 dias, no máximo 150 por vez
         "fotmob_recentes": lambda: svc.fotmob.fetch_details(None, limit=150,
                                                             since=(date.today() - timedelta(days=10)).isoformat(),
@@ -114,7 +116,7 @@ def run_sync(
                "espn": svc.espn.enabled, "espn_historico": svc.espn.enabled, "espn_temporada": svc.espn.enabled,
                "espn_resumos": svc.espn.enabled, "espn_elencos": svc.espn.enabled,
                "fotmob_temporada": svc.fotmob.enabled, "fotmob_jogos": svc.fotmob.enabled,
-               "fotmob_recentes": svc.fotmob.enabled,
+               "fotmob_recentes": svc.fotmob.enabled, "fotmob_tudo": svc.fotmob.enabled,
                "estatisticas_brasil": svc.api_football.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 
@@ -275,6 +277,24 @@ def prefetch_recent_boxscores(svc: MatchDataService, days_back: int = 3, limit: 
             say(f"  ✖ boxscore {r['home_team_name']} x {r['away_team_name']}: {exc}")
     say(f"• boxscores baixados: {ok}")
     return {"downloaded": ok, "errors": err}
+
+
+def _fotmob_all(svc, say) -> Dict[str, int]:
+    """Calendário de 5 temporadas + detalhes de todos os jogos, em lotes de 500, até não faltar nada. Ctrl+C para —
+    rodando de novo continua de onde parou (o que já veio fica no banco)."""
+    tot = {"temporadas": 0, "detalhes": 0, "errors": 0}
+    r = svc.fotmob.sync_seasons(None, seasons_back=5, progress=say)
+    tot["temporadas"] = r.get("temporadas", 0)
+    since = f"{date.today().year - 5}-01-01"
+    while True:
+        pend = svc.fotmob.pending(since)
+        say(f"  faltam ~{pend} jogos com detalhes (≈ {pend * 0.8 / 3600:.1f} h no ritmo atual — estimativa)")
+        r = svc.fotmob.fetch_details(None, since=since, limit=500, progress=say)
+        tot["detalhes"] += r["detalhes"]
+        tot["errors"] += r["errors"]
+        if r["detalhes"] == 0:
+            break
+    return tot
 
 
 def _fotmob_ids(leagues: Optional[List[str]]) -> Optional[List[int]]:

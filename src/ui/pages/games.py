@@ -21,6 +21,28 @@ def render(current_context, match_bar=None) -> None:
     ctx = current_context()
     if ctx is None:
         return
+    if not ctx.has_events and not st.session_state.get(f"_fm_tried_{ctx.match_id}"):
+        # rodada 5: sem lances → busca NA HORA a mesma partida na FotMob (escalação, números por jogador, chutes, xG)
+        st.session_state[f"_fm_tried_{ctx.match_id}"] = True
+        try:
+            from src.ui.context import get_service
+
+            svc = get_service()
+            box = ctx.bundle.boxscore or {}
+            rich = any(getattr(box.get(k), "empty", True) is False for k in ("player_stats",))
+            if svc.fotmob.enabled and not rich:
+                with st.spinner("Buscando os detalhes desta partida na FotMob..."):
+                    fm_id = svc.fotmob.ensure_match(int(ctx.match_id), ctx.bundle.meta or {})
+                from src.ui.context import _bundle_parts
+
+                if fm_id and fm_id != int(ctx.match_id) and svc.db.has_boxscore(fm_id):
+                    st.session_state["match_id"] = int(fm_id)      # passa a mostrar a versão mais rica (FotMob)
+                    st.rerun()
+                elif fm_id == int(ctx.match_id):
+                    _bundle_parts.clear()                          # só o cache das partidas abertas (máx. 12)
+                    st.rerun()
+        except Exception:
+            pass
     meta = ctx.bundle.meta or {}
     h, a = meta.get("home_team_name", ""), meta.get("away_team_name", "")
     comp, season = meta.get("competition_name", ""), meta.get("season_name", "")

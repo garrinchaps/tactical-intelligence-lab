@@ -143,7 +143,12 @@ class FotmobProvider:
         self.db = db
         flag = os.getenv("ENABLE_FOTMOB", "true") if enabled is None else str(enabled)
         self._enabled = flag.strip().lower() in ("1", "true", "sim", "yes")
-        self.client = PoliteHttpClient("fotmob", db=db, min_interval_s=1.5)
+        # ~0,7 s entre pedidos (≈ 5 mil jogos por hora): rápido, mas sem rajadas; FOTMOB_INTERVALO no .env ajusta
+        try:
+            gap = max(float(os.getenv("FOTMOB_INTERVALO", "0.7")), 0.3)
+        except ValueError:
+            gap = 0.7
+        self.client = PoliteHttpClient("fotmob", db=db, min_interval_s=gap)
 
     @property
     def enabled(self) -> bool:
@@ -378,7 +383,7 @@ class FotmobProvider:
                 "finalizacoes": len(shots), "desfalques": unav}
 
     def fetch_details(self, leagues: Optional[List[int]] = None, since: Optional[str] = None, limit: int = 300,
-                      progress=None) -> Dict[str, int]:
+                      progress=None, stop=None) -> Dict[str, int]:
         """Detalhes dos jogos encerrados que ainda não têm, por prioridade e do mais recente ao mais antigo; retomável."""
         say = progress or (lambda m: None)
         order = leagues or (PRIORITY + [k for k in LEAGUES if k not in PRIORITY])
@@ -393,20 +398,98 @@ class FotmobProvider:
                              "WHERE data_source = 'fotmob' AND home_score IS NOT NULL AND match_date >= ? "
                              "AND match_id NOT IN (SELECT DISTINCT match_id FROM match_lineups)", (since,)).fetchall()
         rank = {lg: i for i, lg in enumerate(order)}
-        todo = [r for r in todo if r[1] in rank]
+        tried = self._recently_tried()
+        todo = [r for r in todo if r[1] in rank and int(r[0]) not in tried]
         todo.sort(key=lambda r: (rank.get(r[1], 999), -int(str(r[2] or "0").replace("-", "")[:8] or 0)))
         tot = {"detalhes": 0, "errors": 0, "pendentes": max(len(todo) - limit, 0)}
         for i, (mid, _lg, _d) in enumerate(todo[:limit], 1):
+            if stop is not None and stop():
+                break
             try:
                 self.ingest(int(mid))
                 tot["detalhes"] += 1
+                self._mark_tried(int(mid), True)
             except Exception as exc:
                 tot["errors"] += 1
+                self._mark_tried(int(mid), False)
                 say(f"  fotmob jogo {mid}: {exc}")
             if i % 25 == 0:
                 say(f"  detalhes: {i}/{min(limit, len(todo))}")
         say(f"  detalhes baixados: {tot['detalhes']} · faltam {tot['pendentes']} (rode de novo para continuar)")
         return tot
+
+    # ------------------------------------------------------------------ tentativas (não repete jogo sem dado)
+    def _tried_table(self) -> None:
+        with self.db.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS fotmob_tried (match_id INTEGER PRIMARY KEY, tried_at TEXT, ok INTEGER)")
+
+    def _mark_tried(self, match_id: int, ok: bool) -> None:
+        self._tried_table()
+        with self.db.connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO fotmob_tried VALUES (?, datetime('now'), ?)", (int(match_id), int(ok)))
+
+    def _recently_tried(self, days: int = 7) -> set:
+        """Jogos já pedidos que voltaram sem escalação (liga pequena) ou com erro: só tenta de novo depois de 7 dias."""
+        self._tried_table()
+        with self.db.connect() as conn:
+            rows = conn.execute("SELECT match_id FROM fotmob_tried WHERE tried_at >= datetime('now', ?)",
+                                (f"-{int(days)} days",)).fetchall()
+        return {int(r[0]) for r in rows}
+
+    def pending(self, since: Optional[str] = None) -> int:
+        since = since or f"{date.today().year - 5}-01-01"
+        with self.db.connect() as conn:
+            n = conn.execute("SELECT COUNT(*) FROM matches WHERE data_source = 'fotmob' AND home_score IS NOT NULL "
+                             "AND match_date >= ? AND match_id NOT IN (SELECT DISTINCT match_id FROM match_lineups)",
+                             (since,)).fetchone()[0]
+        return max(int(n) - len(self._recently_tried()), 0)
+
+    # ------------------------------------------------------------------ sob demanda (instantâneo)
+    def ensure_teams(self, team_names: List[str], n: int = 10, days: int = 400) -> Dict[str, int]:
+        """Baixa NA HORA os detalhes dos últimos `n` jogos dos times que ainda não têm (ex.: ao abrir a Escalação)."""
+        if not team_names or not self.enabled:
+            return {"detalhes": 0}
+        ph = ",".join("?" * len(team_names))
+        since = (date.today() - __import__("datetime").timedelta(days=days)).isoformat()
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                f"SELECT match_id FROM matches WHERE data_source = 'fotmob' AND home_score IS NOT NULL AND match_date >= ? "
+                f"AND (home_team_name IN ({ph}) OR away_team_name IN ({ph})) "
+                f"AND match_id NOT IN (SELECT DISTINCT match_id FROM match_lineups) ORDER BY match_date DESC LIMIT ?",
+                [since, *team_names, *team_names, int(n)]).fetchall()
+        tried = self._recently_tried()
+        done = 0
+        for (mid,) in rows:
+            if int(mid) in tried:
+                continue
+            try:
+                self.ingest(int(mid))
+                self._mark_tried(int(mid), True)
+                done += 1
+            except Exception:
+                self._mark_tried(int(mid), False)
+        return {"detalhes": done}
+
+    def ensure_match(self, match_id: int, meta: Dict[str, Any]) -> Optional[int]:
+        """A mesma partida na FotMob (data ±1 dia + mesmos times), com os detalhes baixados na hora se faltarem."""
+        try:
+            from src.data_hub.consolidate import siblings
+
+            ids = [int(match_id)] + [int(x["match_id"]) for x in siblings(self.db, int(match_id), meta)]
+        except Exception:
+            ids = [int(match_id)]
+        fm = [m for m in ids if m >= to_internal_id("fotmob", 0)]
+        if not fm:
+            return None
+        mid = fm[0]
+        if not self.db.has_boxscore(mid) and mid not in self._recently_tried(1):
+            try:
+                self.ingest(mid)
+                self._mark_tried(mid, True)
+            except Exception:
+                self._mark_tried(mid, False)
+                return None
+        return mid
 
     def _has_frozen(self) -> bool:
         try:

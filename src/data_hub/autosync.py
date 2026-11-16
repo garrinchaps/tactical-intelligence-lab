@@ -61,12 +61,77 @@ def due(db, now: Optional[datetime] = None) -> List[str]:
     d = _last_ok(db, DAILY)
     if d is None or now - d >= timedelta(hours=24):
         out += DAILY
-        import os
-
-        # FotMob só no automático se você ligar de propósito (ENABLE_FOTMOB=true no .env)
-        if os.getenv("ENABLE_FOTMOB", "").strip().lower() in ("1", "true", "sim", "yes"):
-            out += ["fotmob_temporada", "fotmob_recentes"]
     return out
+
+
+# ------------------------------------------------------------------ FotMob contínua (rodada 5, pedido do usuário)
+_fm: Dict[str, Any] = {"running": False, "baixados": 0, "pendentes": None, "fase": "", "ultimo": None, "erro": None}
+
+
+def fotmob_enabled() -> bool:
+    """Ligada por padrão; ENABLE_FOTMOB=false no .env desliga."""
+    return os.getenv("ENABLE_FOTMOB", "true").strip().lower() not in ("0", "false", "nao", "não", "no")
+
+
+def _fotmob_loop() -> None:
+    """
+    Abastece a base sozinha enquanto o app está aberto, um pedido a cada ~0,7 s, sem travar a tela:
+      1. uma vez por dia: calendário e resultados da temporada atual de todas as competições (e, na 1ª vez, as
+         temporadas anteriores — FOTMOB_TEMPORADAS, padrão 2; temporada passada já baixada não é pedida de novo);
+      2. detalhes dos jogos dos últimos 10 dias (estatísticas, escalação, números por jogador, chutes);
+      3. o histórico em lotes de 300, Brasil e Europa principal primeiro, do mais novo ao mais velho;
+      4. quando não falta nada, dorme 30 min e confere de novo.
+    """
+    import time
+
+    from src.data_hub import sync_policy as P
+    from src.data_hub.service import MatchDataService
+
+    try:
+        svc = MatchDataService()
+        fm = svc.fotmob
+        while enabled() and fotmob_enabled():
+            try:
+                last = P.last_synced(svc.db, "fotmob", "_temporada_diaria")
+                if last is None or datetime.now(timezone.utc) - last >= timedelta(hours=24):
+                    _fm["fase"] = "calendário e resultados"
+                    try:
+                        back = max(0, min(int(os.getenv("FOTMOB_TEMPORADAS", "2")), 5))
+                    except ValueError:
+                        back = 2
+                    fm.sync_seasons(None, seasons_back=back)
+                    P.mark_synced(svc.db, "fotmob", "_temporada_diaria")
+                _fm["fase"] = "jogos dos últimos 10 dias"
+                r1 = fm.fetch_details(None, since=(datetime.now().date() - timedelta(days=10)).isoformat(), limit=200,
+                                      stop=lambda: not enabled())
+                _fm["fase"] = "histórico"
+                r2 = fm.fetch_details(None, since=f"{datetime.now().year - 5}-01-01", limit=300, stop=lambda: not enabled())
+                _fm["baixados"] += r1["detalhes"] + r2["detalhes"]
+                _fm["pendentes"] = fm.pending()
+                _fm["ultimo"] = datetime.now(timezone.utc)
+                _fm["erro"] = None
+                if r1["detalhes"] + r2["detalhes"] == 0:
+                    _fm["fase"] = "em dia"
+                    time.sleep(30 * 60)
+                else:
+                    time.sleep(5)
+            except Exception as exc:            # sem internet, site fora: tenta de novo em 10 min, nunca derruba o app
+                _fm["erro"] = f"{type(exc).__name__}: {exc}"
+                time.sleep(10 * 60)
+    finally:
+        _fm["running"] = False
+
+
+def fotmob_status() -> str:
+    if not fotmob_enabled():
+        return ""
+    if _fm.get("erro"):
+        return f"FotMob: tentando de novo em instantes ({_fm['erro'][:60]})"
+    if not _fm.get("running"):
+        return ""
+    p = _fm.get("pendentes")
+    return (f"⚡ FotMob abastecendo a base ({_fm.get('fase', '')}): {_fm['baixados']} jogos com detalhes nesta sessão"
+            + (f" · faltam {p}" if p is not None else ""))
 
 
 def _run(sources: List[str]) -> None:
@@ -118,6 +183,9 @@ def ensure_started(db) -> Dict[str, Any]:
         if not _live["running"] and os.getenv("AUTO_SYNC_LIVE", "1").strip() not in ("0", "false"):
             _live["running"] = True
             threading.Thread(target=_live_loop, daemon=True, name="til-ao-vivo").start()
+        if not _fm["running"] and fotmob_enabled():
+            _fm["running"] = True
+            threading.Thread(target=_fotmob_loop, daemon=True, name="til-fotmob").start()
         recent = _state["last_attempt"] and datetime.now(timezone.utc) - _state["last_attempt"] < timedelta(minutes=RETRY_MINUTES)
         if not _state["running"] and not recent:
             pending = due(db)

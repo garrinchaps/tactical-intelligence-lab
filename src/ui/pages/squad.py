@@ -262,7 +262,18 @@ def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
     tm = D.table("tm_jogadores", ["nome", "valor_mercado_eur", "ultima_temporada", "funcao", "posicao"])
     if not tm.empty:
         tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= date.today().year - 2]
-    info = M.player_table(get_service().db, names, n=n, tm_values=tm)
+    db = get_service().db
+    try:                                    # rodada 5: sem escalações recentes → baixa NA HORA os últimos jogos na FotMob
+        ph = ",".join("?" * len(names))
+        with db.connect() as conn:
+            recent = conn.execute(f"SELECT COUNT(DISTINCT l.match_id) FROM match_lineups l JOIN matches m ON m.match_id = "
+                                  f"l.match_id WHERE l.team_name IN ({ph}) AND m.match_date >= date('now', '-45 days')",
+                                  list(names)).fetchone()[0]
+        if recent < 4 and get_service().fotmob.enabled:
+            get_service().fotmob.ensure_teams(list(names), n=12)
+    except Exception:
+        pass
+    info = M.player_table(db, names, n=n, tm_values=tm)
     return {"info": info, "names": names}
 
 
@@ -360,6 +371,16 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     if (a["jogadores"] is None or a["jogadores"].empty) or (b["jogadores"] is None or b["jogadores"].empty):
         note("Faltam escalações recentes", "Baixe os resumos dos jogos (estatísticas + escalações): "
              "`python -m src.data_hub.sync --only espn_resumos` e os elencos: `--only espn_elencos`.", "warn")
+    for nm, inf in ((team, a), (rival, b)):
+        if not inf.get("jogos"):
+            note(f"{nm}: nenhuma escalação recente na base",
+                 "Sem escalações, a provável abaixo usa só o elenco e a posição de cadastro (qualidade e chance de começar "
+                 "ficam perto de zero — não é uma avaliação dos jogadores). A FotMob está baixando os jogos em segundo "
+                 "plano; volte em alguns minutos.", "warn")
+        elif (inf.get("dias_desde_ultima_escalacao") or 0) > 30:
+            note(f"{nm}: escalações desatualizadas",
+                 f"A escalação mais recente na base é de {inf['dias_desde_ultima_escalacao']} dias atrás. Quem não está no "
+                 "elenco atual já sai da conta, mas a titularidade pode estar velha.", "warn")
     st.caption(f"Base: últimos {len(a['jogos'])} jogos de {team} e {len(b['jogos'])} de {rival} com escalação · "
                f"elenco: {a['fonte_elenco']} / {b['fonte_elenco']}. Provável = quem tem começado jogando, sem lesionados "
                "e suspensos — a escalação oficial só sai cerca de 1 h antes do jogo.")

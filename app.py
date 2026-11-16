@@ -205,6 +205,9 @@ def main() -> None:
             from src.data_hub import autosync
 
             st.caption(autosync.status_text(autosync.ensure_started(get_service().db)))
+            fm = autosync.fotmob_status()
+            if fm:
+                st.caption(fm)
         except Exception:
             pass
     page.run()
