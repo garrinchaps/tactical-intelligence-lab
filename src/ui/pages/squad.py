@@ -101,7 +101,17 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
         ap = D.table("tm_aparicoes", None, "transfermarkt_id", sq["transfermarkt_id"].dropna().tolist())
         usage = season_usage(ap, sq["transfermarkt_id"].dropna().tolist(),
                              since=(date.today() - timedelta(days=365)).isoformat())
-    rated = lab_rating(sq, D.tm_reference(), usage, D.external_ratings()) if not sq.empty else sq
+    performance = pd.DataFrame()
+    if not sq.empty:
+        try:
+            # Reutiliza a mesma régua 2.0 por posição usada nas páginas de jogadores e de partida.
+            from src.squad import matchday as M
+
+            performance = M.player_table(get_service().db, names, n=10, tm_values=tm).get("jogadores", pd.DataFrame())
+        except Exception:
+            performance = pd.DataFrame()
+    rated = lab_rating(sq, D.tm_reference(), usage, D.external_ratings(), player_performance=performance) \
+        if not sq.empty else sq
     return {"squad": rated, "club": club, "names": names, "fonte": source or "—", "mudancas": changes,
             "nao_confirmados": unconfirmed[[c for c in ("nome", "posicao", "ultima_temporada") if c in unconfirmed]]
             if not unconfirmed.empty else unconfirmed}
