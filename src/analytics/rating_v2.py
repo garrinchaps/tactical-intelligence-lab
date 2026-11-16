@@ -548,6 +548,17 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     funcao = row.get("funcao") or role_of(row.get("posicao"))
     mins = max(0.0, _as_float(row.get("minutos")))
     role_mix = row.get("role_mix")
+    if funcao not in WEIGHTS and funcao != "goleiro":
+        # Sem função observável, não presume que o jogador seja meia central.
+        return {
+            "jogador": row.get("jogador"), "equipe": row.get("equipe"), "funcao": "não identificada",
+            "minutos": mins, "desempenho": None, "nota": None, "nota_final": None,
+            "classificacao": "sem nota", "impacto": None, "confianca_pct": 0, "confianca": "baixa",
+            "amostra": minutes_tier(mins), "dimensoes": {k: None for k in DIMS},
+            "dimensoes_pt": DIM_PT, "pesos": {}, "base": [], "role_mix": {},
+            "eventos_decisivos": {}, "pares": 0,
+            "motivo": "posição/função não identificada pela fonte",
+        }
     peers = _peer_group(ref, funcao, role_mix)
     gk = funcao == "goleiro"
     inds, dims, base_wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (
@@ -565,15 +576,20 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
             ]
     acc: Dict[str, List[tuple]] = {k: [] for k in dims}
     detail = []
+    reference_support = []
     for k, (dim, w, hi) in inds.items():
-        pc = _pct(row.get(k), peers[k] if k in peers else pd.Series(dtype=float))
+        series = pd.to_numeric(peers[k], errors="coerce").dropna() if k in peers else pd.Series(dtype=float)
+        row_value = row.get(k)
+        if row_value is not None and not pd.isna(row_value):
+            reference_support.append(int(len(series)))
+        pc = _pct(row_value, series)
         sc = None if pc is None else pct_to_score(pc if hi else 100 - pc)
         if sc is not None:
             acc[dim].append((sc, w))
-            ref_med = pd.to_numeric(peers[k], errors="coerce").median() if k in peers else None
-            detail.append({"indicador": k, "rotulo": IND_PT.get(k, k), "dimensao": dim, "valor": row.get(k),
+            ref_med = float(series.median()) if len(series) else None
+            detail.append({"indicador": k, "rotulo": IND_PT.get(k, k), "dimensao": dim, "valor": row_value,
                            "nota": round(sc, 1), "percentil": round(pc if hi else 100 - pc), "mediana_pares": ref_med,
-                           "maior_melhor": hi})
+                           "pares_indicador": int(len(series)), "maior_melhor": hi})
     dim_score = {k: (sum(s * w for s, w in v) / sum(w for _, w in v)) if v else None for k, v in acc.items()}
     if not gk:
         # disciplina: expulsão é penalização severa (consequência independente — não é dupla contagem)
@@ -583,7 +599,9 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     raw = sum(s * w for s, w in obs) / sum(w for _, w in obs) if obs else None
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
     c_min = min(1.0, max(0.0, mins / 60.0))
-    c_pool = min(1.0, len(peers) / 40.0)
+    # Confiança usa o tamanho real das amostras por indicador disponível, não só o total bruto de jogadores no grupo.
+    median_support = float(np.median(reference_support)) if reference_support else 0.0
+    c_pool = min(1.0, median_support / 40.0)
     conf = round(100 * (0.35 * c_min + 0.35 * cover + 0.30 * c_pool))
     if mins < 15 or raw is None:
         perf = None
@@ -611,7 +629,7 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
                 "erros_que_geraram_chance": int(_as_float(row.get("erros_que_viraram_chance"))),
                 "expulsoes": int(_as_float(row.get("vermelhos"))),
             },
-            "pares": int(len(peers))}
+            "pares": int(len(peers)), "pares_medianos_por_indicador": round(median_support, 1)}
 
 
 def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> float:
@@ -693,6 +711,9 @@ def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
 def report(ev: Dict[str, Any]) -> str:
     """Relatório explicável de uma atuação, incluindo o ajuste decisivo e as lacunas de observação."""
     if ev.get("desempenho") is None:
+        reason = ev.get("motivo")
+        if reason:
+            return f"**{ev['jogador']}**: sem nota — {reason}. A ferramenta não presume uma função."
         return (f"**{ev['jogador']}** jogou {ev['minutos']:.0f} min — {ev['amostra']}: sem nota (pouco tempo ou sem lances "
                 "suficientes). Ausência de dado não vira nota baixa.")
     dims = {k: v for k, v in ev["dimensoes"].items() if v is not None}
