@@ -512,22 +512,19 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
         perf = round(float(np.clip(c_min * raw + (1 - c_min) * REF_SCORE, 0, 10)), 1)
         if perf >= 9.6 and (cover < 0.85 or mins < 75):
             perf = 9.5                               # 10 exige atuação completa e bem observada
-    imp = impact(row, perf, context)
-    # A nota principal incorpora momentos decisivos. "desempenho" continua disponível como base estatística,
-    # enquanto "impacto" e "nota" refletem também gols, assistências, defesas-chave e pênaltis defendidos.
-    nota = imp
+    delta = impact_delta(row, context) if perf is not None else None
+    nota = round(float(np.clip(perf + delta, 0, 10)), 1) if perf is not None else None
     return {"jogador": row.get("jogador"), "equipe": row.get("equipe"), "funcao": funcao, "minutos": mins,
-            "desempenho": perf, "nota": nota, "nota_final": nota, "classificacao": label(nota), "impacto": imp,
+            "desempenho": perf, "nota": nota, "nota_final": nota, "classificacao": label(nota),
+            "impacto": (round(delta, 1) if delta is not None else None),
             "confianca_pct": conf, "confianca": "alta" if conf >= 75 else "média" if conf >= 50 else "baixa",
             "amostra": minutes_tier(mins), "dimensoes": {k: (round(v, 1) if v is not None else None) for k, v in dim_score.items()},
             "dimensoes_pt": DIM_PT if not gk else GK_DIM_PT, "pesos": dict(zip(dims, wts)), "base": detail,
             "pares": int(len(peers))}
 
 
-def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[str, Any]] = None) -> Optional[float]:
-    """Ajuste decisivo da nota (0–10), limitado para que um único evento não apague os 90 minutos."""
-    if perf is None:
-        return None
+def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> float:
+    """Ajuste decisivo em pontos (não é uma segunda nota). Intervalo limitado a −1,5…+2,5."""
     ctx = context or {}
     total_goals = max(float(row.get("gols", 0) or 0), 0.0)
     raw_penalties = row.get("gols_penalti")
@@ -554,8 +551,14 @@ def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[st
     bonus -= min(0.90, 0.45 * float(row.get("chances_claras_perdidas", 0) or 0))
     bonus -= 0.80 * float(row.get("erros_que_viraram_chance", 0) or 0)
     bonus -= 0.60 * float(row.get("vermelhos", 0) or 0)
-    # O ajuste de eventos é importante, mas tem limite para não virar uma nota de gols e assistências.
-    return round(float(np.clip(perf + np.clip(bonus, -1.5, 2.5), 0, 10)), 1)
+    return round(float(np.clip(bonus, -1.5, 2.5)), 1)
+
+
+def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[str, Any]] = None) -> Optional[float]:
+    """Compatibilidade: devolve a nota final (desempenho-base + ajuste decisivo)."""
+    if perf is None:
+        return None
+    return round(float(np.clip(perf + impact_delta(row, context), 0, 10)), 1)
 
 
 def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
