@@ -5,6 +5,8 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.canonical.provenance import ProvenanceRecord, ProvenanceRegistry
 from src.connectors.empirical_fallback import CI_TEXT, GENERATOR, METRICS, MINUTE_BANDS, SCORE_CTX, EmpiricalFallback
 from src.ingestion.video_homography_demo import PitchHomographyProjector
@@ -67,7 +69,7 @@ def _scenarios(reg: ProvenanceRegistry) -> None:
         if ok.empty:
             empty_state("Todas as zonas com amostra insuficiente neste recorte (n < 30).", icon="🧮")
         else:
-            st.plotly_chart(charts.ci_bars(grid, f"{METRICS[metric]['label']} por zona — {CI_TEXT}", METRICS[metric]["unit"]),
+            render_chart(charts.ci_bars(grid, f"{METRICS[metric]['label']} por zona — {CI_TEXT}", METRICS[metric]["unit"]),
                             use_container_width=True)
     comparison_table(grid[["zone", "value", "ci_low", "ci_high", "n", "status"]].rename(
         columns={"zone": "zona", "value": "valor", "ci_low": "IC 2,5%", "ci_high": "IC 97,5%"}),
