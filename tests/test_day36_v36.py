@@ -851,6 +851,41 @@ def test_rating_v3_rules(final_df):
     assert r["desempenho"].dropna().max() < 9.6       # desempenho 10 continua raríssimo
 
 
+def test_rating_v3_rewards_the_final_decisive_shootout_kick(final_df):
+    from src.analytics.rating_v2 import match_ratings_v2
+
+    ratings = match_ratings_v2(final_df).set_index("jogador")
+    montiel = ratings.loc["Gonzalo Montiel"]
+    assert montiel["shootout_penalti_decisivo"] == 1
+    assert montiel["nota"] > montiel["desempenho"]
+
+
+def test_rating_v3_does_not_guess_an_unknown_position():
+    from src.analytics.rating_v2 import evaluate
+
+    result = evaluate({"jogador": "Jogador sem posição", "posicao": "Unknown", "minutos": 90}, pd.DataFrame())
+    assert result["funcao"] == "não identificada"
+    assert result["desempenho"] is None
+    assert result["nota"] is None
+    assert result["confianca_pct"] == 0
+
+
+def test_rating_v3_ignores_shootout_attempts_without_a_result():
+    import pandas as pd
+
+    from src.analytics.rating_v2 import _shootout_contributions
+
+    df = pd.DataFrame([
+        {"period": 2, "minute": 70, "type_name": "Goal Keeper", "team_name": "A",
+         "player_name": "Goleiro A", "position_name": "Goalkeeper"},
+        {"period": 2, "minute": 70, "type_name": "Goal Keeper", "team_name": "B",
+         "player_name": "Goleiro B", "position_name": "Goalkeeper"},
+        {"period": 5, "minute": 120, "type_name": "Shot", "team_name": "A",
+         "player_name": "Batedor A", "shot_outcome_name": None},
+    ])
+    assert _shootout_contributions(df) == {}
+
+
 def test_rating_v3_does_not_turn_missing_xg_into_zero(final_df):
     from src.analytics.rating_v2 import indicators
 
