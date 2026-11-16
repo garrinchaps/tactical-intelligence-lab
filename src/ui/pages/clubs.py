@@ -7,6 +7,8 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.data_hub.registry import BADGES
 from src.ui.components import comparison_table, empty_state, form_html, hero, result_card_html
 from src.ui.crests import crest_img
@@ -226,7 +228,7 @@ def render(_ctx=None) -> None:
                 from src.ui import charts
 
                 last = u.sort_values("data").tail(20)
-                st.plotly_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
+                render_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
                                              ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
                                 use_container_width=True)
 
@@ -276,7 +278,7 @@ def _style_tab(name: str, names: List[str]) -> None:
             fig.add_trace(go.Scatter(x=list(range(len(ser))), y=xg_c, mode="lines+markers", name="xG contra",
                                      line=dict(color="#EF4444", width=3), hovertext=lab, hoverinfo="text+y"))
             fig.update_xaxes(showticklabels=False, title="jogos (do mais antigo ao mais recente)")
-            st.plotly_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
+            render_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
     a, b = st.columns(2)
     with a:
         st.markdown("#### 🧬 Como joga")
