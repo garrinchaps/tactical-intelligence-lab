@@ -65,7 +65,36 @@ def due(db, now: Optional[datetime] = None) -> List[str]:
 
 
 # ------------------------------------------------------------------ FotMob contínua (rodada 5, pedido do usuário)
-_fm: Dict[str, Any] = {"running": False, "baixados": 0, "pendentes": None, "fase": "", "ultimo": None, "erro": None}
+_fm: Dict[str, Any] = {"running": False, "baixados": 0, "pendentes": None, "fase": "", "ultimo": None,
+                               "ultima_regua": None, "regua_status": None, "erro": None}
+
+
+def _refresh_rating_references(svc) -> None:
+    """Atualiza diariamente as réguas comuns de desempenho por posição após novos dados FotMob/eventos."""
+    from src.data_hub import sync_policy as P
+
+    last = P.last_synced(svc.db, "ratings", "_referencias_diarias")
+    if last is not None and datetime.now(timezone.utc) - last < timedelta(hours=24):
+        return
+    box_n = event_n = 0
+    errors = []
+    try:
+        from src.analytics.rating_box import build_reference as build_box_reference
+
+        box_n = build_box_reference(svc.db, limit=600)
+    except Exception as exc:
+        errors.append(f"FotMob: {type(exc).__name__}: {exc}")
+    try:
+        from src.analytics.rating_v2 import build_reference_from_db
+
+        event_n = build_reference_from_db(limit=300, progress=lambda msg: None)
+    except Exception as exc:
+        errors.append(f"eventos: {type(exc).__name__}: {exc}")
+    P.mark_synced(svc.db, "ratings", "_referencias_diarias")
+    _fm["ultima_regua"] = datetime.now(timezone.utc)
+    _fm["regua_status"] = f"régua atualizada: {box_n} atuações FotMob e {event_n} atuações com eventos"
+    if errors:
+        _fm["regua_status"] += " · " + " | ".join(errors)[:180]
 
 
 def fotmob_enabled() -> bool:
@@ -108,6 +137,8 @@ def _fotmob_loop() -> None:
                 r2 = fm.fetch_details(None, since=f"{datetime.now().year - 5}-01-01", limit=300, stop=lambda: not enabled())
                 _fm["baixados"] += r1["detalhes"] + r2["detalhes"]
                 _fm["pendentes"] = fm.pending()
+                _fm["fase"] = "atualizando réguas de desempenho"
+                _refresh_rating_references(svc)
                 _fm["ultimo"] = datetime.now(timezone.utc)
                 _fm["erro"] = None
                 if r1["detalhes"] + r2["detalhes"] == 0:
@@ -130,8 +161,9 @@ def fotmob_status() -> str:
     if not _fm.get("running"):
         return ""
     p = _fm.get("pendentes")
-    return (f"⚡ FotMob abastecendo a base ({_fm.get('fase', '')}): {_fm['baixados']} jogos com detalhes nesta sessão"
-            + (f" · faltam {p}" if p is not None else ""))
+    status = (f"⚡ FotMob abastecendo a base ({_fm.get('fase', '')}): {_fm['baixados']} jogos com detalhes nesta sessão"
+              + (f" · faltam {p}" if p is not None else ""))
+    return status + (f" · {_fm['regua_status']}" if _fm.get("regua_status") else "")
 
 
 def _run(sources: List[str]) -> None:
