@@ -451,10 +451,10 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
 
     key = "base"
     if key not in _REF_CACHE:
-        p = Path("data/processed/rating_ref_v2.parquet")
+        p = Path("data/processed/rating_ref_v3_0_1.parquet")
         ref = pd.DataFrame()
         if not p.exists() and p.with_name("rating_ref_v3_0_1_demo.parquet").exists():
-            p = p.with_name("rating_ref_v2_demo.parquet")
+            p = p.with_name("rating_ref_v3_0_1_demo.parquet")
         if p.exists():
             try:
                 ref = pd.read_parquet(p)
@@ -464,7 +464,7 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
             ref = _demo_reference()
             try:                                      # guarda para não recalcular a cada abertura do app
                 p.parent.mkdir(parents=True, exist_ok=True)
-                ref.to_parquet(p.with_name("rating_ref_v2_demo.parquet"), index=False)
+                ref.to_parquet(p.with_name("rating_ref_v3_0_1_demo.parquet"), index=False)
             except Exception:
                 pass
         _REF_CACHE[key] = ref
