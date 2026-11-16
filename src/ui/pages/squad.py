@@ -265,7 +265,7 @@ def _traits_table(items: List[Dict[str, Any]], better_word: str) -> pd.DataFrame
 
 # ------------------------------------------------------------------------------------------------ próximo jogo
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
-def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
+def _matchday(team: str, version: str, n: int, target_competition: Optional[str] = None) -> Dict[str, Any]:
     from src.squad import matchday as M
     from src.ui.context import get_service
     from src.ui.pages.clubs import same_team_names
@@ -285,7 +285,7 @@ def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
             get_service().fotmob.ensure_teams(list(names), n=12)
     except Exception:
         pass
-    info = M.player_table(db, names, n=n, tm_values=tm)
+    info = M.player_table(db, names, n=n, tm_values=tm, target_competition=target_competition)
     return {"info": info, "names": names}
 
 
@@ -379,6 +379,11 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
                    "escalação oficial nem notícias, que só existem para jogos marcados.")
         f = None
     rv = _matchday(rival, version, n)
+    # Recalcula a disponibilidade com o torneio do próximo jogo; amarelos/vermelhos de outra competição não contaminam o XI.
+    target_comp = str(f["competition"]) if f is not None and f.get("competition") else None
+    if target_comp:
+        me = _matchday(team, version, n, target_comp)
+        rv = _matchday(rival, version, n, target_comp)
     a, b = me["info"], rv["info"]
     if (a["jogadores"] is None or a["jogadores"].empty) or (b["jogadores"] is None or b["jogadores"].empty):
         note("Faltam escalações recentes", "Baixe os resumos dos jogos (estatísticas + escalações): "
