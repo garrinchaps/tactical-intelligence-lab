@@ -204,7 +204,7 @@ class UniversalMatchFinder:
     only_real: bool = True           # esconde simulações e uploads (alternável ao lado da busca)
     levels: Optional[Tuple[str, ...]] = None   # níveis escolhidos no topo (EVENTS/BOXSCORE/RESULT); None = regra acima
 
-    def search_local(self, q: ParsedQuery, limit: int = 15) -> pd.DataFrame:
+    def search_local(self, q: ParsedQuery, limit: int = 60) -> pd.DataFrame:
         where, params = [], []
         if self.levels:
             where.append("data_level IN (" + ",".join(f"'{l}'" for l in self.levels if l.isalpha() or "_" in l)
@@ -238,7 +238,9 @@ class UniversalMatchFinder:
             return cat
         cat["level_rank"] = cat["data_level"].map(LEVEL_RANK).fillna(0)
         cat["source_rank"] = cat["data_source"].map(SOURCE_RANK).fillna(0)
-        cat = cat.sort_values(["score", "match_date", "level_rank", "source_rank"],
+        # v36: o nome serve para FILTRAR (fica só a faixa dos mais parecidos) e a ordem é por DATA, do mais recente
+        cat = cat[cat["score"] >= cat["score"].max() - 0.04]
+        cat = cat.sort_values(["match_date", "level_rank", "source_rank", "score"],
                               ascending=[False, False, False, False])
         # deduplica a mesma partida vinda de fontes diferentes (mesma data + mesmos times) — só entre os melhores
         cat = cat.head(max(limit * 40, 200)).copy()
