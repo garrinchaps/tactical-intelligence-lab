@@ -212,5 +212,6 @@ def render(current_context, match_bar) -> None:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
                     "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
-                    "audit": (res.get("number_tags") or {}).get("linhas", []), **_mentioned(res)})
+                    "audit": (res.get("number_tags") or {}).get("linhas", []), **_mentioned(res),
+                    "players_q": list((res.get("scope") or {}).get("players") or [])})
     st.rerun()

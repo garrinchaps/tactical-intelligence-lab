@@ -69,6 +69,26 @@ Não cite números nem estatísticas."""
 
 
 MISSES_PATH = "data/assistente_sem_alvo.jsonl"
+def resolve_pronoun(query: str, history: List[Dict[str, Any]], roster: List[str]) -> str:
+    """Troca 'ele/dele/nele/esse jogador' pelo jogador da pergunta anterior (só se ele jogou esta partida)."""
+    last = None
+    for h in reversed(history or []):
+        cand = [p for p in (h.get("players_q") or h.get("chips_p") or []) if p in roster]
+        if cand:
+            last = cand[0]
+            break
+    if not last:
+        return query
+    rx = [(r"\b(esse|este|aquele) (jogador|atleta|cara)\b", last), (r"\bdele\b", f"de {last}"), (r"\bnele\b", f"em {last}"),
+          (r"\bele\b", last), (r"\bo cara\b", last)]
+    out = query
+    for pat, rep in rx:
+        out = re.sub(pat, rep, out, count=1, flags=re.I)
+        if out != query:
+            break
+    return out
+
+
 FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how", "rating",
              "lineup_role",
              "team_merit",
@@ -1424,6 +1444,11 @@ class DynamicTacticalAnalyst:
             teams_in_match = [meta.get("home_team_name", ""), meta.get("away_team_name", "")]
         ordered = [target_team] + [t for t in teams_in_match if t != target_team][:1]
         sc = QueryUnderstanding.parse(query, roster, ordered if len(ordered) == 2 else None)
+        if not sc.players and history:                        # "e ele foi bem?" → o último jogador citado neste jogo
+            q2 = resolve_pronoun(query, history, roster)
+            if q2 != query:
+                query = q2
+                sc = QueryUnderstanding.parse(query, roster, ordered if len(ordered) == 2 else None)
         if not sc.players:                                    # jogador citado que não está nesta partida (ex.: Kane)
             sc.absent = QueryUnderstanding.absent_names(query, norm_q(query), roster, ordered)
         use_llm = prefer_llm and self.api_key is not None and self.cloud_ready()
