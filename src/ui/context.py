@@ -134,7 +134,7 @@ def match_ratings(match_id: int, team: Optional[str], _df: pd.DataFrame) -> pd.D
 
 
 @st.cache_data(show_spinner=False, max_entries=16)
-def match_ratings_v2(match_id: int, _df: pd.DataFrame, rating_version: str = "3.0") -> pd.DataFrame:
+def match_ratings_v2(match_id: int, _df: pd.DataFrame, rating_version: str = "3.0.1") -> pd.DataFrame:
     from src.analytics.rating_v2 import match_ratings_v2 as _mr
 
     return _mr(_df)
