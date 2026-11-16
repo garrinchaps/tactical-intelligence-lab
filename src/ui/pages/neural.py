@@ -21,7 +21,10 @@ SAVED = Path("models/trained/danger_nn.npz")
 
 @st.cache_data(show_spinner=False)
 def _data():
-    return pd.read_csv(SAMPLE)
+    d = pd.read_csv(SAMPLE)
+    if "density_is_360" not in d:
+        d["density_is_360"] = d["density_source"].eq("statsbomb_360").astype(float) if "density_source" in d else 0.0
+    return d
 
 
 def _didactic() -> None:
@@ -48,9 +51,9 @@ def _didactic() -> None:
     st.markdown("### Passo a passo")
     st.markdown(steps_html([
         ("O que a rede vê",
-         "Cada jogada vira 14 números: <b>distância</b> e <b>ângulo</b> até o gol, quantos <b>adversários estão a 5 m</b> "
-         "(medido pelo tracking 360 da StatsBomb), quantos <b>passes</b> a posse já teve, o <b>placar</b> naquele momento e "
-         "a <b>zona do campo</b>. É como um olheiro que anota a situação antes de cada toque."),
+         "Cada jogada vira 15 números: <b>distância</b> e <b>ângulo</b> até o gol, quantos <b>adversários estão a 5 m</b> "
+         "(tracking 360 medido ou estimativa por eventos), quantos <b>passes</b> a posse já teve, o <b>placar</b>, a "
+         "<b>zona do campo</b> e um indicador que informa se a densidade veio do 360. O modelo não confunde medida com estimativa."),
         ("O neurônio: uma soma com pesos",
          "Cada neurônio multiplica esses números por <b>pesos</b> (o quanto cada coisa importa), soma tudo e decide se "
          "“acende”. Ex.: perto do gol e com poucos marcadores → soma alta. A rede tem 2 camadas escondidas (32 e 16 "
@@ -62,9 +65,9 @@ def _didactic() -> None:
          "Depois de cada lote de jogadas, o erro é “devolvido” da saída para trás: cada peso recebe a parcela de culpa "
          "que teve e é ajustado um pouquinho na direção que diminui o erro (<b>descida do gradiente</b>). Repetir isso "
          "milhares de vezes é o que chamamos de treinar. Tudo foi escrito do zero, sem biblioteca pronta de IA."),
-        ("Uma prova que a rede nunca viu",
-         "16 jogos ficam separados desde o início e <b>nunca</b> entram no treino. Toda versão nova faz a mesma prova. "
-         "Assim “melhorou” quer dizer melhorou de verdade, e não decorou as respostas."),
+        ("Uma validação separada por partida",
+         "Partidas inteiras ficam fora do treino e são usadas para comparar versões. Como esse conjunto participa da escolha "
+         "do campeão, ele é uma validação de promoção — não um teste final externo intocado."),
         ("Guardamos sempre a melhor",
          "Cada treino gera uma versão. Ela só vira a <b>versão oficial</b> se errar menos na prova do que a atual; senão "
          "fica registrada como rejeitada. O Assistente sempre usa a oficial e diz qual é em cada resposta."),
@@ -103,7 +106,15 @@ def _simulator() -> None:
     ang = float(np.degrees(abs(np.arctan2(44 - y, dx) - np.arctan2(36 - y, dx))))
     sd = {"perdendo por 2+": -2, "perdendo por 1": -1, "empatando": 0, "ganhando por 1": 1, "ganhando por 2+": 2}[score]
     z = _zone_onehot(np.array([x]), np.array([float(y)]))
-    feats = [dist, ang, dens, passes, sd] + [float(z[c_][0]) for c_ in ZONE_COLS]
+    density_origin = st.selectbox("Origem da densidade", ["Tracking 360 medido", "Estimativa por eventos"], index=0)
+    values = {"dist_to_goal_m": dist, "angle_to_goal_deg": ang, "opp_density_5m": dens, "passes_so_far": passes,
+              "score_diff": sd, "density_is_360": float(density_origin == "Tracking 360 medido")}
+    values.update({name: float(z[name][0]) for name in ZONE_COLS})
+    from src.machine_learning.danger_dataset import LEGACY_FEATURES
+    names = list(getattr(net, "feature_names", []) or [])
+    if not names or any(name.startswith("x") for name in names):
+        names = LEGACY_FEATURES if net.layer_sizes[0] == len(LEGACY_FEATURES) else list(values)
+    feats = [values.get(name, 0.0) for name in names]
     p = float(net.predict_proba(np.array([feats]))[0])
     col1, col2 = st.columns([1, 2])
     col1.metric("Chance de a posse terminar em finalização", f"{100 * p:.1f}%")
@@ -167,9 +178,9 @@ def render(ctx=None) -> None:
     champion_cached()                                    # garante a v001 na primeira execução
     t1, t2 = st.columns(2)
     use_db = t1.toggle("Incluir partidas do banco com tracking 360 (o conjunto cresce com a sincronização)", value=True)
-    use_proxy = t2.toggle("Incluir também as sem 360 (densidade de adversários estimada pelos eventos)", value=False,
-                          help="Muito mais partidas (OpenPlay, Wyscout, StatsBomb sem 360), com uma das variáveis "
-                               "estimada. O teste continua só com 360 medido, então a promoção mostra se ajudou.")
+    use_proxy = t2.toggle("Incluir também jogos sem 360 (densidade estimada por eventos)", value=True,
+                          help="Amplia a base com eventos do OpenPlay, Wyscout e StatsBomb sem freeze frame. O campo "
+                               "density_is_360 informa a origem; a estimativa não é apresentada como tracking medido.")
     from src.machine_learning.model_registry import (EXP_BATCH, EXP_EPOCHS, EXP_PATIENCE, EXPERIMENT_ORDER,
                                                      EXPERIMENTS, class_balance, feature_report)
 
@@ -193,8 +204,8 @@ def render(ctx=None) -> None:
     from src.machine_learning import train_job
 
     if train_now or search_now or exp_now:
-        common = ["--tentativas", str(int(attempts)), "--partidas-novas", "40"] + ([] if use_db else ["--sem-banco"]) \
-            + (["--com-estimadas"] if use_proxy else [])
+        common = ["--tentativas", str(int(attempts)), "--partidas-novas", "500"] + ([] if use_db else ["--sem-banco"]) \
+            + (["--com-estimadas"] if use_proxy else ["--somente-360"])
         if exp_now:
             args = ["--experimentos", ",".join(exp_pick)] + common
         elif train_now:
@@ -225,7 +236,7 @@ def render(ctx=None) -> None:
             with st.expander("Registro do treino"):
                 st.code("\n".join(job.get("log") or []) or "(sem mensagens ainda)")
     live = None
-    with st.expander("🔬 Conferência dos dados de treino (classes e as 14 variáveis)"):
+    with st.expander("🔬 Conferência dos dados de treino (classes e as 15 variáveis)"):
         diag = st.session_state.get("nn_data_diag")
         if diag is None and st.button("Conferir agora (usa a amostra local, ~2 s)", key="nn_diag"):
             diag = {"bal": class_balance(data), "feat": feature_report(data)}
@@ -265,8 +276,8 @@ def render(ctx=None) -> None:
         kpi("perda final (treino)", f"{net.history['train_loss'][-1]:.4f}", prov)
     with k[4]:
         kpi("AUC na validação fixa", f"{(live['auc'] if live else ci.get('val_auc', 0)):.3f}", prov)
-    st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas separadas na primeira rodada e nunca usadas "
-               "no treino — todas as versões são medidas nas mesmas ações.")
+    st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas que não entram no treino. Ela é reutilizada para "
+               "comparar/promover versões; por isso não é um teste final externo independente.")
     l, r = st.columns([1, 1.3])
     l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), use_container_width=True)
     with r:
@@ -294,6 +305,7 @@ def render(ctx=None) -> None:
             st.caption("Neurônio de saída: não tem filhos.")
     _versions_and_usage(ctx, reg, live)
     _assistant_misses()
+    _learning_activity_panel()
     if ctx is not None:
         provenance_panel(ctx.registry)
 
@@ -302,7 +314,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
     """Histórico de versões, curva de aprendizado e como o campeão entra nas respostas do Analista IA."""
     from src.machine_learning.model_registry import DangerModelRegistry, danger_by_player, model_card, score_actions
 
-    st.markdown("### 📈 Histórico de versões (todas medidas na mesma validação fixa)")
+    st.markdown("### 📈 Histórico de versões (mesma validação fixa, separada por partida)")
     v = reg.versions()
     if not v.empty:
         v["versão"] = v["version"].map(lambda x: f"v{x:03d}")
@@ -317,10 +329,9 @@ def _versions_and_usage(ctx, reg, live) -> None:
             "created": "criada", "origin": "origem", "hidden": "ocultas", "learning_rate": "η", "n_matches_train": "partidas",
             "n_samples_train": "ações", "val_auc": "AUC", "val_logloss": "perda (teste)", "cv_logloss_std": "desvio da perda entre dobras",
             "test_gain": "ganho", "gain_ci_low": "IC95% inferior", "promoted": "promovida", "reason": "decisão"}),
-            "Promoção rigorosa: a nova versão só vira campeã se, no teste isolado (partidas que nunca treinam), "
-            "o IC 95% do bootstrap pareado por partida do ganho de perda ficar acima de zero, o ganho for ≥ 0,0005, "
-            "a AUC não cair mais que 0,005 em relação ao campeão e o desvio da AUC entre as dobras do GroupKFold por "
-            "partida (3 dobras) for ≤ 0,05. Todas as tentativas ficam registradas.")
+            "Promoção: a nova versão precisa melhorar a perda na validação fixa, com IC 95% pareado por partida acima de zero, "
+            "ganho mínimo, AUC sem queda relevante e estabilidade no GroupKFold. A validação é reutilizada para selecionar "
+            "versões; portanto, não deve ser chamada de teste externo final. Todas as tentativas ficam registradas.")
     with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
         if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
             with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):
@@ -335,10 +346,11 @@ def _versions_and_usage(ctx, reg, live) -> None:
     st.markdown("### 🔗 Como este treino muda as respostas do Analista IA")
     card = model_card()
     if card:
-        note(f"Modelo em uso: {card['versao']}", f"{card['arquitetura']}, {card['partidas_de_treino']} partidas de treino, "
-             f"AUC {card['auc_validacao']} na validação fixa. O Analista usa este modelo em: “quem mais criou perigo?”, "
-             "nos planos “como anular o jogador X?” e “qual tática a equipe Y deveria usar?” (onde a rede vê perigo) — "
-             "e cada resposta cita a versão usada.")
+        extra = (f", tracking 360 medido em {card['tracking_360_pct']}% das ações" if card.get("tracking_360_pct") is not None else "")
+        note(f"Modelo em uso: {card['versao']}", f"{card['arquitetura']}, {card['partidas_de_treino']} partidas, "
+             f"{card.get('acoes_de_treino', '—')} ações, AUC {card['auc_validacao']} na validação{extra}. "
+             "O classificador é especializado em perigo da posse; os demais setores reutilizam a régua estatística "
+             "compartilhada e seus próprios critérios, não estes mesmos pesos.")
     if ctx is None or not getattr(ctx, "has_events", False):
         st.caption("Abra uma partida com eventos para ver a comparação campeão × desafiante numa pergunta real.")
         return
@@ -358,6 +370,22 @@ def _versions_and_usage(ctx, reg, live) -> None:
                 comparison_table(top.rename(columns={"acoes_perigosas": "ações perigosas", "maior_chance_pct": "maior chance (%)"}))
     if challenger is not None:
         st.caption("Se o desafiante for promovido, a coluna da direita passa a ser a resposta do Analista IA.")
+
+
+def _learning_activity_panel() -> None:
+    """Deixa explícito o que perguntas e avaliações realmente ensinam ao sistema."""
+    from src.intelligence.learning_hub import learning_summary
+
+    s = learning_summary()
+    st.markdown("### 🧠 Aprendizado com o uso do programa")
+    k = st.columns(4)
+    k[0].metric("Perguntas registradas", s["questions_recorded"])
+    k[1].metric("Com feedback positivo", s["positive_feedback"])
+    k[2].metric("Com feedback negativo", s["negative_feedback"])
+    k[3].metric("Aguardando revisão", s["feedback_pending_review"])
+    st.caption("Cada pergunta fica registrada para auditoria e para encontrar lacunas. Perguntas e 👍/👎 não alteram os pesos: "
+               "o feedback fica pendente de revisão. O treino só usa exemplos com rótulo verificável, como a sequência real "
+               "de eventos e se a posse terminou em finalização.")
 
 
 def _assistant_misses() -> None:
