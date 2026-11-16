@@ -239,7 +239,10 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         is_goal = shots.get("shot_outcome_name", pd.Series(dtype=object)) == "Goal"
         is_pen = shots.get("shot_type_name", pd.Series(dtype=object)) == "Penalty"
         on = shots.get("shot_outcome_name", pd.Series(dtype=object)).isin(["Goal", "Saved", "Saved To Post"])
-        big_missed = sxg[(sxg >= 0.3) & ~is_goal].sum()
+        outcomes = shots.get("shot_outcome_name", pd.Series("", index=shots.index)).astype(str)
+        # Finalização defendida não é erro do atacante: só desvios/traves entram como chance desperdiçada.
+        missed = outcomes.str.lower().isin(["off t", "wayward", "post", "miss", "missed"])
+        big_missed = sxg[(sxg >= 0.3) & missed].sum()
         carries = e[et == "Carry"]
         touches = int(et.isin(["Pass", "Carry", "Shot", "Dribble", "Ball Receipt*", "Miscontrol", "Dispossessed"]).sum())
         turn = e[e.get("is_turnover", 0) == 1] if "is_turnover" in e else e.iloc[0:0]
@@ -293,7 +296,7 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "assistencias": sum(1 for g in gl if g.get("assistencia") == p),
             "gols_np90": np_goals * f, "gols_pen90": pen_goals * f, "xg90": float(sxg.sum()) * f, "xg": round(float(sxg.sum()), 2),
             "no_alvo90": int(on.sum()) * f, "fin_area90": int(((shots["x"] >= 102) & shots["y"].between(18, 62)).sum()) * f,
-            "chances_perdidas_xg90": float(big_missed) * f, "chances_claras_perdidas": int(((sxg >= 0.3) & ~is_goal).sum()),
+            "chances_perdidas_xg90": float(big_missed) * f, "chances_claras_perdidas": int(((sxg >= 0.3) & missed).sum()),
             "assist90": sum(1 for g in gl if g.get("assistencia") == p) * f, "xa90": xa.get(p, 0.0) * f, "xa": round(xa.get(p, 0.0), 2),
             "decisivos90": 0.0, "passes_area90": int((ok.get("end_in_box", 0) == 1).sum()) * f if len(ok) else 0.0,
             "quebra_linha90": int((ok.get("is_line_breaking_pass", 0) == 1).sum()) * f if len(ok) else 0.0,
