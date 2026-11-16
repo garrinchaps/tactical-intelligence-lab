@@ -157,22 +157,28 @@ def recent_player_stats(db, match_ids: Sequence[int], team_names: Sequence[str],
     return df.groupby("jogador", as_index=False).sum(numeric_only=True)
 
 
-def suspensions(db, last_match_id: Optional[int], team_names: Sequence[str]) -> Dict[str, str]:
-    """Vermelho no último jogo = suspenso no próximo (regra geral; acúmulo de amarelos não é calculado)."""
+def suspensions(db, last_match_id: Optional[int], team_names: Sequence[str],
+                target_competition: Optional[str] = None) -> Dict[str, str]:
+    """Expulsão só é aplicada à mesma competição do próximo jogo; competição desconhecida usa a do último jogo."""
     if not last_match_id:
         return {}
     th, ts = _names_sql(team_names)
     try:
         with db.connect() as conn:
+            meta = conn.execute("SELECT competition_name FROM matches WHERE match_id = ?", (int(last_match_id),)).fetchone()
+            last_comp = str(meta[0] or "") if meta else ""
+            active_comp = str(target_competition or last_comp).strip()
+            if target_competition and last_comp and active_comp.casefold() != last_comp.casefold():
+                return {}
             r = conn.execute(f"SELECT player_name FROM match_timeline WHERE match_id = ? AND team_name IN ({th}) "
                              f"AND event_type LIKE '%Red%'", [int(last_match_id)] + ts).fetchall()
     except Exception:
         return {}
-    return {p[0]: "suspenso (expulso no último jogo)" for p in r if p[0]}
+    return {p[0]: f"suspenso (expulso no último jogo de {active_comp or 'competição não identificada'})" for p in r if p[0]}
 
 
 def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional[pd.DataFrame] = None,
-                 season_games: int = 40) -> Dict[str, Any]:
+                 season_games: int = 40, target_competition: Optional[str] = None) -> Dict[str, Any]:
     """
     Tabela por jogador com conceitos SEPARADOS (v36, avaliação 2.0):
       qualidade (0–10)  = temporada: fatia de jogos como titular + gols/assistências por jogo (+ valor de mercado, só
@@ -201,8 +207,8 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
     stats_season = recent_player_stats(db, games, team_names, canon)
     stats_5 = recent_player_stats(db, list(last5), team_names, canon)
     last_id = games[0] if games else None
-    susp = suspensions(db, last_id, team_names)
-    susp.update(yellow_suspensions(db, games, team_names))
+    susp = suspensions(db, last_id, team_names, target_competition=target_competition)
+    susp.update(yellow_suspensions(db, games, team_names, target_competition=target_competition))
     names = set(ros["name"]) if not ros.empty else set()
     if not lu.empty:
         names |= set(lu["jogador"])
@@ -328,7 +334,8 @@ YELLOW_LIMIT = {"Brasileirão Série A": 3, "Brasileirão Série B": 3, "Copa do
                 "CONMEBOL Sul-Americana": 3, "UEFA Champions League": 3}
 
 
-def yellow_suspensions(db, games: Sequence[int], team_names: Sequence[str]) -> Dict[str, str]:
+def yellow_suspensions(db, games: Sequence[int], team_names: Sequence[str],
+                       target_competition: Optional[str] = None) -> Dict[str, str]:
     """
     Pendurado que levou o amarelo que completa o ciclo no último jogo da competição = suspenso no próximo dela.
     É ESTIMATIVA pela regra geral da competição (o regulamento pode zerar cartões em certas fases).
@@ -344,6 +351,11 @@ def yellow_suspensions(db, games: Sequence[int], team_names: Sequence[str]) -> D
                                   f"AND t.team_name IN ({th}) AND t.event_type LIKE '%Yellow%'", conn, params=ps + ts)
     except Exception:
         return {}
+    if t.empty:
+        return {}
+    # Cartões acumulados nunca são transportados automaticamente entre competições.
+    active_comp = str(target_competition or t.sort_values("match_date").iloc[-1]["competition_name"] or "").strip()
+    t = t[t["competition_name"].astype(str).str.casefold() == active_comp.casefold()]
     if t.empty:
         return {}
     out = {}
