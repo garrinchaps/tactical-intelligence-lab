@@ -154,19 +154,19 @@ def _stats_table(ctx: MatchContext) -> None:
         note("Por 90 minutos", "As estatísticas são normalizadas por 90 minutos; nota, desempenho, impacto e confiança continuam na escala 0–10 original.", "warn")
     # A nota não pode ser multiplicada por 90: incorporamos o resultado 3.0 depois da normalização das contagens.
     if not v2.empty:
-        cols_v2 = [c for c in ("jogador", "nota", "nota_final", "desempenho", "impacto", "confianca",
-                               "confianca_pct", "classificacao", "amostra", "dim_tatica") if c in v2.columns]
+        cols_v2 = [c for c in ("jogador", "nota", "desempenho", "impacto", "confianca",
+                               "confianca_pct", "classificacao", "amostra", "funcao", "dim_tatica") if c in v2.columns]
         s = s.merge(v2[cols_v2].drop_duplicates("jogador"), on="jogador", how="left", suffixes=("", "_v3"))
         if "nota_v3" in s:
             s["nota"] = s["nota_v3"]
-        if "nota_final" in s:
-            s["nota"] = s["nota_final"]
+        if "funcao" in s:
+            s["setor"] = s["funcao"]
     ctx.prov("ps_table", "Estatísticas individuais", len(s), "contagem de eventos por atleta; minutos estimados pelas substituições")
     ctx.prov("nota", "Nota final 3.0 da atuação (0–10)", "por jogador",
              "percentis por função + papéis mistos + impacto decisivo observável; dados ausentes reduzem cobertura", tier="DERIVED")
     s = _with_market_value(s, ctx)
     labels = {**PLAYER_STAT_LABELS, "nota": "Nota final 3.0 (0–10)", "setor": "Setor", "obs_nota": "Obs. da nota",
-              "desempenho": "Desempenho base (0–10)", "nota_final": "Nota final (0–10)",
+              "desempenho": "Desempenho base (0–10)", "funcao": "Função predominante",
               "impacto": "Impacto (0–10)", "confianca": "Confiança", "confianca_pct": "Confiança (%)",
               "defesas_goleiro": "Defesas (goleiro)", "gols_sofridos_goleiro": "Gols sofridos (goleiro)"}
     base = ["jogador", "equipe", "posicao", "setor", "nota", "minutos"]
