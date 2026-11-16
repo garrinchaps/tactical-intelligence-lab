@@ -189,7 +189,8 @@ def player_match_stats(df: Optional[pd.DataFrame], team: Optional[str] = None) -
     if df is None or df.empty:
         return pd.DataFrame()
     d = _regular(df)
-    d = d[d["player_name"].notna()]
+    d = d[d["player_name"].notna() & ~d["player_name"].astype(str).str.lower().isin(["não identificado", "nao identificado",
+                                                                                     "unknown"])]
     if team:
         d = d[d["team_name"] == team]
     if d.empty:

@@ -294,7 +294,7 @@ def test_analyst_answers_goal_and_ranking_questions(final_internal):
     r = a.answer("quem fez gol nessa partida?", "Argentina", meta, df, None, prefer_llm=False)
     assert "Gols de Argentina" in r["report_markdown"] and "pênaltis" in r["report_markdown"].lower()
     r = a.answer("quem foi o jogador que mais deu passes?", "Argentina", meta, df, None, prefer_llm=False)
-    assert r["report_markdown"].startswith("**Passes") and r["hallucination_audit"]["untraceable_count"] == 0
+    assert "**Passes" in r["report_markdown"] and r["report_markdown"].startswith("Quem mais") and r["hallucination_audit"]["untraceable_count"] == 0
     r = a.answer("o que a argentina fez para ganhar a partifda", "Argentina", meta, df, None, prefer_llm=False)
     assert "pênaltis" in r["report_markdown"] and r["scope"]["category"] != "off_topic"
 

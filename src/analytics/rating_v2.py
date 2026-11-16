@@ -253,6 +253,8 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
     if key not in _REF_CACHE:
         p = Path("data/processed/rating_ref_v2.parquet")
         ref = pd.DataFrame()
+        if not p.exists() and p.with_name("rating_ref_v2_demo.parquet").exists():
+            p = p.with_name("rating_ref_v2_demo.parquet")
         if p.exists():
             try:
                 ref = pd.read_parquet(p)
@@ -260,6 +262,11 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
                 ref = pd.DataFrame()
         if ref.empty:
             ref = _demo_reference()
+            try:                                      # guarda para não recalcular a cada abertura do app
+                p.parent.mkdir(parents=True, exist_ok=True)
+                ref.to_parquet(p.with_name("rating_ref_v2_demo.parquet"), index=False)
+            except Exception:
+                pass
         _REF_CACHE[key] = ref
     ref = _REF_CACHE[key]
     if extra:
@@ -436,3 +443,41 @@ def report(ev: Dict[str, Any]) -> str:
         s += " Não observado nesta fonte: " + ", ".join(x.lower() for x in not_obs) + "."
     s += f" Comparado com {ev['pares']} atuações de jogadores da mesma função na base."
     return s
+
+
+def build_reference_from_db(limit: int = 300, progress=None) -> int:
+    """
+    Monta a base de referência dos percentis com até `limit` partidas COM LANCES do banco (StatsBomb, Wyscout, OpenPlay):
+        python -m src.analytics.rating_v2 --referencia 300
+    Quanto mais partidas, mais justa a comparação por função. Roda uma vez (e de novo quando a base crescer).
+    """
+    from src.data_hub.service import MatchDataService
+    from src.metrics.xt_model import ExpectedThreatModel
+    from src.preprocessing.event_cleaner import EventPreprocessor
+
+    say = progress or (lambda m: print(m, flush=True))
+    svc = MatchDataService()
+    with svc.db.connect() as conn:
+        ids = [r[0] for r in conn.execute("SELECT DISTINCT match_id FROM events LIMIT ?", (int(limit),))]
+    dfs = []
+    for i, mid in enumerate(ids, 1):
+        try:
+            raw = svc.db.load_events(int(mid))
+            if raw is None or raw.empty:
+                continue
+            dfs.append(ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(raw)))
+        except Exception as exc:
+            say(f"  partida {mid}: {exc}")
+        if i % 25 == 0:
+            say(f"  {i}/{len(ids)} partidas")
+    n = build_reference(dfs)
+    say(f"referência da nota 2.0: {n} atuações de {len(dfs)} partidas")
+    return n
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(description="Base de referência (percentis por função) da nota 2.0.")
+    ap.add_argument("--referencia", type=int, default=300, help="quantas partidas com lances usar")
+    build_reference_from_db(ap.parse_args().referencia)

@@ -700,7 +700,7 @@ def test_guard_count_never_derives_from_a_decimal():
 TACTICAL_QS = [
     ("como eu poderia fazer para explorar mais as dificuldades defensivas da frança?", "attack_plan", "explorar a defesa"),
     ("como eu poderia anular o harry kane nessa partida?", "plan", "não está nesta partida"),
-    ("como o messi foi? ele fez gol?", None, "Sim, Lionel Messi marcou"),
+    ("como o messi foi? ele fez gol?", "rating", "Sim, Lionel Messi marcou"),
     ("Em quais corredores a França conseguiu progredir com mais facilidade: lateral, central ou meio-espaço?", "corridors", "Por onde"),
     ("A Argentina sofreu mais com bolas nas costas da defesa, infiltrações entre os zagueiros ou jogadas pelos lados?",
      "conceded_how", "Como Argentina sofreu"),
@@ -713,6 +713,14 @@ TACTICAL_QS = [
      "defenders_diag", "Diagnóstico individual"),
     ("Identifique quais combinações de jogadores produziram maior progressão territorial e perigo ofensivo.", "combinations", "Duplas"),
     ("Compare os comportamentos ofensivos de Messi e Di María nessa partida.", None, "Lado a lado"),
+    # rodada 4 (conversa Aston Villa x Sunderland)
+    ("Como anular o principal criador do adversário?", "plan", "principal criador do adversário neste jogo foi"),
+    ("o que o otamendi fez na partida? foi bom ou ruim?", "rating", "nota de desempenho"),
+    ("o que harry maguire fez?", None, "Harry Maguire não está nesta partida"),
+    ("quem deveria ganhar o jogo pelo xT", "team_merit", "Pelo xT"),
+    ("quem foi o jogador que mais correu nas costas da defesa?", "ranking", "Sem tracking"),
+    ("quem menos marcou/ se dedicou defensivamente?", "ranking", "Quem menos contribuiu"),
+    ("qual foi a nota de martinezz?", None, "De qual deles"),
 ]
 
 
@@ -798,3 +806,33 @@ def test_key_starter_who_missed_last_game_stays_probable():
     assert am["jogador"] == "Matheus Pereira"                                        # não perde a vaga por 1 jogo
     st_ = next(p for p in xi if p["papel"] == "ST")
     assert st_["jogador"] != "Zagueiro Bom"                                          # zagueiro não vira centroavante
+
+
+def test_two_questions_in_one_message_get_two_answers(final_df):
+    from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+
+    meta = {"match_id": 3869685, "data_level": "EVENTS", "home_team_name": "Argentina", "away_team_name": "France"}
+    r = DynamicTacticalAnalyst(api_key="").answer("quem mais deu passes? quem deveria ganhar o jogo pelo xg?", "Argentina",
+                                                  meta, final_df, None, prefer_llm=False)
+    md = r["report_markdown"]
+    assert "Quem mais se destacou em **passes**" in md and "Pelo xG" in md and r["hallucination_audit"]["is_grounded"]
+
+
+def test_rating_v2_rules(final_df):
+    from src.analytics.rating_v2 import evaluate, match_ratings_v2, pct_to_score, role_of
+
+    assert pct_to_score(50) == 5.5 and pct_to_score(90) == 8.5 and pct_to_score(99) == 10.0
+    assert role_of("Left Center Back") == "zagueiro" and role_of("Right Back") == "lateral" and role_of("Goalkeeper") == "goleiro"
+    r = match_ratings_v2(final_df).set_index("jogador")
+    assert r.loc["Lionel Messi", "desempenho"] > r.loc["Nicolás Otamendi", "desempenho"]
+    assert r.loc["Kylian Mbappé", "impacto"] > r.loc["Kylian Mbappé", "desempenho"]            # gols pesam no IMPACTO
+    assert pd_isna(r.loc["Germán Pezzella", "desempenho"])                                        # 10 min: sem nota
+    gk = r.loc["Hugo Lloris", "_detalhe"]
+    assert gk["dimensoes"]["posicionamento"] is None                                              # não observado ≠ zero
+    assert r["desempenho"].dropna().max() < 9.6                                                   # 10 é raríssimo
+
+
+def pd_isna(v):
+    import pandas as pd
+
+    return pd.isna(v)

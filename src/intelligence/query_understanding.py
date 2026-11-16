@@ -38,7 +38,7 @@ FOOTBALL_TERMS = {
     "artilheiro", "marcou", "marcaram", "fez", "assistencia", "assistencias", "chutou", "chutaram", "passou",
     "driblou", "desarmou", "selecao", "copa", "campeonato", "titular", "titulares", "melhor", "destaque", "craque",
     "decisivo", "virada", "classificou", "eliminou", "final", "semifinal", "jogada", "lance", "lances",
-    "estrategia", "goleada", "perigo", "perigoso", "perigosa", "tocou", "toques", "anular", "parar", "neutralizar", "plano", "jogar",
+    "estrategia", "goleada", "perigo", "nota", "notas", "avaliacao", "atuacao", "desempenho", "xg", "xt", "perigoso", "perigosa", "tocou", "toques", "anular", "parar", "neutralizar", "plano", "jogar",
 }
 # gentílicos → nome do país (para "defesa francesa", "jogadores ingleses" acharem a seleção certa)
 DEMONYMS = {
@@ -79,6 +79,8 @@ PRESENCE_RX = (r"\b(jogou|atuou|entrou|participou|esteve em campo|estava em camp
 
 # perguntas que pedem um fato ou um ranking de atletas (respondidas com tabela curta, não com visão geral)
 RANKING_METRICS: Tuple[Tuple[str, str], ...] = (
+    (r"costas da defesa|em profundidade|atac\w* a profundidade|corr\w* (nas|para as) costas|infiltr\w* mais", "profundidade"),
+    (r"marc\w*|defensiv\w*|dedic\w*|desarm\w* e intercept|ajud\w* (na|a) defesa|recompo", "acoes_defensivas"),
     (r"erros? que (originaram|geraram|deram|resultaram|levaram)|participa\w* nos erros|erros? perigos|erros? decisiv",
      "erros_perigosos"),
 
@@ -150,7 +152,10 @@ class QueryScope:
     team_named: bool = False            # a pergunta cita uma das equipes pelo nome
     absent: List[str] = field(default_factory=list)   # jogadores citados que não estão nesta partida
     position_filter: Optional[str] = None             # "defesa" | "meio" | "ataque" (ex.: "quais defensores...")
+    order: str = "desc"                               # "asc" em "quem MENOS marcou"
+    subject: Optional[str] = None                     # "principal criador" do adversário → resolvido no jogo
     also_weakness: bool = False                       # pergunta dupla: jogador + "a fragilidade foi em qual setor?"
+    ambiguous: List[str] = field(default_factory=list)  # "martinez" com 3 Martínez em campo: pergunta qual
 
     @property
     def in_scope(self) -> bool:
@@ -170,11 +175,13 @@ class QueryScope:
 
 
 class QueryUnderstanding:
+    _last_ambiguous: List[str] = []
     @classmethod
     def parse(cls, text: str, match_players: Optional[List[str]] = None,
               teams: Optional[List[str]] = None) -> QueryScope:
         """`teams` = [equipe analisada, adversário] para detectar quando a pergunta cita o adversário."""
         sc = QueryScope(raw=text or "")
+        cls._last_ambiguous = []
         t = norm(text)
         for rx, country in DEMONYMS.items():
             t = re.sub(rx, country, t)
@@ -182,9 +189,11 @@ class QueryUnderstanding:
 
         # ---- atletas citados (nome completo, sobrenome ou nome comum)
         sc.players = cls._match_players(t, match_players or [])
+        if not sc.players and cls._last_ambiguous:
+            sc.ambiguous = list(cls._last_ambiguous)
 
         # ---- escopo (tolera erros de digitação: "partifda" ≈ "partida") e conta equipes citadas
-        football_hits = len(words & FOOTBALL_TERMS) + (2 if sc.players else 0)
+        football_hits = len(words & FOOTBALL_TERMS) + (2 if sc.players or sc.ambiguous else 0)
         if teams:
             football_hits += 2 * sum(cls._team_position(t, tm) is not None for tm in teams if tm)
         if football_hits == 0:
@@ -299,7 +308,7 @@ class QueryUnderstanding:
             sc.attribute = ("altura" if re.search(r"altura|estatura|alt[oa]", prof.group(0)) else
                             "idade" if re.search(r"idade|velh|nov|jove", prof.group(0)) else "valor")
             return cls._finish(sc, t)
-        if unav:
+        if unav and not re.search(r"costas|profundidade", t):
             sc.ask, sc.attribute = "unavailable", unav.group(0)
             return cls._finish(sc, t)
 
@@ -321,8 +330,25 @@ class QueryUnderstanding:
         many = re.search(r"\b(mais|maior|maiores|menos|ranking)\b", t)
         plan_rx += (r"|\b(como|o que)\b[^?]{0,45}\b(anula\w*|parar|parad[oa]|neutraliz\w*|marca(r|do|da)|cont(er|ido)|"
                     r"segur\w*|evit\w*|vence\w*|super(ar|ado)|enfrent\w*|limit\w*)\b|tres mudancas|mudancas taticas|plano de jogo|revanche|se (voce|eu) fosse o (treinador|tecnico)")
+        if re.search(r"principal criador|melhor jogador|craque|cerebro|quem pensa o jogo|principal (jogador|arma|ameaca)|"
+                     r"camisa 10|maior perigo deles", t):
+            sc.subject = "criador"
+        rating_q = re.search(r"\bnota\b|avalia\w*|foi (bem|bom|mal|ruim)|bom ou ruim|ruim ou bom|"
+                             r"como (o |a )?\w+( \w+)? (foi|jogou|atuou)( na partida| no jogo| hoje)?\s*(\?|$)|"
+                             r"jogou (bem|mal)|atuacao|desempenho d", t)
+        team_merit = re.search(r"(quem|qual (time|equipe)|que time) (deveria|merecia|mereceu)\b|merecia (ganhar|vencer)|"
+                               r"pelo (xg|xt)\b|pelos numeros quem", t)
         analysis = next((k for k, rx in ANALYSIS_RX if re.search(rx, t)), None)
-        if analysis == "attack_plan" or (analysis and not (sc.players and analysis in ("corridors", "efficiency"))):
+        if analysis == "conceded_how" and re.search(r"(quem|qual jogador|jogador que)\b.*\bmais\b", t):
+            analysis = None                              # "quem MAIS correu nas costas" = ranking de jogador
+        if re.search(r"\bmenos\b|\bpior(es)?\b", t):
+            sc.order = "asc"
+        if sc.players and rating_q and not many:
+            sc.ask = "rating"
+        elif team_merit:
+            sc.ask = "team_merit"
+            sc.attribute = "xt" if re.search(r"\bxt\b", t) else "xg"
+        elif analysis == "attack_plan" or (analysis and not (sc.players and analysis in ("corridors", "efficiency"))):
             sc.ask = analysis
         elif re.search(plan_rx, t):
             sc.ask = "plan"
@@ -391,16 +417,23 @@ class QueryUnderstanding:
         import difflib
 
         cands = set(re.findall(r"(?<![.?!]\s)(?<!^)\b([A-ZÁ-Ú][a-zá-ú'\-]+(?:\s+(?:de |da |do |dos )?[A-ZÁ-Ú][a-zá-ú'\-]+)+)", raw or ""))
-        for m in re.finditer(r"\b(?:anular|marcar|parar|neutralizar|conter|segurar|utilizou|usou|usar|utilizar)\s+(?:o|a)\s+"
-                             r"([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?)", t):
-            cands.add(m.group(1))
+        for rx in (r"\b(?:anular|marcar|parar|neutralizar|conter|segurar|utilizou|usou|usar|utilizar)\s+(?:o|a)\s+"
+                   r"([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?)",
+                   r"\bo que (?:o |a )?([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?) (?:fez|faz|achou)",
+                   r"\bcomo (?:o |a )?([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?) (?:foi|jogou|atuou)",
+                   r"\bnota d[aeo]s? ([a-z][a-z'\-]+(?:\s[a-z][a-z'\-]+)?)"):
+            for m in re.finditer(rx, t):
+                cands.add(m.group(1))
         rn = [norm(r) for r in roster if isinstance(r, str)]
         tn = [norm(x) for x in (teams or []) if x]
-        stop = {"como", "qual", "quais", "se", "em", "o", "a", "por", "que", "compare", "identifique", "construa", "elabore"}
+        stop = {"como", "qual", "quais", "se", "em", "o", "a", "por", "que", "compare", "identifique", "construa", "elabore",
+                "principal", "melhor", "craque", "time", "equipe", "adversario", "rival", "goleiro", "zagueiro", "atacante",
+                "camisa", "artilheiro", "ele", "ela", "voce", "eu", "jogo", "partida", "treinador", "tecnico", "lateral",
+                "volante", "meia", "ponta", "centroavante", "defesa", "ataque", "meio", "sunderland", "aston"}
         out = []
         for c in cands:
             n = norm(c)
-            if not n or n.split()[0] in stop or any(n in x or x in n for x in tn):
+            if not n or n.split()[0] in stop or any(w in stop for w in n.split()) or any(n in x or x in n for x in tn):
                 continue
             last = n.split()[-1]
             if any(n in r or last in r.split() for r in rn) or difflib.get_close_matches(n, rn, n=1, cutoff=0.8):
@@ -468,6 +501,22 @@ class QueryUnderstanding:
         found = [n for _, n in sorted(strong)]
         if not found:
             found = [names[0] for names in weak.values() if len(names) == 1]
+        if not found:                                    # erro de digitação no sobrenome ("martinezz" ≈ "martinez")
+            import difflib
+
+            toks = [w for w in re.findall(r"[a-z]{4,}", t)]
+            by_last: Dict[str, List[str]] = {}
+            for name in roster:
+                if isinstance(name, str) and name.strip():
+                    for part in re.split(r"[\s\-]+", norm(name))[1:]:
+                        if len(part) >= 4:
+                            by_last.setdefault(part, []).append(name)
+            for w in toks:
+                hit = difflib.get_close_matches(w, list(by_last), n=1, cutoff=0.85)
+                if hit and len(set(by_last[hit[0]])) == 1:
+                    found.append(by_last[hit[0]][0])
+                elif hit:
+                    QueryUnderstanding._last_ambiguous = sorted(set(by_last[hit[0]]))
         else:  # primeiro nome que não pertence a nenhum dos já encontrados e é único
             taken = {norm(f).split()[0] for f in found}
             found += [names[0] for first, names in weak.items() if len(names) == 1 and first not in taken]

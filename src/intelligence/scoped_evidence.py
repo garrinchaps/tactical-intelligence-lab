@@ -346,10 +346,32 @@ class ScopedEvidenceBuilder:
         st = player_match_stats(w, scope_team)
         if st.empty:
             return {"metrica": PLAYER_STAT_LABELS.get(metric, metric), "lideres": [], "amostra_N": 0}
+        if metric == "profundidade":                    # bolas recebidas nas costas da defesa (proxy honesto)
+            rec = w[(w["type_name"] == "Pass") & (w.get("is_pass_completed", 0) == 1) & w["pass_recipient_name"].notna()]
+            deep = rec[(rec["end_x"] >= 102) | (rec.get("is_pass_through_ball", 0).fillna(0).astype(bool))]
+            if scope_team:
+                deep = deep[deep["team_name"] == scope_team]
+            g = deep.groupby(["pass_recipient_name", "team_name"]).size().sort_values(ascending=False).head(top)
+            return {"metrica": "Bolas recebidas nas costas da defesa / em profundidade", "chave": metric,
+                    "equipes_consideradas": scope_team or f"{team} e {opp}",
+                    "lideres": [{"jogador": k[0], "equipe": k[1], "valor": int(v)} for k, v in g.items()],
+                    "nota_proxy": "sem tracking não existe 'corrida'; conto passes certos recebidos dentro da área "
+                                  "adversária ou em bola enfiada nas costas da defesa", "amostra_N": int(len(rec))}
         if sc.position_filter:
             from src.metrics.player_rating import sector
 
             st = st[st["posicao"].map(sector) == sc.position_filter]
+        if sc.order == "asc":                           # "quem MENOS…": por 90 min, só quem jogou ≥ 45 min, sem goleiros
+            from src.metrics.player_rating import sector
+
+            st = st[(st["minutos"] >= 45) & (st["posicao"].map(sector) != "goleiro")].copy()
+            st[metric] = (st[metric] / st["minutos"].clip(lower=1) * 90).round(2)
+            st = st.sort_values([metric, "minutos"], ascending=[True, False]).head(top)
+            return {"metrica": PLAYER_STAT_LABELS.get(metric, metric) + " por 90 min (do menor para o maior)", "chave": metric,
+                    "ordem": "asc", "equipes_consideradas": scope_team or f"{team} e {opp}",
+                    "lideres": [{"jogador": r.jogador, "equipe": r.equipe, "valor": _r(getattr(r, metric), 2),
+                                 "secundaria": "Minutos (estimados)", "valor_secundario": int(r.minutos)} for r in st.itertuples()],
+                    "amostra_N": int(len(w))}
         st = st[st[metric].fillna(0) > 0].sort_values([metric, "minutos"], ascending=[False, True]).head(top)
         extra = {"finalizacoes_no_alvo": "finalizacoes", "passes_certos": "passes", "gols": "finalizacoes",
                  "assistencias": "passes_decisivos", "perigo": "xg", "passes_errados": "passes"}.get(metric)
@@ -724,6 +746,42 @@ class ScopedEvidenceBuilder:
         return {"equipe": team, "adversario": opp, "fortes": issues[:4], "amostra_N": int(len(df)),
                 "criterio": "o que a equipe impôs ao rival no mesmo jogo (mesma régua das falhas, lado trocado)"}
 
+    _RATING_CACHE: Dict[int, Any] = {}
+
+    @classmethod
+    def block_rating(cls, df: pd.DataFrame, player: str) -> Dict[str, Any]:
+        """Nota 2.0 da atuação (desempenho, impacto, confiança e as dimensões), reaproveitada na mesma partida."""
+        from src.analytics.rating_v2 import match_ratings_v2
+
+        key = id(df)
+        if key not in cls._RATING_CACHE:
+            cls._RATING_CACHE.clear()
+            cls._RATING_CACHE[key] = match_ratings_v2(df)
+        r = cls._RATING_CACHE[key]
+        hit = r[r["jogador"] == player] if not r.empty else r
+        if hit.empty:
+            return {"jogador": player, "sem_dados": True}
+        ev = hit.iloc[0]["_detalhe"]
+        row = hit.iloc[0]
+        same = r[(r["funcao"] == row["funcao"]) & r["desempenho"].notna()]
+        rank = int((same["desempenho"] > (row["desempenho"] or 0)).sum()) + 1 if row["desempenho"] is not None else None
+        return {**{k: v for k, v in ev.items() if k not in ("base",)}, "gols": int(row.get("gols") or 0),
+                "assistencias": int(row.get("assistencias") or 0), "xg": row.get("xg"), "xa": row.get("xa"),
+                "ranking_na_funcao": rank, "na_funcao": int(len(same)), "melhores_indicadores": sorted(
+                    ev["base"], key=lambda b: -b["nota"])[:3], "piores_indicadores": sorted(ev["base"], key=lambda b: b["nota"])[:2],
+                "amostra_N": int(row.get("minutos") or 0)}
+
+    @classmethod
+    def block_team_merit(cls, df: pd.DataFrame, sc: QueryScope, team: str, other: str) -> Dict[str, Any]:
+        from src.intelligence.tactical_blocks import efficiency
+        from src.metrics.match_facts import team_match_stats
+
+        w = df[cls._time_mask(df, sc)]
+        a, b = team_match_stats(w, team), team_match_stats(w, other)
+        eff = efficiency(w, [team, other])["equipes"]
+        return {"metrica": sc.attribute or "xg", "equipes": {team: {**a, **eff[team]}, other: {**b, **eff[other]}},
+                "amostra_N": int(len(w))}
+
     @staticmethod
     def _defender(sc: QueryScope, team: str, other: str) -> str:
         """Quem DEFENDE na pergunta: o time citado depois de 'defesa/dificuldades/fraquezas/espaços'."""
@@ -781,6 +839,9 @@ class ScopedEvidenceBuilder:
         team, other = (opp, target_team) if sc.team_focus == "opponent" else (target_team, opp)
 
         blocks: Dict[str, Any] = {"contexto": cls.block_context(df, sc, team, other)}
+        if sc.ambiguous and not sc.players:
+            blocks["ambiguo"] = {"nomes": sc.ambiguous}
+            return cls._wrap(df, sc, team, other, meta, blocks)
         if sc.absent and not sc.players and sc.ask in (None, "plan", "presence"):
             blocks["ausente"] = {"nomes": sc.absent, "elenco_da_partida": int(df["player_name"].nunique())}
             return cls._wrap(df, sc, team, other, meta, blocks)
@@ -803,11 +864,25 @@ class ScopedEvidenceBuilder:
                 blocks[f"erros::{p}"] = cls.block_errors(df, sc, p)
         elif sc.ask in TACTICAL_ASKS:
             blocks.update(cls.block_tactical(df, sc, team, other))
+        elif sc.ask == "rating":
+            for p in sc.players[:2]:
+                blocks[f"nota::{p}"] = cls.block_rating(df, p)
+        elif sc.ask == "team_merit":
+            blocks["merito"] = cls.block_team_merit(df, sc, team, other)
         elif sc.ask == "weakness":
             blocks["falhas"] = cls.block_weakness(df, sc, team, other)
         elif sc.ask == "strength":
             blocks["fortes"] = cls.block_strength(df, sc, team, other)
         elif sc.ask == "plan":
+            if not sc.players and sc.subject == "criador":   # "como anular o principal criador do adversário?"
+                rival = other if sc.team_focus != "opponent" else team
+                from src.metrics.match_facts import player_match_stats
+
+                ps = player_match_stats(df[cls._time_mask(df, sc)], rival)
+                if not ps.empty:
+                    sc.players = [ps.sort_values("xt", ascending=False).iloc[0]["jogador"]]
+                    blocks["sujeito"] = {"quem": sc.players[0], "equipe": rival, "criterio": "quem mais levou a bola para "
+                                         "perto do gol (xT) no time adversário"}
             if sc.players:
                 for p in sc.players[:2]:
                     blocks[f"plano_jogador::{p}"] = cls.block_plan_vs_player(df, sc, p)

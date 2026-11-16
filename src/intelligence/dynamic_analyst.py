@@ -69,7 +69,8 @@ Não cite números nem estatísticas."""
 
 
 MISSES_PATH = "data/assistente_sem_alvo.jsonl"
-FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how",
+FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how", "rating",
+             "team_merit",
              "between_lines", "efficiency", "moments", "goal_buildup", "defenders_diag", "combinations"}
 
 
@@ -235,6 +236,23 @@ class LocalScopedWriter:
                 continue
             if key == "comparacao":
                 continue                                     # a comparação é escrita depois dos blocos dos jogadores
+            if key == "ambiguo":
+                out.append("Tem mais de um jogador com esse nome nesta partida: " + ", ".join(f"**{n}**" for n in b["nomes"])
+                           + ". De qual deles você está falando?")
+                continue
+            if key == "sujeito":
+                out.append(f"_O principal criador do adversário neste jogo foi **{b['quem']}** ({b['equipe']}) — {b['criterio']}._")
+                continue
+            if key.startswith("nota::"):
+                out.append(cls._rating_text(b, sc))
+                if b.get("desempenho") is not None:
+                    summary.append(f"{b['jogador']} fez uma atuação {b['classificacao']} ({_fmt(b['desempenho'])})")
+                continue
+            if key == "merito":
+                txt, summ = cls._merit_text(b)
+                out.append(txt)
+                summary.append(summ)
+                continue
             if key == "ranking" and b.get("chave") == "erros_perigosos":
                 e = b["erros_perigosos"]
                 rows = [r for r in e["jogadores"] if r["perdas"]]
@@ -266,6 +284,16 @@ class LocalScopedWriter:
                 if not lid:
                     out.append(f"Nenhum atleta registrou {b['metrica'].lower()} no recorte.")
                     continue
+                first = lid[0]
+                lab0 = b["metrica"].split(" (")[0].split(" por 90")[0]
+                if b.get("ordem") == "asc":
+                    opening = (f"Quem menos contribuiu em **{lab0.lower()}** foi **{first['jogador']}** ({first['equipe']}), "
+                               f"com {_fmt(first['valor'])} por 90 minutos")
+                else:
+                    opening = f"Quem mais se destacou em **{lab0.lower()}** foi **{first['jogador']}** ({first['equipe']}), com {_fmt(first['valor'])}"
+                if len(lid) > 1:
+                    opening += f"; logo atrás veio {lid[1]['jogador']} ({_fmt(lid[1]['valor'])})"
+                out.append(opening + "." + (f" _{b['nota_proxy'].capitalize()}._" if b.get("nota_proxy") else ""))
                 head = f"**{b['metrica']} — {b['equipes_consideradas']}" + (f", {sc.describe()}" if sc.has_cut else "") + ":**"
                 rows = "\n".join(f"{i}. {r['jogador']} ({r['equipe']}): {_fmt(r['valor'])}"
                                   + (f" · {r['secundaria'].lower()}: {_fmt(r['valor_secundario'])}" if r.get("secundaria") else "")
@@ -274,8 +302,7 @@ class LocalScopedWriter:
                 ia = b.get("segunda_opiniao_ia") or {}
                 if ia.get("modelo") and ia.get("lideres_ia"):
                     out.append(cls._danger_ranking(ia))
-                lab = b["metrica"] if b["metrica"].startswith("x") else b["metrica"].lower()
-                summary.append(f"{lid[0]['jogador']} liderou em {lab} ({_fmt(lid[0]['valor'])})")
+
                 continue
             if key.startswith("plano_jogador::"):
                 out.append(cls._plan_player(b))
@@ -443,7 +470,7 @@ class LocalScopedWriter:
                 summary.insert(0, diff[0] if diff else f"{a['jogador']} e {b2['jogador']} lado a lado")
         if summary:
             joined = "; ".join(summary[:2])
-            out.append("\n**Resumo:** " + joined[:1].upper() + joined[1:] + ".")
+            out.append("\n**Em resumo:** " + joined[:1].upper() + joined[1:] + ".")
         return "\n\n".join(out)
 
     # ------------------------------------------------------------------ perguntas fora dos eventos
@@ -708,6 +735,73 @@ class LocalScopedWriter:
         if rest:
             txt += f"\n\n{tail}\n" + "\n".join(f"- {line(x)}" for x in rest)
         return txt + "\n\n_Critério: cada item compara as duas equipes no mesmo jogo; vem primeiro o de maior diferença._"
+
+    @classmethod
+    def _rating_text(cls, b: Dict[str, Any], sc: QueryScope) -> str:
+        """Nota 2.0 em linguagem de conversa: veredito primeiro, depois o porquê (com os números)."""
+        p = b["jogador"]
+        if b.get("sem_dados"):
+            return f"Não consigo avaliar {p}: não há lances dele nesta partida."
+        if b.get("desempenho") is None:
+            return (f"{p} jogou só {_fmt(b['minutos'])} minutos — {b['amostra']}. Com tão pouco tempo eu não dou nota: seria "
+                    "chute, e ausência de dado não vira nota baixa.")
+        n, imp = b["desempenho"], b["impacto"]
+        verdict = {"desastrosa": "foi muito mal", "muito ruim": "foi mal", "ruim": "ficou abaixo do esperado",
+                   "regular": "fez um jogo regular", "razoável": "fez um jogo razoável", "boa": "jogou bem",
+                   "muito boa": "jogou muito bem", "excelente": "foi excelente", "excepcional": "fez uma atuação excepcional"}
+        pt = b["dimensoes_pt"]
+        dims = {k: v for k, v in b["dimensoes"].items() if v is not None}
+        best = sorted(dims.items(), key=lambda kv: -kv[1])[:2]
+        worst = sorted(dims.items(), key=lambda kv: kv[1])[:1]
+        gl = b.get("gols") or 0
+        goal_ans = ""
+        if re.search(r"\bgol", norm_q(sc.raw)):
+            goal_ans = (f"**{'Sim' if gl else 'Não'}, {p} {'marcou ' + _pl(gl, 'gol', 'gols') if gl else 'não marcou'}.** ")
+        txt = goal_ans + (f"**{p} {verdict.get(b['classificacao'], 'jogou')}**: nota de desempenho **{_fmt(n)}** ({b['classificacao']}) "
+               f"e impacto no jogo **{_fmt(imp)}**")
+        if b.get("ranking_na_funcao") and b.get("na_funcao", 0) > 1:
+            txt += f" — {b['ranking_na_funcao']}º entre os {b['na_funcao']} {b['funcao']}s da partida"
+        txt += ".\n\n"
+        txt += (f"O que mais pesou a favor: {pt[best[0][0]].lower()} ({_fmt(best[0][1])})"
+                + (f" e {pt[best[1][0]].lower()} ({_fmt(best[1][1])})" if len(best) > 1 else "") + ". ")
+        if worst and worst[0][1] < 5.5:
+            txt += f"O ponto fraco foi {pt[worst[0][0]].lower()} ({_fmt(worst[0][1])}). "
+        facts = []
+        if b.get("gols"):
+            facts.append(_pl(b["gols"], "gol", "gols"))
+        if b.get("assistencias"):
+            facts.append(_pl(b["assistencias"], "assistência", "assistências"))
+        if b["funcao"] == "goleiro":
+            facts.append("goleiro avaliado pelo modelo próprio de goleiros (defesas, segurança, distribuição, cobertura)")
+        if facts:
+            txt += "Também conta: " + ", ".join(facts) + ". "
+        nobs = [pt[k].lower() for k, v in b["dimensoes"].items() if v is None]
+        txt += (f"\n\n_Confiança {b['confianca']} ({b['confianca_pct']}%): {_fmt(b['minutos'])} min ({b['amostra']}), comparado com "
+                f"{b['pares']} atuações da mesma função."
+                + (f" Não observado nesta fonte: {', '.join(nobs)}." if nobs else "") + "_")
+        return txt
+
+    @staticmethod
+    def _merit_text(b: Dict[str, Any]) -> tuple:
+        e = b["equipes"]
+        (t1, a), (t2, c) = list(e.items())
+        key = b["metrica"]
+        lab = "xG (qualidade das chances)" if key == "xg" else "xT (o quanto cada time levou a bola para perto do gol)"
+        va, vc = a.get(key) or 0, c.get(key) or 0
+        win = t1 if va > vc else t2 if vc > va else None
+        kl = "xG" if key == "xg" else "xT"
+        txt = (f"**Pelo {kl}, {'quem merecia vencer era ' + win if win else 'deu empate'}**: "
+               f"{t1} {_fmt(va)} x {_fmt(vc)} {t2} — {lab}.\n\n"
+               f"O placar foi {t1} {a.get('gols')} x {c.get('gols')} {t2}. "
+               f"{t1}: {a.get('finalizacoes')} finalizações ({a.get('no_alvo')} no alvo), {a.get('grandes_chances')} chances claras. "
+               f"{t2}: {c.get('finalizacoes')} finalizações ({c.get('no_alvo')} no alvo), {c.get('grandes_chances')} chances claras.")
+        g1, g2 = a.get("gols") or 0, c.get("gols") or 0
+        res = t1 if g1 > g2 else t2 if g2 > g1 else None
+        if win and res and win != res:
+            txt += f" Ou seja: {res} venceu com menos do que as chances indicavam — eficiência (ou sorte) acima do normal."
+        elif win and res == win:
+            txt += f" O resultado bateu com os números: {win} criou mais e venceu."
+        return txt, (f"pelo {kl}, {win} merecia a vitória" if win else f"pelo {kl} o jogo foi equilibrado")
 
     @classmethod
     def _danger_ranking(cls, b: Dict[str, Any]) -> str:
@@ -1072,7 +1166,26 @@ class DynamicTacticalAnalyst:
         import time as _time
 
         t0 = _time.perf_counter()
-        res = self._answer(query, *args, **kwargs)
+        parts = [q.strip() + "?" for q in re.split(r"\?+", query or "") if len(q.strip().split()) >= 3]
+        if len(parts) >= 2:                              # só divide se CADA parte tiver alvo próprio
+            parsed = [QueryUnderstanding.parse(q) for q in parts]
+            if not all(sc_.in_scope and (sc_.ask or sc_.players or sc_.metrics or sc_.team_named) for sc_ in parsed) or \
+                    any(re.match(r"^\s*(e |ele|ela|foi |isso|esse|essa)", q.lower()) for q in parts[1:]):
+                parts = [query]
+        if len(parts) >= 2:                              # duas perguntas na mesma mensagem: responde as duas
+            subs = [self._answer(q, *args, **kwargs) for q in parts[:3]]
+            md = "\n\n---\n\n".join(f"**{q}**\n\n{r['report_markdown']}" for q, r in zip(parts, subs))
+            audits = [r.get("hallucination_audit") or {} for r in subs]
+            evs = [r.get("evidence") or {} for r in subs]
+            merged = None
+            if any(evs):
+                base = next(e for e in evs if e)
+                merged = {**base, "blocos": {f"{i}::{k}": v for i, e in enumerate(evs) for k, v in (e.get("blocos") or {}).items()}}
+            res = {**subs[0], "report_markdown": md, "evidence": merged,
+                   "hallucination_audit": {**audits[0], "is_grounded": all(a.get("is_grounded", True) for a in audits)},
+                   "subanswers": subs}
+        else:
+            res = self._answer(query, *args, **kwargs)
         secs = round(_time.perf_counter() - t0, 2)
         res["latency_s"] = secs
         log_latency(query, secs, res.get("engine_used", ""), (res.get("scope") or {}).get("ask"))
