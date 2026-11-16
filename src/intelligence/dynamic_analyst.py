@@ -1560,6 +1560,25 @@ class DynamicTacticalAnalyst:
         else:
             evidence = ScopedEvidenceBuilder.build_boxscore(boxscore or {}, sc, meta, target_team)
             local_md = LocalScopedWriter.write_boxscore(evidence, sc)
+            try:                                   # rodada 5: com dados da FotMob, resposta própria (não a tabela de sempre)
+                from src.data_hub.db import DataHubDB
+                from src.intelligence import box_analyst
+
+                opp = next((t for t in teams_in_match if t != target_team), "")
+                fb = box_analyst.build(DataHubDB(), sc, meta, target_team, opp)
+                txt = box_analyst.write(fb) if fb else ""
+                if txt:
+                    evidence = {**evidence, "blocos": {**(evidence.get("blocos") or {}), "fotmob": fb},
+                                "escopo": {**(evidence.get("escopo") or {}), "resumo_generico": False}}
+                    meta_r = evidence.setdefault("metadata", {})
+                    roster_fm = []
+                    for k in ("ranking", "plano_jogador", "nota", "como_sofreu", "historia_box"):
+                        if k in fb:
+                            roster_fm += re.findall(r"'jogador': '([^']+)'", str(fb[k]))
+                    meta_r["match_player_roster"] = list(dict.fromkeys((meta_r.get("match_player_roster") or []) + roster_fm))
+                    local_md = txt
+            except Exception:
+                pass
 
         if (evidence.get("escopo") or {}).get("resumo_generico"):
             log_generic_fallback(query, sc)

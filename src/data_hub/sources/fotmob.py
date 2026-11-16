@@ -354,9 +354,57 @@ class FotmobProvider:
                           "source": "fotmob"})
         return box, shots, unavailable
 
+    @staticmethod
+    def parse_extras(d: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        O que a FotMob dá além da súmula: momentum minuto a minuto (+ = mandante pressionando, − = visitante) e por
+        onde cada time atacou (esquerda/meio/direita, % por tempo), desfalques com previsão de volta e o craque do jogo.
+        """
+        c = d.get("content") or {}
+        teams = [t.get("name", "") for t in (d.get("header") or {}).get("teams") or []]
+        mom = (((c.get("momentum") or {}).get("main") or {}).get("data") or [])
+        lu = c.get("lineup") or {}
+        unav = {}
+        for side in ("homeTeam", "awayTeam"):
+            t = lu.get(side) or {}
+            unav[t.get("name", "")] = [{"jogador": u.get("name"), "tipo": (u.get("unavailability") or {}).get("type"),
+                                       "volta": (u.get("unavailability") or {}).get("expectedReturn")}
+                                      for u in t.get("unavailable") or []]
+        potm = ((c.get("matchFacts") or {}).get("playerOfTheMatch") or {})
+        return {"times": teams, "momentum": [[int(x.get("minute", 0)), float(x.get("value", 0))] for x in mom if isinstance(x, dict)],
+                "zonas_ataque": c.get("attackingZones") or {}, "desfalques": unav,
+                "craque": {"jogador": (potm.get("name") or {}).get("fullName") if isinstance(potm.get("name"), dict) else potm.get("name"),
+                           "nota": (potm.get("rating") or {}).get("num") if isinstance(potm.get("rating"), dict) else None}
+                if potm else None}
+
+    def extras(self, internal_id: int, fetch: bool = True) -> Dict[str, Any]:
+        """Momentum, zonas de ataque e desfalques do jogo; jogos baixados antes da rodada 5 buscam só isso na hora."""
+        import json as _json
+
+        self.ensure_tables()
+        with self.db.connect() as conn:
+            r = conn.execute("SELECT extra_json FROM match_extra WHERE match_id = ?", (int(internal_id),)).fetchone()
+        if r:
+            return _json.loads(r[0] or "{}")
+        if not fetch or not self.enabled:
+            return {}
+        fid = int(internal_id) - to_internal_id("fotmob", 0)
+        d = self._get("matchDetails", {"matchId": fid}, max_age_s=None, cache=False)
+        ex = self.parse_extras(d)
+        _box, shots, _u = self.parse_details(d, internal_id)
+        with self.db.connect() as conn:
+            conn.execute("INSERT OR REPLACE INTO match_extra VALUES (?, 'fotmob', ?)",
+                         (int(internal_id), _json.dumps(ex, ensure_ascii=False, separators=(",", ":"))))
+            if shots and not conn.execute("SELECT 1 FROM match_shots WHERE match_id = ? LIMIT 1", (int(internal_id),)).fetchone():
+                cols = list(shots[0].keys())
+                conn.executemany(f"INSERT INTO match_shots ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                                 [tuple(s[k] for k in cols) for s in shots])
+        return ex
+
     def ensure_tables(self) -> None:
         with self.db.connect() as conn:
             conn.executescript(SHOTS_DDL)
+            conn.execute("CREATE TABLE IF NOT EXISTS match_extra (match_id INTEGER PRIMARY KEY, source TEXT, extra_json TEXT)")
 
     def ingest(self, internal_id: int) -> Dict[str, Any]:
         """Baixa e grava os detalhes de UM jogo (sob demanda ou em lote). Jogo encerrado e consolidado é congelado."""
@@ -375,6 +423,13 @@ class FotmobProvider:
                 cols = list(shots[0].keys())
                 conn.executemany(f"INSERT INTO match_shots ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                                  [tuple(s[k] for k in cols) for s in shots])
+            try:
+                import json as _json
+
+                conn.execute("INSERT OR REPLACE INTO match_extra VALUES (?, 'fotmob', ?)",
+                             (int(internal_id), _json.dumps(self.parse_extras(d), ensure_ascii=False, separators=(",", ":"))))
+            except Exception:
+                pass
             level = DataLevel.BOXSCORE if (box["team_stats"] or box["lineups"]) else DataLevel.RESULT
             conn.execute("UPDATE matches SET data_level = ? WHERE match_id = ?", (level, int(internal_id)))
         if box["team_stats"] or box["lineups"]:

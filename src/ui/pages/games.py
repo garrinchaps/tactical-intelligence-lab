@@ -93,9 +93,17 @@ def render(current_context, match_bar=None) -> None:
         from src.ui.pages import patterns
 
         patterns.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
+    elif not ctx.has_events and sec == SECTIONS[1]:
+        from src.ui.pages import fotmob_depth
+
+        fotmob_depth.render(ctx)                     # rodada 5: momentum, corredores, xG acumulado, destaques (FotMob)
+    elif not ctx.has_events and sec == SECTIONS[3]:
+        from src.ui.pages import fotmob_strengths
+
+        fotmob_strengths.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
     elif not ctx.has_events and sec != SECTIONS[2]:
         source_gap("eventos com coordenadas", ctx.bundle.source,
-                   "Redes de passe, xT e comparações espaciais precisam de jogos ✅ (StatsBomb/Wyscout).", "🗺️",
+                   "Comparações espaciais precisam de jogos ✅ (StatsBomb/Wyscout/OpenPlay).", "🗺️",
                    ctx.bundle.level)
     elif sec == SECTIONS[1]:
         networks.render(ctx)

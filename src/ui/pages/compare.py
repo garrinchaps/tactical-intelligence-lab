@@ -7,7 +7,7 @@ Página Comparações:
 
 from __future__ import annotations
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import pandas as pd
 import streamlit as st
@@ -466,6 +466,95 @@ def _player_pick(label: str, key: str):
     return r, names
 
 
+FM_GROUPS = {
+    "⚽ Ataque": [("totalGoals", "Gols", False), ("xg", "xG", False), ("totalShots", "Finalizações", False),
+                 ("shotsOnTarget", "No alvo", False), ("touches_opp_box", "Toques na área rival", False)],
+    "🎯 Criação e passe": [("goalAssists", "Assistências", False), ("xa", "xA", False), ("chances_created", "Chances criadas", False),
+                          ("passes_into_final_third", "Passes no terço final", False), ("line_breaking_passes", "Quebram linhas", False),
+                          ("accurate_crosses", "Cruzamentos certos", False), ("accurate_passes", "Passes certos", False)],
+    "🏃 Progressão": [("dribbles_succeeded", "Dribles certos", False), ("touches", "Toques na bola", False),
+                     ("dispossessed", "Perdeu a posse", True)],
+    "🛡️ Defesa e duelos": [("matchstats.headers.tackles", "Desarmes", False), ("interceptions", "Interceptações", False),
+                          ("recoveries", "Recuperações", False), ("clearances", "Cortes", False), ("duel_won", "Duelos ganhos", False),
+                          ("aerials_won", "Aéreos ganhos", False), ("dribbled_past", "Vezes driblado", True),
+                          ("foulsCommitted", "Faltas cometidas", True)],
+    "📡 Físico (só ligas que medem)": [("distance_m", "Distância (m)", False), ("sprints", "Sprints", False)],
+}
+
+
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=64)
+def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
+    """Números da FotMob do jogador (identidade pelo id do atleta da FotMob), somados nos últimos `n_games` jogos."""
+    import json as _j
+
+    from src.ui.context import get_service
+
+    if not names:
+        return {}
+    ph = ",".join("?" * len(names))
+    with get_service().db.connect() as conn:
+        d = pd.read_sql_query(f"SELECT s.match_id, s.team_name, s.rating, s.stats_json, m.match_date FROM match_player_stats s "
+                              f"JOIN matches m ON m.match_id = s.match_id WHERE s.player_name IN ({ph}) AND m.data_source = 'fotmob' "
+                              f"ORDER BY m.match_date DESC LIMIT 200", conn, params=list(names))
+    if d.empty:
+        return {}
+    d["st"] = [_j.loads(x or "{}") for x in d["stats_json"]]
+    d["fid"] = [s.get("fotmob_id") for s in d["st"]]
+    top = d.iloc[0]
+    d = d[d["fid"] == top["fid"]] if top["fid"] is not None else d[d["team_name"] == top["team_name"]]
+    d = d[[bool(s.get("minutes")) for s in d["st"]]].head(int(n_games))
+    if d.empty:
+        return {}
+    tot: Dict[str, float] = {}
+    for s in d["st"]:
+        for k, v in s.items():
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "fotmob_id":
+                tot[k] = tot.get(k, 0.0) + float(v)
+    mins = tot.get("minutes", 0) or 1
+    per90 = {k: v * 90 / mins for k, v in tot.items() if k != "minutes"}
+    rat = pd.to_numeric(d["rating"], errors="coerce").dropna()
+    return {"jogos": int(len(d)), "minutos": int(mins), "per90": per90, "nota_fotmob": round(float(rat.mean()), 2) if len(rat) else None,
+            "time": top["team_name"], "ultimo": str(d["match_date"].iloc[0])}
+
+
+def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
+    from src.ui.components import duel_bars
+    from src.ui.context import get_service
+
+    if not (pa and pb):
+        return
+    n_games = {"Último jogo": 1, "Últimos 5 jogos": 5}.get(recorte, 40)
+    v = get_service().db.stable_version()
+    A = _fotmob_player(tuple(dict.fromkeys((na or []) + [pa["nome"]])), n_games, v)
+    B = _fotmob_player(tuple(dict.fromkeys((nb or []) + [pb["nome"]])), n_games, v)
+    if not (A and B):
+        missing = [p["nome"] for p, X in ((pa, A), (pb, B)) if not X]
+        st.caption(f"📊 Sem números da FotMob para: {', '.join(missing)} (a base ainda está sendo abastecida).")
+        return
+    n1, n2 = pa["nome"], pb["nome"]
+    st.markdown("#### 📊 Pelos números por jogador da FotMob (muito mais jogos)")
+    st.caption(f"{n1}: {A['jogos']} jogos, {A['minutos']} min ({A['time']}, último {A['ultimo']}) · "
+               f"{n2}: {B['jogos']} jogos, {B['minutos']} min ({B['time']}, último {B['ultimo']}) · por 90 minutos.")
+    wins = {n1: 0, n2: 0}
+    tabs = st.tabs(list(FM_GROUPS))
+    for tab, (g, items) in zip(tabs, FM_GROUPS.items()):
+        rows = [{"label": lab, "a": A["per90"].get(k), "b": B["per90"].get(k), "fmt": "{:.2f}", "lower_is_better": low}
+                for k, lab, low in items if A["per90"].get(k) is not None and B["per90"].get(k) is not None]
+        for r in rows:
+            if r["a"] != r["b"]:
+                wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
+        with tab:
+            if rows:
+                duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+            else:
+                st.caption("A fonte não publica esses números para os jogos deles (não é zero).")
+    na_, nb_ = A.get("nota_fotmob"), B.get("nota_fotmob")
+    st.markdown(f'<div class="til-card" style="min-height:auto"><div class="label">Placar dos indicadores (FotMob)'
+                + (f" · nota média FotMob {na_} × {nb_}" if na_ and nb_ else "") + '</div>'
+                f'<div class="value" style="font-size:1.6rem"><span style="color:#22D3EE">{n1} {wins[n1]}</span> × '
+                f'<span style="color:#EF4444">{wins[n2]} {n2}</span></div></div>', unsafe_allow_html=True)
+
+
 def _any_players() -> None:
     from src.ui.pages.players_search import SCOUT_GROUPS, player_scout
 
@@ -498,6 +587,9 @@ def _any_players() -> None:
         last = cut.iloc[0]
         info.append(f"**{p['nome']}**: {len(cut)} jogo(s), ~{mins:.0f} min estimados · último: {last.get('match_date')} "
                     f"{last.get('home_team_name', '')} x {last.get('away_team_name', '')}")
+    _fotmob_compare(pa, na, pb, nb, recorte)
+    if cols or info:
+        st.markdown("#### 🟢 Pelos lances com coordenadas (StatsBomb/Wyscout/OpenPlay)")
     for line in info:
         st.markdown("- " + line)
     if len(cols) < 2:

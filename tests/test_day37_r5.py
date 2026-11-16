@@ -210,3 +210,37 @@ def test_canonical_names_across_sources():
     assert m["Ibrahima Konate"] == "Ibrahima Konaté" and m["Virgil Van Dijk"] == "Virgil van Dijk"
     assert m["Alisson"] == "Alisson Becker"
     assert "Gabriel" not in m                      # dois Gabriel no elenco: não junta por palpite
+
+
+def test_box_analyst_uses_fotmob_player_stats_and_shots(tmp_path):
+    from src.data_hub.sources.fotmob import FotmobProvider
+    from src.intelligence import box_analyst
+    from src.intelligence.query_understanding import QueryUnderstanding
+
+    db = DataHubDB(tmp_path / "b.db")
+    mid = 12_000_000_777
+    db.upsert_matches([{"match_id": mid, "source_match_id": "777", "competition_name": "Brasileirão Série A", "season_name": "2026",
+                        "match_date": "2026-10-18", "home_team_name": "Grêmio", "away_team_name": "Cruzeiro", "home_score": 2,
+                        "away_score": 4, "status": "FT", "data_source": "fotmob", "data_level": "BOXSCORE"}])
+    ps = [{"team_name": "Cruzeiro", "player_name": "Kaio Jorge", "position": "", "minutes": 90, "rating": 9.1,
+           "stats": {"minutes": 90, "totalShots": 5, "xg": 1.4, "totalGoals": 3, "chances_created": 1}},
+          {"team_name": "Grêmio", "player_name": "Carlos Vinícius", "position": "", "minutes": 90, "rating": 7.0,
+           "stats": {"minutes": 90, "totalShots": 3, "xg": 0.6, "totalGoals": 1, "xa": 0.4, "chances_created": 3}}]
+    db.save_boxscore(mid, {"team_stats": [], "lineups": [], "timeline": [], "player_stats": ps})
+    FotmobProvider(db, enabled=False).ensure_tables()
+    with db.connect() as c:
+        c.executemany("INSERT INTO match_shots (match_id, team_name, player_name, minute, x, y, xg, outcome, situation, on_target, own_goal, source) "
+                      "VALUES (?,?,?,?,?,?,?,?,?,1,0,'fotmob')",
+                      [(mid, "Grêmio", "Carlos Vinícius", 17, 110, 40, 0.4, "Goal", "FastBreak"),
+                       (mid, "Grêmio", "Carlos Vinícius", 60, 95, 20, 0.05, "Miss", "RegularPlay")])
+    meta = {"match_id": mid, "home_team_name": "Grêmio", "away_team_name": "Cruzeiro"}
+    roster = ["Kaio Jorge", "Carlos Vinícius"]
+    sc = QueryUnderstanding.parse("quem mais finalizou?", roster, ["Cruzeiro", "Grêmio"])
+    b = box_analyst.build(db, sc, meta, "Cruzeiro", "Grêmio")
+    assert b["ranking"]["lideres"][0]["jogador"] == "Kaio Jorge" and "Kaio Jorge" in box_analyst.write(b)
+    sc = QueryUnderstanding.parse("como o cruzeiro poderia evitar tomar gols", roster, ["Cruzeiro", "Grêmio"])
+    b = box_analyst.build(db, sc, meta, "Cruzeiro", "Grêmio")
+    assert b["como_sofreu"]["chutes"] == 2 and "contra-ataque" in box_analyst.write(b)
+    sc = QueryUnderstanding.parse("quem correu mais?", roster, ["Cruzeiro", "Grêmio"])
+    b = box_analyst.build(db, sc, meta, "Cruzeiro", "Grêmio")
+    assert b["ranking"].get("sem_dado") and "não dá para fazer o ranking" in box_analyst.write(b)
