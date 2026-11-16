@@ -421,6 +421,22 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
                         f'margin-bottom:.45rem">🎯 <b>{t["nome"]}</b> ({t["papel"] or "?"}{", lado " + t["lado"] if t["lado"] else ""}): '
                         f'{t["gols"]} gols e {t["assistencias"]} assistências nos últimos {len(b["jogos"])} jogos</div>',
                         unsafe_allow_html=True)
+    try:                                               # rodada 5: estilo habitual e problemas que se repetem (pré-jogo)
+        from src.ui.pages.patterns import _history
+
+        hx = _history(rival, int(f["match_id"]) if f is not None else 0, version)
+        idn, vu = hx.get("identidade") or {}, hx.get("vulneraveis") or {}
+        if idn.get("tracos") or vu.get("padroes") or vu.get("sinais"):
+            st.markdown(f"**🧬 Como {rival} costuma jogar e onde costuma sofrer** (últimos {idn.get('jogos', 0)} jogos com estatísticas)")
+            for t_ in idn.get("tracos") or []:
+                st.markdown(f"- {rival} {t_['traco']} — {t_['metrica']} {t_['media']} (normal {t_['referencia']}), em "
+                            f"{t_['frequencia_pct']}% dos jogos")
+            for p_ in vu.get("padroes") or []:
+                st.markdown(f"- 🩹 **Padrão:** {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos) — explore isso")
+            for p_ in vu.get("sinais") or []:
+                st.markdown(f"- ⚠️ Sinal: {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos)")
+    except Exception:
+        pass
     lu = b["escalacoes"]
     if lu is not None and not lu.empty:
         with st.expander(f"Últimos jogos de {rival} usados na leitura"):

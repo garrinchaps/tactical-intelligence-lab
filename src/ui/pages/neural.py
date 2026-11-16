@@ -122,6 +122,8 @@ def render(ctx=None) -> None:
     _didactic()
     _simulator()
     st.markdown("---")
+    _benchmark()
+    st.markdown("---")
     st.markdown("## 🔧 Por dentro (parte técnica)")
     note("Objetivo didático", "A rede resolve a mesma tarefa do XGBoost (perigo de posse) para comparação direta. "
          "Ficar abaixo do XGBoost seria esperado: o objetivo é mostrar como o aprendizado acontece, não superar o estado da arte.")
@@ -379,3 +381,41 @@ def _assistant_misses() -> None:
         st.dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, use_container_width=True)
         st.caption("Arquivo local data/assistente_sem_alvo.jsonl (não vai para o GitHub). Mande essas perguntas na "
                    "próxima sessão para eu ensinar o Assistente a respondê-las.")
+
+
+def _benchmark() -> None:
+    """Rodada 5: a rede contra modelos mais simples, nas MESMAS dobras por partida (resultado salvo, não recalculado)."""
+    import json
+    from pathlib import Path
+
+    st.markdown("## ⚖️ A rede neural é a ferramenta certa? (comparação justa)")
+    path = Path("data/processed/benchmark_perigo.json")
+    res = None
+    if path.exists():
+        try:
+            res = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            res = None
+    if st.button("Rodar a comparação agora (~1–2 min)", key="nn_bench"):
+        from src.machine_learning.benchmark import DEMO, OUT, run
+
+        with st.spinner("Treinando 6 modelos nas mesmas dobras por partida..."):
+            res = run(pd.read_csv(DEMO))
+            OUT.parent.mkdir(parents=True, exist_ok=True)
+            OUT.write_text(json.dumps(res, ensure_ascii=False, indent=1), encoding="utf-8")
+    if not res:
+        st.caption("Ainda não rodou. Clique no botão ou rode no terminal: `python -m src.machine_learning.benchmark`.")
+        return
+    st.caption(f"{res['partidas']} partidas · {res['acoes']} ações · {res['positivos_pct']}% terminaram em finalização · "
+               f"{res['dobras']} dobras (nenhuma partida no treino e na validação ao mesmo tempo).")
+    df = pd.DataFrame(res["resultados"])
+    show = df.rename(columns={"modelo": "Modelo", "auc": "AUC", "brier": "Brier", "log_loss": "Log loss", "ece": "Calibração (ECE)",
+                              "dif_auc_vs_logistica": "Δ AUC vs logística", "ic95": "IC 95%", "veredito": "Veredito"})
+    st.dataframe(show, hide_index=True, use_container_width=True)
+    note("O que isso quer dizer", res["conclusao"] + " AUC 0,5 = moeda; 1,0 = perfeito. Brier/log loss/ECE menores = "
+         "probabilidades melhores. A rede continua como componente didático; o critério de promoção não foi afrouxado.", "info")
+    imp = res.get("importancia_permutacao") or {}
+    if imp:
+        with st.expander("Quais variáveis realmente ajudam (importância por permutação)"):
+            st.dataframe(pd.DataFrame([{"Variável": k, "Queda de AUC sem ela": v} for k, v in imp.items()]),
+                         hide_index=True, use_container_width=True)

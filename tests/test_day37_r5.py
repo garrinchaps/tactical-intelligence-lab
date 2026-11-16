@@ -185,3 +185,18 @@ def test_team_history_identity_vulnerability_similar(tmp_path):
     sim = TH.similar(db, ["Alvo"], mid + 105, k=2)
     assert sim["semelhantes"] and sim["semelhantes"][0]["time_comparado"] == "Alvo"     # os mais parecidos são dele mesmo
     assert all(s["match_id"] != mid + 105 for s in sim["semelhantes"])
+
+
+def test_benchmark_compares_models_on_same_folds():
+    import pandas as pd
+
+    from src.machine_learning.benchmark import DEMO, run
+
+    d = pd.read_csv(DEMO)
+    small = d[d["match_id"].isin(sorted(d["match_id"].unique())[:16])]
+    res = run(small, k=3, epochs=5, n_boot=30)
+    names = [r["modelo"] for r in res["resultados"]]
+    assert any(n.startswith("Rede neural") for n in names) and any("logística" in n for n in names)
+    floor = next(r for r in res["resultados"] if r["modelo"].startswith("Taxa constante"))
+    assert all(r["auc"] >= floor["auc"] - 0.05 for r in res["resultados"])
+    assert all("veredito" in r for r in res["resultados"] if not r["modelo"].startswith(("Taxa", "Regressão logística (todas")))
