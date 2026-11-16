@@ -36,6 +36,17 @@ def same_team_names(name: str) -> List[str]:
     same = set(t.loc[t["core"] == core, "nome"])
     sc = fast_scores(name, t["nome"].tolist())
     same |= {n for n, v in sc.items() if v >= 0.92}
+    # Identificadores geográficos/institucionais distintivos não podem ser descartados pelo fuzzy match.
+    # Ex.: Santos FC e Santos Laguna compartilham "Santos", mas são clubes diferentes.
+    import re as _re
+    tokens = set(_re.findall(r"[a-z0-9]+", str(name).casefold()))
+    distinctive = {"laguna", "unam", "pumas", "guadalajara", "monterrey", "tigres", "america", "medellin",
+                   "cali", "quito", "cusco", "tijuana", "pachuca", "toluca"}
+    identity = tokens & distinctive
+    if identity:
+        same = {n for n in same if identity.issubset(set(_re.findall(r"[a-z0-9]+", str(n).casefold())))}
+    else:
+        same = {n for n in same if not (set(_re.findall(r"[a-z0-9]+", str(n).casefold())) & distinctive)}
     # time feminino, sub-20, reservas etc. não são "o mesmo time" (Barcelona × Barcelona WFC)
     import re as _re
 
