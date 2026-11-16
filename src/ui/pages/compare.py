@@ -12,6 +12,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.data_hub.gender import gender_of
 from src.data_hub.search import team_score
 from src.metrics.match_facts import (PLAYER_STAT_LABELS, TEAM_STAT_LABELS, goal_line, goals, per90, player_match_stats,
@@ -101,7 +103,7 @@ def _two_teams(ctx: MatchContext) -> None:
     rows = pd.DataFrame([{"indicador": TEAM_STAT_LABELS[k_], a: sa.get(k_), b: sb.get(k_)} for k_ in TEAM_KEYS])
     l, r = st.columns([1.25, 1])
     with l:
-        st.plotly_chart(charts.grouped_bars(rows[~rows["indicador"].isin(["Passes", "Perdas de posse"])], "indicador", [a, b],
+        render_chart(charts.grouped_bars(rows[~rows["indicador"].isin(["Passes", "Perdas de posse"])], "indicador", [a, b],
                                             "Indicadores das duas equipes", height=620), use_container_width=True)
     with r:
         comparison_table(rows, "PPDA menor = pressão mais intensa. Posse = proporção dos passes da partida.")
@@ -169,7 +171,7 @@ def _team_over_time(ctx: MatchContext) -> None:
     pick = st.multiselect("Indicadores no gráfico", [TEAM_STAT_LABELS[k] for k in TEAM_KEYS],
                           default=["xG", "Finalizações", "Posse (% dos passes)", "Field tilt (%)"], key="cmp_self_ind")
     if pick:
-        st.plotly_chart(charts.grouped_bars(tab.melt(id_vars="partida", value_vars=pick).pivot(index="variable", columns="partida",
+        render_chart(charts.grouped_bars(tab.melt(id_vars="partida", value_vars=pick).pivot(index="variable", columns="partida",
                                                                                             values="value").reset_index(),
                                             "variable", tab["partida"].tolist(), f"{team}: indicadores por partida",
                                             height=120 + 70 * len(pick)), use_container_width=True)
@@ -276,7 +278,7 @@ def _players(ctx: MatchContext) -> None:
     l, r = st.columns([1, 1.2])
     with l:
         mx = {c: max(float(p90a.iloc[0][c]), float(p90b.iloc[0][c]), 1e-6) for c in RADAR_KEYS}
-        st.plotly_chart(charts.radar({pa: [round(100 * float(p90a.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS],
+        render_chart(charts.radar({pa: [round(100 * float(p90a.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS],
                                       pb: [round(100 * float(p90b.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS]},
                                      [PLAYER_STAT_LABELS[c] for c in RADAR_KEYS],
                                      f"Por 90 min (100 = o maior dos dois) · {int(tot_a['minutos'])} e {int(tot_b['minutos'])} min"),
