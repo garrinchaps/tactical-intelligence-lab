@@ -435,13 +435,14 @@ GK_SHORT = [("defesas", "DEF"), ("aereo", "AER"), ("distribuicao", "DIS"), ("seg
 
 def _player_card(nome: str, names: tuple, club: str = "") -> None:
     """
-    Cartão no estilo FC/FIFA (rodada 5): qualidade = média da nota 2.0 nos últimos jogos com números por jogador;
+    Cartão no estilo FC/FIFA: qualidade = média da nota 3.0 nos últimos jogos com números por jogador;
     fase = últimos 5; regularidade = quanto a nota oscila. Atributos = média de cada dimensão (0–10 → 0–99).
     Nada é inventado: sem jogos com números por jogador, o cartão não aparece.
     """
     from src.ui.context import get_service
 
-    f = _form_data(names, get_service().db.stable_version(), club or "")
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+    f = _form_data(names, get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, club or "")
     if f is None or f.empty or len(f) < 2:
         return
     score_col = "nota" if "nota" in f and f["nota"].notna().any() else "desempenho"
@@ -449,7 +450,8 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
     if scored.empty:
         return
     q = float(scored.mean())
-    fase = float(pd.to_numeric(f.head(5)[score_col], errors="coerce").mean())
+    recent_scores = pd.to_numeric(f[score_col], errors="coerce").dropna().head(5)
+    fase = float(recent_scores.mean()) if not recent_scores.empty else q
     sd = float(scored.std() or 0)
     reg = "muito regular" if sd < 0.6 else "regular" if sd < 1.0 else "oscila bastante"
     fun = f["funcao"].mode().iloc[0]
@@ -460,10 +462,13 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<b>{int(round(9.9 * float(f[k].dropna().mean())))}</b></div>' for k, lab in dims if k in f and f[k].notna().any())
     trend = "▲" if fase - q >= 0.3 else "▼" if q - fase >= 0.3 else "●"
     tcol = "#22C55E" if trend == "▲" else "#EF4444" if trend == "▼" else "#94A3B8"
-    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * getattr(r, score_col))}px;'
-                     f'background:{"#22C55E" if getattr(r, score_col) >= 7.0 else "#F59E0B" if getattr(r, score_col) >= 5.5 else "#EF4444"};'
+    spark_df = f.copy()
+    spark_df["_score"] = pd.to_numeric(spark_df[score_col], errors="coerce")
+    spark_df = spark_df.dropna(subset=["_score"])
+    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * r._score)}px;'
+                     f'background:{"#22C55E" if r._score >= 7.0 else "#F59E0B" if r._score >= 5.5 else "#EF4444"};'
                      f'border-radius:3px;margin-right:2px;vertical-align:bottom"></span>'
-                     for r in f.iloc[::-1].itertuples())
+                     for r in spark_df.iloc[::-1].itertuples())
     st.markdown(
         f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:stretch;margin:.4rem 0 1rem">'
         f'<div style="width:190px;background:linear-gradient(160deg,{tier}33,#0F1626 55%);border:2px solid {tier};'
