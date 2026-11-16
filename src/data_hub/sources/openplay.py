@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -124,6 +125,7 @@ class OpenPlayProvider:
     def __init__(self, db=None, path: Optional[str] = None):
         self.db = db
         self.path = Path(path or os.getenv("OPENPLAY_PATH", "") or DEFAULT_DIR)
+        self._catalog_map: Optional[Dict[str, tuple[str, str]]] = None
 
     # ---------------------------------------------------------------- arquivos
     @staticmethod
@@ -198,7 +200,7 @@ class OpenPlayProvider:
             except Exception:
                 df = pd.read_parquet(p)
         else:
-            df = pd.read_csv(p, low_memory=False)
+            df = pd.read_csv(p, low_memory=False, usecols=columns)
         if filters:
             for col, op, val in filters:
                 df = df[df[col].astype(str) == str(val)]
@@ -508,19 +510,92 @@ class OpenPlayProvider:
             flipped.loc[og, "team_id"] = flipped.loc[og, "team_name"].map(ids)
         return flipped if score(flipped) == (home_score, away_score) else df
 
+    @staticmethod
+    def _sid_key(value: Any) -> str:
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return str(value).strip()
+
     def _events_file_for(self, sid: Any, paths: List[Path]) -> List[Path]:
-        """Arquivo de eventos mais provável primeiro (events_<comp>_<temporada>, pela tabela de jogos)."""
-        for mp in self.all_files().get("matches") or []:
-            try:
-                cols = ["match_id", "comp", "season"] if mp.suffix.lower() == ".parquet" else None
-                df = self._read(mp, columns=cols, filters=[("match_id", "=", sid)])
-            except Exception:
-                continue
-            if not df.empty and {"comp", "season"} <= set(df.columns):
-                want = f"events_{df.iloc[0]['comp']}_{df.iloc[0]['season']}".lower()
-                first = [p for p in paths if p.stem.lower() == want]
-                return first + [p for p in paths if p not in first]
+        """Escolhe o parquet da competição/temporada usando um índice carregado uma única vez."""
+        if self._catalog_map is None:
+            catalog: Dict[str, tuple[str, str]] = {}
+            for mp in self.all_files().get("matches") or []:
+                try:
+                    df = self._read(mp, columns=["match_id", "comp", "season"])
+                except Exception:
+                    continue
+                if not {"match_id", "comp", "season"} <= set(df.columns):
+                    continue
+                for r in df[["match_id", "comp", "season"]].dropna().itertuples(index=False, name=None):
+                    catalog[self._sid_key(r[0])] = (str(r[1]), str(r[2]))
+            self._catalog_map = catalog
+        info = self._catalog_map.get(self._sid_key(sid))
+        if info:
+            want = f"events_{info[0]}_{info[1]}".lower()
+            first = [p for p in paths if p.stem.lower() == want]
+            return first + [p for p in paths if p not in first]
         return paths
+
+    def pending_match_ids(self, limit: Optional[int] = None) -> List[int]:
+        """IDs OpenPlay com evento no catálogo, ainda não convertidos/cacheados no banco."""
+        if self.db is None:
+            return []
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                "SELECT m.match_id FROM matches m LEFT JOIN events e ON e.match_id = m.match_id "
+                "WHERE m.data_source = 'openplay' AND m.data_level = 'EVENTS' "
+                "GROUP BY m.match_id HAVING COUNT(e.event_id) = 0 ORDER BY m.match_date DESC"
+            ).fetchall()
+        now = time.time()
+        out = []
+        for row in rows:
+            mid = int(row[0])
+            try:
+                failed_at = float(self.db.get_state("openplay", f"prefetch_failed_{mid}") or 0)
+            except (TypeError, ValueError):
+                failed_at = 0
+            if failed_at and now - failed_at < 24 * 3600:
+                continue
+            out.append(mid)
+            if limit is not None and len(out) >= max(0, int(limit)):
+                break
+        return out
+
+    def pending_count(self) -> int:
+        if self.db is None:
+            return 0
+        with self.db.connect() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM matches m LEFT JOIN events e ON e.match_id = m.match_id "
+                "WHERE m.data_source = 'openplay' AND m.data_level = 'EVENTS' "
+                "GROUP BY m.match_id HAVING COUNT(e.event_id) = 0"
+            ).fetchall()
+        return len(row)
+
+    def prefetch_events(self, limit: int = 250, progress: Optional[Callable[[str], None]] = None,
+                        stop: Optional[Callable[[], bool]] = None) -> Dict[str, int]:
+        """Converte uma fatia dos jogos locais sem abrir telas; é retomável e nunca acessa a rede."""
+        if self.db is None:
+            raise ValueError("prefetch OpenPlay exige DataHubDB")
+        say = progress or (lambda m: None)
+        ids = self.pending_match_ids(limit=limit)
+        loaded = failed = 0
+        for i, mid in enumerate(ids, 1):
+            if stop and stop():
+                break
+            try:
+                frame = self.load_events(mid)
+                if frame is not None and not frame.empty:
+                    loaded += 1
+            except Exception as exc:
+                failed += 1
+                self.db.set_state("openplay", f"prefetch_failed_{mid}", str(time.time()))
+                say(f"OpenPlay {mid}: {type(exc).__name__}: {exc}")
+            if i % 25 == 0:
+                say(f"OpenPlay: lote {i}/{len(ids)} · convertidos {loaded} · falhas {failed}")
+        return {"loaded": loaded, "failed": failed, "pending": self.pending_count(), "attempted": len(ids)}
 
     def load_events(self, match_id: int) -> pd.DataFrame:
         meta = self.db.get_match(int(match_id)) or {}
