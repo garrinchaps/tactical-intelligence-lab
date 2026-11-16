@@ -34,7 +34,7 @@ FULL = Path("data/processed/danger_full.csv.gz")      # gerado por `python -m sr
 MIN_360_SHARE = 0.8                                    # partidas do banco só entram se tiverem densidade medida (360)
 MIN_IMPROVEMENT = 0.0005        # redução mínima de log-loss para promover (evita "melhora" por ruído)
 MAX_CV_AUC_STD = 0.05           # estabilidade: AUC das dobras do GroupKFold não pode variar mais que isso
-MAX_AUC_DROP = 0.005            # e a AUC no validação fixa não pode cair mais que isso em relação ao campeão
+MAX_AUC_DROP = 0.005            # e a AUC na validação fixa não pode cair mais que isso em relação ao campeão
 VAL_FRACTION = 0.25
 
 
@@ -55,7 +55,7 @@ class Version:
     reason: str
     origin: str = "treino"
     history: Dict[str, List[float]] = field(default_factory=dict)
-    # validação agrupada por partida (GroupKFold) e critério estatístico de promoção
+    # validação agrupada por partida (GroupKFold) e critérios de promoção
     cv_folds: int = 0
     cv_seeds: int = 0
     cv_logloss_mean: Optional[float] = None
