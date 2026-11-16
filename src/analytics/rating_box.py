@@ -163,7 +163,7 @@ def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.D
 def player_form(db, names: List[str], n: int = 10, ref: Optional[pd.DataFrame] = None,
                 team_names: Optional[List[str]] = None) -> pd.DataFrame:
     """
-    Nota 2.0 (por estatísticas) do jogador nos últimos `n` jogos com números por jogador — base da FASE (últimos 5),
+    Nota 3.0 (por estatísticas) do jogador nos últimos `n` jogos com números por jogador — base da FASE (últimos 5),
     da QUALIDADE (média do período) e da REGULARIDADE (desvio entre jogos). Sem jogos assim, volta vazio.
     Nunca só pelo nome: usa o id do atleta na FotMob; sem id, fica no clube informado ou no time do jogo mais recente.
     """
