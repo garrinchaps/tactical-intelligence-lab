@@ -90,7 +90,7 @@ def resolve_pronoun(query: str, history: List[Dict[str, Any]], roster: List[str]
 
 
 FACT_ASKS = {"goals", "ranking", "profile", "unavailable", "presence", "errors", "corridors", "conceded_how", "rating",
-             "lineup_role",
+             "lineup_role", "subs", "game_state", "similar", "identity",
              "team_merit",
              "between_lines", "efficiency", "moments", "goal_buildup", "defenders_diag", "combinations"}
 
@@ -232,6 +232,12 @@ class LocalScopedWriter:
                 out.append(match_story.write(b, _fmt))
                 if b["fatores"]:
                     summary.append(b["fatores"][0]["leitura"].rstrip("."))
+                continue
+            if key in ("trocas", "placar_estado", "parecidos", "identidade"):
+                txt, summ = cls._r5_text(key, b)
+                out.append(txt)
+                if summ:
+                    summary.append(summ)
                 continue
             if key == "escalacao":
                 txt, summ = cls._lineup_text(b)
@@ -554,6 +560,71 @@ class LocalScopedWriter:
         "fisico": "dados físicos e médicos (peso, batimentos, lesões) não fazem parte das bases de jogo",
         "contexto": "público, clima, gramado e salários não constam nas fontes de lances e estatísticas",
     }
+
+    @staticmethod
+    def _r5_text(key: str, b: Dict[str, Any]) -> Tuple[str, str]:
+        team = b.get("equipe", "")
+        if key == "trocas":
+            tr = b.get("trocas") or []
+            if not tr:
+                return f"{team} não teve substituição com tempo suficiente antes e depois para comparar (≥ 4 min de cada lado).", ""
+            lines, best = [], None
+            for t_ in tr:
+                v = t_["variacao"]
+                bits = []
+                for k, lab in (("posse_pct", "posse"), ("field_tilt_pct", "campo rival"), ("xt_15", "xT/15'"), ("xg_15", "xG/15'"),
+                               ("xg_sofrido_15", "xG sofrido/15'")):
+                    if v.get(k) is not None and abs(v[k]) >= (5 if "pct" in k else 0.15):
+                        bits.append(f"{lab} {'+' if v[k] > 0 else ''}{_fmt(v[k])}")
+                lines.append(f"- **{t_['minuto']}'** entrou {', '.join(t_['entrou'])} (saiu {', '.join(t_['saiu'])}), placar {t_['placar_na_troca']}: "
+                             + (", ".join(bits) if bits else "quase nada mudou") + f". _{t_['aviso']}._")
+                score = (v.get("xt_15") or 0) + (v.get("xg_15") or 0) - (v.get("xg_sofrido_15") or 0)
+                if best is None or score > best[0]:
+                    best = (score, t_)
+            head = (f"**Como {team} mudou depois de cada substituição** (janela de até {int(b.get('janela_min', 15))} min antes × depois):")
+            summ = (f"a troca dos {best[1]['minuto']}' foi a que mais acompanhou uma melhora de {team}" if best and best[0] > 0.2 else "")
+            return head + "\n" + "\n".join(lines) + ("\n\n💡 _Isso mostra o que aconteceu junto com a troca — o placar, o "
+                                                   "cansaço e as trocas do rival também pesam. Não prova que quem entrou causou a mudança._"), summ
+        if key == "placar_estado":
+            st_ = b.get("estados") or {}
+            if not st_:
+                return "Sem dados suficientes para separar o jogo por placar.", ""
+            lines = []
+            for k in ("vencendo", "empatando", "perdendo"):
+                v = st_.get(k)
+                if v:
+                    lines.append(f"- **{k}** ({_fmt(v['minutos'])} min{', amostra pequena' if v.get('amostra_pequena') else ''}): "
+                                 f"posse {_fmt(v.get('posse_pct'))}%, campo rival {_fmt(v.get('field_tilt_pct'))}%, "
+                                 f"xG {_fmt(v.get('xg_15'))} e xG sofrido {_fmt(v.get('xg_sofrido_15'))} a cada 15 min.")
+            return f"**{team} conforme o placar:**\n" + "\n".join(lines), ""
+        if key == "parecidos":
+            sm = b.get("semelhantes") or []
+            if not sm:
+                return ("Não achei jogos parecidos: este jogo (ou a base) não tem estatísticas suficientes para comparar estilo."
+                        + (f" ({b.get('motivo')})" if b.get("motivo") else ""), "")
+            lines = [f"- **{x['jogo']}** ({x['data']}, {x['competicao']}) — estilo de {x['time_comparado']}: coincide em "
+                     f"{', '.join(x['coincide_em'])}; difere em {', '.join(x['difere_em'])}." for x in sm]
+            return (f"**Jogos com estilo parecido ao de {team} neste jogo:**\n" + "\n".join(lines)
+                    + f"\n\n_{b.get('criterio', '')}._"), f"o jogo mais parecido foi {sm[0]['jogo']}"
+        if key == "identidade":
+            tr = b.get("tracos") or []
+            vu = (b.get("vulneraveis") or {})
+            out = []
+            if tr:
+                out.append(f"**Como {team} costuma jogar** (últimos {b.get('jogos')} jogos com estatísticas):")
+                out += [f"- {team} {t_['traco']}: {t_['metrica']} {_fmt(t_['media'])} contra {_fmt(t_['referencia'])} normal "
+                        f"({t_['dif_pct']:+.0f}%), em {t_['frequencia_pct']}% dos jogos." for t_ in tr]
+            else:
+                out.append(f"Nos jogos com estatísticas de {team}, nenhum traço de estilo aparece de forma consistente "
+                           f"(≥ 60% dos jogos)." if b.get("jogos") else f"Não há jogos de {team} com estatísticas suficientes.")
+            if vu.get("padroes"):
+                out.append("**Problemas que se repetem:** " + "; ".join(
+                    f"{p['problema']} ({p['jogos_acima']} de {p['jogos']} jogos)" for p in vu["padroes"]) + ".")
+            elif vu.get("sinais"):
+                out.append("**Sinais (ainda não padrão):** " + "; ".join(
+                    f"{p['problema']} ({p['jogos_acima']} de {p['jogos']})" for p in vu["sinais"]) + ".")
+            return "\n".join(out), (f"{team} {tr[0]['traco']}" if tr else "")
+        return "", ""
 
     @staticmethod
     def _lineup_text(b: Dict[str, Any]) -> Tuple[str, str]:

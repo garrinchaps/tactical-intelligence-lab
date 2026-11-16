@@ -9,7 +9,7 @@ from src.ui import nav
 from src.ui.components import source_gap
 from src.ui.names import pt
 
-SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes"]
+SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico"]
 
 
 def render(current_context, match_bar=None) -> None:
@@ -67,6 +67,10 @@ def render(current_context, match_bar=None) -> None:
 
     if sec == SECTIONS[0]:
         match_center.render(ctx)
+    elif sec == SECTIONS[5]:
+        from src.ui.pages import patterns
+
+        patterns.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
     elif not ctx.has_events and sec != SECTIONS[2]:
         source_gap("eventos com coordenadas", ctx.bundle.source,
                    "Redes de passe, xT e comparações espaciais precisam de jogos ✅ (StatsBomb/Wyscout).", "🗺️",

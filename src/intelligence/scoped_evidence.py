@@ -1115,6 +1115,25 @@ class ScopedEvidenceBuilder:
             blocks["historia"] = match_story.build(df, team, other)
         elif sc.ask == "result":
             blocks["resultado"] = cls.block_result(df, team, other, meta)
+        elif sc.ask in ("subs", "game_state"):
+            from src.analytics import match_patterns as MP
+
+            w = df[cls._time_mask(df, sc)]
+            blocks["trocas" if sc.ask == "subs" else "placar_estado"] = \
+                MP.substitution_impact(w, team) if sc.ask == "subs" else MP.game_state(w, team)
+        elif sc.ask in ("similar", "identity"):
+            try:
+                from src.analytics import team_history as TH
+                from src.data_hub.db import DataHubDB
+
+                db = DataHubDB()
+                names = [team]
+                if sc.ask == "similar":
+                    blocks["parecidos"] = {**TH.similar(db, names, int(meta.get("match_id") or 0)), "equipe": team}
+                else:
+                    blocks["identidade"] = {**TH.identity(db, names), "vulneraveis": TH.vulnerabilities(db, names), "equipe": team}
+            except Exception as exc:
+                blocks["identidade" if sc.ask == "identity" else "parecidos"] = {"erro": str(exc), "equipe": team}
         elif sc.ask == "lineup_role":
             blocks["escalacao"] = cls.block_lineup(df, sc, team, other, meta)
         elif sc.ask == "presence":

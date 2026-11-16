@@ -361,7 +361,17 @@ class QueryUnderstanding:
             analysis = None                              # "quem MAIS correu nas costas" = ranking de jogador
         if re.search(r"\bmenos\b|\bpior(es)?\b", t):
             sc.order = "asc"
-        if sc.players and rating_q and not many:
+        r5 = (("subs", r"substitui|substituic|\btrocas?\b|depois da entrada|depois que (o |a )?\w+ entrou|quem entrou mudou|"
+                       r"(melhorou|piorou) depois d"),
+              ("game_state", r"quando (estava|esteve|ficou) (perdendo|vencendo|ganhando|empatando|atras|na frente)|"
+                             r"depois de (sofrer|levar|tomar|marcar|fazer) o (primeiro )?gol|conforme o placar|com o placar"),
+              ("similar", r"jogos? (taticamente )?(parecid|semelhant)|partidas? (parecid|semelhant)|outros jogos (assim|como esse)"),
+              ("identity", r"\bestilo\b|identidade|como (o |a )?\w+( \w+)? costuma jogar|jeito de jogar|modelo de jogo|"
+                           r"problemas? (recorrentes?|que se repetem)|vulnerabilidades? recorrent|sempre sofre"))
+        hit5 = next((k for k, rx in r5 if re.search(rx, t)), None)
+        if hit5 and not (sc.players and hit5 == "identity"):
+            sc.ask = hit5
+        elif sc.players and rating_q and not many:
             sc.ask = "rating"
         elif team_merit:
             sc.ask = "team_merit"

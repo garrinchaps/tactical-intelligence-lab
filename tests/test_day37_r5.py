@@ -129,3 +129,59 @@ def test_fotmob_ids_and_fixture_dedup(tmp_path):
     EspnProvider.save_fixtures(s, rows)
     fx = next_fixtures(db, ["Cruzeiro"])
     assert len(fx) == 1 and fx.iloc[0]["league"] == "bra.1"
+
+
+# ------------------------------------------------------------------ Rodada 5: padrões e histórico
+def test_match_patterns_on_world_cup_final():
+    from src.connectors.statsbomb_connector import load_demo_events
+    from src.ingestion.statsbomb_loader import StatsBombDataLoader
+    from src.analytics import match_patterns as MP
+    from src.preprocessing.event_cleaner import EventPreprocessor
+
+    df = EventPreprocessor.process_match_events(StatsBombDataLoader._parse_raw_events(None, load_demo_events(3869685), 3869685))
+    sp = MP.set_pieces(df, "Argentina")
+    assert sp["ataque"]["escanteio"]["cobradores"] == {"Lionel Messi": 6}          # Messi bateu os 6 escanteios
+    subs = MP.substitution_impact(df, "France")["trocas"]
+    first = subs[0]
+    assert first["minuto"] == 41 and set(first["saiu"]) == {"Ousmane Dembélé", "Olivier Giroud"}
+    assert first["placar_na_troca"] == "0 x 2" and "não causa" in first["aviso"]
+    assert first["variacao"]["posse_pct"] > 10                    # a França passou a ter mais a bola depois das trocas
+    gs = MP.game_state(df, "France")["estados"]
+    assert set(gs) <= {"vencendo", "empatando", "perdendo"} and "perdendo" in gs
+    assert abs(sum(v["minutos"] for v in gs.values()) - 124) < 6   # 120 + acréscimos, sem a disputa de pênaltis
+
+
+def _team_game(db, mid, date, home, away, hs, as_, stats_h, stats_a, comp="Liga X"):
+    db.upsert_matches([{"match_id": mid, "source_match_id": str(mid), "competition_name": comp, "season_name": "2026",
+                        "match_date": date, "home_team_name": home, "away_team_name": away, "home_score": hs, "away_score": as_,
+                        "status": "FT", "data_source": "espn", "data_level": "BOXSCORE"}])
+    from src.data_hub.boxscore import stat_row
+
+    rows = [stat_row(home, k, v) for k, v in stats_h.items()] + [stat_row(away, k, v) for k, v in stats_a.items()]
+    db.save_boxscore(mid, {"team_stats": [r for r in rows if r], "lineups": [], "timeline": [], "player_stats": []})
+
+
+def test_team_history_identity_vulnerability_similar(tmp_path):
+    from src.analytics import team_history as TH
+
+    db = DataHubDB(tmp_path / "h.db")
+    base = {"possession_pct": 50, "pass_accuracy_pct": 80, "passes_total": 400, "long_balls_accurate": 30, "crosses_total": 15,
+            "shots_total": 12, "shots_inside_box": 7, "xg": 1.2, "touches_opp_box": 20, "tackles_won": 15, "interceptions": 8}
+    mid = 500_200_000
+    # 30 jogos de outros times = régua da competição
+    for i in range(30):
+        _team_game(db, mid + i, f"2026-0{1 + i % 9}-{10 + i % 18:02d}", f"T{i}", f"U{i}", 1, 1, base,
+                   {**base, "possession_pct": 50 + (i % 5) - 2, "crosses_total": 14 + i % 4})
+    # o time: muita posse em todos os jogos e sofre MUITOS cruzamentos em quase todos
+    for j in range(6):
+        _team_game(db, mid + 100 + j, f"2026-10-{j + 1:02d}", "Alvo", f"R{j}", 2, 1,
+                   {**base, "possession_pct": 68 + j % 3}, {**base, "possession_pct": 32 - j % 3, "crosses_total": 30 + j})
+    idn = TH.identity(db, ["Alvo"])
+    assert idn["jogos"] == 6 and any(t["traco"] == "gosta de ter a bola" and t["frequencia_pct"] == 100 for t in idn["tracos"])
+    vu = TH.vulnerabilities(db, ["Alvo"])
+    assert any(p["problema"] == "sofre muitos cruzamentos" for p in vu["padroes"])
+    hab = TH.vs_habit(db, ["Alvo"], mid + 105)
+    assert "diferencas" in hab and hab["jogos_historico"] >= 4
+    sim = TH.similar(db, ["Alvo"], mid + 105, k=2)
+    assert sim["semelhantes"] and sim["semelhantes"][0]["time_comparado"] == "Alvo"     # os mais parecidos são dele mesmo
+    assert all(s["match_id"] != mid + 105 for s in sim["semelhantes"])
