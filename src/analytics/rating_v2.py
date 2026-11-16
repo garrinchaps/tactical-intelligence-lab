@@ -344,9 +344,11 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         rows.append({
             "jogador": p, "equipe": team, "posicao": e["position_name"].dropna().mode().iloc[0] if "position_name" in e
             and not e["position_name"].dropna().empty else "", "funcao": primary_role, "role_mix": role_mix, "minutos": m,
-            "gols": np_goals + pen_goals, "gols_penalti": pen_goals,
+            "gols": np_goals + pen_goals,
+            "gols_penalti": pen_goals if "shot_type_name" in shots else None,
             "assistencias": sum(1 for g in gl if g.get("assistencia") == p),
-            "gols_np90": np_goals * f, "gols_pen90": pen_goals * f,
+            "gols_np90": np_goals * f if "shot_type_name" in shots else None,
+            "gols_pen90": pen_goals * f if "shot_type_name" in shots else None,
             "xg90": float(sxg.sum()) * f if has_player_xg else None,
             "xg": round(float(sxg.sum()), 2) if has_player_xg else None,
             "no_alvo90": int(on.sum()) * f if has_shot_outcome else None,
