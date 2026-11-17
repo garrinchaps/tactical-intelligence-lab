@@ -1,8 +1,12 @@
+import sqlite3
+from contextlib import contextmanager
+from datetime import date, timedelta
+
 import pandas as pd
 
 from src.scout.engine import (
     _foreign_rule, build_market_universe, build_simulation, transfer_realism,
-    add_quality_scores, recommend,
+    add_quality_scores, load_player_history, recommend,
 )
 
 
@@ -272,3 +276,106 @@ def test_market_universe_does_not_attach_ambiguous_history_to_homonyms():
     assert out["minutos"].isna().all()
     assert out["historico_temporadas"].tolist() == ["[]", "[]"]
     assert out["historico_ambiguo"].fillna(False).all()
+
+
+class _SQLiteHistoryDB:
+    def __init__(self, path):
+        self.path = str(path)
+
+    @contextmanager
+    def connect(self):
+        conn = sqlite3.connect(self.path)
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def _history_fixture(path):
+    conn = sqlite3.connect(path)
+    conn.executescript("""
+        CREATE TABLE matches (
+            match_id INTEGER PRIMARY KEY,
+            match_date TEXT,
+            season_name TEXT,
+            competition_name TEXT,
+            home_team_name TEXT,
+            away_team_name TEXT,
+            data_source TEXT
+        );
+        CREATE TABLE match_player_stats (
+            match_id INTEGER NOT NULL,
+            team_name TEXT NOT NULL,
+            player_name TEXT NOT NULL,
+            position TEXT,
+            minutes INTEGER,
+            rating REAL,
+            stats_json TEXT
+        );
+        CREATE INDEX idx_matches_date ON matches(match_date);
+        CREATE INDEX idx_pstats_match ON match_player_stats(match_id, team_name);
+        CREATE INDEX idx_pstats_player ON match_player_stats(player_name, match_id);
+    """)
+
+    rows = []
+    match_id = 1
+
+    def add_player(name, offset_days, minutes=90):
+        nonlocal match_id
+        played = (date.today() - timedelta(days=offset_days)).isoformat()
+        conn.execute(
+            """INSERT INTO matches VALUES (?, ?, '2025', 'Liga de teste',
+               'Clube A', 'Clube B', 'fotmob')""",
+            (match_id, played),
+        )
+        rows.append((match_id, "Clube A", name, "ST", minutes, 7.0, "{}"))
+        match_id += 1
+
+    # Jogador Transfermarkt: deve manter todo o recorte de cinco anos.
+    add_player("Alpha Target", 250)
+    add_player("Alpha Target", 40)
+
+    # Jogador sem cadastro: quatro jogos recentes e 480 minutos qualificam-no.
+    for offset in (30, 60, 90, 120):
+        add_player("Beta Unlisted", offset, 120)
+    add_player("Beta Unlisted", 500, 90)
+
+    # Jogador antigo sem exposição recente: não entra no universo reduzido.
+    add_player("Gamma Legacy", 200)
+
+    conn.executemany(
+        "INSERT INTO match_player_stats VALUES (?, ?, ?, ?, ?, ?, ?)", rows
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_load_player_history_filters_names_but_keeps_full_history_and_active_unlisted(tmp_path):
+    path = tmp_path / "history.sqlite"
+    _history_fixture(path)
+
+    history = load_player_history(
+        _SQLiteHistoryDB(path), days=1825, player_names=["Alpha Target"]
+    )
+
+    by_core = history.set_index("core")
+    assert "alpha target" in by_core.index
+    assert "beta unlisted" in by_core.index
+    assert "gamma legacy" not in by_core.index
+    assert by_core.loc["alpha target", "jogos"] == 2
+    # O jogador sem cadastro é selecionado pelos quatro jogos recentes e mantém também
+    # sua partida de 500 dias atrás no histórico completo.
+    assert by_core.loc["beta unlisted", "jogos"] == 5
+    assert by_core.loc["beta unlisted", "minutos"] == 570
+
+
+def test_load_player_history_without_market_names_preserves_full_catalog_behavior(tmp_path):
+    path = tmp_path / "history_all.sqlite"
+    _history_fixture(path)
+
+    history = load_player_history(_SQLiteHistoryDB(path), days=1825)
+
+    assert set(history["core"]) == {
+        "alpha target", "beta unlisted", "gamma legacy"
+    }
