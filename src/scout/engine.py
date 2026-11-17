@@ -312,12 +312,22 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
 
     # Uma única ordenação atende forma dos últimos cinco jogos e seleção do registro mais recente.
     chronological = rows.sort_values("match_date", ascending=True, kind="stable")
-    forms = chronological.groupby(
+    # Reduz cada grupo a no máximo cinco avaliações válidas antes de construir as listas.
+    # A implementação anterior executava uma função Python sobre todo o histórico de cada
+    # atleta, mesmo descartando quase todas as linhas com tail(5).
+    form_rows = chronological.loc[
+        chronological["_rating_num"].notna(), group_keys + ["_rating_num"]
+    ]
+    form_rows = form_rows.groupby(
         group_keys, dropna=False, sort=False, observed=True
-    )["_rating_num"].agg(
-        lambda values: [round(float(value), 2) for value in values.dropna().tail(5)]
+    ).tail(5)
+    forms = form_rows.groupby(
+        group_keys, dropna=False, sort=False, observed=True
+    )["_rating_num"].agg(list).reindex(out.index)
+    out["forma_5"] = forms.map(
+        lambda values: [round(float(value), 2) for value in values]
+        if isinstance(values, list) else []
     )
-    out["forma_5"] = forms.reindex(out.index)
 
     latest = (
         chronological.drop_duplicates(group_keys, keep="last")
