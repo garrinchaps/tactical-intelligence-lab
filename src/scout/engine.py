@@ -231,6 +231,11 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
                 data["temporada"] = _safe_str(season) or "não identificada"
                 seasons.append(data)
         all_data = _player_season_totals(group)
+        latest_row = group.sort_values("match_date", ascending=False).iloc[0]
+        observed_positions = group["position"].dropna().astype(str).tolist() if "position" in group else []
+        all_data["nome_observado"] = _safe_str(latest_row.get("player_name"))
+        all_data["posicao_observada"] = pd.Series(observed_positions).mode().iloc[0] if observed_positions else ""
+        all_data["nacionalidade_observada"] = None
         last_year = group[pd.to_datetime(group["match_date"], errors="coerce") >=
                           pd.Timestamp.today().normalize() - pd.Timedelta(days=365)]
         recent = _player_season_totals(last_year) if not last_year.empty else {}
@@ -262,11 +267,11 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     """Universo de atletas: cadastro de mercado + histórico estatístico multi-clube."""
     if tm_players is None or tm_players.empty:
         return pd.DataFrame()
-    p = tm_players.copy()
+    p = tm_players.copy() if tm_players is not None else pd.DataFrame()
     for col in ("nome", "clube", "posicao", "funcao", "nascimento", "nacionalidade", "transfermarkt_id",
                 "clube_id", "valor_mercado_eur", "fim_contrato", "ultima_temporada"):
         if col not in p:
-            p[col] = None
+            p[col] = pd.Series(dtype=object)
     p["nome"] = p["nome"].fillna("").astype(str)
     p = p[p["nome"].str.strip() != ""].copy()
     p["_core"] = p["nome"].map(player_core)
@@ -316,6 +321,46 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
             p["_valor_historico"] = p["transfermarkt_id"].astype(str).map(vmap)
             p["valor_tm_atual"] = p["valor_mercado_eur"]
             p["valor_mercado_eur"] = p["valor_mercado_eur"].combine_first(p["_valor_historico"])
+    # Amplia o universo com atletas ausentes do cadastro TM, mas observados recentemente em escalações
+    # e com exposição mínima. Sem idade, contrato ou valor publicados, esses campos ficam vazios.
+    if history is not None and not history.empty and "core" in history:
+        known = set(p["_core"].dropna().astype(str))
+        observed = []
+        for _, item in history.iterrows():
+            core = _safe_str(item.get("core"))
+            last_game = pd.to_datetime(item.get("ultimo_jogo"), errors="coerce")
+            minutes_12m = _num(item.get("minutos_12m")) or 0
+            games_12m = _num(item.get("jogos_12m")) or 0
+            if (not core or core in known or pd.isna(last_game) or
+                    last_game < pd.Timestamp.today().normalize() - pd.Timedelta(days=180) or
+                    minutes_12m < 450 or games_12m < 4):
+                continue
+            name = _safe_str(item.get("nome_observado"))
+            role = _role(item.get("posicao_observada"), "")
+            if not name or not role:
+                continue
+            record = {col: None for col in p.columns}
+            record.update({"nome": name, "clube": _safe_str(item.get("ultimo_time")),
+                           "posicao": _safe_str(item.get("posicao_observada")), "funcao": _safe_str(item.get("posicao_observada")),
+                           "nacionalidade": None, "nascimento": None, "idade": np.nan,
+                           "valor_mercado_eur": np.nan, "fim_contrato": pd.NaT,
+                           "transfermarkt_id": None, "clube_id": None, "papel": role, "_role": role,
+                           "_core": core, "clube_observado": True,
+                           "fonte_clube_observado": "últimas partidas disponíveis; sem cadastro TM",
+                           "sem_cadastro_mercado": True})
+            for key, value in item.items():
+                if key not in ("core", "historico_temporadas", "ultimos_jogos", "nome_observado", "posicao_observada"):
+                    record[key] = value
+            record["historico_temporadas"] = json.dumps(item.get("historico_temporadas", []), ensure_ascii=False, default=str)
+            record["ultimos_jogos"] = json.dumps(item.get("ultimos_jogos", []), ensure_ascii=False, default=str)
+            record["idade"] = np.nan
+            record["valor_mercado_eur"] = np.nan
+            record["fim_contrato"] = pd.NaT
+            record["clube_valor_total_eur"] = np.nan
+            observed.append(record)
+            known.add(core)
+        if observed:
+            p = pd.concat([p, pd.DataFrame(observed)], ignore_index=True, sort=False)
     for col in ("minutos", "jogos", "rating_media", "minutos_12m", "jogos_12m", "rating_12m"):
         if col not in p:
             p[col] = np.nan
