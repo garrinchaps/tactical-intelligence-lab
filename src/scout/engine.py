@@ -567,8 +567,9 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     valid_minutes = raw["_minutes_num"].where(raw["_rating_num"].notna(), 0)
     raw["_rating_minutes"] = valid_minutes
     raw["_rating_weight"] = raw["_rating_num"].fillna(0) * valid_minutes
-    raw["_opponent_minutes"] = raw["_minutes_num"]
-    raw["_opponent_level_weight"] = pd.to_numeric(raw["_opponent_level"], errors="coerce").fillna(50) * raw["_opponent_minutes"]
+    opponent_level = pd.to_numeric(raw["_opponent_level"], errors="coerce")
+    raw["_opponent_minutes"] = raw["_minutes_num"].where(opponent_level.notna(), 0)
+    raw["_opponent_level_weight"] = opponent_level.fillna(0) * raw["_opponent_minutes"]
     raw["_opponent_adjustment_weight"] = pd.to_numeric(raw["_opponent_adjustment"], errors="coerce").fillna(0) * raw["_opponent_minutes"]
 
     report("Calculando totais da carreira por jogador...")
