@@ -23,6 +23,75 @@ import pandas as pd
 
 from src.squad.formations import FORMATIONS, ROLE_PT, fit, natural_role
 
+
+# Normaliza nomes de seleções e nacionalidades do Transfermarkt. Países não listados
+# continuam tratados como clubes, evitando classificar clubes pelo nome de cidade.
+_COUNTRY_ALIASES = {
+    "brasil": "brazil", "brazil": "brazil",
+    "inglaterra": "england", "england": "england",
+    "espanha": "spain", "spain": "spain",
+    "alemanha": "germany", "germany": "germany",
+    "franca": "france", "france": "france",
+    "italia": "italy", "italy": "italy",
+    "portugal": "portugal",
+    "argentina": "argentina",
+    "uruguai": "uruguay", "uruguay": "uruguay",
+    "holanda": "netherlands", "paises baixos": "netherlands", "netherlands": "netherlands",
+    "belgica": "belgium", "belgium": "belgium",
+    "croacia": "croatia", "croatia": "croatia",
+    "servia": "serbia", "serbia": "serbia",
+    "japao": "japan", "japan": "japan",
+    "coreia do sul": "south korea", "south korea": "south korea",
+    "estados unidos": "united states", "united states": "united states",
+    "mexico": "mexico",
+    "colombia": "colombia",
+    "chile": "chile",
+    "paraguai": "paraguay", "paraguay": "paraguay",
+    "equador": "ecuador", "ecuador": "ecuador",
+    "peru": "peru",
+    "senegal": "senegal",
+    "marrocos": "morocco", "morocco": "morocco",
+    "nigeria": "nigeria",
+    "camaroes": "cameroon", "cameroon": "cameroon",
+    "costa do marfim": "ivory coast", "ivory coast": "ivory coast",
+    "gana": "ghana", "ghana": "ghana",
+    "dinamarca": "denmark", "denmark": "denmark",
+    "suecia": "sweden", "sweden": "sweden",
+    "noruega": "norway", "norway": "norway",
+    "suica": "switzerland", "switzerland": "switzerland",
+    "austria": "austria",
+    "polonia": "poland", "poland": "poland",
+    "turquia": "turkey", "turkey": "turkey",
+    "ucrania": "ukraine", "ukraine": "ukraine",
+}
+
+
+def _country_key(value: Any) -> str:
+    import unicodedata
+
+    if value is None or pd.isna(value):
+        return ""
+    raw = unicodedata.normalize("NFKD", str(value).casefold())
+    token = " ".join("".join(ch for ch in raw if not unicodedata.combining(ch)).split())
+    return _COUNTRY_ALIASES.get(token, "")
+
+
+def national_team_key(team_name: str) -> str:
+    """Retorna a nacionalidade canônica quando o nome selecionado é uma seleção reconhecida."""
+    return _country_key(team_name)
+
+
+def filter_national_team_players(players: pd.DataFrame, team_name: str) -> pd.DataFrame:
+    """Em seleções, mantém apenas atletas cuja nacionalidade está explicitamente confirmada."""
+    country = national_team_key(team_name)
+    if not country or players is None or players.empty:
+        return players.copy() if players is not None else pd.DataFrame()
+    if "nacionalidade" not in players:
+        return players.iloc[0:0].copy()
+    mask = players["nacionalidade"].map(_country_key).eq(country)
+    return players.loc[mask].copy().reset_index(drop=True)
+
+
 # ------------------------------------------------------------------------------------------------ elenco
 def age_on(born: Any, ref: Optional[date] = None) -> Optional[float]:
     b = pd.to_datetime(born, errors="coerce")
@@ -60,7 +129,7 @@ def squad_frame(tm_players: pd.DataFrame, club_ids: Iterable[Any] = (), club_nam
     if not parts or all(p.empty for p in parts):
         return pd.DataFrame(columns=["nome", "papel", "idade"])
     df = pd.concat(parts, ignore_index=True)
-    for c in ("funcao", "posicao", "nascimento", "altura_cm", "pe", "valor_mercado_eur", "transfermarkt_id", "nota_manual"):
+    for c in ("funcao", "posicao", "nacionalidade", "nascimento", "altura_cm", "pe", "valor_mercado_eur", "transfermarkt_id", "nota_manual"):
         if c not in df:
             df[c] = None
     df["papel"] = [natural_role(f, p) for f, p in zip(df["funcao"], df["posicao"])]

@@ -6,6 +6,8 @@
 
 ---
 
+> **Diretriz acadêmica atualizada:** este plano também orienta a aplicação prática da disciplina G00IIAR0.01. A matriz de rastreabilidade dos quatro pilares de IA, com estado real, datasets, métricas, dependências e critérios de conclusão, está em [`docs/MATRIZ_IA_ACADEMICA.md`](MATRIZ_IA_ACADEMICA.md). Nenhum modelo será considerado concluído apenas por existir: exige integração funcional, dados adequados, baseline, avaliação, teste, explicabilidade e limitações documentadas.
+
 ## Sumário Executivo
 
 O **Tactical Intelligence Lab** foi idealizado para ser uma plataforma autônoma, profissional e explicável de inteligência futebolística. O projeto combina engenharia de dados em larga escala, modelagem estatística contextual, redes neurais para leitura de dinâmicas de jogo, simulação tática e motor de scout auditável.

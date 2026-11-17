@@ -200,3 +200,15 @@ A área **Scout** combina diagnóstico do clube, qualidade estatística por fun�
 ## 🚀 Publicação na internet
 
 A preparação para hospedagem pública, incluindo requisitos de armazenamento persistente e migração validada da base local, está em [`docs/DEPLOY_PUBLICO.md`](docs/DEPLOY_PUBLICO.md). Para gerar um inventário **somente de leitura** antes da migração, execute `python scripts/inventory_deploy_data.py`. O inventário não altera o SQLite nem envia dados ao GitHub.
+
+## Migração arquitetural
+
+O legado Streamlit/SQLite continua sendo a referência funcional durante a migração para Data Hub + API + web. O inventário, plano, status, política de fontes, segurança, operação e testes estão em:
+
+- `docs/MAPA_COMPLETO_DE_FUNCIONALIDADES.md`
+- `docs/ARQUITETURA_ALVO.md`
+- `docs/PLANO_DE_MIGRACAO.md`
+- `docs/STATUS_DA_MIGRACAO.md`
+- `docs/TESTES_E_PARIDADE.md`
+
+O banco local não deve ser versionado nem enviado integralmente ao Supabase. Use `PYTHONPATH=src python -m pytest -q tests` (ou o equivalente PowerShell documentado) para reproduzir a suíte principal.

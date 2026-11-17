@@ -104,6 +104,21 @@ def _lake_team(name: str):
 PAGE = 25
 
 
+def filter_team_matches(matches: pd.DataFrame, level: str = "Todos os jogos") -> pd.DataFrame:
+    """Filtro explícito da profundidade do catálogo, sem depender do filtro global da navegação."""
+    if matches is None or matches.empty or level == "Todos os jogos":
+        return matches.copy() if matches is not None else pd.DataFrame()
+    levels = {
+        "Somente com lances": {"EVENTS"},
+        "Somente com estatísticas": {"BOXSCORE"},
+        "Somente placares": {"RESULT"},
+    }
+    allowed = levels.get(level)
+    if allowed is None:
+        raise ValueError(f"Filtro de partidas desconhecido: {level}")
+    return matches[matches["data_level"].astype(str).isin(allowed)].copy()
+
+
 def upcoming(names) -> pd.DataFrame:
     """Próximos jogos do time (lake 'agenda', alimentado pelo open-matchday)."""
     try:
@@ -136,13 +151,13 @@ def render(_ctx=None) -> None:
         empty_state("Nenhum time escolhido", "Use a busca no topo e clique no time.", "🛡️")
         return
     names = same_team_names(name)
-    from src.ui.context import LEVEL_CHOICES, chosen_levels
-
-    m = team_matches(names, include_score_only=None)           # v36: respeita o nível escolhido no topo (🟢/📊/📄)
-    allm = team_matches(names, include_score_only=True)        # campanha usa todos os resultados
+    # O perfil sempre carrega o catálogo completo uma única vez. O filtro local abaixo
+    # permite alternar profundidade sem depender do seletor global e sem esconder placares.
+    allm = team_matches(names, include_score_only=True)
+    m = allm
     r = record(names, allm)
     lake, key, ids = _lake_team(name)
-    fontes = sorted(ids["fonte"].unique()) if not ids.empty else sorted(m["data_source"].unique()) if not m.empty else []
+    fontes = sorted(ids["fonte"].unique()) if not ids.empty else sorted(allm["data_source"].unique()) if not allm.empty else []
     st.markdown(f'<div class="til-profile">{crest_img(name, "lg")}<div><div class="n">{pt(name)}</div>'
                 f'<div class="d">{len(m)} jogos no nível escolhido · {len(allm)} resultados no total'
                 + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
@@ -156,7 +171,7 @@ def render(_ctx=None) -> None:
     k[1].metric("V / E / D", f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}")
     k[2].metric("Gols pró / contra", f"{r.get('gp', 0)} / {r.get('gc', 0)}")
     k[3].metric("Aproveitamento", f"{r.get('aprov', 0)}%")
-    k[4].metric("Com todos os lances (✅)", int((m["data_level"] == "EVENTS").sum()) if not m.empty else 0)
+    k[4].metric("Com todos os lances (✅)", int((allm["data_level"] == "EVENTS").sum()) if not allm.empty else 0)
 
     nxt = upcoming(names)
     if not nxt.empty:
@@ -167,12 +182,16 @@ def render(_ctx=None) -> None:
     with t0:
         _style_tab(name, names)
     with t1:
-        lv_names = [k for k, v in LEVEL_CHOICES.items() if v in chosen_levels()]
-        st.caption("Mostrando só jogos com: " + " · ".join(lv_names) + " (o filtro de nível do topo vale aqui também).")
+        level_filter = st.selectbox(
+            "Exibir partidas",
+            ["Todos os jogos", "Somente com lances", "Somente com estatísticas", "Somente placares"],
+            key=f"team_level_filter_{name}",
+            help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",
+        )
+        m = filter_team_matches(allm, level_filter)
         if m.empty:
-            empty_state("Nenhum jogo deste time no nível escolhido", f"Há {len(allm)} resultado(s) dele no total, mas "
-                        "nenhum com o nível de dado marcado no topo.", "🗓️",
-                        "Marque outro nível no seletor do topo (ex.: 📊 estatísticas ou 📄 só placar).")
+            empty_state("Nenhuma partida neste filtro", f"Há {len(allm)} resultado(s) deste time no catálogo. "
+                        "Experimente 'Todos os jogos' ou outra profundidade de dados.", "🗓️")
         else:
             f1, f2 = st.columns(2)
             seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)

@@ -50,5 +50,8 @@ database/*.db.gz
 database/*.db-*
 
 tactical-intelligence-lab/
+apps/web/node_modules/
+apps/web/dist/
+apps/web/*audit*.json
 data/processed/rating_ref_v3*.parquet
 data/learning/

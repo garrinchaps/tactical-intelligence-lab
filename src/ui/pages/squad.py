@@ -96,8 +96,24 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
     if sq.empty or len(sq) < 11:                         # clube fora do Transfermarkt: elenco pelas escalações da base
         local = D.squad_from_db(get_service().db, names)
         if not local.empty:
-            sq = squad_frame(local, [], [local["clube"].iloc[0]], added)
-            source = "escalações dos jogos na base (ESPN, API-Football, súmulas)"
+            from src.squad.planner import filter_national_team_players, national_team_key
+
+            if national_team_key(team):
+                # As escalações históricas identificam quem atuou pela seleção, mas não provam
+                # a nacionalidade. Cruza com o cadastro do Transfermarkt e exclui desconhecidos.
+                nationality_catalog = D.table("tm_jogadores", ["nome", "nacionalidade"])
+                if not nationality_catalog.empty and "nacionalidade" in nationality_catalog:
+                    nationality_catalog = nationality_catalog.drop_duplicates("nome", keep="last")
+                    local = local.merge(nationality_catalog[["nome", "nacionalidade"]], on="nome", how="left")
+                local = filter_national_team_players(local, team)
+                added = filter_national_team_players(added, team)
+            if not local.empty:
+                sq = squad_frame(local, [], [local["clube"].iloc[0]], added)
+                source = "escalações da base + nacionalidade confirmada"
+    from src.squad.planner import filter_national_team_players, national_team_key
+    if national_team_key(team):
+        sq = filter_national_team_players(sq, team)
+
     usage = pd.DataFrame()
     if "transfermarkt_id" in sq and sq["transfermarkt_id"].notna().any():
         ap = D.table("tm_aparicoes", None, "transfermarkt_id", sq["transfermarkt_id"].dropna().tolist())

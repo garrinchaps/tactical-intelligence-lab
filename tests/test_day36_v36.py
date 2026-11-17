@@ -269,7 +269,10 @@ def test_club_page_respects_top_level_filter():
     import src.ui.pages.clubs as C
 
     src = inspect.getsource(C.render)
-    assert "team_matches(names, include_score_only=None)" in src          # nível do topo, não "tudo analisável"
+    # O perfil carrega todos os resultados e filtra a profundidade localmente,
+    # independentemente do seletor global.
+    assert "team_matches(names, include_score_only=True)" in src
+    assert "m = filter_team_matches(allm, level_filter)" in src
 
 
 # ------------------------------------------------------------------ atletas duplicados
