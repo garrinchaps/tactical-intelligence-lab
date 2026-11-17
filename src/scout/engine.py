@@ -709,8 +709,8 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                     p[col] = p[hist_col].where(matched, p[col])
                 else:
                     p[col] = p[hist_col]
-                p.drop(columns=[hist_col], inplace=True)
-        p.drop(columns=["core", "__history_present"], errors="ignore", inplace=True)
+                p = p.drop(columns=[hist_col])
+        p = p.drop(columns=["core", "__history_present"], errors="ignore")
     else:
         matched = pd.Series(False, index=p.index)
 

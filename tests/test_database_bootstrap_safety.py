@@ -10,10 +10,13 @@ from scripts import fetch_db
 
 
 def _make_database(path: Path, *, table: str = "local_records", value: str = "keep-me") -> None:
-    with sqlite3.connect(path) as connection:
+    connection = sqlite3.connect(path)
+    try:
         connection.execute(f"CREATE TABLE {table} (value TEXT NOT NULL)")
         connection.execute(f"INSERT INTO {table}(value) VALUES (?)", (value,))
         connection.commit()
+    finally:
+        connection.close()
 
 
 def _make_remote_gzip(tmp_path: Path) -> Path:

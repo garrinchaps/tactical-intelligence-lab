@@ -9,6 +9,7 @@ Para substituição intencional, defina TACTICAL_ALLOW_DB_REPLACE=1; uma cópia 
 from __future__ import annotations
 
 import gzip
+import gc
 import os
 import shutil
 import sqlite3
@@ -45,7 +46,8 @@ def _truthy(value: str | None) -> bool:
 def _user_tables(path: Path) -> list[str]:
     """Lista tabelas de usuário em modo somente leitura."""
     uri = path.resolve().as_uri() + "?mode=ro"
-    with sqlite3.connect(uri, uri=True, timeout=10) as conn:
+    conn = sqlite3.connect(uri, uri=True, timeout=10)
+    try:
         conn.execute("PRAGMA query_only = ON")
         integrity = conn.execute("PRAGMA quick_check").fetchone()
         if not integrity or integrity[0] != "ok":
@@ -54,6 +56,10 @@ def _user_tables(path: Path) -> list[str]:
             "SELECT name FROM sqlite_master "
             "WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         ).fetchall()
+    finally:
+        conn.close()
+        del conn
+        gc.collect()
     return [str(row[0]) for row in rows]
 
 
@@ -80,6 +86,8 @@ def _backup_existing_database(path: Path) -> Path:
     else:
         destination.close()
         source.close()
+        del destination, source
+        gc.collect()
     return backup_path
 
 
@@ -148,8 +156,16 @@ def ensure_database(
                 shutil.copyfileobj(source, destination)
 
         print("Verificando integridade SQLite...")
-        with sqlite3.connect(str(temp_db)) as conn:
+        # O context manager controla a transação, mas não garante o
+        # fechamento do handle em todas as versões do SQLite no Windows.
+        # Fechar explicitamente antes do replace evita bloquear o .partial.
+        conn = sqlite3.connect(str(temp_db))
+        try:
             result = conn.execute("PRAGMA quick_check").fetchone()
+        finally:
+            conn.close()
+            del conn
+            gc.collect()
         if not result or result[0] != "ok":
             raise RuntimeError(
                 f"Banco remoto inválido: {result[0] if result else 'sem resultado'}"

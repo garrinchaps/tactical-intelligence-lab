@@ -1,6 +1,6 @@
 # Cobertura da base — Tactical Intelligence Lab
 
-Gerado em 17/11/2026 02:46 a partir de `tactical_lab.db` · **437.333 partidas reais** (simulações e uploads fora da conta).
+Gerado em 17/11/2026 19:56 a partir de `tactical_lab.db` · **437.347 partidas reais** (simulações e uploads fora da conta).
 
 
 > Honestidade técnica: estes números saem direto do banco. Ligas e temporadas que não aparecem aqui **não estão em nenhuma fonte aberta sincronizada** — são lacunas reais, não zeros estimados.
@@ -15,9 +15,9 @@ Gerado em 17/11/2026 02:46 a partir de `tactical_lab.db` · **437.333 partidas r
 
 | nível | partidas | % |
 |---|---|---|
-| ESTATÍSTICAS | 93085 | 21% |
+| ESTATÍSTICAS | 94598 | 22% |
 | EVENTOS | 32449 | 7% |
-| SÓ PLACAR | 311799 | 71% |
+| SÓ PLACAR | 310300 | 71% |
 
 ## Inconsistências detectadas
 
@@ -27,15 +27,15 @@ Nenhuma.
 
 | fonte | ESTATÍSTICAS | EVENTOS | SÓ PLACAR | total |
 |---|---|---|---|---|
-| fdcouk | 59226 | 0 | 67066 | 126292 |
-| fotmob | 26991 | 0 | 76802 | 103793 |
+| fdcouk | 59227 | 0 | 67066 | 126293 |
+| fotmob | 28486 | 0 | 75310 | 103796 |
 | openfootball | 0 | 0 | 89781 | 89781 |
 | intl | 0 | 0 | 49923 | 49923 |
 | openplay | 0 | 26547 | 0 | 26547 |
-| espn | 1583 | 0 | 21552 | 23135 |
+| espn | 1591 | 0 | 21552 | 23143 |
 | brasileirao | 3410 | 0 | 5375 | 8785 |
 | statsbomb | 0 | 3961 | 0 | 3961 |
-| open_matchday | 1803 | 0 | 1300 | 3103 |
+| open_matchday | 1812 | 0 | 1293 | 3105 |
 | wyscout | 0 | 1941 | 0 | 1941 |
 | api_football | 72 | 0 | 0 | 72 |
 
@@ -50,14 +50,14 @@ Nenhuma.
 | árbitro | 5% | todas as partidas |
 | linha do tempo (gols/cartões) | 12% | todas as partidas |
 | escalações | 7% | todas as partidas |
-| estatística: chutes | 99% | 93085 partidas com estatísticas |
-| estatística: no alvo | 97% | 93085 partidas com estatísticas |
-| estatística: posse | 34% | 93085 partidas com estatísticas |
-| estatística: escanteios | 99% | 93085 partidas com estatísticas |
-| estatística: faltas | 97% | 93085 partidas com estatísticas |
-| estatística: amarelos | 100% | 93085 partidas com estatísticas |
-| estatística: xG | 25% | 93085 partidas com estatísticas |
-| eventos já baixados | 15% | 32449 partidas com eventos na fonte |
+| estatística: chutes | 99% | 94598 partidas com estatísticas |
+| estatística: no alvo | 97% | 94598 partidas com estatísticas |
+| estatística: posse | 35% | 94598 partidas com estatísticas |
+| estatística: escanteios | 99% | 94598 partidas com estatísticas |
+| estatística: faltas | 97% | 94598 partidas com estatísticas |
+| estatística: amarelos | 100% | 94598 partidas com estatísticas |
+| estatística: xG | 25% | 94598 partidas com estatísticas |
+| eventos já baixados | 17% | 32449 partidas com eventos na fonte |
 
 ## Por competição e temporada (maiores 400)
 
@@ -79,15 +79,15 @@ Nenhuma.
 | La Liga | 2019/2020 | 792 | 413 | 0 | 379 | 0 | fdcouk, openplay, statsbomb | posse, xG |
 | Ligue 1 | 2022/2023 | 790 | 411 | 0 | 379 | 0 | fdcouk, openplay, statsbomb | posse, xG |
 | Ligue 1 | 2021/2022 | 781 | 401 | 0 | 380 | 0 | fdcouk, openplay, statsbomb | posse, xG |
-| Serie A | 2023/2024 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
+| Serie A | 2023/2024 | 760 | 380 | 145 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Serie A | 2016/2017 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2018/2019 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Serie A | 2015/2016 | 760 | 760 | 0 | 0 | 0 | openplay, statsbomb | n/a |
 | Serie A | 2020/2021 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Serie A | 2025/2026 | 760 | 380 | 380 | 380 | 0 | fdcouk, openplay | posse, xG |
-| La Liga | 2023/2024 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
+| La Liga | 2023/2024 | 760 | 380 | 142 | 380 | 0 | fdcouk, openplay | posse, xG |
 | La Liga | 2022/2023 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
-| La Liga | 2024/2025 | 760 | 380 | 376 | 380 | 0 | fdcouk, openplay | posse, xG |
+| La Liga | 2024/2025 | 760 | 380 | 380 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Serie A | 2018/2019 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Serie A | 2019/2020 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Campeonato Brasileiro Série A | 2024 | 760 | 0 | 0 | 1 | 759 | brasileirao, fdcouk | posse, xG |
@@ -103,7 +103,7 @@ Nenhuma.
 | Brasileirão Série A | 2025 | 760 | 0 | 0 | 760 | 0 | espn, fotmob | — |
 | Premier League | 2020/2021 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2015/2016 | 760 | 760 | 2 | 0 | 0 | openplay, statsbomb | n/a |
-| Premier League | 2024/2025 | 760 | 380 | 379 | 380 | 0 | fdcouk, openplay | posse, xG |
+| Premier League | 2024/2025 | 760 | 380 | 380 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2022/2023 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2025/2026 | 760 | 380 | 380 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2016/2017 | 760 | 380 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
@@ -113,12 +113,12 @@ Nenhuma.
 | Ligue 1 | 2016/2017 | 759 | 379 | 0 | 379 | 1 | fdcouk, openplay | posse, xG |
 | Campeonato Brasileiro Série A | 2023 | 759 | 0 | 0 | 380 | 379 | brasileirao, fdcouk | xG |
 | Ligue 1 | 2018/2019 | 759 | 380 | 0 | 379 | 0 | fdcouk, openplay | posse, xG |
-| Premier League | 2023/2024 | 759 | 380 | 0 | 379 | 0 | fdcouk, openplay | posse, xG |
+| Premier League | 2023/2024 | 759 | 380 | 145 | 379 | 0 | fdcouk, openplay | posse, xG |
 | Campeonato Brasileiro Série A | 2016 | 758 | 0 | 0 | 379 | 379 | brasileirao, fdcouk | xG |
 | La Liga | 2025/2026 | 758 | 380 | 380 | 378 | 0 | fdcouk, openplay | posse, xG |
 | La Liga | 2021/2022 | 758 | 379 | 0 | 379 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2019/2020 | 758 | 379 | 0 | 379 | 0 | fdcouk, openplay | posse, xG |
-| Serie A | 2024/2025 | 758 | 380 | 375 | 378 | 0 | fdcouk, openplay | posse, xG |
+| Serie A | 2024/2025 | 758 | 380 | 379 | 378 | 0 | fdcouk, openplay | posse, xG |
 | Premier League | 2021/2022 | 757 | 377 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
 | Ligue 1 | 2015/2016 | 757 | 757 | 0 | 0 | 0 | openplay, statsbomb | n/a |
 | Serie A | 2022/2023 | 755 | 375 | 0 | 380 | 0 | fdcouk, openplay | posse, xG |
@@ -132,16 +132,16 @@ Nenhuma.
 | Argentina — Primera Nacional | 2026 | 655 | 0 | 0 | 0 | 655 | fotmob | n/a |
 | Campeonato Brasileiro Série A | 2020 | 648 | 0 | 0 | 267 | 381 | brasileirao, fdcouk | xG |
 | Argentina — Primera Nacional | 2025 | 634 | 0 | 0 | 0 | 634 | fotmob | n/a |
-| Ligue 1 | 2024/2025 | 612 | 306 | 303 | 306 | 0 | fdcouk, openplay | posse, xG |
+| Ligue 1 | 2024/2025 | 612 | 306 | 306 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2025/2026 | 612 | 306 | 306 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2017/2018 | 612 | 306 | 0 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2016/2017 | 612 | 306 | 0 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2019/2020 | 612 | 306 | 0 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2018/2019 | 612 | 306 | 0 | 306 | 0 | fdcouk, openplay | posse, xG |
-| Ligue 1 | 2023/2024 | 611 | 305 | 0 | 306 | 0 | fdcouk, openplay | posse, xG |
+| Ligue 1 | 2023/2024 | 611 | 305 | 117 | 306 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2020/2021 | 611 | 306 | 0 | 305 | 0 | fdcouk, openplay | posse, xG |
 | Ligue 1 | 2025/2026 | 611 | 306 | 306 | 305 | 0 | fdcouk, openplay | posse, xG |
-| Bundesliga | 2023/2024 | 611 | 306 | 0 | 305 | 0 | fdcouk, openplay | posse, xG |
+| Bundesliga | 2023/2024 | 611 | 306 | 117 | 305 | 0 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2024/2025 | 611 | 306 | 306 | 304 | 1 | fdcouk, openplay | posse, xG |
 | Bundesliga | 2021/2022 | 611 | 306 | 0 | 305 | 0 | fdcouk, openplay | posse, xG |
 | Brasileirão Série D | 2026 | 610 | 0 | 0 | 0 | 610 | fotmob | n/a |
@@ -228,13 +228,13 @@ Nenhuma.
 | Italian Serie B | 2013/14 | 471 | 0 | 0 | 0 | 471 | openfootball | n/a |
 | Major League Soccer | 2021 | 471 | 0 | 0 | 0 | 471 | fdcouk | n/a |
 | Italian Serie B | 2016/17 | 469 | 0 | 0 | 0 | 469 | openfootball | n/a |
-| La Liga 2 | 2023-2024 | 468 | 0 | 0 | 0 | 468 | fotmob | n/a |
+| La Liga 2 | 2023-2024 | 468 | 0 | 0 | 468 | 0 | fotmob | xG |
 | La Liga 2 | 2025 | 468 | 0 | 0 | 0 | 468 | espn | n/a |
 | La Liga 2 | 2021-2022 | 468 | 0 | 0 | 0 | 468 | fotmob | n/a |
-| La Liga 2 | 2025-2026 | 468 | 0 | 0 | 91 | 377 | fotmob | — |
+| La Liga 2 | 2025-2026 | 468 | 0 | 0 | 468 | 0 | fotmob | — |
 | Liga Profesional  (Argentina) | 2015 | 468 | 0 | 0 | 1 | 467 | fdcouk | posse, xG |
-| La Liga 2 | 2022-2023 | 468 | 0 | 0 | 0 | 468 | fotmob | n/a |
-| La Liga 2 | 2024-2025 | 468 | 0 | 0 | 0 | 468 | fotmob | n/a |
+| La Liga 2 | 2022-2023 | 468 | 0 | 0 | 180 | 288 | fotmob | — |
+| La Liga 2 | 2024-2025 | 468 | 0 | 0 | 468 | 0 | fotmob | — |
 | La Liga 2 | 2022/2023 | 462 | 0 | 0 | 462 | 0 | fdcouk | posse, xG |
 | La Liga 2 | 2021/2022 | 462 | 0 | 0 | 462 | 0 | fdcouk | posse, xG |
 | Serie B | 2017/2018 | 462 | 0 | 0 | 462 | 0 | fdcouk | posse, xG |
@@ -469,11 +469,11 @@ Nenhuma.
 
 ## Qualidade dos dados
 
-- Partidas auditadas: 437333
+- Partidas auditadas: 437347
 - Bloqueadas pela validação (placar negativo, equipe vazia, data impossível): 0
 - Avisos de data fora da temporada: 499
 - Duplicatas reais (mesmo conteúdo SHA-256, mesma fonte, ids diferentes): 0
-- Mesma partida presente em outra fonte (ligações esperadas): 95643
+- Mesma partida presente em outra fonte (ligações esperadas): 95646
 - Lances com minuto fora de 0–130: 0 · eventos fora do campo/minuto: 12
 
 
@@ -507,20 +507,20 @@ Primeiros avisos:
 
 | fonte | última | ok | erros |
 |---|---|---|---|
-| api_football | 2026-11-16 22:49:37 | 13 | 0 |
+| api_football | 2026-11-17 22:51:01 | 14 | 0 |
 | brasileirao | 2026-11-17 04:38:16 | 3 | 0 |
 | cbf | 2026-11-15 18:49:15 | 3 | 0 |
-| espn | 2026-11-16 22:50:59 | 16 | 0 |
+| espn | 2026-11-17 22:51:01 | 19 | 0 |
 | espn_elencos | 2026-11-17 04:30:23 | 3 | 0 |
 | espn_historico | 2026-11-15 18:09:46 | 2 | 0 |
 | espn_resumos | 2026-11-16 02:09:06 | 1 | 0 |
 | espn_temporada | 2026-11-16 01:49:27 | 1 | 0 |
 | estatisticas_brasil | 2026-11-17 05:35:06 | 3 | 0 |
-| fdcouk | 2026-11-17 01:57:52 | 23 | 0 |
+| fdcouk | 2026-11-17 22:47:03 | 26 | 0 |
 | fotmob_jogos | 2026-11-16 05:42:46 | 1 | 0 |
 | fotmob_temporada | 2026-11-16 05:30:01 | 1 | 0 |
 | lake | 2026-11-17 05:09:38 | 9 | 0 |
-| open_matchday | 2026-11-16 20:27:54 | 8 | 0 |
+| open_matchday | 2026-11-17 15:34:27 | 9 | 0 |
 | open_sources | 2026-11-17 04:41:48 | 5 | 0 |
 | openfootball | 2026-11-17 04:32:10 | 6 | 0 |
 | openplay | 2026-11-17 04:30:54 | 4 | 1 |
