@@ -141,3 +141,43 @@ def test_foreign_nationality_check_handles_brazilian_and_dual_nationality():
     assert is_foreign_player("Brazil", "Brasil") is False
     assert is_foreign_player("Argentina, Italy", "Brazil") is True
     assert is_foreign_player(None, "Brazil") is None
+
+
+
+def test_player_season_totals_reuses_preparsed_stats_without_changing_results():
+    import json
+
+    from src.scout.engine import _json_obj, _player_season_totals
+
+    rows = pd.DataFrame([
+        {
+            "match_id": 1, "match_date": "2026-11-15", "team_name": "Club A",
+            "competition_name": "League", "minutes": 90, "rating": 8.0,
+            "stats_json": json.dumps({
+                "totalGoals": 1, "xg": 0.6, "accurate_passes_pct": 80,
+                "duels_won_pct": 55,
+            }),
+        },
+        {
+            "match_id": 2, "match_date": "2026-11-16", "team_name": "Club A",
+            "competition_name": "League", "minutes": 60, "rating": 7.0,
+            "stats_json": json.dumps({
+                "goalAssists": 1, "xg": 0.4, "pass_accuracy": 88,
+                "duelsWonPercentage": 65,
+            }),
+        },
+    ])
+
+    expected = _player_season_totals(rows)
+    prepared = rows.copy()
+    prepared["_parsed_stats"] = prepared["stats_json"].map(_json_obj)
+    actual = _player_season_totals(prepared)
+
+    assert actual == expected
+    assert actual["minutos"] == 150
+    assert actual["jogos"] == 2
+    assert actual["goals"] == 1.0
+    assert actual["assists"] == 1.0
+    assert actual["xg"] == 1.0
+    assert actual["pass_accuracy_pct"] == 80.0
+    assert actual["duels_won_pct"] == 55.0
