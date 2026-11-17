@@ -5,11 +5,13 @@ Usa dados observados do lake/SQLite; estimativas financeiras e projeções táti
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
+from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
@@ -71,6 +73,54 @@ COUNT_KEYS = {
     "fouls": "foulsCommitted", "errors": "errors_led_to_goal", "saves": "saves",
     "xgot_faced": "xgot_faced", "yellow_cards": "yellow_cards", "red_cards": "red_cards",
 }
+def history_cache_revision(db: Any) -> str:
+    """Fingerprint conservador do SQLite para versionar caches do Scout.
+
+    O conteúdo de uma base WAL pode estar dividido entre o arquivo principal e
+    o -wal. O -shm é deliberadamente ignorado porque é um índice compartilhado
+    transitório, não a fonte persistente dos dados. Se não for possível
+    verificar o arquivo com segurança, a chave é volátil e o cache não é
+    reutilizado entre chamadas.
+    """
+    import time
+
+    raw_path = getattr(db, "db_path", None)
+    if raw_path is None:
+        raw_path = getattr(db, "path", None)
+    if raw_path is None or str(raw_path) == ":memory:":
+        return f"uncacheable:{time.monotonic_ns()}"
+
+    try:
+        path = Path(raw_path).expanduser().resolve()
+        path.stat()
+    except (OSError, TypeError, ValueError):
+        return f"uncacheable:{time.monotonic_ns()}"
+
+    files = []
+    for suffix in ("", "-wal", "-journal"):
+        candidate = Path(f"{path}{suffix}")
+        try:
+            stat = candidate.stat()
+        except FileNotFoundError:
+            files.append((suffix, False, None, None, None))
+        except OSError:
+            return f"uncacheable:{time.monotonic_ns()}"
+        else:
+            files.append((
+                suffix, True, int(stat.st_size),
+                int(stat.st_mtime_ns), int(stat.st_ctime_ns),
+            ))
+
+    if not files[0][1]:
+        return f"uncacheable:{time.monotonic_ns()}"
+
+    payload = json.dumps(
+        {"path": str(path), "files": files},
+        ensure_ascii=True, separators=(",", ":"), sort_keys=True,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:24]
+
+
 LANGUAGES = {
     "brazil": {"portugues"}, "portugal": {"portugues"}, "angola": {"portugues"},
     "argentina": {"espanhol"}, "uruguay": {"espanhol"}, "chile": {"espanhol"},
@@ -327,7 +377,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                     """
                     SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
                     FROM matches AS m
-                    CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match
+                    CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
                     WHERE p.match_id = m.match_id
                       AND m.match_date >= ?
                       AND COALESCE(p.minutes, 0) > 0
