@@ -28,7 +28,9 @@ def _market_data(version: str):
     if not players.empty and last.notna().any():
         players = players[(last >= last.max() - 2) |
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
-    history = E.load_player_history(get_service().db, days=1825)
+    history = E.load_player_history(
+        get_service().db, days=1825, player_names=players.get("nome", pd.Series(dtype=str))
+    )
     valuations = D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"])
     universe = E.add_quality_scores(E.build_market_universe(players, history, valuations))
     # Notas externas (ex.: Simonetti) corroboram a qualidade sem substituir métricas observadas.
