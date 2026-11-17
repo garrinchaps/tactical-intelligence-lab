@@ -1,3 +1,5 @@
+import pandas as pd
+
 from src.data_hub.db import DataHubDB
 from src.data_hub.registry import DataLevel
 
