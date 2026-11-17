@@ -1132,35 +1132,64 @@ def _feedback_adjust(reason: str, realism: Dict[str, Any], candidate: Dict[str, 
 def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dict[str, Any],
               buyer_country: str = "", competition: str = "", roster: Optional[pd.DataFrame] = None,
               rejected: Optional[Iterable[str]] = None, feedback_reason: str = "",
-              season: Optional[int] = None) -> pd.DataFrame:
+              season: Optional[int] = None, max_per_position: int = 120) -> pd.DataFrame:
     if players is None or players.empty or not needs:
         return pd.DataFrame()
     rejected_cores = {player_core(x) for x in (rejected or [])}
     target_roles = {_safe_str(n.get("papel")) for n in needs if _safe_str(n.get("papel"))}
     allowed_roles = {role for role in ROLE_LABELS if any(fit(target, role) >= .60 for target in target_roles)}
     eligible = players[players["papel"].isin(allowed_roles)].copy() if "papel" in players else players.iloc[0:0]
-    # Não oferecer atletas já registrados no comprador; usar o clube atual como fonte de vínculo.
+    if eligible.empty:
+        return pd.DataFrame()
     own_cores = {team_core(x) for x in (buyer.get("club_aliases") or [])}
     if own_cores and "clube" in eligible:
         eligible = eligible[~eligible["clube"].map(team_core).isin(own_cores)]
     if "historico_ambiguo" in eligible:
         eligible = eligible[~eligible["historico_ambiguo"].fillna(False)]
-    # Não varrer o universo inteiro em Python para cada vaga; a filtragem vetorial deixa a tela responsiva.
+    if rejected_cores and "_core" in eligible:
+        eligible = eligible[~eligible["_core"].astype(str).isin(rejected_cores)]
+    if eligible.empty:
+        return pd.DataFrame()
+
+    # Pré-seleção vetorial: evita fazer centenas de milhares de cálculos de dossiê a cada clique.
+    # O corte inicial combina qualidade, encaixe, contrato/minutagem e affordability; o ranking completo
+    # só é calculado para o grupo mais promissor de cada posição.
     rows = []
+    buyer_budget = _num(buyer.get("orcamento_proxy_eur"))
     for need in needs:
         role = _safe_str(need.get("papel"))
         if not role:
             continue
-        for _, r in eligible.iterrows():
-            if _safe_str(r.get("_core")) in rejected_cores:
-                continue
-            candidate_role = _safe_str(r.get("papel"))
-            if candidate_role not in ROLE_LABELS:
-                continue
-            role_fit = float(fit(role, candidate_role))
-            if role_fit < .60:
-                continue
-            c = r.to_dict()
+        candidates = eligible.copy()
+        candidates["_scout_role_fit"] = candidates["papel"].map(lambda x: float(fit(role, _safe_str(x))))
+        candidates = candidates[candidates["_scout_role_fit"] >= .60]
+        if candidates.empty:
+            continue
+        q = pd.to_numeric(candidates.get("qualidade"), errors="coerce").fillna(48)
+        mins = pd.to_numeric(candidates.get("minutos_12m"), errors="coerce")
+        if "minutos" in candidates:
+            mins = mins.combine_first(pd.to_numeric(candidates["minutos"], errors="coerce"))
+        usage = pd.Series(48.0, index=candidates.index)
+        known_mins = mins.notna()
+        usage.loc[known_mins] = (70 - (mins[known_mins] - 1800).clip(lower=0) / 90 +
+                                 (900 - mins[known_mins]).clip(lower=0, upper=900) / 36).clip(18, 88)
+        contract = pd.to_datetime(candidates.get("fim_contrato"), errors="coerce")
+        months = (contract - pd.Timestamp.today().normalize()).dt.days / 30.44
+        contract_score = pd.Series(50.0, index=candidates.index)
+        contract_score.loc[months.notna() & (months <= 6)] = 95
+        contract_score.loc[months.notna() & (months > 6) & (months <= 12)] = 83
+        contract_score.loc[months.notna() & (months > 12) & (months <= 24)] = 60
+        contract_score.loc[months.notna() & (months > 24)] = 42
+        market = pd.to_numeric(candidates.get("valor_mercado_eur"), errors="coerce")
+        finance = pd.Series(48.0, index=candidates.index)
+        if buyer_budget:
+            ratio = market / max(buyer_budget, 1.0)
+            finance.loc[market.notna()] = (100 - (ratio.loc[market.notna()] - .18).clip(lower=0) * 72).clip(8, 96)
+        candidates["_scout_pre"] = (.43 * q + .19 * candidates["_scout_role_fit"] * 100 +
+                                     .16 * usage + .12 * contract_score + .10 * finance)
+        candidates = candidates.sort_values("_scout_pre", ascending=False).head(max(20, int(max_per_position)))
+        for c in candidates.drop(columns=["_scout_pre"]).to_dict("records"):
+            role_fit = float(c.pop("_scout_role_fit", 0))
             realism = transfer_realism(c, buyer, buyer_country, competition, season,
                                        foreign_count=int(buyer.get("estrangeiros_atual", 0) or 0))
             tactical = tactical_compatibility(c, buyer.get("estilo") or {"tracos": []})
@@ -1169,7 +1198,6 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
             sample_conf = _num(c.get("confianca_pct")) or 0
             sporting = quality if quality is not None else 48
             need_score = float(need.get("urgencia") or 50)
-            # Uma nota média sem amostra fica neutra e com confiança reduzida; valor de mercado não vira nota técnica.
             score = (.29 * sporting + .24 * realism["score"] + .18 * tactical["score"] +
                      .13 * chemistry_score["score"] + .10 * need_score + .06 * (role_fit * 100))
             score += _feedback_adjust(feedback_reason, realism, c)
@@ -1188,8 +1216,7 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
     if not rows:
         return pd.DataFrame()
     out = pd.DataFrame(rows).sort_values(["score_scout", "realismo"], ascending=False)
-    out = out.drop_duplicates("_core", keep="first")
-    return out.reset_index(drop=True)
+    return out.drop_duplicates("_core", keep="first").reset_index(drop=True)
 
 
 def shortlist_by_position(ranked: pd.DataFrame, role: str, limit: int = 3) -> pd.DataFrame:
