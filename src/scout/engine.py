@@ -73,6 +73,8 @@ COUNT_KEYS = {
     "fouls": "foulsCommitted", "errors": "errors_led_to_goal", "saves": "saves",
     "xgot_faced": "xgot_faced", "yellow_cards": "yellow_cards", "red_cards": "red_cards",
 }
+
+
 def history_cache_revision(db: Any) -> str:
     """Fingerprint conservador do SQLite para versionar caches do Scout.
 
