@@ -513,6 +513,7 @@ def render(_ctx=None):
                 open_view("jogador", name=selected)
         else:
             st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
+        st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")
         if financial.get("faixa_proxy_eur"):
             lo, hi = financial["faixa_proxy_eur"]
             st.markdown("#### Capacidade financeira estimada")
