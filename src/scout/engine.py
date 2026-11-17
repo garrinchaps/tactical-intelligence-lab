@@ -1120,8 +1120,10 @@ def _feedback_adjust(reason: str, realism: Dict[str, Any], candidate: Dict[str, 
         penalty -= 24
     if "velho" in r and (_num(candidate.get("idade")) or 0) > 27:
         penalty -= 22
-    if "físico" in r and _num(candidate.get("altura_cm")) is None:
-        penalty -= 8
+    if "físico" in r:
+        physical_fields = ("altura_cm", "height_cm", "sprints_p90", "aerials_won_p90", "duels_won_pct")
+        if not any(_num(candidate.get(k)) is not None for k in physical_fields):
+            penalty -= 8
     if "estrangeiro" in r and realism.get("penalidade_estrangeiros", 0):
         penalty -= 20
     if "característica" in r:
@@ -1165,22 +1167,22 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
         candidates = candidates[candidates["_scout_role_fit"] >= .60]
         if candidates.empty:
             continue
-        q = pd.to_numeric(candidates.get("qualidade"), errors="coerce").fillna(48)
-        mins = pd.to_numeric(candidates.get("minutos_12m"), errors="coerce")
+        q = pd.to_numeric(candidates.get("qualidade", pd.Series(np.nan, index=candidates.index)), errors="coerce").fillna(48)
+        mins = pd.to_numeric(candidates.get("minutos_12m", pd.Series(np.nan, index=candidates.index)), errors="coerce")
         if "minutos" in candidates:
             mins = mins.combine_first(pd.to_numeric(candidates["minutos"], errors="coerce"))
         usage = pd.Series(48.0, index=candidates.index)
         known_mins = mins.notna()
         usage.loc[known_mins] = (70 - (mins[known_mins] - 1800).clip(lower=0) / 90 +
                                  (900 - mins[known_mins]).clip(lower=0, upper=900) / 36).clip(18, 88)
-        contract = pd.to_datetime(candidates.get("fim_contrato"), errors="coerce")
+        contract = pd.to_datetime(candidates.get("fim_contrato", pd.Series(pd.NaT, index=candidates.index)), errors="coerce")
         months = (contract - pd.Timestamp.today().normalize()).dt.days / 30.44
         contract_score = pd.Series(50.0, index=candidates.index)
         contract_score.loc[months.notna() & (months <= 6)] = 95
         contract_score.loc[months.notna() & (months > 6) & (months <= 12)] = 83
         contract_score.loc[months.notna() & (months > 12) & (months <= 24)] = 60
         contract_score.loc[months.notna() & (months > 24)] = 42
-        market = pd.to_numeric(candidates.get("valor_mercado_eur"), errors="coerce")
+        market = pd.to_numeric(candidates.get("valor_mercado_eur", pd.Series(np.nan, index=candidates.index)), errors="coerce")
         finance = pd.Series(48.0, index=candidates.index)
         if buyer_budget:
             ratio = market / max(buyer_budget, 1.0)
