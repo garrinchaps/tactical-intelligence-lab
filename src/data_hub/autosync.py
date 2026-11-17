@@ -192,14 +192,25 @@ def _fotmob_loop(db=None) -> None:
         fm = svc.fotmob
         while enabled() and fotmob_enabled():
             try:
+                # Calendário/resultados da temporada corrente: 3 h, para não deixar os jogos
+                # recentes da seleção e dos clubes presos a uma atualização diária.
+                last_current = P.last_synced(svc.db, "fotmob", "_temporada_3h")
+                if last_current is None or datetime.now(timezone.utc) - last_current >= timedelta(hours=3):
+                    _fm["fase"] = "calendário e resultados recentes"
+                    fm.sync_seasons(None, seasons_back=0)
+                    P.mark_synced(svc.db, "fotmob", "_temporada_3h")
+
+                # Temporadas anteriores continuam sendo abastecidas uma vez por dia, sem
+                # repetir o backfill histórico a cada ciclo de três horas.
                 last = P.last_synced(svc.db, "fotmob", "_temporada_diaria")
                 if last is None or datetime.now(timezone.utc) - last >= timedelta(hours=24):
-                    _fm["fase"] = "calendário e resultados"
+                    _fm["fase"] = "histórico de temporadas"
                     try:
                         back = max(0, min(int(os.getenv("FOTMOB_TEMPORADAS", "2")), 5))
                     except ValueError:
                         back = 2
-                    fm.sync_seasons(None, seasons_back=back)
+                    if back:
+                        fm.sync_seasons(None, seasons_back=back)
                     P.mark_synced(svc.db, "fotmob", "_temporada_diaria")
                 _fm["fase"] = "jogos dos últimos 10 dias"
                 r1 = fm.fetch_details(None, since=(datetime.now().date() - timedelta(days=10)).isoformat(), limit=200,
