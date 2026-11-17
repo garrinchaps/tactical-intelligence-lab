@@ -265,8 +265,6 @@ def _history_map(history: Optional[pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
 def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[pd.DataFrame] = None,
                           club_values: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """Universo de atletas: cadastro de mercado + histórico estatístico multi-clube."""
-    if tm_players is None or tm_players.empty:
-        return pd.DataFrame()
     p = tm_players.copy() if tm_players is not None else pd.DataFrame()
     for col in ("nome", "clube", "posicao", "funcao", "nascimento", "nacionalidade", "transfermarkt_id",
                 "clube_id", "valor_mercado_eur", "fim_contrato", "ultima_temporada"):
