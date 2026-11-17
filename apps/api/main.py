@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Query
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.auth import current_user
 from src.machine_learning.model_catalog import model_cards
@@ -54,6 +55,21 @@ def create_app(db_path: Path | str | None = None) -> FastAPI:
         title="Tactical Intelligence Lab API",
         version="0.1.0",
         description="Contratos read-only para dados compartilhados do Data Hub.",
+    )
+    allowed_origins = [
+        origin.strip()
+        for origin in os.getenv(
+            "TIL_CORS_ORIGINS",
+            "http://localhost:5173,http://127.0.0.1:5173",
+        ).split(",")
+        if origin.strip()
+    ]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_origins,
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
     )
     bearer = HTTPBearer(auto_error=False)
 
