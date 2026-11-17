@@ -333,8 +333,16 @@ def _history_fixture(path):
         match_id += 1
 
     # Jogador Transfermarkt: deve manter todo o recorte de cinco anos e somar métricas JSON.
-    add_player("Alpha Target", 250, 90, 6.0, '{"totalGoals":"2","goalAssists":"1","xg":"0,5"}')
-    add_player("Alpha Target", 40, 90, 8.0, '{"totalGoals":1,"xg":0.2}')
+    add_player(
+        "Alpha Target", 250, 90, 6.0,
+        '{"totalGoals":"2","goalAssists":"1","xg":"0,5","accurate_passes_pct":"80",'
+        '"pass_accuracy":"99","duels_won_pct":50,"duelsWonPercentage":99}'
+    )
+    add_player(
+        "Alpha Target", 40, 90, 8.0,
+        '{"totalGoals":1,"xg":0.2,"accurate_passes_pct":90,"pass_accuracy":"99",'
+        '"duels_won_pct":null,"duelsWonPercentage":99}'
+    )
 
     # Jogador sem cadastro: quatro jogos recentes e 480 minutos qualificam-no.
     for i, offset in enumerate((30, 60, 90, 120)):
@@ -371,6 +379,8 @@ def test_load_player_history_filters_names_but_keeps_full_history_and_active_unl
     assert by_core.loc["alpha target", "goals_p90"] == 1.5
     assert by_core.loc["alpha target", "xg"] == 0.7
     assert by_core.loc["alpha target", "forma_5"] == [6.0, 8.0]
+    assert by_core.loc["alpha target", "pass_accuracy_pct"] == 85.0
+    assert by_core.loc["alpha target", "duels_won_pct"] == 50.0
     assert by_core.loc["alpha target", "gols_12m"] == 1.0
     assert by_core.loc["alpha target", "rating_12m"] == 8.0
     season = by_core.loc["alpha target", "historico_temporadas"]
