@@ -296,9 +296,13 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     weighted = grouped["_rating_weight"].sum()
     weight_minutes = grouped["_rating_minutes"].sum()
     out["rating_media"] = (weighted / weight_minutes.replace(0, np.nan)).round(2)
-    opponent_minutes = grouped["_opponent_minutes"].sum().replace(0, np.nan)
-    out["nivel_adversario_medio"] = (grouped["_opponent_level_weight"].sum() / opponent_minutes).round(1)
-    out["ajuste_adversario_medio"] = (grouped["_opponent_adjustment_weight"].sum() / opponent_minutes).round(3)
+    if {"_opponent_minutes", "_opponent_level_weight", "_opponent_adjustment_weight"} <= set(rows.columns):
+        opponent_minutes = grouped["_opponent_minutes"].sum().replace(0, np.nan)
+        out["nivel_adversario_medio"] = (grouped["_opponent_level_weight"].sum() / opponent_minutes).round(1)
+        out["ajuste_adversario_medio"] = (grouped["_opponent_adjustment_weight"].sum() / opponent_minutes).round(3)
+    else:
+        out["nivel_adversario_medio"] = np.nan
+        out["ajuste_adversario_medio"] = np.nan
     out["ultimo_jogo"] = grouped["match_date"].max().astype(str)
 
     metric_names = list(COUNT_KEYS)
