@@ -217,7 +217,8 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     total_minutes = float(mins.sum())
     out["minutos"] = int(total_minutes)
     out["jogos"] = int(rows["match_id"].nunique()) if "match_id" in rows else len(rows)
-    ratings = pd.to_numeric(rows.get("rating"), errors="coerce")
+    rating_column = "rating_ajustada" if "rating_ajustada" in rows else "rating"
+    ratings = pd.to_numeric(rows.get(rating_column), errors="coerce")
     valid = ratings.notna() & (mins > 0)
     out["rating_media"] = round(float(np.average(ratings[valid], weights=mins[valid])), 2) if valid.any() else None
     out["ultimo_jogo"] = _safe_str(rows["match_date"].max()) if "match_date" in rows else ""
@@ -295,6 +296,9 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     weighted = grouped["_rating_weight"].sum()
     weight_minutes = grouped["_rating_minutes"].sum()
     out["rating_media"] = (weighted / weight_minutes.replace(0, np.nan)).round(2)
+    opponent_minutes = grouped["_opponent_minutes"].sum().replace(0, np.nan)
+    out["nivel_adversario_medio"] = (grouped["_opponent_level_weight"].sum() / opponent_minutes).round(1)
+    out["ajuste_adversario_medio"] = (grouped["_opponent_adjustment_weight"].sum() / opponent_minutes).round(3)
     out["ultimo_jogo"] = grouped["match_date"].max().astype(str)
 
     metric_names = list(COUNT_KEYS)
@@ -538,10 +542,34 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     del stat_frame
 
     raw["_minutes_num"] = pd.to_numeric(raw["minutes"], errors="coerce").fillna(0)
-    raw["_rating_num"] = pd.to_numeric(raw["rating"], errors="coerce")
+    raw["_rating_source"] = pd.to_numeric(raw["rating"], errors="coerce")
+
+    # Ajusta a nota média de cada atuação pelo Elo pré-jogo do adversário. O cálculo é em lote
+    # (uma vez por partida/equipe, nunca uma consulta por jogador) e falha em modo neutro.
+    try:
+        from src.analytics.opponent_strength import opponent_strength_for_matches
+
+        match_teams = raw[["match_id", "team_name"]].drop_duplicates()
+        strength_map = opponent_strength_for_matches(db, match_teams.itertuples(index=False, name=None))
+        keys = [(int(mid), str(team or "")) for mid, team in
+                raw[["match_id", "team_name"]].itertuples(index=False, name=None)]
+        raw["_opponent_adjustment"] = [strength_map.get(k, {}).get("ajuste", 0.0) for k in keys]
+        raw["_opponent_level"] = [strength_map.get(k, {}).get("nivel") for k in keys]
+    except Exception as exc:
+        report(f"Contexto de adversários indisponível; mantendo notas originais: {type(exc).__name__}: {exc}")
+        raw["_opponent_adjustment"] = 0.0
+        raw["_opponent_level"] = np.nan
+
+    raw["_rating_num"] = raw["_rating_source"] + pd.to_numeric(
+        raw["_opponent_adjustment"], errors="coerce"
+    ).fillna(0)
+    raw["rating_ajustada"] = raw["_rating_num"].round(2)
     valid_minutes = raw["_minutes_num"].where(raw["_rating_num"].notna(), 0)
     raw["_rating_minutes"] = valid_minutes
     raw["_rating_weight"] = raw["_rating_num"].fillna(0) * valid_minutes
+    raw["_opponent_minutes"] = raw["_minutes_num"]
+    raw["_opponent_level_weight"] = pd.to_numeric(raw["_opponent_level"], errors="coerce").fillna(50) * raw["_opponent_minutes"]
+    raw["_opponent_adjustment_weight"] = pd.to_numeric(raw["_opponent_adjustment"], errors="coerce").fillna(0) * raw["_opponent_minutes"]
 
     report("Calculando totais da carreira por jogador...")
     career = _history_group_totals(raw, ["_core"])
@@ -575,7 +603,8 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     latest = ordered.drop_duplicates("_core", keep="first").set_index("_core")
     recent_games = ordered.groupby("_core", sort=False, group_keys=False).head(15)
     games_by_core = {
-        core: group[["match_date", "team_name", "competition_name", "minutes", "rating", "stats_json"]]
+        core: group[["match_date", "team_name", "competition_name", "minutes", "rating",
+                     "rating_ajustada", "_opponent_level", "_opponent_adjustment", "stats_json"]]
         .to_dict("records")
         for core, group in recent_games.groupby("_core", sort=False)
     }
@@ -597,6 +626,8 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
             "minutos_12m": int(recent.get("minutos", 0) or 0),
             "jogos_12m": int(recent.get("jogos", 0) or 0),
             "rating_12m": recent.get("rating_media"),
+            "nivel_adversario_12m": recent.get("nivel_adversario_medio"),
+            "ajuste_adversario_12m": recent.get("ajuste_adversario_medio"),
             "gols_12m": recent.get("goals"),
             "assistencias_12m": recent.get("assists"),
             "xg_12m": recent.get("xg"),
