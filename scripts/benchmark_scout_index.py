@@ -88,6 +88,16 @@ def main() -> int:
         for row in conn.execute("EXPLAIN QUERY PLAN " + LEGACY_QUERY, (since,)):
             print(f"  {row[3]}", flush=True)
 
+        has_index = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+            ("idx_pstats_match_player_minutes",),
+        ).fetchone()
+        if not has_index:
+            print("\nÍndice de cobertura ainda não existe neste banco.", flush=True)
+            print("O benchmark é somente leitura. Feche o app e execute:", flush=True)
+            print(f'  python scripts/optimize_db.py --database "{database}"', flush=True)
+            return 2
+
         print("\nPlano da consulta com índice de cobertura:", flush=True)
         for row in conn.execute("EXPLAIN QUERY PLAN " + COVERING_QUERY, (since,)):
             print(f"  {row[3]}", flush=True)
