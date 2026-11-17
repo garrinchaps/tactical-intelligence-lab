@@ -23,7 +23,6 @@ st.set_page_config(page_title="Tactical Intelligence Lab", page_icon="⚽", layo
 
 from src.data_hub.registry import BADGES, DataLevel  # noqa: E402
 from src.ui import theme  # noqa: E402
-from src.ui.components import empty_state, error_state, match_strip  # noqa: E402
 from src.ui import nav  # noqa: E402
 from src.ui.i18n import LANGS, t  # noqa: E402
 
@@ -44,6 +43,7 @@ DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — dispon
 def current_context(with_sim_ci: bool = True):
     """Abre a partida da sessão e monta o contexto (None + estado de erro desenhado se falhar)."""
     from src.ui.context import build_context, load_bundle, teams_of
+    from src.ui.components import error_state
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception as exc:
@@ -64,6 +64,7 @@ def current_context(with_sim_ci: bool = True):
 def match_bar() -> None:
     """Faixa da partida aberta + equipe em foco + atalho para analisar o jogo ou trocar (pela busca)."""
     from src.ui.context import load_bundle, teams_of
+    from src.ui.components import match_strip
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception:
@@ -92,6 +93,7 @@ def needs_match(render: Callable, needs_events: bool = False) -> Callable[[], No
         if ctx is None:
             return
         if needs_events and not ctx.has_events:
+            from src.ui.components import empty_state
             empty_state("Esta seção precisa de eventos com coordenadas", f"A partida aberta tem nível {ctx.bundle.level}.",
                         "🗺️", "Troque para uma partida ✅ (eventos StatsBomb/Wyscout).")
             return
