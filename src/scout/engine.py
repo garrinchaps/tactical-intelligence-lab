@@ -206,8 +206,14 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     return out
 
 
-def load_player_history(db, days: int = 900) -> pd.DataFrame:
-    """Histórico multi-clube; normaliza chaves por valor único e reaproveita JSON por jogador."""
+def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None) -> pd.DataFrame:
+    """Resume histórico completo dos atletas relevantes sem carregar todo o universo de aparições.
+
+    Quando recebe nomes do catálogo de mercado, localiza primeiro as identidades presentes no banco
+    e os atletas sem cadastro que atingiram a exposição mínima nos últimos 180 dias. Depois busca
+    os cinco anos completos apenas dessas identidades. Chamadas antigas sem player_names preservam
+    o comportamento de carregar todo o histórico.
+    """
     since = (date.today() - timedelta(days=int(days))).isoformat()
     query = """
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
@@ -217,11 +223,75 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
         WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0
           AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
     """
-    # Não ordenar 700 mil+ linhas no SQLite: a seleção de duplicatas é feita abaixo e
-    # cada atleta é ordenado individualmente quando seus últimos jogos são montados.
     try:
         with db.connect() as conn:
-            raw = pd.read_sql_query(query, conn, params=[since])
+            if player_names is None:
+                raw = pd.read_sql_query(query, conn, params=[since])
+            else:
+                target_cores = {
+                    player_core(name) for name in player_names
+                    if name is not None and not pd.isna(name) and player_core(name)
+                }
+
+                # O índice começa por player_name: esta consulta percorre apenas o índice
+                # compacto e dispensa 749 mil buscas individuais na tabela matches.
+                known_names = [
+                    str(row[0]) for row in conn.execute(
+                        """SELECT DISTINCT player_name FROM match_player_stats
+                           WHERE player_name IS NOT NULL AND TRIM(player_name) <> ''"""
+                    )
+                ]
+
+                # Descobre jogadores sem cadastro Transfermarkt por jogos/minutos recentes.
+                # CROSS JOIN fixa matches como tabela externa: usa o índice de data e consulta
+                # as estatísticas pelo match_id, em vez de varrer o índice de todos os atletas.
+                active_names = [
+                    str(row[0]) for row in conn.execute(
+                        """
+                        SELECT p.player_name
+                        FROM matches AS m
+                        CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match
+                        WHERE p.match_id = m.match_id
+                          AND m.match_date >= date('now', '-180 days')
+                          AND COALESCE(p.minutes, 0) > 0
+                          AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+                        GROUP BY p.player_name
+                        HAVING SUM(COALESCE(p.minutes, 0)) >= 450
+                           AND COUNT(DISTINCT p.match_id) >= 4
+                        """
+                    )
+                ]
+                relevant_cores = target_cores | {
+                    player_core(name) for name in active_names if player_core(name)
+                }
+                selected_names = sorted({
+                    name for name in known_names if player_core(name) in relevant_cores
+                })
+
+                if not selected_names:
+                    return pd.DataFrame()
+
+                # A tabela temporária evita limites de parâmetros SQL e permite começar pelos
+                # nomes elegíveis usando idx_pstats_player, sem cortar o histórico de cinco anos.
+                conn.execute(
+                    "CREATE TEMP TABLE scout_relevant_players (player_name TEXT PRIMARY KEY)"
+                )
+                conn.executemany(
+                    "INSERT OR IGNORE INTO scout_relevant_players (player_name) VALUES (?)",
+                    [(name,) for name in selected_names],
+                )
+                selected_query = """
+                    SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
+                           m.match_date, m.season_name, m.competition_name, m.home_team_name, m.away_team_name
+                    FROM scout_relevant_players AS r
+                    CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_player
+                    JOIN matches AS m ON m.match_id = p.match_id
+                    WHERE p.player_name = r.player_name
+                      AND m.match_date >= ?
+                      AND COALESCE(p.minutes, 0) > 0
+                      AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+                """
+                raw = pd.read_sql_query(selected_query, conn, params=[since])
     except Exception:
         return pd.DataFrame()
     if raw.empty:
