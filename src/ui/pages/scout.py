@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import io
 import json
 import re
@@ -186,20 +187,29 @@ def _add_player(player, plan_key):
 def _player_card(player, roster, team, idx, plan_key, rejected_key):
     name = str(player.get("nome") or "Jogador")
     r = player.get("realismo") or {}
-    s = int(r.get("score") or 0)
-    tag = "viable" if s >= 76 else "loan" if s >= 56 or r.get("oportunidade_emprestimo") else "dream"
+    score = int(r.get("score") or 0)
+    tag = "viable" if score >= 76 else "loan" if r.get("oportunidade_emprestimo") else "dream"
     quality = player.get("qualidade")
     quality = "sem nota" if quality is None or pd.isna(quality) else f"{float(quality):.0f}/100"
     position = player.get("papel_alvo_label") or _role(player.get("papel"))
-    st.markdown(
-        f'<div class="scout-player"><div class="scout-avatar">{_initials(name)}</div><div class="scout-main">'
-        f'<div class="scout-name">{name}</div><div class="scout-sub">{position} · {player.get("clube") or "Clube não identificado"} · '
-        f'{player.get("idade") if pd.notna(player.get("idade")) else "idade n/d"} anos · {player.get("nacionalidade") or "nacionalidade n/d"}</div>'
-        f'<div class="scout-tags"><span class="scout-tag {tag}">{r.get("rotulo","Sem estimativa")} · {s}%</span>'
+    club = str(player.get("clube") or "Clube não identificado")
+    nationality = str(player.get("nacionalidade") or "")
+    from src.ui.crests import crest_img
+
+    club_crest = crest_img(club, "xs") if club and club != "Clube não identificado" else ""
+    flag = crest_img(nationality, "xs") if nationality else ""
+    player_html = (
+        f'<div class="scout-player"><div class="scout-avatar">{html.escape(_initials(name))}</div>'
+        f'<div class="scout-main"><div class="scout-name">{html.escape(name)}</div>'
+        f'<div class="scout-sub">{html.escape(str(position))} · {club_crest} {html.escape(club)} · '
+        f'{html.escape(str(player.get("idade") if pd.notna(player.get("idade")) else "idade n/d"))} anos · '
+        f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
+        f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
         f'<span class="scout-tag neutral">Compatibilidade {(player.get("compatibilidade") or {}).get("score","—")}%</span>'
         f'<span class="scout-tag neutral">Qualidade {quality}</span></div></div>'
-        f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>',
-        unsafe_allow_html=True)
+        f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>'
+    )
+    st.markdown(player_html, unsafe_allow_html=True)
     a, b = st.columns([1.1, 1.1])
     if a.button("＋ Adicionar ao plano", key=f"scout_add_{_slug(name)}_{idx}", type="primary", use_container_width=True):
         _add_player(player, plan_key)
