@@ -1280,6 +1280,27 @@ def record_rejection(db, club: str, player: str, role: str, reason: str, score: 
                      (club, player, role, reason, score))
 
 
+def rejection_preferences(db, club: str, limit: int = 12) -> Dict[str, Any]:
+    """Resume as últimas recusas do clube para recalibrar a busca seguinte."""
+    ensure_scout_tables(db)
+    try:
+        with db.connect() as conn:
+            rows = pd.read_sql_query(
+                """SELECT motivo,papel,COUNT(*) AS ocorrencias,MAX(criado_em) AS mais_recente
+                   FROM scout_feedback WHERE clube=?
+                   GROUP BY motivo,papel ORDER BY mais_recente DESC LIMIT ?""",
+                conn, params=[club, int(limit)])
+    except Exception:
+        return {"motivos": [], "amostra": 0}
+    if rows.empty:
+        return {"motivos": [], "amostra": 0}
+    reasons = []
+    for row in rows.to_dict("records"):
+        reasons.extend([_safe_str(row.get("motivo"))] * min(3, int(row.get("ocorrencias") or 1)))
+    return {"motivos": reasons, "amostra": int(rows["ocorrencias"].sum()),
+            "posicoes": rows.to_dict("records")}
+
+
 def save_plan(db, club: str, name: str, payload: Dict[str, Any]) -> int:
     ensure_scout_tables(db)
     encoded = json.dumps(payload, ensure_ascii=False, default=str)
