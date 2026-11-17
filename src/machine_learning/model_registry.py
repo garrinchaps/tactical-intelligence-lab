@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss, roc_auc_score
 
-from src.machine_learning.danger_dataset import FEATURES, LEGACY_FEATURES, build_match_rows
+from src.machine_learning.danger_dataset import MODEL_FEATURES as FEATURES, LEGACY_FEATURES, build_match_rows
 from src.machine_learning.neural_net import NeuralNetwork
 
 ROOT = Path("models/registry/danger")
