@@ -35,7 +35,7 @@ PLOTLY_LAYOUT = dict(
     paper_bgcolor="rgba(11,17,32,0.0)",
     plot_bgcolor="rgba(11,17,32,0.55)",
     font=dict(color=PALETTE["text"], family="Inter, Segoe UI, sans-serif", size=13),
-    colorway=[PALETTE["primary"], PALETTE["secondary"], PALETTE["accent"], PALETTE["warning"], PALETTE["violet"], "#F472B6"],
+    colorway=["#60A5FA", "#FB7185", "#34D399", "#FBBF24", "#C4B5FD", "#F472B6"],
     margin=dict(l=30, r=20, t=50, b=35),
     legend=dict(orientation="h", y=-0.15, font=dict(size=12)),
     hoverlabel=dict(bgcolor="#111A2E", bordercolor="#22D3EE", font=dict(color=PALETTE["text"], size=13)),
@@ -110,15 +110,15 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
   color: {P['text']}; font-family: Inter, 'Segoe UI', sans-serif;
 }}
 [data-testid="stTable"] thead th {{
-  background: #172641; color: {P['text']}; font-size: .72rem; font-weight: 800;
-  text-transform: uppercase; letter-spacing: .06em; border-bottom: 2px solid {P['accent']};
+  background: #20395F; color: #FFFFFF; font-size: .74rem; font-weight: 900;
+  text-transform: uppercase; letter-spacing: .06em; border-bottom: 2px solid #67E8F9;
   padding: 12px 14px;
 }}
 [data-testid="stTable"] tbody td {{
-  background: #0D1424; color: #DCE6F4; font-size: .86rem;
+  background: #0E192B; color: #F1F5F9; font-size: .88rem;
   border-bottom: 1px solid {P['border']}; padding: 10px 14px;
 }}
-[data-testid="stTable"] tbody tr:nth-child(even) td {{ background: #111C30; }}
+[data-testid="stTable"] tbody tr:nth-child(even) td {{ background: #172945; }}
 [data-testid="stTable"] tbody tr:hover td {{ background: rgba(34,211,238,.10); }}
 [data-testid="stExpander"] {{ border-radius: 14px; border: 1px solid {P['border']}; background: rgba(11,17,32,0.6); }}
 /* gráficos: cartão elevado, fundo consistente e bordas suaves */
@@ -257,6 +257,29 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-step .n {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.4rem; font-weight: 700; min-width: 42px; height: 42px;
   border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--til-grad); color: white; }}
 .til-step .t {{ font-weight: 800; font-size: 1.02rem; }} .til-step .b {{ color: {P['muted']}; font-size: 0.92rem; margin-top: 3px; }}
+
+/* Scout War Room: contraste alto, informação densa apenas quando solicitada */
+.scout-player {{ display:flex; align-items:center; gap:14px; padding:14px 16px; margin:10px 0 5px;
+  border:1px solid #334967; border-radius:16px; background:linear-gradient(120deg,#13243D,#0D1728);
+  box-shadow:0 7px 20px rgba(0,0,0,.25); }}
+.scout-avatar {{ flex:0 0 48px; width:48px; height:48px; display:grid; place-items:center; border-radius:50%;
+  background:linear-gradient(140deg,#2563EB,#0E7490); border:2px solid #93C5FD; color:#FFF;
+  font-weight:900; font-size:1.05rem; }}
+.scout-main {{ flex:1; min-width:0; }}
+.scout-name {{ color:#FFF; font-weight:900; font-size:1.06rem; }}
+.scout-sub {{ color:#CBD5E1; font-size:.8rem; margin-top:2px; }}
+.scout-tags {{ display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }}
+.scout-tag {{ display:inline-block; padding:3px 9px; border-radius:999px; font-size:.72rem; font-weight:850;
+  border:1px solid transparent; }}
+.scout-tag.viable {{ background:#123A2B; color:#86EFAC; border-color:#22C55E; }}
+.scout-tag.loan {{ background:#443511; color:#FDE68A; border-color:#D97706; }}
+.scout-tag.dream {{ background:#481F2A; color:#FDA4AF; border-color:#E11D48; }}
+.scout-tag.neutral {{ background:#1E3554; color:#DBEAFE; border-color:#4773A8; }}
+.scout-value {{ min-width:110px; text-align:right; color:#FFF; font-weight:900; }}
+.scout-value small {{ display:block; color:#B9C7DA; font-size:.68rem; font-weight:500; }}
+[data-testid="stDataFrame"] [role="columnheader"] {{ background:#20395F !important; color:#FFF !important; }}
+[data-testid="stDataFrame"] [role="gridcell"] {{ color:#F1F5F9 !important; }}
+
 </style>
 """
 
