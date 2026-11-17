@@ -175,6 +175,10 @@ pytest -q
 $env:TIL_STRICT_PROVENANCE="1"; streamlit run app.py   # PowerShell: qualquer número sem origem vira erro
 ```
 
+## 🎯 Scout & Planejamento
+
+A área **Scout** combina diagnóstico do clube, qualidade estatística por função, referências de mercado, realismo contextual, busca manual, oportunidades U23 e simulação de entradas/saídas. O método, as fontes, os pesos e as limitações estão descritos em [docs/SCOUT.md](docs/SCOUT.md).
+
 ## ⚠️ Limitações conhecidas
 
 - **Sem tracking contínuo:** a "compactação" é estimada pela dispersão das ações defensivas (proxy declarada na resposta).
