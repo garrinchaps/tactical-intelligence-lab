@@ -82,6 +82,21 @@ def test_explicit_replace_creates_consistent_backup(monkeypatch, tmp_path):
         assert connection.execute("SELECT value FROM remote_records").fetchone()[0] == "remote-copy"
 
 
+
+def test_datahub_migration_is_versioned_and_cache_revisions_are_selective(tmp_path):
+    from src.data_hub.db import DataHubDB
+
+    db = DataHubDB(db_path=tmp_path / "revision.sqlite")
+    with db.connect() as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 27
+    catalog_before = db.catalog_version()
+    db._bump_cache_revision("catalog_revision")
+    assert db.catalog_version() != catalog_before
+    history_before = db.get_state("cache", "player_history_revision")
+    db.save_boxscore(12345, {})
+    assert db.get_state("cache", "player_history_revision") != history_before
+
+
 def test_datahub_uses_tactical_db_path_alias(monkeypatch, tmp_path):
     from src.data_hub.db import DataHubDB
 
