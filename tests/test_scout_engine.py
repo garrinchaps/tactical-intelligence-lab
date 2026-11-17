@@ -321,7 +321,7 @@ def _history_fixture(path):
     rows = []
     match_id = 1
 
-    def add_player(name, offset_days, minutes=90):
+    def add_player(name, offset_days, minutes=90, rating=7.0, stats_json="{}"):
         nonlocal match_id
         played = (date.today() - timedelta(days=offset_days)).isoformat()
         conn.execute(
@@ -329,12 +329,12 @@ def _history_fixture(path):
                'Clube A', 'Clube B', 'fotmob')""",
             (match_id, played),
         )
-        rows.append((match_id, "Clube A", name, "ST", minutes, 7.0, "{}"))
+        rows.append((match_id, "Clube A", name, "ST", minutes, rating, stats_json))
         match_id += 1
 
-    # Jogador Transfermarkt: deve manter todo o recorte de cinco anos.
-    add_player("Alpha Target", 250)
-    add_player("Alpha Target", 40)
+    # Jogador Transfermarkt: deve manter todo o recorte de cinco anos e somar métricas JSON.
+    add_player("Alpha Target", 250, 90, 6.0, '{"totalGoals":"2","goalAssists":"1","xg":"0,5"}')
+    add_player("Alpha Target", 40, 90, 8.0, '{"totalGoals":1,"xg":0.2}')
 
     # Jogador sem cadastro: quatro jogos recentes e 480 minutos qualificam-no.
     for i, offset in enumerate((30, 60, 90, 120)):
@@ -365,6 +365,17 @@ def test_load_player_history_filters_names_but_keeps_full_history_and_active_unl
     assert "beta unlisted" in by_core.index
     assert "gamma legacy" not in by_core.index
     assert by_core.loc["alpha target", "jogos"] == 2
+    assert by_core.loc["alpha target", "minutos"] == 180
+    assert by_core.loc["alpha target", "rating_media"] == 7.0
+    assert by_core.loc["alpha target", "goals"] == 3.0
+    assert by_core.loc["alpha target", "goals_p90"] == 1.5
+    assert by_core.loc["alpha target", "xg"] == 0.7
+    assert by_core.loc["alpha target", "forma_5"] == [6.0, 8.0]
+    assert by_core.loc["alpha target", "gols_12m"] == 1.0
+    assert by_core.loc["alpha target", "rating_12m"] == 8.0
+    season = by_core.loc["alpha target", "historico_temporadas"]
+    assert len(season) == 1 and season[0]["temporada"] == "2025"
+    assert season[0]["goals"] == 3.0
     # O jogador sem cadastro é selecionado pelos quatro jogos recentes e mantém também
     # sua partida de 500 dias atrás no histórico completo.
     assert by_core.loc["beta unlisted", "jogos"] == 5
