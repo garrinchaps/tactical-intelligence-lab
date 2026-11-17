@@ -52,6 +52,8 @@ def database_stats(path: Path) -> dict[str, Any]:
     uri = path.resolve().as_uri() + "?mode=ro"
     conn = sqlite3.connect(uri, uri=True, timeout=30)
     try:
+        # Mantém uma fotografia consistente enquanto as tabelas são contadas.
+        conn.execute("BEGIN")
         result["integrity_check"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
         tables = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
