@@ -69,7 +69,9 @@ _COUNTRY_ALIASES = {
 def _country_key(value: Any) -> str:
     import unicodedata
 
-    raw = unicodedata.normalize("NFKD", str(value or "").casefold())
+    if value is None or pd.isna(value):
+        return ""
+    raw = unicodedata.normalize("NFKD", str(value).casefold())
     token = " ".join("".join(ch for ch in raw if not unicodedata.combining(ch)).split())
     return _COUNTRY_ALIASES.get(token, "")
 
