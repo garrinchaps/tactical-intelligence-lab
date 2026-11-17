@@ -335,10 +335,11 @@ def render(_ctx=None):
     back_button(key="scout_back")
     page_header("Scout & Planejamento", "War Room de mercado: carências do clube, alvos realistas e simulação do elenco.")
     service = get_service()
-    # A chave muda a cada 20 min: preserva a atualização periódica do cache em memória
-    # e permite reaproveitar o mercado já processado após reiniciar o Streamlit.
+    # Mantém a renovação periódica do catálogo externo e também invalida o cache
+    # imediatamente quando o SQLite principal/WAL/journal realmente muda.
+    # A assinatura usa apenas metadados de arquivo: não percorre centenas de milhares de linhas.
     import time
-    version = f"{service.db.stable_version()}:{int(time.time() // 1200)}"
+    version = f"{E.history_cache_revision(service.db)}:{int(time.time() // 1200)}"
     prefill = str(param("club", "") or st.session_state.get("scout_selected_club", ""))
     try:
         with st.spinner("Carregando mercado e histórico estatístico disponível..."):
