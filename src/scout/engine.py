@@ -1324,8 +1324,17 @@ def rejection_preferences(db, club: str, limit: int = 12) -> Dict[str, Any]:
     reasons = []
     for row in rows.to_dict("records"):
         reasons.extend([_safe_str(row.get("motivo"))] * min(3, int(row.get("ocorrencias") or 1)))
+    try:
+        with db.connect() as conn:
+            names = pd.read_sql_query(
+                """SELECT jogador,MAX(criado_em) AS mais_recente FROM scout_feedback
+                   WHERE clube=? GROUP BY jogador ORDER BY mais_recente DESC LIMIT 80""",
+                conn, params=[club])
+    except Exception:
+        names = pd.DataFrame(columns=["jogador"])
     return {"motivos": reasons, "amostra": int(rows["ocorrencias"].sum()),
-            "posicoes": rows.to_dict("records")}
+            "posicoes": rows.to_dict("records"),
+            "jogadores_recusados": names["jogador"].dropna().astype(str).tolist() if not names.empty else []}
 
 
 def save_plan(db, club: str, name: str, payload: Dict[str, Any]) -> int:
