@@ -81,15 +81,17 @@ Todas as decisões arquiteturais e linhas de código devem honrar quatro pilares
 
 ---
 
-## 2. Auditoria Técnica do Estado Atual do Repositório
+## 2. Auditoria Técnica do Estado do Repositório
 
-Com base na inspeção direta do código-fonte local e do banco de dados `database/tactical_lab.db`:
+**Nota de evidência:** este quadro mistura evidências do código consultado no GitHub com uma fotografia histórica do banco local registrada em auditoria anterior. O arquivo `database/tactical_lab.db` não estava disponível nesta sessão; portanto, tamanho, número de tabelas/registros e integridade SQLite abaixo **não são uma certificação atual**. Revalidar no computador que contém o banco usando `python scripts/project_audit.py --database database/tactical_lab.db --count-rows --check-integrity`. O inventário em CI sem o banco local só comprova o código e a estrutura do checkout.
+
+As informações de código foram conferidas nas branches de desenvolvimento em 17/11/2026. Não representam, por si só, o conteúdo da branch `main`.
 
 | Componente | Estado Atual Auditado | Diagnóstico e Ação no Plano |
 |---|---|---|
-| **Banco Relacional** | SQLite 3 (`tactical_lab.db`), 4,7 GB, 40 tabelas, 12.141.253 registros. `PRAGMA integrity_check` = `ok`. | Mantido como camada de estado e serviço rápido. Otimizar índices e isolar processos de escrita pesada. |
+| **Banco Relacional** | Fotografia histórica: SQLite 3 (`tactical_lab.db`), 4,7 GB, 40 tabelas, 12.141.253 registros, `PRAGMA integrity_check` = `ok` na auditoria anterior. **Não revalidado nesta sessão.** | Reexecutar auditoria read-only no banco local; preservar SQLite como camada transacional. |
 | **Camada Analítica** | Módulos parciais em `src/data_lake` com suporte a Parquet e DuckDB. | Consolidar views DuckDB para consultas agregadas sobre grandes históricos. |
-| **Testes Automatizados** | 315 testes executados, 100% aprovados após correções de alinhamento e tema. | Expandir testes de regressão de latência e invariância estatística. |
+| **Testes Automatizados** | GitHub Actions no commit `92698b8`: `compileall` concluído; inventário read-only concluído; suíte completa: **322 passed, 1 skipped, 21 warnings** (Python 3.11, 17/11/2026). | Expandir testes de regressão de latência, invariância estatística e integrações com banco de produção. |
 | **Motor de Scout** | `src/scout/engine.py` (1.729 linhas). Otimizado com `_parsed_stats`, `_history_group_totals` e índice `idx_pstats_player`. | Alinhamento de índices corrigido (`index=raw.index`). Próxima etapa: camada de pré-cálculo de 12 meses. |
 | **Modelos de ML** | Rede neural MLP em NumPy (`neural_net.py`), benchmark pareado (`benchmark.py`), treino em subprocesso (`train_job.py`). | Expandir experimentos com PyTorch, incorporando arquiteturas temporais e espaciais. |
 | **Integração de Fontes** | StatsBomb Open Data (offline), OpenPlay (26k jogos), FotMob (thread ao vivo), ESPN (ano/mês + resumos), Transfermarkt (50k atletas). | Implementar verificação centralizada de integridade e fallback automático. |
@@ -103,7 +105,7 @@ Com base na inspeção direta do código-fonte local e do banco de dados `databa
 > **Regra de Ouro:** Não adicionar novos modelos preditivos pesados sobre estruturas de dados que demorem mais de 2 segundos para responder a uma consulta analítica básica.
 
 ### 1. Auditoria Completa da Aplicação
-* **Prioridade:** P0 · Concluída / Contínua
+* **Prioridade:** P0 · Parcial / Contínua — inventário estático e CI abrangente adicionados; auditoria de runtime, consultas críticas e cobertura de todas as rotas ainda pendentes.
 * **Objetivo:** Mapear o grafo completo de chamadas, tabelas e fluxos de dados para garantir que nenhuma refatoração quebre funcionalidades ativas.
 * **Ações Técnicas:**
   1. Manter inventário automatizado (`public_deploy_inventory.json`) atualizado a cada alteração estrutural.
@@ -539,9 +541,9 @@ gantt
 
 O projeto será considerado em **Estado de Excelência e Pronto para Lançamento Público** quando todos os seguintes requisitos forem comprovadamente atendidos:
 
-- [x] Todas as funcionalidades existentes preservadas e 100% da suíte de testes aprovada.
-- [x] Problema de alinhamento dos índices do Scout investigado e corrigido (`index=raw.index`).
-- [x] Tema visual protegido contra vazamento de código CSS como texto.
+- [ ] Preservação de todas as funcionalidades comprovada por testes de integração e revisão de rotas; a suíte automatizada atual passou, mas não equivale a uma certificação end-to-end de cada fluxo.
+- [x] Correção do alinhamento de índices do Scout presente na branch de desenvolvimento (`index=raw.index`) e coberta pela suíte automatizada do PR de fundação; ainda não incorporada à `main`.
+- [ ] Proteção visual contra vazamento de CSS: alteração de whitespace consta na branch de desenvolvimento; falta validação visual/manual da interface e integração na `main`.
 - [ ] Tabela de pré-agregação histórica (`player_season_aggregates`) ativa, reduzindo a carga do Scout para $\le 1,5\text{ s}$.
 - [ ] Camada DuckDB integrada lendo dados particionados em Parquet para consultas analíticas pesadas.
 - [ ] Cadastro Universal de Jogadores operando sem mistura de homônimos.
