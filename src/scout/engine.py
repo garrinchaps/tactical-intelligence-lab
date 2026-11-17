@@ -821,7 +821,10 @@ def is_foreign_player(nationality: Any, buyer_country: Any) -> Optional[bool]:
 
 
 def _foreign_rule(competition: str, season: int) -> Optional[Dict[str, Any]]:
-    c = _safe_str(competition).lower()
+    import unicodedata
+
+    raw = _safe_str(competition).lower()
+    c = "".join(ch for ch in unicodedata.normalize("NFKD", raw) if not unicodedata.combining(ch))
     if any(x in c for x in BR_COMP_TOKENS):
         if season <= 2026:
             return {"limite": 9, "status": "regra vigente consultada para 2026", "unidade": "relacionados por partida"}
