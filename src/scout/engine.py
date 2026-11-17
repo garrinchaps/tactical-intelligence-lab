@@ -440,16 +440,30 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     # e com exposição mínima. Sem idade, contrato ou valor publicados, esses campos ficam vazios.
     if history is not None and not history.empty and "core" in history:
         known = set(p["_core"].dropna().astype(str))
+        # Filtra vetorialmente o histórico antes de montar os atletas sem cadastro de mercado.
+        extra_history = history.copy()
+        extra_history["_scout_core"] = extra_history["core"].map(_safe_str)
+        extra_last_game = pd.to_datetime(
+            extra_history.get("ultimo_jogo", pd.Series(index=extra_history.index, dtype=object)),
+            errors="coerce",
+        )
+        extra_minutes = pd.to_numeric(
+            extra_history.get("minutos_12m", pd.Series(0, index=extra_history.index)), errors="coerce"
+        ).fillna(0)
+        extra_games = pd.to_numeric(
+            extra_history.get("jogos_12m", pd.Series(0, index=extra_history.index)), errors="coerce"
+        ).fillna(0)
+        extra_mask = (
+            extra_history["_scout_core"].ne("")
+            & ~extra_history["_scout_core"].isin(known)
+            & extra_last_game.notna()
+            & (extra_last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=180))
+            & (extra_minutes >= 450)
+            & (extra_games >= 4)
+        )
         observed = []
-        for _, item in history.iterrows():
+        for item in extra_history.loc[extra_mask].drop(columns=["_scout_core"]).to_dict("records"):
             core = _safe_str(item.get("core"))
-            last_game = pd.to_datetime(item.get("ultimo_jogo"), errors="coerce")
-            minutes_12m = _num(item.get("minutos_12m")) or 0
-            games_12m = _num(item.get("jogos_12m")) or 0
-            if (not core or core in known or pd.isna(last_game) or
-                    last_game < pd.Timestamp.today().normalize() - pd.Timedelta(days=180) or
-                    minutes_12m < 450 or games_12m < 4):
-                continue
             name = _safe_str(item.get("nome_observado"))
             role = _role(item.get("posicao_observada"), "")
             if not name or not role:
