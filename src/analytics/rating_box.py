@@ -152,9 +152,13 @@ def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.D
     out = []
     from src.analytics.opponent_strength import opponent_strength_for_match
 
+    strength_by_team = {}
     for r in ind.to_dict("records"):
         r = {k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()}   # NaN = sem dado (não é zero)
-        strength = opponent_strength_for_match(db, int(match_id), r.get("equipe"))
+        team = str(r.get("equipe") or "")
+        if team not in strength_by_team:
+            strength_by_team[team] = opponent_strength_for_match(db, int(match_id), team)
+        strength = strength_by_team[team]
         ev = evaluate(r, pool, {"opponent_adjustment": strength.get("ajuste", 0.0),
                                 "opponent_strength": strength})
         out.append({"jogador": r["jogador"], "equipe": r["equipe"], "funcao": r["funcao"], "minutos": r["minutos"],
@@ -212,7 +216,9 @@ def player_form(db, names: List[str], n: int = 10, ref: Optional[pd.DataFrame] =
         dims = x["_detalhe"]["dimensoes"]
         rows.append({"match_id": mid, "data": d, "jogo": f"{h} {hs} x {as_} {a}", "funcao": x["funcao"], "minutos": x["minutos"],
                      "nota": x["nota"], "nota_final": x["nota_final"], "desempenho": x["desempenho"],
-                     "impacto": x["impacto"], "confianca_pct": x["confianca_pct"], **dims})
+                     "impacto": x["impacto"], "confianca_pct": x["confianca_pct"],
+                     "adversario": x.get("adversario"), "nivel_adversario": x.get("nivel_adversario"),
+                     "ajuste_adversario": x.get("ajuste_adversario"), **dims})
     return pd.DataFrame(rows)
 
 
