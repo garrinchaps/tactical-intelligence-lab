@@ -285,6 +285,11 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     p["valor_mercado_eur"] = pd.to_numeric(p["valor_mercado_eur"], errors="coerce")
     p["fim_contrato"] = pd.to_datetime(p["fim_contrato"], errors="coerce")
     hmap = _history_map(history)
+    # Pré-declara colunas do histórico antes do merge para evitar criação implícita via .at.
+    for item in hmap.values():
+        for col in item:
+            if col not in p:
+                p[col] = None
     dup = p["_core"].duplicated(keep=False)
     for idx, row in p.iterrows():
         item = hmap.get(row["_core"])
