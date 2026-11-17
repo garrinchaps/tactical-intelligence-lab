@@ -430,6 +430,59 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     return d
 
 
+
+def merge_external_ratings(players: pd.DataFrame, ratings: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """Cruza notas externas (ex.: Simonetti) sem substituir a leitura estatística própria."""
+    if players is None or players.empty:
+        return pd.DataFrame() if players is None else players
+    out = players.copy()
+    out["qualidade_estatistica"] = pd.to_numeric(out.get("qualidade"), errors="coerce")
+    out["nota_externa"] = np.nan
+    out["fontes_nota_externa"] = ""
+    if ratings is None or ratings.empty or not {"nome", "nota"} <= set(ratings.columns):
+        out["fonte_qualidade"] = np.where(out["qualidade_estatistica"].notna(),
+                                          "métricas estatísticas por posição", "sem avaliação confiável")
+        return out
+    ext = ratings.copy()
+    ext["_core"] = ext["nome"].map(player_core)
+    ext["nota"] = pd.to_numeric(ext["nota"], errors="coerce")
+    ext = ext[(ext["_core"] != "") & ext["nota"].between(0, 100)]
+    ext = ext.groupby("_core").agg(
+        nota_externa=("nota", "median"),
+        fontes_nota_externa=("fonte", lambda x: " · ".join(sorted(set(x.dropna().astype(str)))) if "fonte" in ext else "")
+    )
+    out["_external_core"] = out["_core"] if "_core" in out else out["nome"].map(player_core)
+    duplicated = out["_external_core"].duplicated(keep=False)
+    matched = out["_external_core"].map(ext["nota_externa"])
+    source = out["_external_core"].map(ext["fontes_nota_externa"])
+    if "historico_ambiguo" in out:
+        blocked = out["historico_ambiguo"].fillna(False).astype(bool)
+        matched = matched.mask(blocked)
+        source = source.mask(blocked)
+    else:
+        matched = matched.mask(duplicated)
+        source = source.mask(duplicated)
+    out["nota_externa"] = matched
+    out["fontes_nota_externa"] = source.fillna("")
+    stat = pd.to_numeric(out["qualidade_estatistica"], errors="coerce")
+    both = stat.notna() & matched.notna()
+    only_external = stat.isna() & matched.notna()
+    # Nota externa tem peso de corroborar, não dominar a produção observada.
+    out.loc[both, "qualidade"] = .82 * stat[both] + .18 * matched[both]
+    out.loc[only_external, "qualidade"] = matched[only_external]
+    out["fonte_qualidade"] = np.select(
+        [both, only_external, stat.notna()],
+        ["82% métricas estatísticas + 18% nota externa",
+         "nota externa isolada; confiança baixa", "métricas estatísticas por posição"],
+        default="sem avaliação confiável",
+    )
+    if "confianca_pct" in out:
+        out.loc[only_external, "confianca_pct"] = 25
+        out.loc[both, "confianca_pct"] = np.minimum(
+            100, pd.to_numeric(out.loc[both, "confianca_pct"], errors="coerce").fillna(0) + 8)
+    out = out.drop(columns=["_external_core"], errors="ignore")
+    return out
+
 def market_club(tm_clubs: Optional[pd.DataFrame], club_name: str) -> Optional[Dict[str, Any]]:
     if tm_clubs is None or tm_clubs.empty:
         return None
