@@ -11,6 +11,7 @@ Execução: streamlit run app.py
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Callable
 
 import streamlit as st
@@ -23,11 +24,18 @@ st.set_page_config(page_title="Tactical Intelligence Lab", page_icon="⚽", layo
 from src.data_hub.registry import BADGES, DataLevel  # noqa: E402
 from src.ui import theme  # noqa: E402
 from src.ui.components import empty_state, error_state, match_strip  # noqa: E402
-from src.ui.context import build_context, get_service, load_bundle, teams_of  # noqa: E402
 from src.ui import nav  # noqa: E402
 from src.ui.i18n import LANGS, t  # noqa: E402
-from src.ui.pages import (ai_analyst, assistant, catalog, clubs, compare, competition, games, lab,  # noqa: E402
-                          ml_inspection, neural, players_search, search_all, squad, scout)
+
+def _lazy_page(module_name: str, function_name: str = "render") -> Callable:
+    """Importa cada página somente quando ela é aberta, sem carregar todo o app no boot."""
+    def call(*args, **kwargs):
+        module = import_module(f"src.ui.pages.{module_name}")
+        return getattr(module, function_name)(*args, **kwargs)
+    call.__name__ = f"{module_name}_{function_name}"
+    call.__module__ = f"src.ui.pages.{module_name}"
+    return call
+
 
 DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — disponível offline em data/demo
 
@@ -35,6 +43,7 @@ DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — dispon
 # ------------------------------------------------------------------ contexto da partida
 def current_context(with_sim_ci: bool = True):
     """Abre a partida da sessão e monta o contexto (None + estado de erro desenhado se falhar)."""
+    from src.ui.context import build_context, load_bundle, teams_of
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception as exc:
@@ -54,6 +63,7 @@ def current_context(with_sim_ci: bool = True):
 
 def match_bar() -> None:
     """Faixa da partida aberta + equipe em foco + atalho para analisar o jogo ou trocar (pela busca)."""
+    from src.ui.context import load_bundle, teams_of
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception:
@@ -102,27 +112,43 @@ def _named(fn: Callable, name: str) -> Callable:
     return fn
 
 
+assistant_render = _lazy_page("assistant")
+search_render = _lazy_page("search_all")
+compare_render = _lazy_page("compare", "render_page")
+squad_render = _lazy_page("squad")
+scout_render = _lazy_page("scout")
+games_render = _lazy_page("games")
+clubs_render = _lazy_page("clubs")
+players_render = _lazy_page("players_search")
+competition_render = _lazy_page("competition")
+neural_render = _lazy_page("neural")
+ml_render = _lazy_page("ml_inspection")
+ai_analyst_render = _lazy_page("ai_analyst")
+catalog_render = _lazy_page("catalog")
+lab_render = _lazy_page("lab")
+
+
 MAIN = [
-    st.Page(_named(lambda: assistant.render(current_context, match_bar), "page_assistente"), title="Assistente", icon="💬",
+    st.Page(_named(lambda: assistant_render(current_context, match_bar), "page_assistente"), title="Assistente", icon="💬",
             url_path="assistente", default=True),
-    st.Page(standalone(search_all.render), title="Buscar", icon="🔎", url_path="buscar"),
-    st.Page(_named(lambda: compare.render_page(current_context, match_bar), "page_comparar"), title="Comparar", icon="🆚",
+    st.Page(standalone(search_render), title="Buscar", icon="🔎", url_path="buscar"),
+    st.Page(_named(lambda: compare_render(current_context, match_bar), "page_comparar"), title="Comparar", icon="🆚",
             url_path="comparar"),
-    st.Page(standalone(squad.render), title="Escalação", icon="📋", url_path="escalacao"),
-    st.Page(standalone(scout.render), title="Scout", icon="🎯", url_path="scout"),
+    st.Page(standalone(squad_render), title="Escalação", icon="📋", url_path="escalacao"),
+    st.Page(standalone(scout_render), title="Scout", icon="🎯", url_path="scout"),
 ]
 VIEWS = {   # telas abertas pelo clique (fora do menu)
-    "jogo": st.Page(_named(lambda: games.render(current_context), "page_jogo"), title="Jogo", icon="🏟️", url_path="jogo"),
-    "time": st.Page(standalone(clubs.render), title="Time", icon="🛡️", url_path="time"),
-    "jogador": st.Page(standalone(players_search.render), title="Jogador", icon="👤", url_path="jogador"),
-    "competicao": st.Page(standalone(competition.render), title="Competição", icon="🏆", url_path="competicao"),
+    "jogo": st.Page(_named(lambda: games_render(current_context), "page_jogo"), title="Jogo", icon="🏟️", url_path="jogo"),
+    "time": st.Page(standalone(clubs_render), title="Time", icon="🛡️", url_path="time"),
+    "jogador": st.Page(standalone(players_render), title="Jogador", icon="👤", url_path="jogador"),
+    "competicao": st.Page(standalone(competition_render), title="Competição", icon="🏆", url_path="competicao"),
 }
 BACKSTAGE = [
-    st.Page(standalone(neural.render, pass_ctx=True), title="Como a IA aprende", icon="🧠", url_path="como-a-ia-aprende"),
-    st.Page(needs_match(ml_inspection.render), title="Machine Learning & Avaliação", icon="🤖", url_path="ml"),
-    st.Page(needs_match(ai_analyst.render), title="Analista técnico (guard)", icon="🛡️", url_path="analista-tecnico"),
-    st.Page(standalone(catalog.render), title="Dados & Fontes", icon="🗄️", url_path="dados"),
-    st.Page(standalone(lab.render), title="Laboratório", icon="🧪", url_path="laboratorio"),
+    st.Page(standalone(neural_render, pass_ctx=True), title="Como a IA aprende", icon="🧠", url_path="como-a-ia-aprende"),
+    st.Page(needs_match(ml_render), title="Machine Learning & Avaliação", icon="🤖", url_path="ml"),
+    st.Page(needs_match(ai_analyst_render), title="Analista técnico (guard)", icon="🛡️", url_path="analista-tecnico"),
+    st.Page(standalone(catalog_render), title="Dados & Fontes", icon="🗄️", url_path="dados"),
+    st.Page(standalone(lab_render), title="Laboratório", icon="🧪", url_path="laboratorio"),
 ]
 
 
@@ -196,6 +222,7 @@ def top_bar(focused: bool = False) -> None:
     st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
     recent_ids = st.session_state.get("recent_match_ids", [])
     if recent_ids:
+        from src.ui.context import load_bundle
         recent_labels = {}
         for mid in recent_ids[:5]:
             try:
@@ -253,6 +280,7 @@ def main() -> None:
     if not focused:
         try:
             from src.data_hub import autosync
+            from src.ui.context import get_service
 
             st.caption(autosync.status_text(autosync.ensure_started(get_service().db)))
             fm = autosync.fotmob_status()
