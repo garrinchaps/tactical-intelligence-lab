@@ -48,3 +48,10 @@ def test_club_roster_is_not_filtered_as_a_national_team():
 
     players = pd.DataFrame({"nome": ["Jogador"], "nacionalidade": ["France"]})
     assert filter_national_team_players(players, "Fluminense")["nome"].tolist() == ["Jogador"]
+
+
+def test_fotmob_international_friendlies_are_in_automatic_catalog():
+    from src.data_hub.sources.fotmob import LEAGUES, PRIORITY
+
+    assert LEAGUES[114] == "Amistosos internacionais"
+    assert 114 in PRIORITY
