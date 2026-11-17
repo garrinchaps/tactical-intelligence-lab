@@ -7,13 +7,15 @@
 
 ## 1. Escopo desta atualização
 
-Esta atualização adiciona exclusivamente:
+Esta rodada adiciona:
 - um inventário estático/read-only do código e do schema SQLite;
-- testes automatizados desse inventário;
+- testes automatizados para o inventário e para o bootstrap do banco;
 - um workflow independente de regressão completa;
+- proteção do bootstrap contra substituição silenciosa de banco SQLite existente;
+- alinhamento da precedência de TACTICAL_DB_PATH entre o bootstrap e DataHubDB;
 - este registro de estado e pendências.
 
-Nenhum módulo de produção, página, algoritmo, modelo ou esquema de dados foi removido ou alterado nesta atualização. O novo script só é executado quando chamado manualmente ou pelo CI.
+Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O bootstrap agora preserva bancos existentes; uma substituição de banco pequeno que contém tabelas exige opt-in explícito e cria backup consistente antes da troca. O inventário continua sem importar/rodar módulos do app e a leitura do SQLite é read-only.
 
 ## 2. Estado observado no GitHub
 
@@ -33,7 +35,8 @@ Nenhum módulo de produção, página, algoritmo, modelo ou esquema de dados foi
 | Entrega | Estado inicial constatado | Próxima ação / critério de conclusão |
 |---|---|---|
 | Inventário de páginas, módulos, símbolos e imports | Parcial; `docs/ARQUITETURA.md` documenta o mapa, mas precisa ser atualizado automaticamente | Usar `scripts/project_audit.py`; revisar discrepâncias com o mapa manual |
-| Inventário SQLite | Parcial; há schema e ferramentas de deploy em branches de trabalho | Executar script com `--database`; obter integridade, tabelas, colunas, índices e FKs. Contagem de linhas e quick_check são opcionais por custo |
+| Inventário SQLite | Parcial; novo script lê schema, colunas, índices e FKs em modo read-only | Executar no banco local com `--database`; contagem de linhas e quick_check são opcionais por custo |
+| Bootstrap seguro do banco | Implementado na branch de trabalho; testes adicionados | Banco pequeno com tabelas não é sobrescrito sem `TACTICAL_ALLOW_DB_REPLACE=1`; substituição intencional gera backup via SQLite Backup API |
 | Testes de regressão gerais | Lacuna de CI confirmada: workflow anterior testa somente dois arquivos | Novo workflow executa compileall e `pytest` completo; aceitação somente após execução verde |
 | Alinhamento do histórico do Scout | Correção existe na linha de desenvolvimento/PRs de trabalho | Reexecutar teste dedicado e comparar dados agregados com fixture independente |
 | Benchmark do Scout | Script dedicado existe na branch de trabalho | Medir baseline e pós-otimização no mesmo banco/hardware, guardando p50/p95 e número de candidatos |
