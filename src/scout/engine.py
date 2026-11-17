@@ -260,6 +260,7 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     )
     out["duels_won_pct"] = duels.round(2)
 
+    # Uma única ordenação atende forma dos últimos cinco jogos e seleção do registro mais recente.
     chronological = rows.sort_values("match_date", ascending=True, kind="stable")
     forms = chronological.groupby(
         group_keys, dropna=False, sort=False, observed=True
@@ -269,8 +270,7 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     out["forma_5"] = forms.reindex(out.index)
 
     latest = (
-        rows.sort_values("match_date", ascending=False, kind="stable")
-        .drop_duplicates(group_keys, keep="first")
+        chronological.drop_duplicates(group_keys, keep="last")
         .set_index(group_keys)
     )
     out["ultimo_time"] = latest["team_name"].reindex(out.index).fillna("")
@@ -431,9 +431,11 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         ["accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct",
          "duels_won_pct", "duelsWonPercentage"]
     ))
+    report(f"Decodificando métricas JSON de {len(raw):,} registros...")
     stat_frame = pd.DataFrame.from_records(
         raw["stats_json"].map(_json_obj).tolist(), columns=stat_fields
     )
+    report("Convertendo métricas JSON para colunas numéricas...")
     for out_key, raw_key in COUNT_KEYS.items():
         raw[out_key] = _history_numeric(stat_frame[raw_key]) if raw_key in stat_frame else np.nan
 
@@ -453,9 +455,10 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     raw["_rating_minutes"] = valid_minutes
     raw["_rating_weight"] = raw["_rating_num"].fillna(0) * valid_minutes
 
-    report("Calculando estatísticas por jogador e temporada...")
+    report("Calculando totais da carreira por jogador...")
     career = _history_group_totals(raw, ["_core"])
 
+    report("Calculando totais por temporada...")
     raw["_season_group"] = raw["season_name"].where(
         raw["season_name"].notna(), "__SEASON_NOT_IDENTIFIED__"
     )
@@ -475,6 +478,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     else:
         season_by_core = {}
 
+    report("Calculando janela dos últimos 12 meses...")
     recent_cutoff = (pd.Timestamp.today().normalize() - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
     recent_rows = raw.loc[raw["match_date"].astype(str) >= recent_cutoff]
     recent_totals = _history_group_totals(recent_rows, ["_core"]) if not recent_rows.empty else pd.DataFrame()
