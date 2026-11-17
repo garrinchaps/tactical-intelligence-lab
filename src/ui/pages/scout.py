@@ -487,6 +487,51 @@ def render(_ctx=None):
                     _dossier(p,roster)
                 if st.button("＋ Adicionar jogador selecionado",key="scout_manual_add",type="primary"):
                     _add_player(p,plan_key); st.rerun()
+    with st.expander("＋ Cadastrar atleta manualmente", expanded=False):
+        st.caption("Cadastro próprio para planejamento. Sem estatísticas verificadas, a qualidade fica como não avaliada.")
+        with st.form("scout_manual_create_form"):
+            ca, cb, cc = st.columns(3)
+            custom_name = ca.text_input("Nome do jogador")
+            custom_role = cb.selectbox("Posição natural", list(E.ROLE_LABELS), format_func=_role)
+            custom_age = cc.number_input("Idade", 15, 45, 22)
+            cd, ce, cf = st.columns(3)
+            custom_club = cd.text_input("Clube atual", "Sem clube informado")
+            custom_nation = ce.text_input("Nacionalidade")
+            custom_value = cf.number_input("Valor de referência (€)", min_value=0, value=0, step=100000)
+            custom_rating = st.number_input("Nota manual de qualidade (0 = sem nota)", min_value=0, max_value=100, value=0)
+            custom_obs = st.text_input("Observação de scout")
+            submitted = st.form_submit_button("Salvar jogador e adicionar ao plano", type="primary")
+        if submitted:
+            if not custom_name.strip():
+                st.error("Informe o nome do jogador.")
+            else:
+                from src.data_lake.ids import player_core
+                from src.squad.formations import ROLE_PT
+                funcao = E.ROLE_LABELS.get(custom_role, custom_role)
+                birth_year = date.today().year - int(custom_age)
+                D.add_player({"nome": custom_name.strip(), "clube": custom_club.strip(),
+                    "posicao": custom_role, "funcao": funcao, "nascimento": f"{birth_year}-07-01",
+                    "valor_mercado_eur": float(custom_value) if custom_value else None,
+                    "nota_manual": float(custom_rating) if custom_rating else None, "observacao": custom_obs})
+                custom = {"nome": custom_name.strip(), "clube": custom_club.strip(), "papel": custom_role,
+                    "papel_alvo": custom_role, "papel_alvo_label": _role(custom_role), "idade": int(custom_age),
+                    "nacionalidade": custom_nation, "valor_mercado_eur": float(custom_value) if custom_value else None,
+                    "qualidade": float(custom_rating) if custom_rating else None, "confianca_pct": 0,
+                    "_core": player_core(custom_name), "historico_temporadas": "[]", "ultimos_jogos": "[]",
+                    "motivo_principal": "Cadastro manual; não há estatísticas verificadas associadas.",
+                    "realismo": E.transfer_realism({"valor_mercado_eur": custom_value or None,
+                        "nacionalidade": custom_nation, "idade": custom_age}, financial, country, competition,
+                        season=next_season),
+                    "compatibilidade": {"score": 50, "label": "sem histórico estatístico", "confianca": "baixa"},
+                    "sinergia": E.chemistry({"papel": custom_role}, roster)}
+                _add_player(custom, plan_key)
+                try:
+                    from src.ui.pages.squad import _squad
+                    _squad.clear()
+                except Exception:
+                    pass
+                st.rerun()
+
     with tabs[3]:
         st.markdown("#### Joias subvalorizadas e potencial")
         st.caption("Triagem de atletas até 23 anos, com qualidade baseada em dados observados e valor comparado aos pares. O upside é heurístico, não previsão de preço.")
