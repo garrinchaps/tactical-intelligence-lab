@@ -147,6 +147,10 @@ def render(_ctx=None) -> None:
                 f'<div class="d">{len(m)} jogos no nível escolhido · {len(allm)} resultados no total'
                 + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
                 unsafe_allow_html=True)
+    scout_a, scout_b = st.columns([1.8, 6])
+    if scout_a.button("🎯 Planejar elenco", key=f"team_scout_{name}", type="primary", use_container_width=True):
+        nav.open_view("scout", club=name)
+    scout_b.caption("Diagnóstico de necessidades, alvos realistas e simulação de transferências.")
     k = st.columns(5)
     k[0].metric("Jogos (todos)", r.get("jogos", 0))
     k[1].metric("V / E / D", f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}")
