@@ -106,7 +106,7 @@ def openplay_prefetch_enabled() -> bool:
     return os.getenv("ENABLE_OPENPLAY_PREFETCH", "true").strip().lower() not in ("0", "false", "nao", "não", "no")
 
 
-def _openplay_prefetch_loop() -> None:
+def _openplay_prefetch_loop(db=None) -> None:
     """Transforma os 26 mil jogos OpenPlay em eventos locais, em lotes retomáveis e com proteção de disco."""
     import time
     from pathlib import Path
@@ -115,7 +115,7 @@ def _openplay_prefetch_loop() -> None:
     from src.data_hub.sources.openplay import OpenPlayProvider
 
     try:
-        svc = MatchDataService()
+        svc = MatchDataService(db=db) if db is not None else MatchDataService()
         provider = OpenPlayProvider(svc.db)
         if not provider.enabled:
             _OPENPLAY["phase"] = "arquivos locais não encontrados; configure OPENPLAY_PATH"
@@ -173,7 +173,7 @@ def fotmob_enabled() -> bool:
     return os.getenv("ENABLE_FOTMOB", "true").strip().lower() not in ("0", "false", "nao", "não", "no")
 
 
-def _fotmob_loop() -> None:
+def _fotmob_loop(db=None) -> None:
     """
     Abastece a base sozinha enquanto o app está aberto, um pedido a cada ~0,7 s, sem travar a tela:
       1. uma vez por dia: calendário e resultados da temporada atual de todas as competições (e, na 1ª vez, as
@@ -188,7 +188,7 @@ def _fotmob_loop() -> None:
     from src.data_hub.service import MatchDataService
 
     try:
-        svc = MatchDataService()
+        svc = MatchDataService(db=db) if db is not None else MatchDataService()
         fm = svc.fotmob
         while enabled() and fotmob_enabled():
             try:
@@ -237,13 +237,14 @@ def fotmob_status() -> str:
     return status + (f" · {_fm['regua_status']}" if _fm.get("regua_status") else "")
 
 
-def _run(sources: List[str]) -> None:
+def _run(sources: List[str], db=None) -> None:
     from src.data_hub.service import MatchDataService
     from src.data_hub.sync import run_sync
 
     log: List[str] = []
     try:
-        run_sync(sources, days_back=3, prefetch_events=0, service=MatchDataService(), progress=log.append,
+        svc = MatchDataService(db=db) if db is not None else MatchDataService()
+        run_sync(sources, days_back=3, prefetch_events=0, service=svc, progress=log.append,
                  seasons_back=0, prefetch_boxscores=30)
         _state["last_error"] = None
     except Exception as exc:  # nunca derruba o app
@@ -256,14 +257,14 @@ _live = {"running": False, "last": None, "ao_vivo": 0, "ligas": []}
 LIVE_CHECK_MIN = 15          # sem jogo ao vivo: confere a cada 15 min; com jogo ao vivo: a cada 1 min
 
 
-def _live_loop() -> None:
+def _live_loop(db=None) -> None:
     """B2: enquanto houver jogo ao vivo (ESPN), atualiza o placar a cada minuto; senão, confere a cada 15 min."""
     import time
 
     from src.data_hub.service import MatchDataService
 
     try:
-        svc = MatchDataService()
+        svc = MatchDataService(db=db) if db is not None else MatchDataService()
         if not svc.espn.enabled:
             return
         while enabled():
@@ -285,20 +286,20 @@ def ensure_started(db) -> Dict[str, Any]:
     with _lock:
         if not _live["running"] and os.getenv("AUTO_SYNC_LIVE", "1").strip() not in ("0", "false"):
             _live["running"] = True
-            threading.Thread(target=_live_loop, daemon=True, name="til-ao-vivo").start()
+            threading.Thread(target=_live_loop, args=(db,), daemon=True, name="til-ao-vivo").start()
         if not _fm["running"] and fotmob_enabled():
             _fm["running"] = True
-            threading.Thread(target=_fotmob_loop, daemon=True, name="til-fotmob").start()
+            threading.Thread(target=_fotmob_loop, args=(db,), daemon=True, name="til-fotmob").start()
         if not _OPENPLAY["running"] and openplay_prefetch_enabled():
             _OPENPLAY["running"] = True
-            threading.Thread(target=_openplay_prefetch_loop, daemon=True, name="til-openplay-prefetch").start()
+            threading.Thread(target=_openplay_prefetch_loop, args=(db,), daemon=True, name="til-openplay-prefetch").start()
         recent = _state["last_attempt"] and datetime.now(timezone.utc) - _state["last_attempt"] < timedelta(minutes=RETRY_MINUTES)
         if not _state["running"] and not recent:
             pending = due(db)
             if pending:
                 _state["running"] = True
                 _state["last_attempt"] = datetime.now(timezone.utc)
-                threading.Thread(target=_run, args=(pending,), daemon=True, name="til-autosync").start()
+                threading.Thread(target=_run, args=(pending, db), daemon=True, name="til-autosync").start()
                 _state["due"] = pending
     return {**_state, "enabled": True, "next_quick": _next(db)}
 
