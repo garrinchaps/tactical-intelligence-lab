@@ -29,7 +29,10 @@ def _market_data(version: str):
         players = players[(last >= last.max() - 2) |
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
     history = E.load_player_history(get_service().db, days=1825)
-    universe = E.add_quality_scores(E.build_market_universe(players, history))
+    valuations = D.table("tm_valores")
+    universe = E.add_quality_scores(E.build_market_universe(players, history, valuations))
+    # Notas externas (ex.: Simonetti) corroboram a qualidade sem substituir métricas observadas.
+    universe = E.merge_external_ratings(universe, D.external_ratings())
     if not clubs.empty:
         from src.data_lake.ids import team_core
         club_rows = clubs.copy()
@@ -84,7 +87,8 @@ def _merge_roster(roster, universe):
     r["_core"] = r["nome"].map(player_core)
     if universe is not None and not universe.empty:
         lookup = universe.drop_duplicates("_core").set_index("_core")
-        cols = [x for x in ("qualidade", "confianca_pct", "rating_media", "rating_12m", "minutos_12m",
+        cols = [x for x in ("qualidade", "confianca_pct", "rating_media", "rating_12m", "qualidade_estatistica",
+                            "nota_externa", "fontes_nota_externa", "fonte_qualidade", "minutos_12m",
                             "jogos_12m", "nacionalidade", "valor_mercado_eur", "fim_contrato",
                             "goals_p90", "assists_p90", "xg_p90", "xa_p90", "chances_created_p90",
                             "def_actions_p90", "sprints_p90", "historico_temporadas", "ultimos_jogos")
@@ -133,6 +137,8 @@ def _dossier(player, roster):
             return []
     hist, recent = unpack(player.get("historico_temporadas")), unpack(player.get("ultimos_jogos"))
     metrics = [
+        ("Qualidade calculada por função", player.get("qualidade_estatistica", player.get("qualidade"))),
+        ("Nota externa 0–100", player.get("nota_externa")),
         ("Minutos 12m", player.get("minutos_12m", player.get("minutos"))),
         ("Jogos 12m", player.get("jogos_12m", player.get("jogos"))),
         ("Nota média 12m", player.get("rating_12m", player.get("rating_media"))),
@@ -142,6 +148,8 @@ def _dossier(player, roster):
     ]
     comparison_table(pd.DataFrame([{"Indicador": k, "Valor": "—" if v is None or pd.isna(v) else round(float(v), 3)}
                                    for k, v in metrics]))
+    if player.get("fontes_nota_externa"):
+        st.caption("Fonte(s) da nota externa: " + str(player.get("fontes_nota_externa")))
     if hist:
         d = pd.DataFrame(hist)
         cols = [c for c in ("temporada", "jogos", "minutos", "rating_media", "goals", "assists", "xg", "xa") if c in d]
@@ -317,6 +325,8 @@ def render(_ctx=None):
         foreign_count = int(sum(1 for n in roster["nacionalidade"].dropna().astype(str)
                                 if E.is_foreign_player(n, country) is True))
     financial["estrangeiros_atual"] = foreign_count
+    feedback = E.rejection_preferences(service.db, team)
+    feedback_reason = " · ".join(feedback.get("motivos", []))
 
     pool = universe.copy() if universe is not None and not universe.empty else pd.DataFrame()
     if not pool.empty:
@@ -334,7 +344,7 @@ def render(_ctx=None):
                  for r in ("GK","CB","LB","RB","DM","CM","AM","LW","RW","ST") if int(counts.get(r, 0)) < 2]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = E.recommend(pool, needs, financial, country, competition, roster=roster,
-                             rejected=st.session_state[rejected_key], season=next_season) \
+                             rejected=st.session_state[rejected_key], feedback_reason=feedback_reason, season=next_season) \
             if not pool.empty else pd.DataFrame()
 
     tabs = st.tabs(["Diagnóstico", "IA · Top 5", "Busca manual", "Joias U23", "Planejamento"])
@@ -408,6 +418,8 @@ def render(_ctx=None):
             st.info("Não há histórico financeiro suficiente para estimar capacidade de investimento.")
     with tabs[1]:
         st.markdown("#### Cinco nomes priorizados")
+        if feedback.get("amostra"):
+            st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
         st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
         if ranked.empty:
             empty_state("Ainda não há candidatos suficientes",
