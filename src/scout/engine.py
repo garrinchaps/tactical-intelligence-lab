@@ -514,6 +514,61 @@ def _stats_for_matches(db, matches: pd.DataFrame, aliases: Sequence[str]) -> Tup
     return own_avg, against_avg, {"n": len(rows_for), "baseline_n": len(baseline), "competicoes": comps}
 
 
+
+def _coach_history_style(db, coach_name: str, current_aliases: Sequence[str], limit: int = 50) -> Dict[str, Any]:
+    """Estilo observado do treinador em partidas de outros clubes; não é perfil genérico inventado."""
+    try:
+        with db.connect() as conn:
+            rows = pd.read_sql_query(
+                """SELECT DISTINCT m.match_id,m.match_date,l.team_name
+                   FROM match_lineups l JOIN matches m ON m.match_id=l.match_id
+                   WHERE l.coach=? AND m.match_date>=date('now','-5 years')
+                     AND COALESCE(m.data_level,'') IN ('EVENTS','BOXSCORE')
+                   ORDER BY m.match_date DESC""", conn, params=[coach_name])
+    except Exception:
+        return {"jogos": 0, "tracos": [], "origem": "histórico indisponível"}
+    if rows.empty:
+        return {"jogos": 0, "tracos": [], "origem": "sem histórico de escalações do técnico"}
+    current = {team_core(x) for x in current_aliases}
+    rows["_team_core"] = rows["team_name"].map(team_core)
+    rows = rows[~rows["_team_core"].isin(current)].drop_duplicates(["match_id", "_team_core"]).head(limit)
+    if rows.empty:
+        return {"jogos": 0, "tracos": [], "origem": "sem partidas anteriores identificadas"}
+    ids = rows["match_id"].astype(int).unique().tolist()
+    ph = ",".join("?" for _ in ids)
+    try:
+        with db.connect() as conn:
+            stats = pd.read_sql_query(
+                f"SELECT match_id,team_name,stat_key,value FROM match_team_stats WHERE match_id IN ({ph})",
+                conn, params=ids)
+    except Exception:
+        stats = pd.DataFrame()
+    if stats.empty:
+        return {"jogos": int(rows["match_id"].nunique()), "tracos": [],
+                "origem": "histórico de jogos encontrado, mas sem estatísticas comparáveis"}
+    own_rows, against_rows = [], []
+    for rec in rows.itertuples():
+        part = stats[stats["match_id"] == rec.match_id]
+        mine = part[part["team_name"].map(team_core) == rec._team_core] if "_team_core" in rows.columns else part.iloc[0:0]
+        # itertuples renomeia campos iniciados por underscore; resolve por ID+nome de equipe.
+        if mine.empty:
+            mine = part[part["team_name"].map(team_core) == team_core(rec.team_name)]
+        other = part[~part.index.isin(mine.index)]
+        if mine.empty or other.empty:
+            continue
+        own_rows.append(dict(zip(mine["stat_key"], pd.to_numeric(mine["value"], errors="coerce"))))
+        against_rows.append(dict(zip(other["stat_key"], pd.to_numeric(other["value"], errors="coerce"))))
+    own = {k: float(pd.to_numeric(pd.Series([r.get(k) for r in own_rows]), errors="coerce").mean())
+           for k in set().union(*(r.keys() for r in own_rows))} if own_rows else {}
+    against = {k: float(pd.to_numeric(pd.Series([r.get(k) for r in against_rows]), errors="coerce").mean())
+               for k in set().union(*(r.keys() for r in against_rows))} if against_rows else {}
+    style = _derive_style(own, against)
+    return {"jogos": int(rows["match_id"].nunique()), "tracos": style.get("tracos", []),
+            "medias_pro": own, "medias_contra": against,
+            "clubes_anteriores": sorted(rows["team_name"].dropna().astype(str).unique().tolist())[:8],
+            "origem": "estatísticas de partidas anteriores do treinador",
+            "limite": "amostra histórica de outros clubes; não representa automaticamente o elenco atual"}
+
 def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = None,
                   tm_clubs: Optional[pd.DataFrame] = None, tm_transfers: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     matches = _team_matches(db, aliases, 50)
@@ -579,12 +634,24 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
         if role not in merged or item["urgencia"] > merged[role]["urgencia"]:
             merged[role] = item
     needs = sorted(merged.values(), key=lambda x: x["urgencia"], reverse=True)
-    style = _derive_style(own, against)
-    style["fonte"] = "até 50 partidas recentes com estatísticas disponíveis" if sample.get("n") else "sem amostra suficiente"
-    if coach.get("nome") and coach.get("jogos", 0) <= 5 and coach.get("partidas_historicas", 0) >= 5:
-        style["contexto_tecnico"] = "amostra curta no clube; perfil histórico do técnico consultado, sem substituir a identidade do elenco atual"
+    squad_style = _derive_style(own, against)
+    squad_style["fonte"] = "até 50 partidas recentes com estatísticas disponíveis" if sample.get("n") else "sem amostra suficiente"
+    coach_style = {"jogos": 0, "tracos": []}
+    if coach.get("nome") and coach.get("jogos", 0) <= 5:
+        coach_style = _coach_history_style(db, coach["nome"], aliases, 50)
+    if coach_style.get("jogos", 0) >= 5 and coach_style.get("tracos"):
+        merged_traits = list(dict.fromkeys((coach_style.get("tracos") or []) + (squad_style.get("tracos") or [])))
+        style = {**squad_style, "tracos": merged_traits[:6],
+                 "tracos_tecnico": coach_style.get("tracos", []),
+                 "tracos_observados_no_elenco": squad_style.get("tracos", []),
+                 "fonte_tecnico": coach_style.get("origem"),
+                 "amostra_tecnico": coach_style.get("jogos"),
+                 "clubes_anteriores_tecnico": coach_style.get("clubes_anteriores", []),
+                 "contexto_tecnico": "projeção inicial: características históricas do treinador combinadas com o retrato estatístico do elenco atual",
+                 "limite": "a projeção depende de adaptação, reforços, disponibilidade e mudança de contexto"}
     else:
-        style["contexto_tecnico"] = "estilo observado do clube; a influência individual do técnico é limitada pelo dado disponível"
+        style = squad_style
+        style["contexto_tecnico"] = "identidade observada do clube; não há amostra histórica suficiente do treinador para projetar mudanças"
     return {
         "partidas_analisadas": sample.get("n", 0), "baseline_competicoes": sample.get("competicoes", []),
         "medias_pro": own, "medias_contra": against, "referencia": baseline, "necessidades": needs,
