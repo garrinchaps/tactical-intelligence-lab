@@ -30,6 +30,11 @@ def test_opponent_elo_uses_only_results_before_target_match(tmp_path):
     assert strength["ajuste"] > 0
     assert strength["confianca"] == "média"
 
+    from src.analytics.opponent_strength import opponent_strength_for_matches
+    both = opponent_strength_for_matches(db, [(target_id, "B"), (target_id, "A")])
+    assert both[(target_id, "B")]["adversario"] == "A"
+    assert both[(target_id, "A")]["adversario"] == "B"
+
 
 def test_rating_adjustment_is_small_and_explicitly_contextual():
     from src.analytics.rating_v2 import evaluate
