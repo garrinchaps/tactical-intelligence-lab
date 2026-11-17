@@ -318,15 +318,19 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     if players is None or players.empty:
         return pd.DataFrame()
     d = players.copy()
+    for col in ("papel", "minutos_12m", "minutos", "rating_12m", "rating_media", "idade", "valor_mercado_eur"):
+        if col not in d:
+            d[col] = np.nan
     d["qualidade"] = np.nan
     d["confianca_pct"] = 0.0
-    d["nota_media_temporada"] = pd.to_numeric(d.get("rating_12m", d.get("rating_media")), errors="coerce")
-    for family, idx in d.groupby(d["papel"].map(_role_family)).groups.items():
+    d["nota_media_temporada"] = pd.to_numeric(d["rating_12m"].combine_first(d["rating_media"]), errors="coerce")
+    # Cada função tem sua própria régua. Não misturar goleiros, laterais, volantes e atacantes.
+    for role, idx in d.groupby("papel", dropna=False).groups.items():
+        family = _role_family(str(role))
         if family == "OTHER":
             continue
         rows = d.loc[idx]
-        role = str(rows["papel"].mode().iloc[0]) if not rows["papel"].mode().empty else ""
-        specs = ROLE_METRICS.get(role, ROLE_METRICS.get(family, []))
+        specs = ROLE_METRICS.get(str(role), ROLE_METRICS.get(family, []))
         if not specs:
             continue
         contributions: Dict[int, List[Tuple[float, float]]] = {}
@@ -355,6 +359,16 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             shrink = .38 + .62 * confidence
             d.at[row_idx, "qualidade"] = round(50 + (raw - 50) * shrink, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)
+    # Potencial de revenda: indicador exploratório, separado da qualidade atual.
+    age = pd.to_numeric(d["idade"], errors="coerce")
+    market = pd.to_numeric(d["valor_mercado_eur"], errors="coerce")
+    market_pct = market.groupby(d["papel"]).rank(pct=True) * 100
+    quality = pd.to_numeric(d["qualidade"], errors="coerce")
+    age_upside = ((25 - age) / 8 * 100).clip(0, 100)
+    d["potencial_revenda"] = (0.58 * quality + 0.27 * age_upside + 0.15 * (100 - market_pct)).where(
+        age.le(23) & quality.notna())
+    d["projecao_valorizacao_24m_pct"] = ((d["potencial_revenda"] - 55) * 1.1).clip(0, 50).round(0)
+    d["potencial_natureza"] = "heurística de triagem; não é previsão de preço"
     return d
 
 
@@ -780,6 +794,7 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     # Jogador muito utilizado em clube de porte muito maior é mais difícil de tirar.
     if mins >= 2400 and tier < 35:
         tier -= 12
+    foreign_count = int(buyer.get("estrangeiros_atual", foreign_count) or 0)
     score = (.30 * finance + .18 * usage + .16 * tier + .14 * contract_score + .12 * affinity + .10 * 72) - foreign_penalty
     score = int(round(float(np.clip(score, 0, 100))))
     label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if score >= 56 or loan_opportunity else "Alvo difícil / sonho"
@@ -798,28 +813,37 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
 
 
 def tactical_compatibility(candidate: Dict[str, Any], style: Dict[str, Any]) -> Dict[str, Any]:
-    metrics = []
-    tr = set(style.get("tracos") or [])
-    if "posse e construção" in tr or "circulação de passes" in tr:
-        metrics += [("pass_accuracy_pct", 1.0), ("chances_created_p90", .9), ("xa_p90", .8)]
-    if "transição e ataque vertical" in tr:
-        metrics += [("sprints_p90", .8), ("xg_p90", 1.0), ("goals_p90", .8)]
-    if "amplitude e cruzamentos" in tr:
-        metrics += [("chances_created_p90", .9), ("assists_p90", .8), ("sprints_p90", .6)]
-    if not metrics:
-        metrics = [("rating_media", 1.0), ("def_actions_p90", .6), ("chances_created_p90", .6)]
-    vals = [(_num(candidate.get(k)), w) for k, w in metrics if _num(candidate.get(k)) is not None]
+    """Compatibilidade de capacidades observadas com traços do clube; sem tracking, não simula posicionamento."""
+    traits = set(style.get("tracos") or [])
+    selected: List[Tuple[str, float, float]] = []
+    if "posse e construção" in traits or "circulação de passes" in traits:
+        selected += [("pass_accuracy_pct", 1.0, 100.0), ("chances_created_p90", .9, 5.0), ("xa_p90", .8, .8)]
+    if "transição e ataque vertical" in traits:
+        selected += [("sprints_p90", .8, 25.0), ("xg_p90", 1.0, .8), ("goals_p90", .8, .8)]
+    if "amplitude e cruzamentos" in traits:
+        selected += [("chances_created_p90", .9, 5.0), ("assists_p90", .8, .5), ("sprints_p90", .6, 25.0)]
+    if not selected:
+        selected = [("rating_media", 1.0, 10.0), ("def_actions_p90", .6, 12.0),
+                    ("chances_created_p90", .6, 5.0)]
+    vals = []
+    evidence = []
+    for key, weight, ceiling in selected:
+        value = _num(candidate.get(key))
+        if value is None:
+            continue
+        normalized = float(np.clip(value / ceiling * 100, 0, 100))
+        vals.append((normalized, weight))
+        evidence.append({"metrica": key, "valor": value, "peso": weight})
     if not vals:
-        return {"score": 50, "label": "dados táticos insuficientes", "evidencias": [], "confianca": "baixa"}
-    # Percentis normalizados são incorporados pela qualidade global; aqui avaliamos presença de capacidades.
-    raw = float(np.average([min(100, max(0, v * (10 if k == "rating_media" else 1))) for (k, w), v in zip(
-        [(k, w) for k, w in metrics if _num(candidate.get(k)) is not None], [x[0] for x in vals])],
-        weights=[w for k, w in metrics if _num(candidate.get(k)) is not None]))
+        return {"score": 50, "label": "dados táticos insuficientes", "evidencias": [],
+                "confianca": "baixa", "metodo": "sem métricas observadas para os traços do clube"}
+    raw = float(np.average([v for v, _ in vals], weights=[w for _, w in vals]))
     quality = _num(candidate.get("qualidade"))
-    score = int(round(np.clip(.55 * (quality if quality is not None else 50) + .45 * raw, 0, 100)))
+    # A técnica individual é uma parte; o encaixe de indicadores com a identidade pesa mais.
+    score = int(round(np.clip(.35 * (quality if quality is not None else 50) + .65 * raw, 0, 100)))
     return {"score": score, "label": "alto" if score >= 75 else "moderado" if score >= 58 else "baixo",
-            "evidencias": [f"{k}: {candidate.get(k)}" for k, _ in metrics if _num(candidate.get(k)) is not None],
-            "confianca": "média" if len(vals) >= 2 else "baixa"}
+            "evidencias": evidence, "confianca": "média" if len(vals) >= 2 else "baixa",
+            "metodo": "índice de capacidades observadas compatíveis com o estilo; não mede movimentos sem bola"}
 
 
 def chemistry(candidate: Dict[str, Any], roster: pd.DataFrame) -> Dict[str, Any]:
@@ -883,12 +907,16 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
     if players is None or players.empty or not needs:
         return pd.DataFrame()
     rejected_cores = {player_core(x) for x in (rejected or [])}
+    target_roles = {_safe_str(n.get("papel")) for n in needs if _safe_str(n.get("papel"))}
+    allowed_roles = {role for role in ROLE_LABELS if any(fit(target, role) >= .60 for target in target_roles)}
+    eligible = players[players["papel"].isin(allowed_roles)].copy() if "papel" in players else players.iloc[0:0]
+    # Não varrer o universo inteiro em Python para cada vaga; a filtragem vetorial deixa a tela responsiva.
     rows = []
     for need in needs:
         role = _safe_str(need.get("papel"))
         if not role:
             continue
-        for _, r in players.iterrows():
+        for _, r in eligible.iterrows():
             if _safe_str(r.get("_core")) in rejected_cores:
                 continue
             candidate_role = _safe_str(r.get("papel"))
@@ -898,8 +926,9 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
             if role_fit < .60:
                 continue
             c = r.to_dict()
-            realism = transfer_realism(c, buyer, buyer_country, competition, season)
-            tactical = tactical_compatibility(c, {"tracos": []} if not need else buyer.get("estilo") or {"tracos": []})
+            realism = transfer_realism(c, buyer, buyer_country, competition, season,
+                                       foreign_count=int(buyer.get("estrangeiros_atual", 0) or 0))
+            tactical = tactical_compatibility(c, buyer.get("estilo") or {"tracos": []})
             chemistry_score = chemistry(c, roster)
             quality = _num(c.get("qualidade"))
             sample_conf = _num(c.get("confianca_pct")) or 0
@@ -917,6 +946,8 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
                 "realismo": realism, "compatibilidade": tactical, "sinergia": chemistry_score,
                 "score_scout": round(float(np.clip(score, 0, 100)), 1),
                 "qualidade_dados_pct": round(sample_conf),
+                "potencial_revenda": _num(c.get("potencial_revenda")),
+                "projecao_valorizacao_24m_pct": _num(c.get("projecao_valorizacao_24m_pct")),
                 "motivo_principal": need.get("motivo", ""),
             })
     if not rows:
