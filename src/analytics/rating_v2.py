@@ -630,7 +630,10 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
     if mins < 15 or raw is None:
         perf = None
     else:
-        perf = round(float(np.clip(c_min * raw + (1 - c_min) * REF_SCORE, 0, 10)), 1)
+        base_perf = c_min * raw + (1 - c_min) * REF_SCORE
+        # Ajuste contextual pequeno, baseado no Elo PRÉ-jogo do adversário; nunca usa o placar avaliado.
+        opponent_adjustment = _as_float((context or {}).get("opponent_adjustment"))
+        perf = round(float(np.clip(base_perf + opponent_adjustment, 0, 10)), 1)
         if perf >= 9.6 and (cover < 0.85 or mins < 75):
             perf = 9.5                               # 10 exige atuação completa e bem observada
     delta = impact_delta(row, context) if perf is not None else None
@@ -654,7 +657,8 @@ def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str,
                 "erros_que_geraram_chance": int(_as_float(row.get("erros_que_viraram_chance"))),
                 "expulsoes": int(_as_float(row.get("vermelhos"))),
             },
-            "pares": int(len(peers)), "pares_medianos_por_indicador": round(median_support, 1)}
+            "pares": int(len(peers)), "pares_medianos_por_indicador": round(median_support, 1),
+            "forca_adversario": (context or {}).get("opponent_strength")}
 
 
 def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> float:
