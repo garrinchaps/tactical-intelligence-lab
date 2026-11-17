@@ -25,11 +25,20 @@ def _market_data(version: str):
     players, clubs = D.table("tm_jogadores"), D.table("tm_clubes")
     last = (pd.to_numeric(players["ultima_temporada"], errors="coerce")
             if "ultima_temporada" in players else pd.Series(dtype=float))
+
+    # Mantém o universo de mercado já utilizado pela interface, inclusive jogadores com
+    # clube_id e temporadas antigas. O carregamento estatístico pesado recebe apenas
+    # atletas com temporada recente; os demais ativos são descobertos pelo histórico local
+    # (450 minutos e 4 jogos nos últimos 180 dias) dentro de load_player_history.
+    history_players = players
     if not players.empty and last.notna().any():
+        history_players = players.loc[last >= last.max() - 2].copy()
         players = players[(last >= last.max() - 2) |
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
+
     history = E.load_player_history(
-        get_service().db, days=1825, player_names=players.get("nome", pd.Series(dtype=str))
+        get_service().db, days=1825,
+        player_names=history_players.get("nome", pd.Series(dtype=str))
     )
     valuations = D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"])
     universe = E.add_quality_scores(E.build_market_universe(players, history, valuations))
