@@ -478,10 +478,13 @@ class FotmobProvider:
     def _tried_table(self) -> None:
         with self.db.connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS fotmob_tried (match_id INTEGER PRIMARY KEY, tried_at TEXT, ok INTEGER)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fotmob_tried_at ON fotmob_tried(tried_at)")
 
     def _mark_tried(self, match_id: int, ok: bool) -> None:
-        self._tried_table()
+        # Uma só conexão por jogo; a tabela/índice também ficam garantidos para chamadas sob demanda.
         with self.db.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS fotmob_tried (match_id INTEGER PRIMARY KEY, tried_at TEXT, ok INTEGER)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fotmob_tried_at ON fotmob_tried(tried_at)")
             conn.execute("INSERT OR REPLACE INTO fotmob_tried VALUES (?, datetime('now'), ?)", (int(match_id), int(ok)))
 
     def _recently_tried(self, days: int = 7) -> set:
