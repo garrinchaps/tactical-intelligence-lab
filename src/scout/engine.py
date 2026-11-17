@@ -313,12 +313,37 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
         vals = club_values.copy()
         if {"transfermarkt_id", "valor_mercado_eur"} <= set(vals.columns):
             vals["valor_mercado_eur"] = pd.to_numeric(vals["valor_mercado_eur"], errors="coerce")
-            vals = vals.sort_values("data" if "data" in vals else "valor_mercado_eur")
-            latest = vals.dropna(subset=["valor_mercado_eur"]).drop_duplicates("transfermarkt_id", keep="last")
+            vals = vals.dropna(subset=["valor_mercado_eur"])
+            if "data" in vals:
+                vals["_data"] = pd.to_datetime(vals["data"], errors="coerce")
+                vals = vals.sort_values("_data")
+            else:
+                vals = vals.sort_values("valor_mercado_eur")
+            latest = vals.drop_duplicates("transfermarkt_id", keep="last")
             vmap = latest.set_index(latest["transfermarkt_id"].astype(str))["valor_mercado_eur"].to_dict()
             p["_valor_historico"] = p["transfermarkt_id"].astype(str).map(vmap)
             p["valor_tm_atual"] = p["valor_mercado_eur"]
             p["valor_mercado_eur"] = p["valor_mercado_eur"].combine_first(p["_valor_historico"])
+            if "data" in vals:
+                cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=365)
+                recent = vals[vals["_data"] >= cutoff]
+                if not recent.empty:
+                    med = recent.groupby(recent["transfermarkt_id"].astype(str))["valor_mercado_eur"].median().to_dict()
+                    latest_recent = recent.drop_duplicates("transfermarkt_id", keep="last")
+                    latest_recent_map = latest_recent.set_index(latest_recent["transfermarkt_id"].astype(str))[
+                        "valor_mercado_eur"].to_dict()
+                    first_recent = recent.drop_duplicates("transfermarkt_id", keep="first")
+                    first_recent_map = first_recent.set_index(first_recent["transfermarkt_id"].astype(str))[
+                        "valor_mercado_eur"].to_dict()
+                    p["valor_tm_media_12m"] = p["transfermarkt_id"].astype(str).map(med)
+                    p["valor_tm_ultima_avaliacao"] = p["transfermarkt_id"].astype(str).map(latest_recent_map)
+                    first_value = p["transfermarkt_id"].astype(str).map(first_recent_map)
+                    last_value = p["valor_tm_ultima_avaliacao"]
+                    p["variacao_tm_12m_pct"] = ((last_value - first_value) / first_value.abs().replace(0, np.nan) * 100).round(1)
+            else:
+                p["valor_tm_media_12m"] = np.nan
+                p["valor_tm_ultima_avaliacao"] = np.nan
+                p["variacao_tm_12m_pct"] = np.nan
     # Amplia o universo com atletas ausentes do cadastro TM, mas observados recentemente em escalações
     # e com exposição mínima. Sem idade, contrato ou valor publicados, esses campos ficam vazios.
     if history is not None and not history.empty and "core" in history:
