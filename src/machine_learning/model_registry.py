@@ -448,9 +448,13 @@ def feature_report(data: pd.DataFrame) -> pd.DataFrame:
     if data is None or data.empty:
         return pd.DataFrame()
     y = data["target"].to_numpy(int)
-    num = data[FEATURES].apply(pd.to_numeric, errors="coerce")
+    # O relatório de qualidade mantém as 14 variáveis táticas originais.
+    # density_is_360 é uma variável de proveniência/qualidade da medição, não uma
+    # dimensão tática; ela continua no treinamento, mas não infla este quadro.
+    report_features = LEGACY_FEATURES
+    num = data[report_features].apply(pd.to_numeric, errors="coerce")
     corr = num.corr().abs()
-    for f in FEATURES:
+    for f in report_features:
         x = num[f]
         miss = float(x.isna().mean())
         xv = x.fillna(x.median())
