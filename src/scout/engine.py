@@ -194,7 +194,15 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
         if vals:
             out["duels_won_pct"] = round(float(np.mean(vals)), 2)
             break
-    out["forma_5"] = [round(float(x), 2) for x in ratings.dropna().tail(5).tolist()]
+    # O histórico pode chegar sem ordenação global (evita ordenar centenas de milhares de linhas no SQL).
+    # A forma deve sempre refletir os cinco jogos mais recentes, independentemente da ordem de entrada.
+    if "match_date" in rows:
+        form_rows = pd.DataFrame({"match_date": rows["match_date"].astype(str), "rating": ratings})
+        form_rows = form_rows.sort_values("match_date", ascending=True, kind="stable")
+        form_values = pd.to_numeric(form_rows["rating"], errors="coerce").dropna().tail(5)
+    else:
+        form_values = ratings.dropna().tail(5)
+    out["forma_5"] = [round(float(x), 2) for x in form_values.tolist()]
     return out
 
 
@@ -204,13 +212,13 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
     query = """
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
                m.match_date, m.season_name, m.competition_name, m.home_team_name, m.away_team_name,
-               m.data_source, m.data_level
         FROM match_player_stats p
         JOIN matches m ON m.match_id = p.match_id
         WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0
           AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
-        ORDER BY m.match_date DESC
     """
+    # Não ordenar 700 mil+ linhas no SQLite: a seleção de duplicatas é feita abaixo e
+    # cada atleta é ordenado individualmente quando seus últimos jogos são montados.
     try:
         with db.connect() as conn:
             raw = pd.read_sql_query(query, conn, params=[since])
