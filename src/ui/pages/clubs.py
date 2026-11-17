@@ -104,6 +104,21 @@ def _lake_team(name: str):
 PAGE = 25
 
 
+def filter_team_matches(matches: pd.DataFrame, level: str = "Todos os jogos") -> pd.DataFrame:
+    """Filtro explícito da profundidade do catálogo, sem depender do filtro global da navegação."""
+    if matches is None or matches.empty or level == "Todos os jogos":
+        return matches.copy() if matches is not None else pd.DataFrame()
+    levels = {
+        "Somente com lances": {"EVENTS"},
+        "Somente com estatísticas": {"BOXSCORE"},
+        "Somente placares": {"RESULT"},
+    }
+    allowed = levels.get(level)
+    if allowed is None:
+        raise ValueError(f"Filtro de partidas desconhecido: {level}")
+    return matches[matches["data_level"].astype(str).isin(allowed)].copy()
+
+
 def upcoming(names) -> pd.DataFrame:
     """Próximos jogos do time (lake 'agenda', alimentado pelo open-matchday)."""
     try:
@@ -173,15 +188,7 @@ def render(_ctx=None) -> None:
             key=f"team_level_filter_{name}",
             help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",
         )
-        level_map = {
-            "Somente com lances": {"EVENTS"},
-            "Somente com estatísticas": {"BOXSCORE"},
-            "Somente placares": {"RESULT"},
-        }
-        if level_filter == "Todos os jogos":
-            m = allm
-        else:
-            m = allm[allm["data_level"].astype(str).isin(level_map[level_filter])].copy()
+        m = filter_team_matches(allm, level_filter)
         if m.empty:
             empty_state("Nenhuma partida neste filtro", f"Há {len(allm)} resultado(s) deste time no catálogo. "
                         "Experimente 'Todos os jogos' ou outra profundidade de dados.", "🗓️")
