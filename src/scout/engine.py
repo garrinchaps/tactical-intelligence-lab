@@ -10,7 +10,7 @@ import math
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -206,7 +206,8 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     return out
 
 
-def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None) -> pd.DataFrame:
+def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None,
+                        progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """Resume histórico completo dos atletas relevantes sem carregar todo o universo de aparições.
 
     Quando recebe nomes do catálogo de mercado, localiza primeiro as identidades presentes no banco
@@ -214,6 +215,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     os cinco anos completos apenas dessas identidades. Chamadas antigas sem player_names preservam
     o comportamento de carregar todo o histórico.
     """
+    report = progress if callable(progress) else (lambda _message: None)
     since = (date.today() - timedelta(days=int(days))).isoformat()
     query = """
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
@@ -235,16 +237,19 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
 
                 # O índice começa por player_name: esta consulta percorre apenas o índice
                 # compacto e dispensa 749 mil buscas individuais na tabela matches.
+                report("Lendo nomes distintos registrados no banco...")
                 known_names = [
                     str(row[0]) for row in conn.execute(
                         """SELECT DISTINCT player_name FROM match_player_stats
                            WHERE player_name IS NOT NULL AND TRIM(player_name) <> ''"""
                     )
                 ]
+                report(f"Nomes encontrados no banco: {len(known_names):,}")
 
                 # Descobre jogadores sem cadastro Transfermarkt por jogos/minutos recentes.
                 # CROSS JOIN fixa matches como tabela externa: usa o índice de data e consulta
                 # as estatísticas pelo match_id, em vez de varrer o índice de todos os atletas.
+                report("Identificando atletas ativos nos últimos 180 dias...")
                 active_since = (date.today() - timedelta(days=180)).isoformat()
                 active_rows = pd.read_sql_query(
                     """
@@ -273,11 +278,13 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                     active_cores = set(active_totals.index[
                         (active_totals["minutos"] >= 450) & (active_totals["jogos"] >= 4)
                     ])
+                report(f"Atletas ativos elegíveis: {len(active_cores):,}")
                 relevant_cores = target_cores | active_cores
                 selected_names = sorted({
                     name for name in known_names if player_core(name) in relevant_cores
                 })
 
+                report(f"Nomes selecionados para histórico: {len(selected_names):,}")
                 if not selected_names:
                     return pd.DataFrame()
 
@@ -301,12 +308,15 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                       AND COALESCE(p.minutes, 0) > 0
                       AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
                 """
+                report("Carregando partidas dos atletas selecionados...")
                 raw = pd.read_sql_query(selected_query, conn, params=[since])
+                report(f"Registros históricos carregados: {len(raw):,}")
     except Exception:
         return pd.DataFrame()
     if raw.empty:
         return raw
 
+    report("Agregando temporadas, estatísticas e últimos jogos...")
     # Normaliza cada nome/clube uma única vez, não uma vez por aparição do jogador.
     player_names = raw["player_name"].dropna().drop_duplicates().tolist()
     player_map = {name: player_core(name) for name in player_names}
@@ -378,7 +388,9 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
             ].to_dict("records"),
         })
         summaries.append({"core": core, **all_data})
-    return pd.DataFrame(summaries)
+    result = pd.DataFrame(summaries)
+    report(f"Histórico agregado: {len(result):,} jogadores")
+    return result
 
 
 def _history_map(history: Optional[pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
