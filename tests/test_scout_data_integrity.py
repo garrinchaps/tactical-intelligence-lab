@@ -30,3 +30,21 @@ def test_team_match_filter_exposes_all_data_depths():
     assert filter_team_matches(matches, "Somente com lances")["match_id"].tolist() == [1, 4]
     assert filter_team_matches(matches, "Somente com estatísticas")["match_id"].tolist() == [2]
     assert filter_team_matches(matches, "Somente placares")["match_id"].tolist() == [3]
+
+def test_national_team_roster_excludes_foreign_and_unknown_nationalities():
+    from src.squad.planner import filter_national_team_players, national_team_key
+
+    players = pd.DataFrame({
+        "nome": ["Vinícius", "Mbappé", "Sem cadastro"],
+        "nacionalidade": ["Brazil", "France", None],
+    })
+    assert national_team_key("Brasil") == "brazil"
+    filtered = filter_national_team_players(players, "Brazil")
+    assert filtered["nome"].tolist() == ["Vinícius"]
+
+
+def test_club_roster_is_not_filtered_as_a_national_team():
+    from src.squad.planner import filter_national_team_players
+
+    players = pd.DataFrame({"nome": ["Jogador"], "nacionalidade": ["France"]})
+    assert filter_national_team_players(players, "Fluminense")["nome"].tolist() == ["Jogador"]
