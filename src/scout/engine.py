@@ -1577,7 +1577,17 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
     if own_cores and "clube" in eligible:
         eligible = eligible[~eligible["clube"].map(team_core).isin(own_cores)]
     if "historico_ambiguo" in eligible:
-        eligible = eligible[~eligible["historico_ambiguo"].fillna(False)]
+        # A coluna pode vir do catálogo como 0/1 (int) ou texto, não necessariamente bool.
+        # Inverter uma Series inteira produz -1/-2 e o Pandas tenta usá-los como nomes de coluna.
+        ambiguous = eligible["historico_ambiguo"].fillna(False)
+        if not pd.api.types.is_bool_dtype(ambiguous):
+            if pd.api.types.is_numeric_dtype(ambiguous):
+                ambiguous = pd.to_numeric(ambiguous, errors="coerce").fillna(0).ne(0)
+            else:
+                ambiguous = ambiguous.astype(str).str.strip().str.casefold().isin(
+                    {"1", "true", "yes", "sim", "y"}
+                )
+        eligible = eligible.loc[~ambiguous]
     if rejected_cores and "_core" in eligible:
         eligible = eligible[~eligible["_core"].astype(str).isin(rejected_cores)]
     if eligible.empty:
