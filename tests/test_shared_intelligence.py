@@ -87,3 +87,45 @@ def test_lineup_rating_uses_shared_position_adjusted_performance_when_available(
     scored = lab_rating(squad, player_performance=performance)
     assert float(scored.loc[0, "nota"]) == 82.0
     assert "desempenho" in scored.loc[0, "nota_base"]
+
+
+
+def test_match_depth_uses_observed_content_not_only_boxscore_label():
+    from src.data_hub.depth import depth_of
+
+    assert depth_of("RESULT", has_team_stats=False, has_individual=False) == 0
+    assert depth_of("BOXSCORE", has_team_stats=False, has_individual=False) == 0
+    assert depth_of("BOXSCORE", has_team_stats=True, has_individual=False) == 1
+    assert depth_of("BOXSCORE", has_team_stats=False, has_individual=True) == 2
+    assert depth_of("EVENTS", has_team_stats=False, has_individual=False) == 3
+    # Compatibilidade para chamadas antigas sem inspeção do conteúdo.
+    assert depth_of("BOXSCORE") == 1
+
+
+def test_fotmob_pair_analysis_uses_only_observed_defensive_metrics():
+    from src.intelligence.box_analyst import _combination_rows, write
+    from src.intelligence.query_understanding import QueryUnderstanding
+
+    roster = ["Declan Rice", "Martin Zubimendi"]
+    scope = QueryUnderstanding.parse(
+        "Como a dupla Declan Rice e Martin Zubimendi ajudou a proteger o meio-campo?",
+        match_players=roster,
+        teams=["Arsenal", "Liverpool"],
+    )
+    assert scope.ask == "combinations"
+    assert len(scope.players) == 2
+
+    players = pd.DataFrame([
+        {"jogador": "Declan Rice", "equipe": "Arsenal", "minutes": 90,
+         "defensive_actions": 8, "interceptions": 3, "recoveries": 5},
+        {"jogador": "Martin Zubimendi", "equipe": "Arsenal", "minutes": 60,
+         "defensive_actions": 6, "interceptions": 1, "recoveries": 3},
+    ])
+    rows = _combination_rows(players, scope.players)
+    assert rows[0]["indicadores"][0]["valor"] == 8.0
+    assert rows[1]["indicadores"][0]["por90"] == 9.0
+
+    report = write({"dupla": {"jogadores": rows, "limite": "sem coordenadas"}})
+    assert "Declan Rice" in report
+    assert "Martin Zubimendi" in report
+    assert "não provam" in report

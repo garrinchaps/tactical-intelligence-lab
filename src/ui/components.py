@@ -19,7 +19,7 @@ import streamlit as st
 from src.canonical.provenance import MissingProvenanceError, ProvenanceRecord, ProvenanceRegistry, strict_mode
 from src.data_hub.registry import BADGES, COLORS, LEVEL_DESCRIPTIONS
 from src.ui.i18n import t
-from src.ui.theme import PALETTE, TIER_COLORS, TIER_LABELS
+from src.ui.theme import PALETTE, PLOTLY_LAYOUT, TIER_COLORS, TIER_LABELS
 
 
 def _esc(v) -> str:
@@ -153,36 +153,175 @@ def note(title: str, body: str, kind: str = "") -> None:
 
 
 def zebra(df: pd.DataFrame):
-    """Tabela estilo FM: linhas alternadas #0D1117/#161B22; notas > 7.5 em azul e < 6.0 em vermelho."""
+    """Tabela escura no padrão do laboratório: cabeçalho destacado, linhas alternadas e indicadores visuais."""
+    if not isinstance(df, pd.DataFrame):
+        return df
     try:
-        sty = df.style.apply(lambda r: [f"background-color: {'#0D1117' if r.name % 2 == 0 else '#161B22'}"] * len(r)
-                             if isinstance(r.name, int) else [""] * len(r), axis=1)
-        # números legíveis: no máximo 2 casas (nada de 0.000000), inteiros sem casa decimal
+        sty = df.style.apply(
+            lambda row: [
+                "background-color: #0D1424" if isinstance(row.name, (int, np.integer)) and row.name % 2 == 0
+                else ("background-color: #111C30" if isinstance(row.name, (int, np.integer)) else "")
+            ] * len(row),
+            axis=1,
+        )
+        table_styles = [
+            {"selector": "table", "props": [
+                ("width", "100%"), ("border-collapse", "separate"), ("border-spacing", "0"),
+                ("background-color", "#0B1120"), ("border-radius", "12px"),
+                ("font-family", "Inter, Segoe UI, sans-serif"), ("overflow", "hidden"),
+            ]},
+            {"selector": "thead th", "props": [
+                ("background-color", "#172641"), ("color", "#F5F7FB"),
+                ("font-size", "0.72rem"), ("font-weight", "800"),
+                ("letter-spacing", "0.06em"), ("text-transform", "uppercase"),
+                ("border-bottom", "2px solid #22D3EE"), ("padding", "12px 14px"),
+                ("white-space", "nowrap"),
+            ]},
+            {"selector": "tbody td", "props": [
+                ("color", "#DCE6F4"), ("font-size", "0.86rem"),
+                ("border-bottom", "1px solid rgba(30,42,68,0.72)"),
+                ("padding", "10px 14px"), ("vertical-align", "middle"),
+            ]},
+            {"selector": "tbody tr:hover td", "props": [
+                ("background-color", "rgba(34,211,238,0.10)"),
+                ("color", "#FFFFFF"),
+            ]},
+            {"selector": "caption", "props": [
+                ("caption-side", "top"), ("color", "#98A6BF"),
+                ("font-size", "0.78rem"), ("padding", "8px 0"),
+            ]},
+        ]
+        sty = sty.set_table_styles(table_styles)
+
+        # Números legíveis: inteiros sem casas; demais valores com até duas casas.
         fmt = {}
-        for c in df.columns:
-            if pd.api.types.is_float_dtype(df[c]):
-                vals = pd.to_numeric(df[c], errors="coerce").dropna()
-                fmt[c] = "{:.0f}" if len(vals) and (vals == vals.round()).all() else "{:.2f}"
+        rating_cols = []
+        for col_name in df.columns:
+            series = pd.to_numeric(df[col_name], errors="coerce")
+            vals = series.dropna()
+            if pd.api.types.is_float_dtype(df[col_name]) and len(vals):
+                fmt[col_name] = "{:.0f}" if (vals == vals.round()).all() else "{:.2f}"
+            low = str(col_name).strip().lower()
+            if any(token in low for token in ("nota", "rating", "avaliação", "avaliacao")):
+                rating_cols.append(col_name)
         if fmt:
             sty = sty.format(fmt, na_rep="—")
-        rating = [c for c in df.columns if str(c).lower() in ("nota", "rating", "avaliação")]
-        if rating:
-            def col(v):
+
+        # Realce cromático sutil para leitura comparativa: gradiente azul por coluna numérica,
+        # sem declarar automaticamente que o maior valor é "melhor" (ex.: perdas, faltas, xGA).
+        numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])
+                        and df[col].notna().sum() > 1]
+        if numeric_cols and len(numeric_cols) <= 32:
+            sty = sty.background_gradient(cmap="PuBu", subset=numeric_cols, axis=0, low=0.08, high=0.18)
+
+        if rating_cols:
+            def rating_color(value):
                 try:
-                    v = float(v)
+                    score = float(value)
                 except (TypeError, ValueError):
                     return ""
-                return "color:#3B82F6;font-weight:700" if v > 7.5 else ("color:#EF4444;font-weight:700" if v < 6.0 else "")
-            sty = sty.map(col, subset=rating) if hasattr(sty, "map") else sty.applymap(col, subset=rating)
+                if score >= 7.5:
+                    return "color:#34D399;font-weight:800"
+                if score < 6.0:
+                    return "color:#F87171;font-weight:800"
+                return "color:#E5E7EB;font-weight:700"
+            sty = sty.map(rating_color, subset=rating_cols) if hasattr(sty, "map") else sty.applymap(rating_color, subset=rating_cols)
         return sty
     except Exception:
         return df
 
 
+def styled_dataframe(data, *args, **kwargs):
+    """Renderiza DataFrames no padrão visual do laboratório, sem perder ordenação ou seleção."""
+    if isinstance(data, pd.DataFrame):
+        # ProgressColumn é nativo do Streamlit 1.36 e desenha barras reais dentro da tabela.
+        config = dict(kwargs.get("column_config") or {})
+        for col_name in data.columns:
+            low = str(col_name).strip().lower()
+            is_rating = any(token in low for token in ("nota", "rating", "avaliação", "avaliacao"))
+            is_rate = any(token in low for token in (
+                "percent", "percentil", "_pct", "pct", "taxa", "auc", "precisão", "precisao",
+                "recall", "f1", "probabilidade",
+            ))
+            if not (is_rating or is_rate) or col_name in config:
+                continue
+            values = pd.to_numeric(data[col_name], errors="coerce").dropna()
+            if values.empty or values.min() < 0:
+                continue
+            maximum = 10.0 if is_rating and values.max() <= 10 else (
+                1.0 if values.max() <= 1 else (100.0 if values.max() <= 100 else float(values.max()))
+            )
+            config[col_name] = st.column_config.ProgressColumn(
+                str(col_name), min_value=0, max_value=maximum,
+                format="%.2f" if maximum <= 1 else "%.1f",
+            )
+        if config:
+            kwargs["column_config"] = config
+        data = zebra(data)
+    kwargs.setdefault("use_container_width", True)
+    kwargs.setdefault("hide_index", True)
+    return st.dataframe(data, *args, **kwargs)
+
+
+def render_chart(figure, *args, **kwargs):
+    """Aplica o tema esportivo a gráficos Plotly, inclusive figuras construídas fora de ui.charts."""
+    try:
+        import plotly.graph_objects as go
+
+        fig = go.Figure(figure)
+        fig.update_layout(
+            template=PLOTLY_LAYOUT["template"],
+            paper_bgcolor=fig.layout.paper_bgcolor or PLOTLY_LAYOUT["paper_bgcolor"],
+            plot_bgcolor=fig.layout.plot_bgcolor or PLOTLY_LAYOUT["plot_bgcolor"],
+            font=dict(family="Inter, Segoe UI, sans-serif", color=PALETTE["text"], size=13),
+            colorway=fig.layout.colorway or PLOTLY_LAYOUT["colorway"],
+            hoverlabel=PLOTLY_LAYOUT["hoverlabel"],
+        )
+        if fig.layout.title and fig.layout.title.text:
+            fig.update_layout(title_font=dict(family="Space Grotesk, Inter, sans-serif", size=15, color=PALETTE["text"]))
+        fig.update_xaxes(
+            gridcolor="rgba(152,166,191,0.10)",
+            zerolinecolor="rgba(152,166,191,0.18)",
+            linecolor=PALETTE["border"],
+            tickfont=dict(color=PALETTE["muted"]),
+        )
+        fig.update_yaxes(
+            gridcolor="rgba(152,166,191,0.10)",
+            zerolinecolor="rgba(152,166,191,0.18)",
+            linecolor=PALETTE["border"],
+            tickfont=dict(color=PALETTE["muted"]),
+        )
+        kwargs.setdefault("theme", None)
+        return st.plotly_chart(fig, *args, **kwargs)
+    except Exception:
+        # Se uma figura não for compatível com go.Figure, mantém o comportamento nativo do Streamlit.
+        return st.plotly_chart(figure, *args, **kwargs)
+
+
+def _markdown_table(df: pd.DataFrame, limit: int = 100) -> str:
+    view = df.reset_index(drop=True).head(limit).copy()
+    headers = [str(x).replace("|", "\\|").replace("\n", " ") for x in view.columns]
+    lines = ["| " + " | ".join(headers) + " |", "| " + " | ".join(["---"] * len(headers)) + " |"]
+    for row in view.itertuples(index=False, name=None):
+        vals = []
+        for value in row:
+            if value is None or (isinstance(value, float) and np.isnan(value)):
+                value = "—"
+            vals.append(str(value).replace("|", "\\|").replace("\n", " "))
+        lines.append("| " + " | ".join(vals) + " |")
+    if len(df) > limit:
+        lines.append(f"\n_Exibindo {limit} de {len(df)} linhas._")
+    return "\n".join(lines)
+
+
 def comparison_table(df: pd.DataFrame, caption: str = "") -> None:
-    st.dataframe(zebra(df.reset_index(drop=True)), use_container_width=True, hide_index=True)
+    view = df.reset_index(drop=True)
+    styled_dataframe(view)
     if caption:
         st.caption(caption)
+    if not view.empty:
+        with st.expander("📋 Copiar para relatório (Markdown)", expanded=False):
+            st.code(_markdown_table(view), language="markdown")
 
 
 def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "jogador", caption: str = "",
@@ -192,7 +331,7 @@ def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "joga
     A seleção é limpa ao abrir, para o "← Voltar" não reabrir a mesma página.
     """
     view = df.reset_index(drop=True)
-    ev = st.dataframe(zebra(view), use_container_width=True, hide_index=True, on_select="rerun",
+    ev = styled_dataframe(view, on_select="rerun",
                       selection_mode="single-row", key=key)
     rows = list(getattr(getattr(ev, "selection", None), "rows", []) or []) if ev is not None else []
     st.caption(("🖱️ Clique numa linha para abrir a página do " + ("jogador" if kind == "jogador" else "time") + ". ")
@@ -306,7 +445,7 @@ def provenance_panel(registry: ProvenanceRegistry) -> None:
         df = pd.DataFrame(rows)[["label", "value", "confidence_tier", "source", "connector", "method", "license",
                                  "ingestion_timestamp", "generator", "ci_low", "ci_high"]]
         df["value"] = df["value"].map(lambda v: "" if v is None else str(v))   # tipos misturados quebravam o pyarrow
-        st.dataframe(df.rename(columns={"label": "métrica", "value": "valor", "confidence_tier": "tier", "source": "fonte",
+        styled_dataframe(df.rename(columns={"label": "métrica", "value": "valor", "confidence_tier": "tier", "source": "fonte",
                                         "connector": "conector", "method": "método", "license": "licença",
                                         "ingestion_timestamp": "ingestão", "generator": "gerador",
                                         "ci_low": "IC 2,5%", "ci_high": "IC 97,5%"}),

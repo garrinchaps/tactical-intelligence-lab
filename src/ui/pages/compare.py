@@ -12,6 +12,8 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.data_hub.gender import gender_of
 from src.data_hub.search import team_score
 from src.metrics.match_facts import (PLAYER_STAT_LABELS, TEAM_STAT_LABELS, goal_line, goals, per90, player_match_stats,
@@ -20,7 +22,7 @@ from src.ui import charts
 from src.ui.components import comparison_table, empty_state, error_state, kpi, note, page_header, provenance_panel
 from src.ui.context import MatchContext, get_service, load_bundle, processed_events
 
-MAX_MATCHES = 10
+MAX_MATCHES = 40
 MIN_MINUTES_PER90 = 90       # abaixo disso, valores por 90 min ficam instáveis
 RADAR_KEYS = ["passes", "passes_progressivos", "passes_decisivos", "finalizacoes", "xg", "xt", "dribles",
               "desarmes", "interceptacoes", "recuperacoes"]
@@ -63,6 +65,7 @@ def _options(found: pd.DataFrame, current: int, n_default: int):
     return opts, (cur + local + other)[:n_default]
 
 
+@st.cache_data(show_spinner=False, ttl=900, max_entries=32)
 def _load_processed(match_ids: List[int]) -> Dict[int, pd.DataFrame]:
     out: Dict[int, pd.DataFrame] = {}
     prog = st.progress(0.0, text="Carregando partidas...")
@@ -101,7 +104,7 @@ def _two_teams(ctx: MatchContext) -> None:
     rows = pd.DataFrame([{"indicador": TEAM_STAT_LABELS[k_], a: sa.get(k_), b: sb.get(k_)} for k_ in TEAM_KEYS])
     l, r = st.columns([1.25, 1])
     with l:
-        st.plotly_chart(charts.grouped_bars(rows[~rows["indicador"].isin(["Passes", "Perdas de posse"])], "indicador", [a, b],
+        render_chart(charts.grouped_bars(rows[~rows["indicador"].isin(["Passes", "Perdas de posse"])], "indicador", [a, b],
                                             "Indicadores das duas equipes", height=620), use_container_width=True)
     with r:
         comparison_table(rows, "PPDA menor = pressão mais intensa. Posse = proporção dos passes da partida.")
@@ -169,7 +172,7 @@ def _team_over_time(ctx: MatchContext) -> None:
     pick = st.multiselect("Indicadores no gráfico", [TEAM_STAT_LABELS[k] for k in TEAM_KEYS],
                           default=["xG", "Finalizações", "Posse (% dos passes)", "Field tilt (%)"], key="cmp_self_ind")
     if pick:
-        st.plotly_chart(charts.grouped_bars(tab.melt(id_vars="partida", value_vars=pick).pivot(index="variable", columns="partida",
+        render_chart(charts.grouped_bars(tab.melt(id_vars="partida", value_vars=pick).pivot(index="variable", columns="partida",
                                                                                             values="value").reset_index(),
                                             "variable", tab["partida"].tolist(), f"{team}: indicadores por partida",
                                             height=120 + 70 * len(pick)), use_container_width=True)
@@ -276,7 +279,7 @@ def _players(ctx: MatchContext) -> None:
     l, r = st.columns([1, 1.2])
     with l:
         mx = {c: max(float(p90a.iloc[0][c]), float(p90b.iloc[0][c]), 1e-6) for c in RADAR_KEYS}
-        st.plotly_chart(charts.radar({pa: [round(100 * float(p90a.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS],
+        render_chart(charts.radar({pa: [round(100 * float(p90a.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS],
                                       pb: [round(100 * float(p90b.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS]},
                                      [PLAYER_STAT_LABELS[c] for c in RADAR_KEYS],
                                      f"Por 90 min (100 = o maior dos dois) · {int(tot_a['minutos'])} e {int(tot_b['minutos'])} min"),
@@ -416,7 +419,8 @@ def _match_vs_match() -> None:
 
 
 # ------------------------------------------------------------------ v36: qualquer jogador × qualquer jogador
-RECORTES = {"Último jogo": 1, "Últimos 5 jogos": 5, "Temporada mais recente": None}
+RECORTES = {"Último jogo": 1, "Últimos 5 jogos": 5, "Últimos 10 jogos": 10, "Últimos 20 jogos": 20,
+            "Últimos 40 jogos": 40, "Temporada mais recente": None}
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=64)
@@ -456,11 +460,10 @@ def _player_pick(label: str, key: str):
     if found.empty:
         st.caption("Nenhum jogador com esse nome.")
         return None, []
-    found = found[found["fontes"].str.contains("eventos")] if found["fontes"].str.contains("eventos").any() else found
     opts = found.to_dict("records")
     r = st.selectbox("Escolha", opts, key=f"{key}_pick", label_visibility="collapsed",
                      format_func=lambda x: f"{x['nome']}" + (f" · {x['clube']}" if x.get("clube") else "")
-                     + (f" · {int(x['jogos'])} jogos com lances" if pd.notna(x.get("jogos")) and x.get("jogos") else ""))
+                     + (f" · {int(x['jogos'])} jogos indexados" if pd.notna(x.get("jogos")) and x.get("jogos") else ""))
     idx = player_index(version)
     names = idx.loc[(idx["pessoa"] == r["core"]) & (idx["fonte"].str.startswith("eventos")), "nome"].unique().tolist()
     return r, names
@@ -523,7 +526,7 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
 
     if not (pa and pb):
         return
-    n_games = {"Último jogo": 1, "Últimos 5 jogos": 5}.get(recorte, 40)
+    n_games = RECORTES.get(recorte) or 40
     v = get_service().db.stable_version()
     A = _fotmob_player(tuple(dict.fromkeys((na or []) + [pa["nome"]])), n_games, v)
     B = _fotmob_player(tuple(dict.fromkeys((nb or []) + [pb["nome"]])), n_games, v)
@@ -556,10 +559,11 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
 
 
 def _any_players() -> None:
+    """Comparação por camada de dado: boxscore amplo ou eventos com coordenadas."""
     from src.ui.pages.players_search import SCOUT_GROUPS, player_scout
 
-    st.caption("Qualquer jogador com lances na base (StatsBomb, Wyscout, OpenPlay e os jogos já abertos), "
-               "não só os da partida aberta.")
+    st.caption("Selecione qualquer atleta indexado. A disponibilidade de cada camada é mostrada separadamente; "
+               "um jogo com boxscore não é tratado como jogo com eventos e coordenadas.")
     a, b = st.columns(2)
     with a:
         pa, na = _player_pick("Jogador A", "cmpA")
@@ -568,53 +572,58 @@ def _any_players() -> None:
     from src.ui.i18n import t
 
     recorte = st.radio(t("Recorte"), list(RECORTES), horizontal=True, key="cmp_any_cut", index=1, format_func=t)
+    depth = st.radio("Camada de dados", ["Dados estatísticos (FotMob/boxscore)", "Dados detalhados (eventos)",
+                                         "Visão conjunta"], horizontal=True, key="cmp_any_depth")
     if not (pa and pb):
         empty_state("Escolha os dois jogadores", "Digite pelo menos 3 letras de cada nome.", "👥")
         return
-    cols, info = {}, []
-    for p, names in ((pa, na), (pb, nb)):
-        sc = player_scout(tuple(names)) if names else pd.DataFrame()
-        if sc.empty:
-            info.append(f"**{p['nome']}**: nenhum jogo com lances na base — sem números concretos para comparar.")
-            continue
-        cut = player_cut(sc.fillna(0), _match_dates(tuple(int(x) for x in sc["match_id"])), recorte)
-        if cut.empty:
-            info.append(f"**{p['nome']}**: nenhum jogo no recorte escolhido.")
-            continue
-        mins = float((cut["m1"] - cut["m0"]).clip(lower=1, upper=125).sum())
-        per = {k: float(cut[k].sum()) / max(mins, 1) * 90 for g in SCOUT_GROUPS.values() for k, _ in g if k in cut}
-        cols[p["nome"]] = per
-        last = cut.iloc[0]
-        info.append(f"**{p['nome']}**: {len(cut)} jogo(s), ~{mins:.0f} min estimados · último: {last.get('match_date')} "
-                    f"{last.get('home_team_name', '')} x {last.get('away_team_name', '')}")
-    _fotmob_compare(pa, na, pb, nb, recorte)
-    if cols or info:
-        st.markdown("#### 🟢 Pelos lances com coordenadas (StatsBomb/Wyscout/OpenPlay)")
-    for line in info:
-        st.markdown("- " + line)
-    if len(cols) < 2:
-        return
-    from src.ui.components import duel_bars
 
-    (n1, v1), (n2, v2) = list(cols.items())
-    worse = {"perdas_de_posse", "faltas_cometidas", "amarelos", "vermelhos", "erros"}
-    wins = {n1: 0, n2: 0}
-    tabs = st.tabs([{"Atacando": "⚽ Ataque", "Passe": "🎯 Passe", "Defendendo": "🛡️ Defesa", "Outros": "⚔️ Duelos e disciplina"}
-                    .get(g, g) for g in SCOUT_GROUPS])
-    for tab, (g, items) in zip(tabs, SCOUT_GROUPS.items()):
-        rows = [{"label": lab, "a": v1[k], "b": v2[k], "fmt": "{:.2f}", "lower_is_better": k in worse}
-                for k, lab in items if k in v1 and k in v2]
-        for r in rows:
-            if r["a"] != r["b"]:
-                wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
-        with tab:
-            duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
-    lead = max(wins, key=wins.get)
-    st.markdown(f'<div class="til-card" style="min-height:auto"><div class="label">Placar dos indicadores</div>'
-                f'<div class="value" style="font-size:1.6rem"><span style="color:#22D3EE">{n1} {wins[n1]}</span> × '
-                f'<span style="color:#EF4444">{wins[n2]} {n2}</span></div></div>', unsafe_allow_html=True)
-    st.caption("Valores por 90 minutos no recorte. Minutos estimados pelo intervalo entre a primeira e a última ação de "
-               "cada jogo. Partidas sem lances do jogador não entram. Em perdas, faltas e cartões, menos é melhor.")
+    if depth in ("Dados estatísticos (FotMob/boxscore)", "Visão conjunta"):
+        _fotmob_compare(pa, na, pb, nb, recorte)
+
+    if depth in ("Dados detalhados (eventos)", "Visão conjunta"):
+        cols, info = {}, []
+        for p, names in ((pa, na), (pb, nb)):
+            sc = player_scout(tuple(names)) if names else pd.DataFrame()
+            if sc.empty:
+                info.append(f"**{p['nome']}**: sem jogos com eventos e coordenadas na base.")
+                continue
+            cut = player_cut(sc.fillna(0), _match_dates(tuple(int(x) for x in sc["match_id"])), recorte)
+            if cut.empty:
+                info.append(f"**{p['nome']}**: nenhum jogo com eventos no recorte escolhido.")
+                continue
+            mins = float((cut["m1"] - cut["m0"]).clip(lower=1, upper=125).sum())
+            per = {k: float(cut[k].sum()) / max(mins, 1) * 90
+                   for g in SCOUT_GROUPS.values() for k, _ in g if k in cut}
+            cols[p["nome"]] = per
+            last = cut.iloc[0]
+            info.append(f"**{p['nome']}**: {len(cut)} jogo(s) com eventos, ~{mins:.0f} min estimados · "
+                        f"último: {last.get('match_date')} {last.get('home_team_name', '')} x {last.get('away_team_name', '')}")
+        st.markdown("#### 🧭 Camada detalhada — eventos com coordenadas")
+        for line in info:
+            st.markdown("- " + line)
+        if len(cols) == 2:
+            from src.ui.components import duel_bars
+
+            (n1, v1), (n2, v2) = list(cols.items())
+            worse = {"perdas_de_posse", "faltas_cometidas", "amarelos", "vermelhos", "erros"}
+            wins = {n1: 0, n2: 0}
+            tabs = st.tabs([{"Atacando": "⚽ Ataque", "Passe": "🎯 Passe", "Defendendo": "🛡️ Defesa",
+                             "Outros": "⚔️ Duelos e disciplina"}.get(g, g) for g in SCOUT_GROUPS])
+            for tab, (g, items) in zip(tabs, SCOUT_GROUPS.items()):
+                rows = [{"label": lab, "a": v1[k], "b": v2[k], "fmt": "{:.2f}", "lower_is_better": k in worse}
+                        for k, lab in items if k in v1 and k in v2]
+                for r in rows:
+                    if r["a"] != r["b"]:
+                        wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
+                with tab:
+                    if rows:
+                        duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+                    else:
+                        st.caption("Sem indicadores comparáveis nessa categoria.")
+            st.markdown(f"**Placar dos indicadores de eventos:** {n1} {wins[n1]} × {wins[n2]} {n2}")
+            st.caption("Minutos estimados pelo intervalo entre a primeira e a última ação do atleta em cada jogo. "
+                       "Esta camada não representa tracking contínuo nem todos os jogos da carreira.")
 
 
 def render_page(current_context, match_bar) -> None:

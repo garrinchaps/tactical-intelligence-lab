@@ -65,10 +65,15 @@ def render(current_context, match_bar=None) -> None:
         from src.data_hub.depth import LABELS, badge, depth_for_matches, depth_of
         from src.ui.context import get_service
 
-        dep = depth_for_matches(get_service().db, [int(ctx.match_id)]).get(int(ctx.match_id))
+        dep_db = depth_for_matches(get_service().db, [int(ctx.match_id)]).get(int(ctx.match_id))
         box = ctx.bundle.boxscore or {}
+        team_stats = box.get("team_stats")
+        has_team = getattr(team_stats, "empty", True) is False
         has_ind = any(getattr(box.get(k), "empty", True) is False for k in ("lineups", "player_stats"))
-        dep = max(dep or 0, depth_of(ctx.bundle.level, bool(box), has_ind))
+        # Não usar bool(box): o dicionário tem as chaves mesmo quando todos os DataFrames estão vazios.
+        # O selo precisa refletir conteúdo real, não apenas a existência do contêiner de boxscore.
+        dep_loaded = depth_of(ctx.bundle.level, has_team_stats=has_team, has_individual=has_ind)
+        dep = max(dep_db or 0, dep_loaded)
         st.caption(f"{badge(dep)} — " + {0: "só o placar: sem estatísticas para analisar.",
                                          1: "estatísticas do time; sem escalação nem números por jogador.",
                                          2: "escalação e números por jogador; sem lances com coordenadas.",

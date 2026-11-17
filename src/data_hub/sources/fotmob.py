@@ -93,7 +93,8 @@ PLAYER_MAP = {"goals": "totalGoals", "assists": "goalAssists", "total_shots": "t
               "expected_assists": "xa", "chances_created": "chances_created", "touches": "touches",
               "physical_metrics_distance_covered": "distance_m", "physical_metrics_topspeed": "top_speed_kmh",
               "errors_led_to_goal": "errors_led_to_goal", "defensive_actions": "defensive_actions",
-              "physical_metrics_number_of_sprints": "sprints", "expected_goals_on_target_faced": "xgot_faced"}
+              "physical_metrics_number_of_sprints": "sprints", "expected_goals_on_target_faced": "xgot_faced",
+              "yellow_cards": "yellow_cards", "red_cards": "red_cards"}
 GENERIC_POS = {0: "G", 1: "D", 2: "M", 3: "F"}
 DROP_KEYS = {"fantasy_points", "xg_and_xa", "rating_title"}       # redundantes (somas, pontos de fantasy)
 
@@ -477,10 +478,13 @@ class FotmobProvider:
     def _tried_table(self) -> None:
         with self.db.connect() as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS fotmob_tried (match_id INTEGER PRIMARY KEY, tried_at TEXT, ok INTEGER)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fotmob_tried_at ON fotmob_tried(tried_at)")
 
     def _mark_tried(self, match_id: int, ok: bool) -> None:
-        self._tried_table()
+        # Uma só conexão por jogo; a tabela/índice também ficam garantidos para chamadas sob demanda.
         with self.db.connect() as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS fotmob_tried (match_id INTEGER PRIMARY KEY, tried_at TEXT, ok INTEGER)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_fotmob_tried_at ON fotmob_tried(tried_at)")
             conn.execute("INSERT OR REPLACE INTO fotmob_tried VALUES (?, datetime('now'), ?)", (int(match_id), int(ok)))
 
     def _recently_tried(self, days: int = 7) -> set:

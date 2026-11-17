@@ -40,3 +40,15 @@ data/treino.pid
 data/processed/rating_ref_v2*.parquet
 data/processed/rating_ref_box*.parquet
 data/processed/benchmark_perigo.json
+
+# Inventário local para migração (não versionar)
+public_deploy_inventory.json
+
+# Arquivos locais de implantacao e ambientes auxiliares
+.venv_hf/
+database/*.db.gz
+database/*.db-*
+
+tactical-intelligence-lab/
+data/processed/rating_ref_v3*.parquet
+data/learning/

@@ -32,6 +32,8 @@ ALIASES: Dict[str, str] = {
     "brighton": "brighton hove albion", "brighton and hove albion": "brighton hove albion", "leicester": "leicester city",
     "leeds": "leeds united", "sheffield united": "sheffield united", "sheffield utd": "sheffield united",
     "west brom": "west bromwich albion", "ipswich": "ipswich town", "luton": "luton town", "norwich": "norwich city",
+    # Itália — Como 1907 e Como são o mesmo clube nas fontes consultadas
+    "como 1907": "como", "como 1907 calcio": "como", "como calcio": "como",
     # Espanha / Itália / Alemanha / França / Portugal
     "ath madrid": "atletico madrid", "atletico de madrid": "atletico madrid", "club atletico de madrid": "atletico madrid",
     "ath bilbao": "athletic club", "athletic bilbao": "athletic club", "betis": "real betis", "sociedad": "real sociedad",

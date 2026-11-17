@@ -21,7 +21,8 @@ import pandas as pd
 
 PSTATS: List[Tuple[str, str, str]] = [  # (regex da pergunta, chave, rótulo)
     (r"finaliz|chut", "totalShots", "Finalizações"), (r"no alvo|no gol", "shotsOnTarget", "Finalizações no alvo"),
-    (r"\bxa\b|assistenc\w* esperad", "xa", "xA (assistências esperadas)"), (r"\bxg\b|gols esperad", "xg", "xG"),
+    (r"\bxa\b|assistenc\w* esperad", "xa", "xA (assistências esperadas)"), (r"\bxgot\b|gols? esperados? no alvo", "_xgot", "xGOT"),
+    (r"\bxg\b|gols esperad", "xg", "xG"),
     (r"cri(ou|a|ar|acao)|chances? criad|passes? decisiv|passe para finaliz", "chances_created", "Chances criadas"),
     (r"assist", "goalAssists", "Assistências"), (r"\bgols?\b|marcou|artilheir", "totalGoals", "Gols"),
     (r"terco final|progred|progress", "passes_into_final_third", "Passes no terço final"),
@@ -84,6 +85,52 @@ def _team_of(name: str, teams: List[str]) -> Optional[str]:
     return next((t for t in teams if _same(team_core(t), team_core(name))), None)
 
 
+PROTECTION_STATS: List[Tuple[str, str]] = [
+    ("defensive_actions", "Ações defensivas"),
+    ("matchstats.headers.tackles", "Desarmes"),
+    ("interceptions", "Interceptações"),
+    ("recoveries", "Recuperações"),
+    ("duel_won", "Duelos ganhos"),
+    ("ground_duels_won", "Duelos terrestres ganhos"),
+    ("aerials_won", "Duelos aéreos ganhos"),
+    ("clearances", "Cortes"),
+]
+
+
+def _combination_rows(players: pd.DataFrame, names: List[str]) -> List[Dict[str, Any]]:
+    """Extrai apenas indicadores defensivos realmente presentes para cada atleta citado."""
+    from src.intelligence.query_understanding import norm
+
+    out: List[Dict[str, Any]] = []
+    for name in names[:3]:
+        hit = players[players["jogador"].map(norm) == norm(name)]
+        if hit.empty:
+            out.append({"jogador": name, "sem_dado": True, "indicadores": []})
+            continue
+        row = hit.iloc[0]
+        try:
+            minutes = float(row.get("minutes"))
+        except (TypeError, ValueError):
+            minutes = 0.0
+        metrics = []
+        for key, label in PROTECTION_STATS:
+            value = pd.to_numeric(pd.Series([row.get(key)]), errors="coerce").iloc[0]
+            if pd.isna(value):
+                continue
+            item = {"metrica": label, "valor": round(float(value), 2)}
+            if minutes > 0:
+                item["por90"] = round(float(value) * 90.0 / minutes, 2)
+            metrics.append(item)
+        out.append({
+            "jogador": str(row.get("jogador") or name),
+            "equipe": str(row.get("equipe") or ""),
+            "minutos": round(minutes, 1) if minutes > 0 else None,
+            "indicadores": metrics,
+            "sem_dado": not bool(metrics),
+        })
+    return out
+
+
 def build(db, sc, meta: Dict[str, Any], target_team: str, opp: str) -> Optional[Dict[str, Any]]:
     """Bloco de evidências pela FotMob; None se o jogo não tem números por jogador (aí vale o redator antigo)."""
     mid = _fm_id(db, meta)
@@ -103,10 +150,34 @@ def build(db, sc, meta: Dict[str, Any], target_team: str, opp: str) -> Optional[
     q = norm(sc.raw)
     out: Dict[str, Any] = {"fonte": "FotMob", "partida_fotmob": int(mid), "equipe": me, "adversario": other}
     ask = sc.ask
+    if ask == "combinations":
+        if len(sc.players) < 2:
+            return out
+        out["dupla"] = {
+            "jogadores": _combination_rows(P, sc.players[:3]),
+            "limite": "FotMob informa contagens individuais, mas não a zona exata de cada ação nem a distância entre linhas.",
+        }
+        return out
     if ask == "unavailable" and re.search(r"corr|sprint|distanc|km\b|velocid", q):
         ask = "ranking"                               # físico: a FotMob tem em algumas ligas — procura antes de negar
     if ask == "ranking" or (ask is None and re.search(r"\bquem\b.*\b(mais|menos)\b", q)):
         key, lab = next(((k, l) for rx, k, l in PSTATS if re.search(rx, q)), ("_rating", "Nota da FotMob"))
+        if key == "_xgot":
+            if S.empty or "xgot" not in S:
+                out["ranking"] = {"metrica": lab, "sem_dado": True}
+                return out
+            shots = S.copy()
+            shots["xgot"] = pd.to_numeric(shots["xgot"], errors="coerce")
+            shots = shots.dropna(subset=["xgot", "player_name"])
+            if sc.team_named and sc.team_focus != "both":
+                shots = shots[shots["team_name"] == me]
+            asc = bool(re.search(r"\bmenos\b|\bpior", q))
+            leaders = (shots.groupby(["player_name", "team_name"], dropna=True)["xgot"].sum()
+                       .sort_values(ascending=asc).head(5))
+            out["ranking"] = {"metrica": lab, "ordem": "asc" if asc else "desc",
+                              "lideres": [{"jogador": name, "equipe": team, "valor": round(float(value), 2)}
+                                          for (name, team), value in leaders.items()]}
+            return out
         if key not in P or P[key].dropna().empty:
             out["ranking"] = {"metrica": lab, "sem_dado": True, "onde_existe": "Premier League (dado físico da liga)"}
             return out
@@ -211,6 +282,28 @@ def _f(v) -> str:
 
 
 def write(b: Dict[str, Any]) -> str:
+    if "dupla" in b:
+        combo = b["dupla"]
+        lines = ["**O que os números individuais mostram sobre a dupla:**"]
+        for p in combo.get("jogadores") or []:
+            if p.get("sem_dado"):
+                lines.append(f"- **{p['jogador']}**: a FotMob não trouxe indicadores defensivos individuais suficientes neste jogo.")
+                continue
+            stats = []
+            for m in p.get("indicadores") or []:
+                value = _f(m["valor"])
+                if m.get("por90") is not None:
+                    value += f" ({_f(m['por90'])} por 90 min)"
+                stats.append(f"{m['metrica'].lower()}: {value}")
+            detail = "; ".join(stats) if stats else "sem indicadores defensivos observáveis"
+            mins = f", { _f(p['minutos'])} min" if p.get("minutos") is not None else ""
+            lines.append(f"- **{p['jogador']}** ({p.get('equipe') or 'equipe não identificada'}{mins}): {detail}.")
+        lines.append(
+            "_Leitura limitada aos registros individuais da FotMob. Desarmes, interceptações e duelos ajudam a "
+            "descrever a participação defensiva, mas não provam, sozinhos, que a dupla fechou o corredor central, "
+            "bloqueou linhas de passe ou protegeu a zaga. Para isso são necessários eventos com coordenadas ou tracking._"
+        )
+        return "\n\n".join(lines)
     if "ranking" in b:
         r = b["ranking"]
         if r.get("sem_dado"):

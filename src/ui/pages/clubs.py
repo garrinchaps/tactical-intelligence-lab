@@ -7,6 +7,8 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.data_hub.registry import BADGES
 from src.ui.components import comparison_table, empty_state, form_html, hero, result_card_html
 from src.ui.crests import crest_img
@@ -34,6 +36,17 @@ def same_team_names(name: str) -> List[str]:
     same = set(t.loc[t["core"] == core, "nome"])
     sc = fast_scores(name, t["nome"].tolist())
     same |= {n for n, v in sc.items() if v >= 0.92}
+    # Identificadores geográficos/institucionais distintivos não podem ser descartados pelo fuzzy match.
+    # Ex.: Santos FC e Santos Laguna compartilham "Santos", mas são clubes diferentes.
+    import re as _re
+    tokens = set(_re.findall(r"[a-z0-9]+", str(name).casefold()))
+    distinctive = {"laguna", "unam", "pumas", "guadalajara", "monterrey", "tigres", "america", "medellin",
+                   "cali", "quito", "cusco", "tijuana", "pachuca", "toluca"}
+    identity = tokens & distinctive
+    if identity:
+        same = {n for n in same if identity.issubset(set(_re.findall(r"[a-z0-9]+", str(n).casefold())))}
+    else:
+        same = {n for n in same if not (set(_re.findall(r"[a-z0-9]+", str(n).casefold())) & distinctive)}
     # time feminino, sub-20, reservas etc. não são "o mesmo time" (Barcelona × Barcelona WFC)
     import re as _re
 
@@ -134,6 +147,10 @@ def render(_ctx=None) -> None:
                 f'<div class="d">{len(m)} jogos no nível escolhido · {len(allm)} resultados no total'
                 + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
                 unsafe_allow_html=True)
+    scout_a, scout_b = st.columns([1.8, 6])
+    if scout_a.button("🎯 Planejar elenco", key=f"team_scout_{name}", type="primary", use_container_width=True):
+        nav.open_view("scout", club=name)
+    scout_b.caption("Diagnóstico de necessidades, alvos realistas e simulação de transferências.")
     k = st.columns(5)
     k[0].metric("Jogos (todos)", r.get("jogos", 0))
     k[1].metric("V / E / D", f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}")
@@ -226,7 +243,7 @@ def render(_ctx=None) -> None:
                 from src.ui import charts
 
                 last = u.sort_values("data").tail(20)
-                st.plotly_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
+                render_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
                                              ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
                                 use_container_width=True)
 
@@ -276,7 +293,7 @@ def _style_tab(name: str, names: List[str]) -> None:
             fig.add_trace(go.Scatter(x=list(range(len(ser))), y=xg_c, mode="lines+markers", name="xG contra",
                                      line=dict(color="#EF4444", width=3), hovertext=lab, hoverinfo="text+y"))
             fig.update_xaxes(showticklabels=False, title="jogos (do mais antigo ao mais recente)")
-            st.plotly_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
+            render_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
     a, b = st.columns(2)
     with a:
         st.markdown("#### 🧬 Como joga")

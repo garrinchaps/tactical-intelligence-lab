@@ -175,6 +175,10 @@ pytest -q
 $env:TIL_STRICT_PROVENANCE="1"; streamlit run app.py   # PowerShell: qualquer número sem origem vira erro
 ```
 
+## 🎯 Scout & Planejamento
+
+A área **Scout** combina diagnóstico do clube, qualidade estatística por função, referências de mercado, realismo contextual, busca manual, oportunidades U23 e simulação de entradas/saídas. O método, as fontes, os pesos e as limitações estão descritos em [docs/SCOUT.md](docs/SCOUT.md).
+
 ## ⚠️ Limitações conhecidas
 
 - **Sem tracking contínuo:** a "compactação" é estimada pela dispersão das ações defensivas (proxy declarada na resposta).
@@ -192,3 +196,7 @@ $env:TIL_STRICT_PROVENANCE="1"; streamlit run app.py   # PowerShell: qualquer n�
 
 - **Wyscout Public Dataset**: Pappalardo, L. et al. *A public data set of spatio-temporal match events in soccer competitions*. Scientific Data 6, 236 (2019). Licença CC BY 4.0. Conversão a partir do repositório processado por koenvo.
 - **API-Football**, **football-data.org** e **ESPN**: dados sujeitos aos termos de cada provedor.
+
+## 🚀 Publicação na internet
+
+A preparação para hospedagem pública, incluindo requisitos de armazenamento persistente e migração validada da base local, está em [`docs/DEPLOY_PUBLICO.md`](docs/DEPLOY_PUBLICO.md). Para gerar um inventário **somente de leitura** antes da migração, execute `python scripts/inventory_deploy_data.py`. O inventário não altera o SQLite nem envia dados ao GitHub.

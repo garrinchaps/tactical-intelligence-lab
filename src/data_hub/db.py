@@ -7,6 +7,7 @@ e controle de cota das APIs.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -111,6 +112,8 @@ CREATE INDEX IF NOT EXISTS idx_team_stats_match ON match_team_stats(match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_team ON match_lineups(team_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_player ON match_lineups(player_name);
 CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team_name);
+CREATE INDEX IF NOT EXISTS idx_pstats_player ON match_player_stats(player_name, match_id);
+CREATE INDEX IF NOT EXISTS idx_lineups_coach ON match_lineups(coach, match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
 """
 
@@ -130,8 +133,11 @@ MAIN_STATS = ("shots_total", "shots_on_target", "possession_pct", "passes_total"
 class DataHubDB:
     """Wrapper fino sobre o SQLite com migração idempotente."""
 
-    def __init__(self, db_path: Path | str = DEFAULT_DB, schema_path: Path | str = DEFAULT_SCHEMA):
-        self.db_path = Path(db_path)
+    def __init__(self, db_path: Path | str | None = None, schema_path: Path | str = DEFAULT_SCHEMA):
+        # Mantém o caminho local padrão, mas permite apontar para um volume persistente em produção.
+        # Um caminho passado explicitamente pelo chamador sempre tem prioridade.
+        configured_path = db_path if db_path is not None else os.getenv("DATABASE_PATH", str(DEFAULT_DB))
+        self.db_path = Path(configured_path)
         self.schema_path = Path(schema_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.migrate()

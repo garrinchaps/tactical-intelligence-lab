@@ -12,21 +12,33 @@ Dado ausente nunca vira zero: o nível diz o que EXISTE, não preenche o que fal
 
 from __future__ import annotations
 
-from typing import Dict, Iterable
+from typing import Dict, Iterable, Optional
 
 LABELS = {0: "Resultado", 1: "Estatísticas do time", 2: "Escalação e números individuais",
           3: "Lances com coordenadas", 4: "Tracking físico"}
 ICONS = {0: "📄", 1: "📊", 2: "👥", 3: "🟢", 4: "🛰️"}
 
 
-def depth_of(level: str, has_team_stats: bool = False, has_individual: bool = False, has_tracking: bool = False) -> int:
+def depth_of(
+    level: str,
+    has_team_stats: Optional[bool] = None,
+    has_individual: Optional[bool] = None,
+    has_tracking: bool = False,
+) -> int:
+    """Classifica pela evidência observada; usa data_level como fallback só sem flags de conteúdo.
+
+    Importante: BOXSCORE é um rótulo amplo. Não prova, sozinho, que uma linha de estatísticas
+    esteja realmente gravada. Quando o chamador consulta o banco, deve passar True/False explícitos.
+    """
     if has_tracking:
         return 4
     if str(level).upper() in ("EVENTS", "UPLOAD"):
         return 3
     if has_individual:
         return 2
-    if has_team_stats or str(level).upper() == "BOXSCORE":
+    if has_team_stats:
+        return 1
+    if has_team_stats is None and has_individual is None and str(level).upper() == "BOXSCORE":
         return 1
     return 0
 

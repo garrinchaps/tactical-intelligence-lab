@@ -1,9 +1,9 @@
 """
-Avaliação 2.0 a partir das ESTATÍSTICAS por jogador (rodada 5) — para jogos sem lances com coordenadas
+Avaliação 3.0 a partir das ESTATÍSTICAS por jogador (rodada 5) — para jogos sem lances com coordenadas
 (Brasileirão, Série B, Libertadores…), usando os números por jogador da FotMob.
 
 Mesmo motor (`rating_v2.evaluate`: dimensões, pesos por função, percentil → nota, encolhimento por minutos,
-confiança, desempenho × impacto), mas com:
+confiança, desempenho-base + ajuste decisivo, mas com:
   * indicadores que a fonte de estatísticas realmente traz (xG, xA, chances criadas, passes no terço final,
     desarmes, interceptações, recuperações, duelos, perdas…). O que ela não traz (xT, quebra de linhas, entre linhas,
     pressão) fica de fora — a dimensão sem dado NÃO vira zero, só reduz a cobertura e a confiança;
@@ -19,7 +19,7 @@ from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
-REF_PATH = Path("data/processed/rating_ref_box.parquet")
+REF_PATH = Path("data/processed/rating_ref_box_v3_0_1.parquet")
 ROLE_TO_FUNCAO = {"GK": "goleiro", "CB": "zagueiro", "LB": "lateral", "RB": "lateral", "LWB": "lateral", "RWB": "lateral",
                   "DM": "volante", "CM": "meia central", "AM": "meia ofensivo", "LM": "ponta", "RM": "ponta",
                   "LW": "ponta", "RW": "ponta", "ST": "centroavante"}
@@ -55,11 +55,14 @@ def indicators(rows: pd.DataFrame, positions: Optional[Dict[str, str]] = None) -
         p90 = lambda k: _num(s.get(k)) * 90 / m if s.get(k) is not None else None
         pct = lambda k: (100 * _num(s[k]) / _num(s[k + "_total"])) if s.get(k) is not None and _num(s.get(k + "_total")) else None
         touches = _num(s.get("touches"))
-        row = {"jogador": r.player_name, "equipe": r.team_name, "funcao": fun, "minutos": m,
-               "gols": int(_num(s.get("totalGoals")) or 0) if s.get("totalGoals") is not None else 0,
-               "assistencias": int(_num(s.get("goalAssists")) or 0) if s.get("goalAssists") is not None else 0,
-               "xg": s.get("xg"), "xa": s.get("xa"), "amarelos": None, "vermelhos": 0,
-               "erros_que_viraram_chance": (_num(s.get("errors_led_to_goal")) or 0) if s.get("errors_led_to_goal") is not None else 0}
+        row = {"jogador": r.player_name, "equipe": r.team_name, "funcao": fun,
+               "role_mix": {fun: 1.0}, "minutos": m,
+               "gols": int(_num(s.get("totalGoals")) or 0) if s.get("totalGoals") is not None else None,
+               "gols_penalti": _num(s.get("penalty_goals")) if s.get("penalty_goals") is not None else None,
+               "assistencias": int(_num(s.get("goalAssists")) or 0) if s.get("goalAssists") is not None else None,
+               "xg": s.get("xg"), "xa": s.get("xa"), "amarelos": s.get("yellow_cards"),
+               "vermelhos": int(_num(s.get("red_cards")) or 0) if s.get("red_cards") is not None else None,
+               "erros_que_viraram_chance": (_num(s.get("errors_led_to_goal")) or 0) if s.get("errors_led_to_goal") is not None else None}
         if fun == "goleiro":
             saves, conc = _num(s.get("saves")), _num(s.get("goals_conceded"))
             row.update({"defesas90": p90("saves"), "gols_evitados": s.get("goals_prevented"),
@@ -76,6 +79,8 @@ def indicators(rows: pd.DataFrame, positions: Optional[Dict[str, str]] = None) -
                         "cortes90": p90("clearances"), "bloqueios90": p90("shot_blocks"), "recup90": p90("recoveries"),
                         "aereos_ganhos90": p90("aerials_won"), "driblado90": p90("dribbled_past"),
                         "passe_pct": pct("accurate_passes"),
+                        "acoes_defensivas90": p90("defensive_actions"),
+                        "sprints90": p90("sprints"),
                         "perdas_por_toque": _num(s.get("dispossessed")) / touches if s.get("dispossessed") is not None and touches else None,
                         "faltas90": p90("foulsCommitted")})
         out.append(row)
@@ -104,8 +109,9 @@ def build_reference(db, limit: int = 400, path: Path = REF_PATH) -> int:
     """Régua: atuações (≥ 30 min) dos jogos mais recentes com estatísticas por jogador da FotMob."""
     with db.connect() as conn:
         ids = [r[0] for r in conn.execute(
-            "SELECT DISTINCT s.match_id FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
-            "WHERE m.data_source = 'fotmob' ORDER BY m.match_date DESC LIMIT ?", (int(limit),)).fetchall()]
+            "SELECT s.match_id FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+            "WHERE m.data_source = 'fotmob' GROUP BY s.match_id "
+            "ORDER BY MAX(m.match_date) DESC LIMIT ?", (int(limit),)).fetchall()]
         if not ids:
             return 0
         ph = ",".join("?" * len(ids))
@@ -130,7 +136,7 @@ def reference(path: Path = REF_PATH) -> pd.DataFrame:
 
 
 def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.DataFrame:
-    """Nota 2.0 (por estatísticas) dos jogadores de um jogo. Vazio se o jogo não tem números por jogador."""
+    """Nota 3.0 (por estatísticas) dos jogadores de um jogo. Vazio se o jogo não tem números por jogador."""
     from src.analytics.rating_v2 import evaluate
 
     with db.connect() as conn:
@@ -149,15 +155,16 @@ def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.D
         ev = evaluate(r, pool)
         out.append({"jogador": r["jogador"], "equipe": r["equipe"], "funcao": r["funcao"], "minutos": r["minutos"],
                     "gols": r["gols"], "assistencias": r["assistencias"], "desempenho": ev["desempenho"],
-                    "impacto": ev["impacto"], "confianca": ev["confianca"], "confianca_pct": ev["confianca_pct"],
+                    "nota": ev["nota"], "nota_final": ev["nota_final"], "impacto": ev["impacto"],
+                    "confianca": ev["confianca"], "confianca_pct": ev["confianca_pct"],
                     "classificacao": ev["classificacao"], "pares": ev["pares"], "_detalhe": ev})
-    return pd.DataFrame(out).sort_values("desempenho", ascending=False, na_position="last").reset_index(drop=True)
+    return pd.DataFrame(out).sort_values("nota", ascending=False, na_position="last").reset_index(drop=True)
 
 
 def player_form(db, names: List[str], n: int = 10, ref: Optional[pd.DataFrame] = None,
                 team_names: Optional[List[str]] = None) -> pd.DataFrame:
     """
-    Nota 2.0 (por estatísticas) do jogador nos últimos `n` jogos com números por jogador — base da FASE (últimos 5),
+    Nota 3.0 (por estatísticas) do jogador nos últimos `n` jogos com números por jogador — base da FASE (últimos 5),
     da QUALIDADE (média do período) e da REGULARIDADE (desvio entre jogos). Sem jogos assim, volta vazio.
     Nunca só pelo nome: usa o id do atleta na FotMob; sem id, fica no clube informado ou no time do jogo mais recente.
     """
@@ -197,7 +204,8 @@ def player_form(db, names: List[str], n: int = 10, ref: Optional[pd.DataFrame] =
         x = me.iloc[0]
         dims = x["_detalhe"]["dimensoes"]
         rows.append({"match_id": mid, "data": d, "jogo": f"{h} {hs} x {as_} {a}", "funcao": x["funcao"], "minutos": x["minutos"],
-                     "desempenho": x["desempenho"], "impacto": x["impacto"], "confianca_pct": x["confianca_pct"], **dims})
+                     "nota": x["nota"], "nota_final": x["nota_final"], "desempenho": x["desempenho"],
+                     "impacto": x["impacto"], "confianca_pct": x["confianca_pct"], **dims})
     return pd.DataFrame(rows)
 
 
@@ -206,7 +214,7 @@ def main() -> None:
 
     from src.data_hub.db import DataHubDB
 
-    ap = argparse.ArgumentParser(description="Régua da nota 2.0 por estatísticas (FotMob).")
+    ap = argparse.ArgumentParser(description="Régua da nota 3.0 por estatísticas (FotMob).")
     ap.add_argument("--referencia", type=int, default=400, help="quantos jogos recentes com números por jogador usar")
     a = ap.parse_args()
     n = build_reference(DataHubDB(), a.referencia)

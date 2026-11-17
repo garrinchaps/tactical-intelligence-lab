@@ -1,23 +1,23 @@
 """
-Modelo de avaliação individual 2.0 — motor estatístico TRANSPARENTE (sem caixa-preta).
+Modelo de avaliação individual 3.0 — motor estatístico TRANSPARENTE (sem caixa-preta).
 
 Jogadores de linha: 7 dimensões (0–10) — produção ofensiva, criação, progressão, defesa, eficiência, disciplina e
-impacto tático — com pesos pela FUNÇÃO exercida no jogo (não só a posição cadastrada).
+trabalho coletivo observável — com pesos pela FUNÇÃO exercida no jogo e blend de papéis quando os eventos documentam mudanças de função.
 Goleiros: 6 dimensões — defesa de finalizações 30%, posicionamento 15%, jogo aéreo 10%, distribuição 15%,
 decisões/segurança 20%, cobertura 10%.
 
 Como cada número vira nota:
 1. Indicador por 90 min (ou taxa) → percentil contra jogadores da MESMA função na base de referência.
-2. Percentil → nota pela tabela P5=2,0 · P10=3,0 · P25=4,5 · P50=5,5 · P75=7,0 · P90=8,5 · P95=9,2 · P99=10
+2. Percentil → nota pela régua 3.0: P5=3,8 · P10=4,5 · P25=5,5 · P50=6,4 · P75=7,4 · P90=8,6 · P95=9,25 · P99=10
    (invertida em indicadores negativos, como perdas e erros).
 3. Dimensão = média ponderada dos indicadores que EXISTEM. Indicador sem dado não vira zero: fica fora e a confiança cai.
 4. Nota = Σ peso × dimensão (pesos renormalizados sobre as dimensões observadas).
-5. Pouca amostra puxa a nota para a referência: S = c·S_obs + (1−c)·5,5, c pelos minutos.
-6. Saídas separadas: DESEMPENHO (qualidade da atuação), IMPACTO (quanto mudou o jogo) e CONFIANÇA (evidência).
+5. Pouca amostra puxa o desempenho para a referência neutra 6,4, conforme minutos observados.
+6. Nota final = desempenho + ajuste limitado de momentos decisivos; também são reportados desempenho-base, impacto e confiança.
 
-Limites honestos: sem tracking nem vídeo, "impacto tático" é INFERIDO de eventos (recepções entre linhas, participação
-na troca de passes, pressão no campo rival) e o posicionamento/jogo aéreo do goleiro não é observado — aparecem como
-"inferido" / "não observado", nunca como certeza. xGOT não existe nas fontes abertas: usa-se o xG das finalizações no alvo.
+Limites honestos: papel misto é aproximado pela distribuição das posições anotadas nos eventos, não por tracking minuto
+a minuto. Sem tracking nem vídeo, fechamentos de linhas, movimentos de atração e coberturas sem ação registrada não são
+observáveis. Gols evitados em fontes sem xGOT são identificados como proxy de xG pré-chute, nunca como xGOT.
 """
 
 from __future__ import annotations
@@ -27,13 +27,16 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 
-PCT_TABLE = [(0, 0.5), (5, 2.0), (10, 3.0), (25, 4.5), (50, 5.5), (75, 7.0), (90, 8.5), (95, 9.2), (99, 10.0), (100, 10.0)]
-REF_SCORE = 5.5
+# Régua 3.0: centro neutro próximo de 6,4 (entre as bases divulgadas de 6,0–6,5),
+# com cauda alta mais exigente. P99 continua raro; os percentis são calibrados por função.
+PCT_TABLE = [(0, 3.0), (5, 3.8), (10, 4.5), (25, 5.5), (50, 6.4), (75, 7.4), (90, 8.6), (95, 9.25), (99, 10.0), (100, 10.0)]
+REF_SCORE = 6.4
+RATING_ENGINE_VERSION = "3.0.1"
 
 DIMS = ["ofensiva", "criacao", "progressao", "defesa", "eficiencia", "disciplina", "tatica"]
 DIM_PT = {"ofensiva": "Produção ofensiva", "criacao": "Criação e construção", "progressao": "Progressão",
           "defesa": "Contribuição defensiva", "eficiencia": "Eficiência técnica", "disciplina": "Disciplina e segurança",
-          "tatica": "Impacto tático (inferido)"}
+          "tatica": "Trabalho coletivo e sem bola (observável)"}
 WEIGHTS = {   # % por função (cada linha soma 100)
     "centroavante": [35, 15, 12, 8, 15, 5, 10], "ponta": [27, 18, 20, 10, 12, 5, 8],
     "meia ofensivo": [20, 25, 18, 10, 12, 5, 10], "meia central": [14, 22, 20, 17, 12, 5, 10],
@@ -63,7 +66,8 @@ INDICATORS: Dict[str, tuple] = {
     "perdas_por_toque": ("eficiencia", 1.0, False), "perdas_perigosas90": ("eficiencia", 1.0, False),
     "amarelos": ("disciplina", 1.0, False), "faltas90": ("disciplina", 0.6, False),
     "entre_linhas90": ("tatica", 1.0, True), "participacao_pct": ("tatica", 1.0, True),
-    "pressao_campo_rival90": ("tatica", 0.8, True),
+    "pressao90": ("tatica", 0.8, True), "pressao_campo_rival90": ("tatica", 0.9, True),
+    "acoes_defensivas90": ("tatica", 0.7, True), "sprints90": ("tatica", 0.35, True),
 }
 GK_INDICATORS: Dict[str, tuple] = {
     "defesas90": ("defesas", 0.8, True), "pct_defesas": ("defesas", 1.0, True), "gols_evitados": ("defesas", 1.6, True),
@@ -87,8 +91,10 @@ IND_PT = {
     "driblado90": "Vezes driblado /90", "passe_pct_dificil": "Acerto em passes difíceis (%)", "passe_pct": "Acerto de passe (%)",
     "perdas_por_toque": "Perdas por toque na bola", "perdas_perigosas90": "Perdas no próprio campo /90",
     "amarelos": "Cartões amarelos", "faltas90": "Faltas cometidas /90", "entre_linhas90": "Bolas recebidas entre linhas /90",
-    "participacao_pct": "Participação na troca de passes (%)", "pressao_campo_rival90": "Pressões no campo rival /90",
-    "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (xG no alvo − gols)",
+    "participacao_pct": "Participação na troca de passes (%)", "pressao90": "Pressões /90",
+    "acoes_defensivas90": "Ações defensivas /90", "sprints90": "Sprints /90",
+    "pressao_campo_rival90": "Pressões no campo rival /90",
+    "defesas90": "Defesas /90", "pct_defesas": "Defesas (%)", "gols_evitados": "Gols evitados (proxy informado pela fonte)",
     "saidas_aereas90": "Ações de goleiro na área /90", "gk_passe_pct": "Acerto de passe (%)", "gk_longos_pct": "Acerto em bolas longas (%)",
     "gk_prog90": "Passes progressivos /90", "gk_perdas90": "Perdas /90", "gk_erros": "Erros que deram chance",
     "gk_acoes_fora_area90": "Ações fora da área /90",
@@ -104,7 +110,9 @@ def outliers(ev: Dict[str, Any], high: float = 85, low: float = 15) -> Dict[str,
 
 
 def role_of(position: Any) -> str:
-    p = str(position or "").lower()
+    p = str(position or "").strip().lower()
+    if not p or p in {"unknown", "não identificado", "nao identificado", "not available", "n/a", "none"}:
+        return "não identificado"
     if "goalkeeper" in p or "goleiro" in p:
         return "goleiro"
     if "center back" in p or "centre back" in p or "zagueiro" in p:
@@ -126,6 +134,16 @@ def role_of(position: Any) -> str:
     return "meia central"
 
 
+def _as_float(value: Any, default: float = 0.0) -> float:
+    """Converte estatística opcional sem propagar NaN para o cálculo da nota."""
+    try:
+        if value is None or pd.isna(value):
+            return float(default)
+        return float(value)
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def pct_to_score(p: float) -> float:
     xs, ys = zip(*PCT_TABLE)
     return float(np.interp(p, xs, ys))
@@ -143,6 +161,80 @@ def label(n: Optional[float]) -> str:
             "razoável" if n < 7 else "boa" if n < 8 else "muito boa" if n < 9 else "excelente" if n < 9.6 else "excepcional")
 
 
+# ------------------------------------------------------------------ momentos decisivos observáveis
+def _shootout_contributions(df: pd.DataFrame) -> Dict[str, Dict[str, int]]:
+    """Atribui tentativas, conversões e defesas da disputa aos atletas identificáveis."""
+    from src.metrics.match_facts import _regular
+
+    result: Dict[str, Dict[str, int]] = {}
+    required = {"period", "type_name", "team_name", "player_name"}
+    if df is None or df.empty or not required.issubset(df.columns):
+        return result
+    regular = _regular(df)
+    teams = [str(x) for x in df["team_name"].dropna().unique()]
+    goalkeepers: Dict[str, str] = {}
+    if "position_name" in regular:
+        is_gk = regular["position_name"].map(role_of).eq("goleiro")
+        gks = regular[is_gk & regular["player_name"].notna()].copy()
+        if not gks.empty:
+            order = [c for c in ("period", "minute", "second", "index_num") if c in gks.columns]
+            if order:
+                gks = gks.sort_values(order, kind="stable")
+            # Prioriza o goleiro com a ação registrada mais recente, aproximando quem terminou a partida.
+            for team, group in gks.groupby("team_name", sort=False):
+                goalkeepers[str(team)] = str(group.iloc[-1]["player_name"])
+    # Algumas fontes não anotam position_name, mas registram ações próprias do goleiro.
+    if "type_name" in regular:
+        actions = regular[regular["type_name"].astype(str).str.lower().isin(["goal keeper", "goalkeeper"])]
+        for team, group in actions.groupby("team_name", sort=False):
+            if str(team) not in goalkeepers:
+                order = [c for c in ("period", "minute", "second", "index_num") if c in group.columns]
+                if order:
+                    group = group.sort_values(order, kind="stable")
+                if not group["player_name"].dropna().empty:
+                    goalkeepers[str(team)] = str(group.iloc[-1]["player_name"])
+
+    attempts = df[(df["period"] == 5) & (df["type_name"] == "Shot")].copy()
+    order = [c for c in ("minute", "second", "index_num") if c in attempts.columns]
+    if order:
+        attempts = attempts.sort_values(order, kind="stable")
+    valid_attempts = []
+    known_misses = {"off t", "wayward", "post", "miss", "missed", "saved", "saved to post",
+                    "saved off target", "blocked"}
+    for _, shot in attempts.iterrows():
+        shooter = str(shot.get("player_name") or "")
+        shooting_team = str(shot.get("team_name") or "")
+        outcome = str(shot.get("shot_outcome_name") or "").strip()
+        normalized = outcome.lower()
+        if not shooter or not shooting_team or (outcome != "Goal" and normalized not in known_misses):
+            # Sem resultado explícito, não inventa conversão nem pênalti perdido.
+            continue
+        row = result.setdefault(shooter, {"shootout_penaltis_marcados": 0, "shootout_penaltis_perdidos": 0,
+                                          "shootout_saves": 0, "shootout_penalti_decisivo": 0})
+        if outcome == "Goal":
+            row["shootout_penaltis_marcados"] += 1
+        else:
+            row["shootout_penaltis_perdidos"] += 1
+        if "saved" in normalized:
+            defending = next((team for team in teams if team != shooting_team), None)
+            keeper = goalkeepers.get(defending or "")
+            if keeper:
+                gk_row = result.setdefault(keeper, {"shootout_penaltis_marcados": 0,
+                                                    "shootout_penaltis_perdidos": 0, "shootout_saves": 0,
+                                                    "shootout_penalti_decisivo": 0})
+                gk_row["shootout_saves"] += 1
+        valid_attempts.append((shooter, shooting_team, outcome))
+
+    # O último pênalti convertido, se encerra a disputa com vantagem, recebe crédito de decisão.
+    if valid_attempts:
+        shooter, winning_team, outcome = valid_attempts[-1]
+        scores = {team: sum(1 for _, t, o in valid_attempts if t == team and o == "Goal") for team in teams}
+        if outcome == "Goal" and scores.get(winning_team, 0) > max(
+                (score for team, score in scores.items() if team != winning_team), default=0):
+            result[shooter]["shootout_penalti_decisivo"] = 1
+    return result
+
+
 # ------------------------------------------------------------------ indicadores por jogador e partida
 def indicators(df: pd.DataFrame) -> pd.DataFrame:
     """Indicadores brutos (por 90 e taxas) de cada jogador numa partida com lances."""
@@ -156,17 +248,23 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
     gl = goals(df)
     col = lambda c, v=0: d[c] if c in d else pd.Series(v, index=d.index)
     t = d["type_name"]
-    xg = pd.to_numeric(col("shot_statsbomb_xg"), errors="coerce").fillna(0)
-    # xA: xG das finalizações que vieram do último passe do jogador na mesma posse
+    shot_rows = d[d["type_name"] == "Shot"]
+    has_match_xg = ("shot_statsbomb_xg" in d.columns
+                    and pd.to_numeric(shot_rows["shot_statsbomb_xg"], errors="coerce").notna().any())
+    has_xa_inputs = has_match_xg and {"possession", "pass_recipient_name", "pass_outcome_name"}.issubset(d.columns)
+    # xA: xG das finalizações que vieram do último passe do jogador na mesma posse.
+    # Sem xG/posse/recebedor, xA fica ausente, não zero.
     xa: Dict[str, float] = {}
-    if "possession" in d:
+    if has_xa_inputs:
         passes = d[(t == "Pass") & col("pass_outcome_name").isna()]
         for s in d[t == "Shot"].itertuples():
             c = passes[(passes["team_name"] == s.team_name) & (passes["pass_recipient_name"] == s.player_name)
                        & (passes.index < s.Index) & (passes["possession"] == s.possession)]
             if len(c):
-                p = str(c.iloc[-1]["player_name"])
-                xa[p] = xa.get(p, 0.0) + float(getattr(s, "shot_statsbomb_xg", 0) or 0)
+                shot_xg = getattr(s, "shot_statsbomb_xg", None)
+                if shot_xg is not None and pd.notna(shot_xg):
+                    p = str(c.iloc[-1]["player_name"])
+                    xa[p] = xa.get(p, 0.0) + float(shot_xg)
     team_pass = d[t == "Pass"].groupby("team_name").size()
     rows = []
     for (p, team), e in d.groupby(["player_name", "team_name"]):
@@ -175,62 +273,134 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
         et = e["type_name"]
         ps = e[et == "Pass"]
         ok = ps[ps.get("pass_outcome_name").isna()] if "pass_outcome_name" in ps else ps
-        hard = ps[(pd.to_numeric(ps.get("pass_length", 0), errors="coerce").fillna(0) >= 25)
-                  | (pd.to_numeric(ps.get("end_x", 0), errors="coerce") - pd.to_numeric(ps.get("x", 0), errors="coerce") >= 15)]
+        hard_mask = pd.Series(False, index=ps.index)
+        if "pass_length" in ps:
+            hard_mask |= pd.to_numeric(ps["pass_length"], errors="coerce").fillna(0) >= 25
+        if {"end_x", "x"}.issubset(ps.columns):
+            hard_mask |= (pd.to_numeric(ps["end_x"], errors="coerce")
+                          - pd.to_numeric(ps["x"], errors="coerce")) >= 15
+        hard = ps[hard_mask]
         hard_ok = hard[hard.get("pass_outcome_name").isna()] if "pass_outcome_name" in hard else hard
         shots = e[et == "Shot"]
-        sxg = pd.to_numeric(shots.get("shot_statsbomb_xg", 0), errors="coerce").fillna(0)
-        is_goal = shots.get("shot_outcome_name", pd.Series(dtype=object)) == "Goal"
-        is_pen = shots.get("shot_type_name", pd.Series(dtype=object)) == "Penalty"
-        on = shots.get("shot_outcome_name", pd.Series(dtype=object)).isin(["Goal", "Saved", "Saved To Post"])
-        big_missed = sxg[(sxg >= 0.3) & ~is_goal].sum()
+        has_player_xg = ("shot_statsbomb_xg" in shots.columns
+                         and pd.to_numeric(shots["shot_statsbomb_xg"], errors="coerce").notna().any())
+        sxg = (pd.to_numeric(shots["shot_statsbomb_xg"], errors="coerce").fillna(0)
+               if "shot_statsbomb_xg" in shots else pd.Series(0.0, index=shots.index))
+        has_shot_outcome = "shot_outcome_name" in shots.columns
+        shot_outcomes = (shots["shot_outcome_name"].astype(str) if has_shot_outcome
+                         else pd.Series("", index=shots.index, dtype=object))
+        is_goal = shot_outcomes.eq("Goal")
+        is_pen = shots["shot_type_name"].eq("Penalty") if "shot_type_name" in shots else pd.Series(False, index=shots.index)
+        on = shot_outcomes.isin(["Goal", "Saved", "Saved To Post"]) if has_shot_outcome else pd.Series(False, index=shots.index)
+        outcomes = shot_outcomes
+        # Finalização defendida não é erro do atacante: só desvios/traves entram como chance desperdiçada.
+        missed = outcomes.str.lower().isin(["off t", "wayward", "post", "miss", "missed"])
+        big_missed = sxg[(sxg >= 0.3) & missed].sum()
         carries = e[et == "Carry"]
         touches = int(et.isin(["Pass", "Carry", "Shot", "Dribble", "Ball Receipt*", "Miscontrol", "Dispossessed"]).sum())
         turn = e[e.get("is_turnover", 0) == 1] if "is_turnover" in e else e.iloc[0:0]
-        own_half_turn = turn[turn["x"] < 50]
+        own_half_turn = turn[turn["x"] < 50] if "x" in turn else turn.iloc[0:0]
         duels = e[et == "Duel"]
-        rec = df[(df.get("pass_recipient_name") == p) & (df["type_name"] == "Pass") & (df.get("is_pass_completed", 0) == 1)]
-        between = rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))] if len(rec) else rec
+        has_receipt_data = {"pass_recipient_name", "is_pass_completed", "type_name", "end_x", "end_y"}.issubset(df.columns)
+        rec = (df[(df["pass_recipient_name"] == p) & (df["type_name"] == "Pass")
+                  & (df["is_pass_completed"] == 1)] if has_receipt_data else df.iloc[0:0])
+        between = (rec[(rec["end_x"] >= 72) & (rec["end_x"] < 102) & (rec["end_y"].between(18, 62))]
+                   if has_receipt_data else rec)
+        error_flag = next((k for k in ("is_error_leading_to_shot", "is_error_leading_to_goal") if k in e), None)
+        errors_to_chance = (int(pd.to_numeric(e[error_flag], errors="coerce").fillna(0).astype(bool).sum())
+                            if error_flag else None)
         gk = {}
-        if "goalkeeper" in str(e.get("position_name", pd.Series([""])).mode().iloc[0] if e.get("position_name") is not None
-                               and not e["position_name"].dropna().empty else "").lower():
+        position_mode = (e["position_name"].dropna().mode().iloc[0]
+                         if "position_name" in e and not e["position_name"].dropna().empty else "")
+        if role_of(position_mode) == "goleiro":
             faced = d[(d["team_name"] != team) & (d["type_name"] == "Shot")]
-            fo = faced.get("shot_outcome_name", pd.Series(dtype=object))
-            on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
-            ga = int((on_t.get("shot_outcome_name") == "Goal").sum())
-            saves = int(len(on_t) - ga)
-            xg_on = float(pd.to_numeric(on_t.get("shot_statsbomb_xg", 0), errors="coerce").fillna(0).sum())
-            longp = ps[pd.to_numeric(ps.get("pass_length", 0), errors="coerce").fillna(0) >= 32]
+            has_faced_outcome = "shot_outcome_name" in faced.columns
+            if has_faced_outcome:
+                fo = faced["shot_outcome_name"]
+                on_t = faced[fo.isin(["Goal", "Saved", "Saved To Post"])]
+                ga = int(on_t["shot_outcome_name"].eq("Goal").sum())
+                saves = int(len(on_t) - ga)
+            else:
+                on_t = faced.iloc[0:0]
+                ga = saves = 0
+            has_faced_xg = ("shot_statsbomb_xg" in on_t.columns
+                             and pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").notna().any())
+            xg_on = (float(pd.to_numeric(on_t["shot_statsbomb_xg"], errors="coerce").fillna(0).sum())
+                     if has_faced_xg else None)
+            longp = (ps[pd.to_numeric(ps["pass_length"], errors="coerce").fillna(0) >= 32]
+                     if "pass_length" in ps else ps.iloc[0:0])
             longp_ok = longp[longp.get("pass_outcome_name").isna()] if "pass_outcome_name" in longp else longp
-            gk = {"defesas90": saves * f, "pct_defesas": 100 * saves / len(on_t) if len(on_t) else None,
-                  "gols_evitados": xg_on - ga if len(on_t) else None, "gols_sofridos": ga, "defesas": saves,
-                  "finalizacoes_no_alvo_enfrentadas": int(len(on_t)), "xg_no_alvo_enfrentado": round(xg_on, 2),
+            saved_shots = (on_t[on_t["shot_outcome_name"].astype(str).str.contains("Saved", case=False)]
+                           if "shot_outcome_name" in on_t else on_t.iloc[0:0])
+            saved_xg = (pd.to_numeric(saved_shots["shot_statsbomb_xg"], errors="coerce").fillna(0)
+                        if "shot_statsbomb_xg" in saved_shots else pd.Series(dtype=float))
+            saved_min = (pd.to_numeric(saved_shots["minute"], errors="coerce").fillna(0)
+                         if "minute" in saved_shots else pd.Series(dtype=float))
+            key_saves = (int(((saved_xg >= 0.25) & (saved_min >= 85)).sum())
+                         if has_faced_xg and "minute" in saved_shots else None)
+            gk = {"defesas90": saves * f if has_faced_outcome else None,
+                  "pct_defesas": 100 * saves / len(on_t) if has_faced_outcome and len(on_t) else None,
+                  "gols_evitados": xg_on - ga if xg_on is not None else None,
+                  "gols_sofridos": ga if has_faced_outcome else None,
+                  "defesas": saves if has_faced_outcome else None,
+                  "key_saves": key_saves,
+                  "finalizacoes_no_alvo_enfrentadas": int(len(on_t)) if has_faced_outcome else None,
+                  "xg_no_alvo_enfrentado": round(xg_on, 2) if xg_on is not None else None,
                   "saidas_aereas90": int((et == "Goal Keeper").sum()) * f if (et == "Goal Keeper").any() else None,
-                  "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) else None,
-                  "gk_longos_pct": 100 * len(longp_ok) / len(longp) if len(longp) >= 3 else None,
-                  "gk_prog90": int((ok.get("is_progressive_action", 0) == 1).sum()) * f if len(ok) else 0.0,
-                  "gk_perdas90": len(turn) * f, "gk_erros": int((et == "Error").sum()),
+                  "gk_passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 and "pass_outcome_name" in ps else None,
+                  "gk_longos_pct": (100 * len(longp_ok) / len(longp)
+                                    if len(longp) >= 3 and "pass_outcome_name" in longp else None),
+                  "gk_prog90": int((ok["is_progressive_action"] == 1).sum()) * f
+                      if "is_progressive_action" in ok and "pass_outcome_name" in ok else None,
+                  "gk_perdas90": len(turn) * f if "is_turnover" in e else None,
+                  "gk_erros": errors_to_chance,
                   "gk_acoes_fora_area90": int(((e["x"] > 18) & et.isin(["Clearance", "Interception", "Ball Recovery",
-                                                                       "Goal Keeper"])).sum()) * f}
+                                                                       "Goal Keeper"])).sum()) * f
+                      if "x" in e else None}
         np_goals = int((is_goal & ~is_pen).sum())
         pen_goals = int((is_goal & is_pen).sum())
-        own_goal_after_error = int((et == "Error").sum())
+        # Só penaliza erro que o provedor marque explicitamente como causador de finalização/gol.
+        # Um evento genérico "Error" não prova, sozinho, que o erro gerou uma chance.
+        pos_series = e["position_name"].dropna().astype(str) if "position_name" in e else pd.Series(dtype=str)
+        mapped_roles = pos_series.map(role_of) if not pos_series.empty else pd.Series(dtype=str)
+        mapped_roles = mapped_roles[mapped_roles.isin([*WEIGHTS.keys(), "goleiro"])]
+        role_counts = mapped_roles.value_counts() if not mapped_roles.empty else pd.Series(dtype=float)
+        role_mix = ({str(k): float(v / role_counts.sum()) for k, v in role_counts.items()}
+                    if not role_counts.empty and role_counts.sum() else {})
+        primary_role = max(role_mix, key=role_mix.get) if role_mix else role_of(
+            e["position_name"].dropna().mode().iloc[0] if "position_name" in e and not e["position_name"].dropna().empty else "")
         rows.append({
             "jogador": p, "equipe": team, "posicao": e["position_name"].dropna().mode().iloc[0] if "position_name" in e
-            and not e["position_name"].dropna().empty else "", "minutos": m,
-            "gols": np_goals + pen_goals, "gols_penalti": pen_goals,
+            and not e["position_name"].dropna().empty else "", "funcao": primary_role, "role_mix": role_mix, "minutos": m,
+            "gols": np_goals + pen_goals,
+            "gols_penalti": pen_goals if "shot_type_name" in shots else None,
             "assistencias": sum(1 for g in gl if g.get("assistencia") == p),
-            "gols_np90": np_goals * f, "gols_pen90": pen_goals * f, "xg90": float(sxg.sum()) * f, "xg": round(float(sxg.sum()), 2),
-            "no_alvo90": int(on.sum()) * f, "fin_area90": int(((shots["x"] >= 102) & shots["y"].between(18, 62)).sum()) * f,
-            "chances_perdidas_xg90": float(big_missed) * f, "chances_claras_perdidas": int(((sxg >= 0.3) & ~is_goal).sum()),
-            "assist90": sum(1 for g in gl if g.get("assistencia") == p) * f, "xa90": xa.get(p, 0.0) * f, "xa": round(xa.get(p, 0.0), 2),
-            "decisivos90": 0.0, "passes_area90": int((ok.get("end_in_box", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "quebra_linha90": int((ok.get("is_line_breaking_pass", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "cruz_certos90": int((ok.get("is_pass_cross", 0).fillna(0).astype(bool)).sum()) * f if len(ok) else 0.0,
-            "enfiadas90": int((ok.get("is_pass_through_ball", 0).fillna(0).astype(bool)).sum()) * f if len(ok) else 0.0,
-            "prog_passes90": int((ok.get("is_progressive_action", 0) == 1).sum()) * f if len(ok) else 0.0,
-            "prog_carries90": int((carries.get("is_progressive_action", 0) == 1).sum()) * f if len(carries) else 0.0,
-            "xt90": float(pd.to_numeric(e.get("delta_xt", 0), errors="coerce").fillna(0).clip(lower=0).sum()) * f,
+            "gols_np90": np_goals * f if "shot_type_name" in shots else None,
+            "gols_pen90": pen_goals * f if "shot_type_name" in shots else None,
+            "xg90": float(sxg.sum()) * f if has_player_xg else None,
+            "xg": round(float(sxg.sum()), 2) if has_player_xg else None,
+            "no_alvo90": int(on.sum()) * f if has_shot_outcome else None,
+            "fin_area90": int(((shots["x"] >= 102) & shots["y"].between(18, 62)).sum()) * f
+                if {"x", "y"}.issubset(shots.columns) else None,
+            "chances_perdidas_xg90": float(big_missed) * f if has_player_xg and has_shot_outcome else None,
+            "chances_claras_perdidas": int(((sxg >= 0.3) & missed).sum()) if has_player_xg and has_shot_outcome else None,
+            "assist90": sum(1 for g in gl if g.get("assistencia") == p) * f,
+            "xa90": xa.get(p, 0.0) * f if has_xa_inputs else None,
+            "xa": round(xa.get(p, 0.0), 2) if has_xa_inputs else None,
+            "decisivos90": 0.0,
+            "passes_area90": int((ok["end_in_box"] == 1).sum()) * f
+                if "end_in_box" in ok and "pass_outcome_name" in ok else None,
+            "quebra_linha90": int((ok["is_line_breaking_pass"] == 1).sum()) * f
+                if "is_line_breaking_pass" in ok and "pass_outcome_name" in ok else None,
+            "cruz_certos90": int(ok["is_pass_cross"].fillna(0).astype(bool).sum()) * f
+                if "is_pass_cross" in ok and "pass_outcome_name" in ok else None,
+            "enfiadas90": int(ok["is_pass_through_ball"].fillna(0).astype(bool).sum()) * f
+                if "is_pass_through_ball" in ok and "pass_outcome_name" in ok else None,
+            "prog_passes90": int((ok["is_progressive_action"] == 1).sum()) * f
+                if "is_progressive_action" in ok and "pass_outcome_name" in ok else None,
+            "prog_carries90": int((carries["is_progressive_action"] == 1).sum()) * f if "is_progressive_action" in carries else None,
+            "xt90": float(pd.to_numeric(e["delta_xt"], errors="coerce").fillna(0).clip(lower=0).sum()) * f
+                if "delta_xt" in e else None,
             "dribles90": int((et == "Dribble").sum()) * f,
             "entradas_terco90": int((e.get("is_final_third_entry", 0) == 1).sum()) * f if "is_final_third_entry" in e else None,
             "entradas_area90": int((e.get("is_box_entry", 0) == 1).sum()) * f if "is_box_entry" in e else None,
@@ -242,16 +412,27 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             "aereos_ganhos90": int(((et == "Duel") & (e.get("duel_type_name") == "Aerial Won")).sum()) * f
             if "duel_type_name" in e else None,
             "driblado90": int((et == "Dribbled Past").sum()) * f,
-            "passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 else None,
-            "passe_pct_dificil": 100 * len(hard_ok) / len(hard) if len(hard) >= 4 else None,
-            "perdas_por_toque": len(turn) / touches if touches >= 10 else None,
-            "perdas_perigosas90": len(own_half_turn) * f,
-            "amarelos": int((e.get("foul_committed_card_name") == "Yellow Card").sum()) if "foul_committed_card_name" in e else 0,
-            "vermelhos": int(e.get("foul_committed_card_name", pd.Series(dtype=object)).isin(["Red Card", "Second Yellow"]).sum()),
-            "faltas90": int((et == "Foul Committed").sum()) * f, "erros_que_viraram_chance": own_goal_after_error,
-            "entre_linhas90": len(between) * f,
-            "participacao_pct": 100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1),
-            "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f if (t == "Pressure").any() else None,
+            "passe_pct": 100 * len(ok) / len(ps) if len(ps) >= 5 and "pass_outcome_name" in ps else None,
+            "passe_pct_dificil": (100 * len(hard_ok) / len(hard)
+                                  if len(hard) >= 4 and "pass_outcome_name" in hard else None),
+            "perdas_por_toque": (len(turn) / touches
+                                 if touches >= 10 and "is_turnover" in e else None),
+            "perdas_perigosas90": (len(own_half_turn) * f
+                                   if "is_turnover" in e and "x" in e else None),
+            "amarelos": int((e["foul_committed_card_name"] == "Yellow Card").sum()) if "foul_committed_card_name" in e else None,
+            "vermelhos": int(e["foul_committed_card_name"].isin(["Red Card", "Second Yellow"]).sum())
+                if "foul_committed_card_name" in e else None,
+            "faltas90": int((et == "Foul Committed").sum()) * f,
+            "erros_que_viraram_chance": errors_to_chance,
+            "pressao90": int((et == "Pressure").sum()) * f if "Pressure" in set(d["type_name"].dropna().astype(str)) else None,
+            "acoes_defensivas90": int(pd.to_numeric(e["is_defensive_action"], errors="coerce").fillna(0).sum()) * f
+                if "is_defensive_action" in e else None,
+            "sprints90": None,
+            "entre_linhas90": len(between) * f if has_receipt_data else None,
+            "participacao_pct": (100 * (len(ps) + len(rec)) / max(2 * int(team_pass.get(team, 0)), 1)
+                                 if has_receipt_data else None),
+            "pressao_campo_rival90": int(((et == "Pressure") & (e["x"] >= 60)).sum()) * f
+                if (t == "Pressure").any() and "x" in e else None,
             **gk,
         })
     out = pd.DataFrame(rows)
@@ -263,7 +444,21 @@ def indicators(df: pd.DataFrame) -> pd.DataFrame:
             kp = dict(zip(pm["jogador"], pm["passes_decisivos"]))
             out["decisivos90"] = [kp.get(p, 0) * 90 / max(m, 1) for p, m in zip(out["jogador"], out["minutos"])]
             out["passes_decisivos"] = out["jogador"].map(kp).fillna(0).astype(int)
-        out["funcao"] = out["posicao"].map(role_of)
+        # A distribuição de papéis vem das posições registradas nos eventos. É uma aproximação pela participação
+        # das ações em cada posição, não tracking minuto a minuto.
+        if "funcao" not in out:
+            out["funcao"] = out["posicao"].map(role_of)
+        else:
+            out["funcao"] = out["funcao"].fillna(out["posicao"].map(role_of))
+        shootout = _shootout_contributions(df)
+        for idx, player in out["jogador"].items():
+            extra = shootout.get(str(player), {})
+            for key, value in extra.items():
+                out.loc[idx, key] = value
+        for key in ("shootout_penaltis_marcados", "shootout_penaltis_perdidos", "shootout_saves", "shootout_penalti_decisivo"):
+            if key not in out:
+                out[key] = 0
+            out[key] = pd.to_numeric(out[key], errors="coerce").fillna(0).astype(int)
     return out
 
 
@@ -274,16 +469,16 @@ _REF_CACHE: Dict[str, pd.DataFrame] = {}
 def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
     """
     Base de comparação: indicadores de jogadores com ≥ 30 min nas partidas com lances disponíveis (cache em disco em
-    data/processed/rating_ref_v2.parquet; sem cache, as partidas de demonstração). Quanto mais partidas, melhor.
+    data/processed/rating_ref_v3_0_1.parquet; sem cache, as partidas de demonstração). Quanto mais partidas, melhor.
     """
     from pathlib import Path
 
     key = "base"
     if key not in _REF_CACHE:
-        p = Path("data/processed/rating_ref_v2.parquet")
+        p = Path("data/processed/rating_ref_v3_0_1.parquet")
         ref = pd.DataFrame()
-        if not p.exists() and p.with_name("rating_ref_v2_demo.parquet").exists():
-            p = p.with_name("rating_ref_v2_demo.parquet")
+        if not p.exists() and p.with_name("rating_ref_v3_0_1_demo.parquet").exists():
+            p = p.with_name("rating_ref_v3_0_1_demo.parquet")
         if p.exists():
             try:
                 ref = pd.read_parquet(p)
@@ -293,7 +488,7 @@ def reference_pool(extra: Optional[List[pd.DataFrame]] = None) -> pd.DataFrame:
             ref = _demo_reference()
             try:                                      # guarda para não recalcular a cada abertura do app
                 p.parent.mkdir(parents=True, exist_ok=True)
-                ref.to_parquet(p.with_name("rating_ref_v2_demo.parquet"), index=False)
+                ref.to_parquet(p.with_name("rating_ref_v3_0_1_demo.parquet"), index=False)
             except Exception:
                 pass
         _REF_CACHE[key] = ref
@@ -322,7 +517,7 @@ def _demo_reference() -> pd.DataFrame:
     return pd.concat(out, ignore_index=True) if out else pd.DataFrame()
 
 
-def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_ref_v2.parquet") -> int:
+def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_ref_v3_0_1.parquet") -> int:
     """Grava a base de referência a partir de várias partidas com lances (rode com muitas partidas para calibrar)."""
     from pathlib import Path
 
@@ -336,18 +531,29 @@ def build_reference(dfs: List[pd.DataFrame], path: str = "data/processed/rating_
     return int(len(ref))
 
 
-def _peer_group(ref: pd.DataFrame, funcao: str) -> pd.DataFrame:
+def _peer_group(ref: pd.DataFrame, funcao: str, role_mix: Optional[Dict[str, float]] = None) -> pd.DataFrame:
     near = {"centroavante": ["centroavante", "ponta"], "ponta": ["ponta", "meia ofensivo", "centroavante"],
             "meia ofensivo": ["meia ofensivo", "meia central", "ponta"], "meia central": ["meia central", "volante", "meia ofensivo"],
             "volante": ["volante", "meia central"], "lateral": ["lateral"], "zagueiro": ["zagueiro"], "goleiro": ["goleiro"]}
-    g = ref[ref["funcao"] == funcao]
+    # Atuação híbrida: compara com a união controlada dos setores que tiveram participação relevante.
+    roles = {r for r, share in (role_mix or {}).items() if r in near and float(share) >= 0.20}
+    if len(roles) > 1:
+        candidates = set(roles)
+        for role in roles:
+            candidates.update(near.get(role, [role]))
+        g = ref[ref["funcao"].isin(candidates)]
+    else:
+        g = ref[ref["funcao"] == funcao]
     if len(g) < 12:                                  # poucos pares: amplia para funções vizinhas
-        g = ref[ref["funcao"].isin(near.get(funcao, [funcao]))]
+        candidates = set(near.get(funcao, [funcao]))
+        for role in roles:
+            candidates.update(near.get(role, [role]))
+        g = ref[ref["funcao"].isin(candidates)]
     return g
 
 
 def _pct(v, series: pd.Series) -> Optional[float]:
-    if v is None or (isinstance(v, float) and np.isnan(v)):
+    if v is None or pd.isna(v):
         return None
     s = pd.to_numeric(series, errors="coerce").dropna()
     if len(s) < 5:
@@ -364,71 +570,134 @@ def _score(v, series: pd.Series, higher: bool) -> Optional[float]:
 def evaluate(row: Dict[str, Any], ref: pd.DataFrame, context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Desempenho, impacto e confiança de UMA atuação, com as dimensões e a base de cada uma."""
     funcao = row.get("funcao") or role_of(row.get("posicao"))
-    mins = float(row.get("minutos") or 0)
-    peers = _peer_group(ref, funcao)
+    mins = max(0.0, _as_float(row.get("minutos")))
+    role_mix = row.get("role_mix")
+    if funcao not in WEIGHTS and funcao != "goleiro":
+        # Sem função observável, não presume que o jogador seja meia central.
+        return {
+            "jogador": row.get("jogador"), "equipe": row.get("equipe"), "funcao": "não identificada",
+            "minutos": mins, "desempenho": None, "nota": None, "nota_final": None,
+            "classificacao": "sem nota", "impacto": None, "confianca_pct": 0, "confianca": "baixa",
+            "amostra": minutes_tier(mins), "dimensoes": {k: None for k in DIMS},
+            "dimensoes_pt": DIM_PT, "pesos": {}, "base": [], "role_mix": {},
+            "eventos_decisivos": {}, "pares": 0,
+            "motivo": "posição/função não identificada pela fonte",
+        }
+    peers = _peer_group(ref, funcao, role_mix)
     gk = funcao == "goleiro"
-    inds, dims, wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (INDICATORS, DIMS, WEIGHTS.get(funcao, WEIGHTS["meia central"]))
+    inds, dims, base_wts = (GK_INDICATORS, GK_DIMS, GK_WEIGHTS) if gk else (
+        INDICATORS, DIMS, WEIGHTS.get(funcao, WEIGHTS["meia central"])
+    )
+    wts = list(base_wts)
+    if not gk and isinstance(role_mix, dict) and role_mix:
+        mix = {str(k): max(_as_float(v), 0.0) for k, v in role_mix.items() if k in WEIGHTS}
+        total_mix = sum(mix.values())
+        if total_mix > 0:
+            wts = [
+                sum(WEIGHTS[role][i] * share for role, share in
+                    ((role, weight / total_mix) for role, weight in mix.items()))
+                for i in range(len(DIMS))
+            ]
     acc: Dict[str, List[tuple]] = {k: [] for k in dims}
     detail = []
+    reference_support = []
     for k, (dim, w, hi) in inds.items():
-        pc = _pct(row.get(k), peers[k] if k in peers else pd.Series(dtype=float))
+        series = pd.to_numeric(peers[k], errors="coerce").dropna() if k in peers else pd.Series(dtype=float)
+        row_value = row.get(k)
+        if row_value is not None and not pd.isna(row_value):
+            reference_support.append(int(len(series)))
+        pc = _pct(row_value, series)
         sc = None if pc is None else pct_to_score(pc if hi else 100 - pc)
         if sc is not None:
             acc[dim].append((sc, w))
-            ref_med = pd.to_numeric(peers[k], errors="coerce").median() if k in peers else None
-            detail.append({"indicador": k, "rotulo": IND_PT.get(k, k), "dimensao": dim, "valor": row.get(k),
+            ref_med = float(series.median()) if len(series) else None
+            detail.append({"indicador": k, "rotulo": IND_PT.get(k, k), "dimensao": dim, "valor": row_value,
                            "nota": round(sc, 1), "percentil": round(pc if hi else 100 - pc), "mediana_pares": ref_med,
-                           "maior_melhor": hi})
+                           "pares_indicador": int(len(series)), "maior_melhor": hi})
     dim_score = {k: (sum(s * w for s, w in v) / sum(w for _, w in v)) if v else None for k, v in acc.items()}
     if not gk:
         # disciplina: expulsão é penalização severa (consequência independente — não é dupla contagem)
-        if row.get("vermelhos"):
-            dim_score["disciplina"] = min(dim_score["disciplina"] if dim_score["disciplina"] is not None else 5.5, 1.0)
-        if row.get("erros_que_viraram_chance"):
-            dim_score["disciplina"] = max((dim_score["disciplina"] or 5.5) - 2.0 * row["erros_que_viraram_chance"], 0.0)
+        if _as_float(row.get("vermelhos")) > 0:
+            dim_score["disciplina"] = min(dim_score["disciplina"] if dim_score["disciplina"] is not None else REF_SCORE, 1.0)
     obs = [(dim_score[k], w) for k, w in zip(dims, wts) if dim_score[k] is not None]
     raw = sum(s * w for s, w in obs) / sum(w for _, w in obs) if obs else None
     cover = sum(w for _, w in obs) / 100.0 if obs else 0.0
-    c_min = min(1.0, mins / 60.0)
-    c_pool = min(1.0, len(peers) / 40.0)
-    conf = round(100 * (0.5 * c_min + 0.3 * cover + 0.2 * c_pool))
+    c_min = min(1.0, max(0.0, mins / 60.0))
+    # Confiança usa o tamanho real das amostras por indicador disponível, não só o total bruto de jogadores no grupo.
+    median_support = float(np.median(reference_support)) if reference_support else 0.0
+    c_pool = min(1.0, median_support / 40.0)
+    conf = round(100 * (0.35 * c_min + 0.35 * cover + 0.30 * c_pool))
     if mins < 15 or raw is None:
         perf = None
     else:
         perf = round(float(np.clip(c_min * raw + (1 - c_min) * REF_SCORE, 0, 10)), 1)
         if perf >= 9.6 and (cover < 0.85 or mins < 75):
             perf = 9.5                               # 10 exige atuação completa e bem observada
-    imp = impact(row, perf, context)
+    delta = impact_delta(row, context) if perf is not None else None
+    nota = round(float(np.clip(perf + delta, 0, 10)), 1) if perf is not None else None
     return {"jogador": row.get("jogador"), "equipe": row.get("equipe"), "funcao": funcao, "minutos": mins,
-            "desempenho": perf, "classificacao": label(perf), "impacto": imp,
+            "desempenho": perf, "nota": nota, "nota_final": nota, "classificacao": label(nota),
+            "impacto": (round(delta, 1) if delta is not None else None),
             "confianca_pct": conf, "confianca": "alta" if conf >= 75 else "média" if conf >= 50 else "baixa",
             "amostra": minutes_tier(mins), "dimensoes": {k: (round(v, 1) if v is not None else None) for k, v in dim_score.items()},
             "dimensoes_pt": DIM_PT if not gk else GK_DIM_PT, "pesos": dict(zip(dims, wts)), "base": detail,
-            "pares": int(len(peers))}
+            "role_mix": (dict(role_mix) if isinstance(role_mix, dict) else {}),
+            "eventos_decisivos": {
+                "gols": int(_as_float(row.get("gols"))), "assistencias": int(_as_float(row.get("assistencias"))),
+                "gols_decisivos": int(_as_float((context or {}).get("gols_decisivos"))),
+                "penaltis_defendidos_disputa": int(_as_float(row.get("shootout_saves"))),
+                "defesas_chave": int(_as_float(row.get("key_saves"))),
+                "penaltis_convertidos_disputa": int(_as_float(row.get("shootout_penaltis_marcados"))),
+                "penaltis_perdidos_disputa": int(_as_float(row.get("shootout_penaltis_perdidos"))),
+                "penalti_decisivo_disputa": int(_as_float(row.get("shootout_penalti_decisivo"))),
+                "grandes_chances_desperdicadas": int(_as_float(row.get("chances_claras_perdidas"))),
+                "erros_que_geraram_chance": int(_as_float(row.get("erros_que_viraram_chance"))),
+                "expulsoes": int(_as_float(row.get("vermelhos"))),
+            },
+            "pares": int(len(peers)), "pares_medianos_por_indicador": round(median_support, 1)}
+
+
+def impact_delta(row: Dict[str, Any], context: Optional[Dict[str, Any]] = None) -> float:
+    """Ajuste decisivo em pontos (não é uma segunda nota). Intervalo limitado a −1,5…+2,5."""
+    ctx = context or {}
+    total_goals = max(_as_float(row.get("gols")), 0.0)
+    raw_penalties = row.get("gols_penalti")
+    if raw_penalties is None or pd.isna(raw_penalties):
+        # Fontes de boxscore podem não separar pênaltis de bola rolando: usa-se peso intermediário,
+        # sem fingir que a distinção foi observada.
+        goal_bonus = 0.42 * total_goals
+    else:
+        penalty_goals = min(max(_as_float(raw_penalties), 0.0), total_goals)
+        open_goals = max(total_goals - penalty_goals, 0.0)
+        goal_bonus = 0.48 * open_goals + 0.30 * penalty_goals
+    bonus = min(1.45, goal_bonus)
+    bonus += min(0.70, 0.35 * _as_float(row.get("assistencias")))
+    bonus += min(0.40, 0.20 * _as_float(ctx.get("gols_decisivos")))
+    # Defesas de pênalti na disputa e defesas de chances claras em momento de alta alavancagem.
+    if row.get("funcao") == "goleiro":
+        bonus += min(1.50, 0.90 * _as_float(row.get("shootout_saves")))
+        bonus += min(0.90, 0.65 * _as_float(row.get("key_saves")))
+        # Em fontes sem xGOT, gols evitados pode ser um proxy baseado em xG pré-chute.
+        prevented = max(_as_float(row.get("gols_evitados")), 0.0)
+        bonus += min(0.45, 0.25 * prevented)
+    bonus += min(0.30, 0.10 * _as_float(row.get("shootout_penaltis_marcados")))
+    bonus += 0.65 * min(1.0, _as_float(row.get("shootout_penalti_decisivo")))
+    bonus -= min(0.70, 0.35 * _as_float(row.get("shootout_penaltis_perdidos")))
+    bonus -= min(0.90, 0.45 * _as_float(row.get("chances_claras_perdidas")))
+    bonus -= 0.80 * _as_float(row.get("erros_que_viraram_chance"))
+    bonus -= 0.60 * _as_float(row.get("vermelhos"))
+    return round(float(np.clip(bonus, -1.5, 2.5)), 1)
 
 
 def impact(row: Dict[str, Any], perf: Optional[float], context: Optional[Dict[str, Any]] = None) -> Optional[float]:
-    """
-    Impacto na partida (0–10): parte do desempenho e soma o que MUDOU o jogo — gols (pênalti vale menos), gol que
-    decidiu/empatou, assistências, xG+xA criados; erros que viraram gol e expulsão tiram muito. O resultado do time
-    não entra (um zagueiro impecável numa derrota não perde nota por isso).
-    """
+    """Compatibilidade: devolve a nota final (desempenho-base + ajuste decisivo)."""
     if perf is None:
         return None
-    ctx = context or {}
-    s = perf
-    s += 0.9 * (row.get("gols", 0) - row.get("gols_penalti", 0)) + 0.4 * row.get("gols_penalti", 0)
-    s += 0.5 * ctx.get("gols_decisivos", 0)
-    s += 0.6 * row.get("assistencias", 0)
-    s += 0.6 * min(float(row.get("xg", 0) or 0) + float(row.get("xa", 0) or 0), 2.0)
-    if row.get("funcao") == "goleiro" and row.get("gols_evitados") is not None:
-        s += 0.8 * float(row["gols_evitados"])
-    s -= 1.5 * row.get("vermelhos", 0) + 1.0 * row.get("erros_que_viraram_chance", 0)
-    return round(float(np.clip(s, 0, 10)), 1)
+    return round(float(np.clip(perf + impact_delta(row, context), 0, 10)), 1)
 
 
 def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
-    """Avaliação 2.0 de todos os jogadores de uma partida com lances (a própria partida entra na referência)."""
+    """Avaliação 3.0 de todos os jogadores de uma partida com lances (a própria partida entra na referência)."""
     ind = indicators(df)
     if ind.empty:
         return ind
@@ -440,11 +709,14 @@ def match_ratings_v2(df: pd.DataFrame, extra_ref: bool = True) -> pd.DataFrame:
     for r in ind.to_dict("records"):
         ev = evaluate(r, ref, {"gols_decisivos": decisive.get(r["jogador"], 0)})
         rows.append({**{k: r.get(k) for k in ("jogador", "equipe", "posicao", "funcao", "minutos", "gols", "assistencias",
-                                              "xg", "xa", "defesas", "gols_sofridos", "gols_evitados")},
-                     "desempenho": ev["desempenho"], "impacto": ev["impacto"], "confianca": ev["confianca"],
+                                              "xg", "xa", "defesas", "gols_sofridos", "gols_evitados",
+                                              "key_saves", "shootout_saves", "shootout_penaltis_marcados",
+                                              "shootout_penaltis_perdidos", "shootout_penalti_decisivo", "role_mix")},
+                     "desempenho": ev["desempenho"], "impacto": ev["impacto"], "nota": ev["nota"],
+                     "nota_final": ev["nota_final"], "confianca": ev["confianca"],
                      "confianca_pct": ev["confianca_pct"], "classificacao": ev["classificacao"], "amostra": ev["amostra"],
                      **{f"dim_{k}": v for k, v in ev["dimensoes"].items()}, "_detalhe": ev})
-    return pd.DataFrame(rows).sort_values(["desempenho"], ascending=False, na_position="last").reset_index(drop=True)
+    return pd.DataFrame(rows).sort_values(["nota"], ascending=False, na_position="last").reset_index(drop=True)
 
 
 def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
@@ -456,14 +728,18 @@ def _decisive_goals(gl: List[Dict[str, Any]]) -> Dict[str, int]:
         before = dict(score)
         score[team] = score.get(team, 0) + 1
         mine, other = before.get(team, 0), max([v for k, v in before.items() if k != team] or [0])
-        if mine <= other and not g.get("gol_contra"):
+        # Só marca quando empata ou passa à frente; gol que apenas diminui uma desvantagem não vira "decisivo".
+        if mine <= other and mine + 1 >= other and not g.get("gol_contra"):
             out[g["jogador"]] = out.get(g["jogador"], 0) + 1
     return out
 
 
 def report(ev: Dict[str, Any]) -> str:
-    """Relatório curto e honesto de uma atuação (pontos fortes/fracos saem das dimensões, com o número)."""
+    """Relatório explicável de uma atuação, incluindo o ajuste decisivo e as lacunas de observação."""
     if ev.get("desempenho") is None:
+        reason = ev.get("motivo")
+        if reason:
+            return f"**{ev['jogador']}**: sem nota — {reason}. A ferramenta não presume uma função."
         return (f"**{ev['jogador']}** jogou {ev['minutos']:.0f} min — {ev['amostra']}: sem nota (pouco tempo ou sem lances "
                 "suficientes). Ausência de dado não vira nota baixa.")
     dims = {k: v for k, v in ev["dimensoes"].items() if v is not None}
@@ -471,14 +747,44 @@ def report(ev: Dict[str, Any]) -> str:
     top = sorted(dims.items(), key=lambda kv: -kv[1])[:2]
     low = sorted(dims.items(), key=lambda kv: kv[1])[:2]
     not_obs = [pt[k] for k, v in ev["dimensoes"].items() if v is None]
-    s = (f"**{ev['jogador']}** ({ev['funcao']}, {ev['minutos']:.0f} min): desempenho **{ev['desempenho']:.1f}** "
-         f"({ev['classificacao']}), impacto **{ev['impacto']:.1f}**, confiança {ev['confianca']} ({ev['confianca_pct']}%). "
+    delta = float(ev.get("impacto") or 0)
+    sign = "+" if delta > 0 else ""
+    s = (f"**{ev['jogador']}** ({ev['funcao']}, {ev['minutos']:.0f} min): nota final **{ev['nota']:.1f}** "
+         f"({ev['classificacao']}); desempenho-base **{ev['desempenho']:.1f}**; ajuste decisivo **{sign}{delta:.1f} pts**; "
+         f"confiança {ev['confianca']} ({ev['confianca_pct']}%). "
          f"Melhor em {pt[top[0][0]].lower()} ({top[0][1]:.1f})"
          + (f" e {pt[top[1][0]].lower()} ({top[1][1]:.1f})" if len(top) > 1 else "")
-         + f"; mais fraco em {pt[low[0][0]].lower()} ({low[0][1]:.1f}).")
+         + f"; menor dimensão observada: {pt[low[0][0]].lower()} ({low[0][1]:.1f}).")
+    events = ev.get("eventos_decisivos") or {}
+    moments = []
+    if events.get("gols"):
+        moments.append(f"{events['gols']} gol(s)")
+    if events.get("assistencias"):
+        moments.append(f"{events['assistencias']} assistência(s)")
+    if events.get("penaltis_defendidos_disputa"):
+        moments.append(f"{events['penaltis_defendidos_disputa']} pênalti(s) defendido(s) na disputa")
+    if events.get("penaltis_convertidos_disputa"):
+        moments.append(f"{events['penaltis_convertidos_disputa']} pênalti(s) convertido(s) na disputa")
+    if events.get("penaltis_perdidos_disputa"):
+        moments.append(f"{events['penaltis_perdidos_disputa']} pênalti(s) perdido(s) na disputa")
+    if events.get("defesas_chave"):
+        moments.append(f"{events['defesas_chave']} defesa(s) de alto impacto")
+    if events.get("gols_decisivos"):
+        moments.append(f"{events['gols_decisivos']} gol(s) que empatou(aram) ou virou(aram) o placar")
+    if events.get("grandes_chances_desperdicadas"):
+        moments.append(f"{events['grandes_chances_desperdicadas']} grande(s) chance(s) desperdiçada(s)")
+    if events.get("erros_que_geraram_chance"):
+        moments.append(f"{events['erros_que_geraram_chance']} erro(s) que geraram chance")
+    if events.get("expulsoes"):
+        moments.append(f"{events['expulsoes']} expulsão(ões)")
+    if moments:
+        s += " Momentos decisivos contabilizados: " + "; ".join(moments) + "."
+    if len(ev.get("role_mix") or {}) > 1:
+        roles = ", ".join(f"{role} {share:.0%}" for role, share in ev["role_mix"].items())
+        s += " Papéis detectados nos eventos: " + roles + " (aproximação pelas posições anotadas, não tracking)."
     if not_obs:
         s += " Não observado nesta fonte: " + ", ".join(x.lower() for x in not_obs) + "."
-    s += f" Comparado com {ev['pares']} atuações de jogadores da mesma função na base."
+    s += f" Comparado com {ev['pares']} atuações de jogadores da mesma função ou de papéis próximos na base."
     return s
 
 
@@ -495,7 +801,13 @@ def build_reference_from_db(limit: int = 300, progress=None) -> int:
     say = progress or (lambda m: print(m, flush=True))
     svc = MatchDataService()
     with svc.db.connect() as conn:
-        ids = [r[0] for r in conn.execute("SELECT DISTINCT match_id FROM events LIMIT ?", (int(limit),))]
+        ids = [r[0] for r in conn.execute(
+            "SELECT e.match_id FROM events e "
+            "JOIN matches m ON m.match_id = e.match_id "
+            "WHERE m.data_level = 'EVENTS' "
+            "GROUP BY e.match_id ORDER BY MAX(m.match_date) DESC LIMIT ?",
+            (int(limit),),
+        )]
     dfs = []
     for i, mid in enumerate(ids, 1):
         try:
@@ -508,13 +820,13 @@ def build_reference_from_db(limit: int = 300, progress=None) -> int:
         if i % 25 == 0:
             say(f"  {i}/{len(ids)} partidas")
     n = build_reference(dfs)
-    say(f"referência da nota 2.0: {n} atuações de {len(dfs)} partidas")
+    say(f"referência da nota 3.0: {n} atuações de {len(dfs)} partidas")
     return n
 
 
 if __name__ == "__main__":
     import argparse
 
-    ap = argparse.ArgumentParser(description="Base de referência (percentis por função) da nota 2.0.")
+    ap = argparse.ArgumentParser(description="Base de referência (percentis por função) da nota 3.0.")
     ap.add_argument("--referencia", type=int, default=300, help="quantas partidas com lances usar")
     build_reference_from_db(ap.parse_args().referencia)

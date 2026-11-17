@@ -12,6 +12,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.squad import data as D
 from src.squad.formations import FORMATIONS, ROLE_PT, fit, natural_role
 from src.squad.planner import (apply_transfers, best_xi, lab_rating, matchup_plan, plan_bonus, probable_xi, season_usage,
@@ -263,7 +265,7 @@ def _traits_table(items: List[Dict[str, Any]], better_word: str) -> pd.DataFrame
 
 # ------------------------------------------------------------------------------------------------ próximo jogo
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
-def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
+def _matchday(team: str, version: str, n: int, target_competition: Optional[str] = None) -> Dict[str, Any]:
     from src.squad import matchday as M
     from src.ui.context import get_service
     from src.ui.pages.clubs import same_team_names
@@ -283,7 +285,7 @@ def _matchday(team: str, version: str, n: int) -> Dict[str, Any]:
             get_service().fotmob.ensure_teams(list(names), n=12)
     except Exception:
         pass
-    info = M.player_table(db, names, n=n, tm_values=tm)
+    info = M.player_table(db, names, n=n, tm_values=tm, target_competition=target_competition)
     return {"info": info, "names": names}
 
 
@@ -377,6 +379,11 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
                    "escalação oficial nem notícias, que só existem para jogos marcados.")
         f = None
     rv = _matchday(rival, version, n)
+    # Recalcula a disponibilidade com o torneio do próximo jogo; amarelos/vermelhos de outra competição não contaminam o XI.
+    target_comp = str(f["competition"]) if f is not None and f.get("competition") else None
+    if target_comp:
+        me = _matchday(team, version, n, target_comp)
+        rv = _matchday(rival, version, n, target_comp)
     a, b = me["info"], rv["info"]
     if (a["jogadores"] is None or a["jogadores"].empty) or (b["jogadores"] is None or b["jogadores"].empty):
         note("Faltam escalações recentes", "Baixe os resumos dos jogos (estatísticas + escalações): "
@@ -406,7 +413,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     weak = M.sector_weaknesses(b, rival)
     with c2:
         st.markdown(f"#### 🔴 {rival} provável ({fr})")
-        st.plotly_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
+        render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
                         use_container_width=True, key="nx_pitch_r")
         st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
@@ -433,7 +440,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
             fig.add_trace(go.Scatter(x=[t["y"]], y=[t["x"]], mode="markers+text", text=[t["marca"]], showlegend=False,
                                      marker=dict(size=22, color=t["cor"], line=dict(color="#090D16", width=1)),
                                      textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
-        st.plotly_chart(fig, use_container_width=True, key="nx_pitch_m")
+        render_chart(fig, use_container_width=True, key="nx_pitch_m")
         st.caption("Marcas F = fragilidades do rival, no lado do campo em que vamos atacá-las (passe o mouse).")
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
@@ -593,7 +600,7 @@ def render(_ctx=None) -> None:
                 st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
                            "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
             else:
-                st.plotly_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
                 if any(p.get("porque") for p in xi):
                     with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
                         _xi_cards(xi, "#22D3EE")
@@ -666,6 +673,25 @@ def render(_ctx=None) -> None:
                             f'{d["origem"]}</span></div>', unsafe_allow_html=True)
                     if not items:
                         st.caption("Nada claro o bastante nos jogos recentes.")
+            from src.squad.planner import deep_tactical_signals
+            signals = deep_tactical_signals(theirs)
+            if signals:
+                st.markdown("##### 🧪 Sinais derivados — além do volume bruto")
+                st.caption("Indicadores calculados jogo a jogo. Não representam tracking posicional; só aparecem quando há "
+                           "amostra mínima e estatísticas pareadas.")
+                signal_cols = st.columns(min(3, len(signals)))
+                for col, signal in zip(signal_cols, signals):
+                    with col:
+                        val = signal["valor"]
+                        shown = f"{val:.2f} {signal['unidade']}"
+                        st.markdown(
+                            f'<div class="fm-card" style="border-top:3px solid #38BDF8;border-radius:12px;padding:.8rem;'
+                            f'min-height:170px"><div style="font-size:.78rem;color:#94A3B8">{signal["titulo"]}</div>'
+                            f'<div style="font-size:1.45rem;font-weight:800;color:#E0F2FE">{shown}</div>'
+                            f'<div style="font-size:.78rem;color:#94A3B8">{signal["jogos"]} jogos pareados</div>'
+                            f'<div style="margin-top:.55rem;font-size:.84rem">{signal["leitura"]}</div>'
+                            f'<div style="margin-top:.4rem;font-size:.72rem;color:#64748B">{signal["evidencia"]}</div></div>',
+                            unsafe_allow_html=True)
             st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
             x, y = st.columns(2)
             with x:
@@ -684,7 +710,7 @@ def render(_ctx=None) -> None:
             if corr.get("ataca_por"):
                 st.markdown(f"**Por onde {rival} chega ao último terço** ({corr['jogos']} jogo(s) com lances, "
                             f"{corr['acoes_ataque']} ações)")
-                st.plotly_chart(_corridor_bars(corr), use_container_width=True)
+                render_chart(_corridor_bars(corr), use_container_width=True)
             st.markdown("**Jogos considerados**")
             comparison_table(pd.DataFrame(theirs["jogos"]).drop(columns=["match_id"]), "")
     with t3:
@@ -775,7 +801,7 @@ def _bars(mine: Dict[str, Any], theirs: Dict[str, Any], team: str, rival: str) -
                              marker=dict(symbol="line-ew-open", size=28, color=P["warning"], line=dict(width=3))))
     from src.ui.charts import _layout
 
-    st.plotly_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), use_container_width=True)
+    render_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), use_container_width=True)
 
 
 def _corridor_bars(corr: Dict[str, Any]) -> go.Figure:

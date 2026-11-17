@@ -8,6 +8,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.data_hub.boxscore import STAT_LABELS
 from src.machine_learning.clustering import SpatialTacticalClustering
 from src.networks.pass_network import PassingNetworkAnalyzer
@@ -105,10 +107,10 @@ def render_events(ctx: MatchContext) -> None:
 
     left, right = st.columns([1.35, 1.0])
     with left:
-        st.plotly_chart(momentum_figure(df, team, opp), use_container_width=True)
+        render_chart(momentum_figure(df, team, opp), use_container_width=True)
         ctx.prov("momento", "Momento da partida", "série", "Σ ΔxT positivo×100 + ações progressivas×1,5 + xG×25 por 5 min")
         try:
-            st.plotly_chart(TacticalVisualizer.create_corridor_vulnerability_plotly(d_org, team), use_container_width=True)
+            render_chart(TacticalVisualizer.create_corridor_vulnerability_plotly(d_org, team), use_container_width=True)
         except Exception as exc:
             st.caption(f"Gráfico de corredores indisponível: {exc}")
     with right:
@@ -184,7 +186,7 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
                         ctx.prov(f"us_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
                                  "soma do xG das finalizações (modelo do Understat)", tier="DERIVED"),
                         f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
-    st.plotly_chart(charts.shot_map(shots, m.get("home_team_name", home), "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
+    render_chart(charts.shot_map(shots, m.get("home_team_name", home), "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
                     use_container_width=True)
     pl = (shots.groupby(["equipe", "jogador"]).agg(chutes=("xg", "size"), xg=("xg", "sum"),
                                                    gols=("resultado", lambda r: int((r == "gol").sum())))
@@ -249,34 +251,38 @@ def _fotmob_shots(ctx: MatchContext, home: str) -> None:
                         ctx.prov(f"fm_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
                                  "soma do xG das finalizações (modelo da FotMob/Opta)", tier="DERIVED"),
                         f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
-    st.plotly_chart(charts.shot_map(shots, hn, "Finalizações (tamanho = xG, ★ = gol) — fonte: FotMob"), use_container_width=True)
+    render_chart(charts.shot_map(shots, hn, "Finalizações (tamanho = xG, ★ = gol) — fonte: FotMob"), use_container_width=True)
 
 
 def _box_ratings(ctx: MatchContext) -> None:
-    """Nota 2.0 por ESTATÍSTICAS (sem lances): régua própria, das atuações com números por jogador da mesma fonte."""
+    """Nota 3.0 por ESTATÍSTICAS (sem lances): régua própria, das atuações com números por jogador da mesma fonte."""
     from src.analytics import rating_box as RB
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+    from src.ui.context import get_service
 
+    db_version = get_service().db.stable_version()
     for mid in _sibling_ids(ctx):
-        r = _box_ratings_cached(int(mid))
+        r = _box_ratings_cached(int(mid), db_version, RATING_ENGINE_VERSION)
         if r is not None and not r.empty:
             break
     else:
         return
-    st.markdown("##### 🏅 Avaliação 2.0 dos jogadores (por estatísticas)")
+    st.markdown("##### 🏅 Avaliação 3.0 dos jogadores (por estatísticas)")
     st.caption("Sem lances com coordenadas neste jogo: a nota usa os números por jogador (xG, xA, chances criadas, "
-               "passes no terço final, desarmes, recuperações, duelos, perdas…) comparados com jogadores da MESMA função "
-               "em outros jogos da mesma fonte. O que a fonte não mede (xT, pressão, entre linhas) não entra e reduz a "
-               "confiança — nunca vira zero.")
-    show = r.drop(columns=["_detalhe"]).rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
+               "passes no terço final, desarmes, recuperações, duelos, perdas e, quando disponíveis, sprints e ações "
+               "defensivas) comparados com jogadores da MESMA função. O que a fonte não mede não entra e reduz a confiança — nunca vira zero. "
+               "Nota final = desempenho estatístico + ajuste limitado para eventos decisivos que a fonte registra.")
+    show = r.drop(columns=["_detalhe", "nota_final"], errors="ignore").rename(columns={"jogador": "Jogador", "equipe": "Time", "funcao": "Função",
                                                         "minutos": "Min", "gols": "Gols", "assistencias": "Assist.",
-                                                        "desempenho": "Desempenho", "impacto": "Impacto",
+                                                        "nota": "Nota final", "nota_final": "Nota final",
+                                                        "desempenho": "Desempenho base", "impacto": "Ajuste decisivo (pts)",
                                                         "confianca": "Confiança", "confianca_pct": "Conf. %",
                                                         "classificacao": "Leitura", "pares": "Pares"})
     comparison_table(show)
 
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
-def _box_ratings_cached(match_id: int):
+def _box_ratings_cached(match_id: int, db_version: str, rating_version: str):
     from src.analytics import rating_box as RB
     from src.ui.context import get_service
 

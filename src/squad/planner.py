@@ -385,6 +385,63 @@ def team_profile(matches: pd.DataFrame, stats: pd.DataFrame, team_names: Sequenc
     return out
 
 
+def deep_tactical_signals(profile: Dict[str, Any], min_games: int = 3) -> List[Dict[str, Any]]:
+    """Indicadores derivados por partida: separam volume, qualidade e variabilidade sem inventar tracking."""
+    def series(side: str, key: str) -> Dict[int, float]:
+        d = profile.get(side, {}).get(key) or {}
+        out = {}
+        for row in d.get("por_jogo", []):
+            try:
+                value = float(row["valor"])
+                if np.isfinite(value):
+                    out[int(row["match_id"])] = value
+            except (KeyError, TypeError, ValueError):
+                continue
+        return out
+
+    def paired_ratio(side: str, numerator: str, denominator: str):
+        a, b = series(side, numerator), series(side, denominator)
+        vals = [a[mid] / b[mid] for mid in a.keys() & b.keys() if b[mid] > 0]
+        return vals if len(vals) >= min_games else []
+
+    signals: List[Dict[str, Any]] = []
+    for side, label in (("a_favor", "produção própria"), ("contra", "produção cedida")):
+        ratios = paired_ratio(side, "xg", "shots_total")
+        if ratios:
+            avg = float(np.mean(ratios))
+            signals.append({
+                "titulo": "Qualidade média das finalizações" if side == "a_favor" else "Perigo médio por chute sofrido",
+                "valor": avg, "unidade": "xG/chute", "jogos": len(ratios),
+                "leitura": ("A equipe gera mais perigo por tentativa; volume e qualidade estão separados."
+                            if side == "a_favor" else
+                            "Cada finalização permitida carrega este nível médio de ameaça; não basta contar chutes."),
+                "evidencia": f"Média por jogo de xG ÷ finalizações — {label}.",
+            })
+    goals, xg = series("a_favor", "goals"), series("a_favor", "xg")
+    common = goals.keys() & xg.keys()
+    if len(common) >= min_games:
+        delta = float(np.mean([goals[k] - xg[k] for k in common]))
+        signals.append({
+            "titulo": "Saldo de gols em relação ao xG", "valor": delta, "unidade": "gol/jogo",
+            "jogos": len(common),
+            "leitura": ("Finalizou acima do xG no recorte; isso pode refletir execução, variância ou qualidade dos goleiros."
+                        if delta > 0.15 else "Converteu abaixo do xG no recorte; não prova, isoladamente, problema de finalização."
+                        if delta < -0.15 else "Conversão próxima ao volume de chances esperado."),
+            "evidencia": "Média de gols − xG, pareada jogo a jogo.",
+        })
+    conceded = series("contra", "xg")
+    if len(conceded) >= min_games and np.mean(list(conceded.values())) > 0:
+        vals = np.asarray(list(conceded.values()), dtype=float)
+        cv = float(np.std(vals, ddof=0) / np.mean(vals))
+        signals.append({
+            "titulo": "Instabilidade do perigo cedido", "valor": cv, "unidade": "CV", "jogos": len(vals),
+            "leitura": ("O perigo cedido oscila bastante entre partidas; a média esconde jogos muito vulneráveis."
+                        if cv >= 0.55 else "O perigo cedido é relativamente estável no recorte."),
+            "evidencia": "Desvio-padrão ÷ média do xG cedido por partida.",
+        })
+    return signals
+
+
 def _traits(profile: Dict[str, Any], threshold: float = 12.0) -> Tuple[List[Dict], List[Dict]]:
     """Pontos fortes e fracos: diferença contra a referência acima do limite, no sentido que importa."""
     good, bad = [], []

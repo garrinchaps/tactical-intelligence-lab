@@ -183,13 +183,22 @@ class MatchDataService:
                 if got is not None:
                     box, how = self._merge_sibling_stats(mid, meta, box, got)
                     notes.append(how)
-        has_stats = not box["team_stats"].empty
-        level = DataLevel.BOXSCORE if has_stats else DataLevel.RESULT
+        has_team_stats = not box["team_stats"].empty
+        has_player_data = any(
+            k in box and box[k] is not None and not box[k].empty
+            for k in ("lineups", "player_stats")
+        )
+        # BOXSCORE precisa abranger também jogos com escalação/números individuais,
+        # mesmo quando a fonte não publica estatísticas coletivas.
+        has_analysis_data = has_team_stats or has_player_data
+        level = DataLevel.BOXSCORE if has_analysis_data else DataLevel.RESULT
         if meta and meta.get("data_level") != level:
             self.db.set_level(mid, level)
-        if not has_stats:
-            notes.append("Esta base só traz placar/gols para este jogo — não há estatísticas (chutes, posse, escanteios) "
-                         "em nenhuma fonte local. Ative a ESPN (ENABLE_ESPN_PUBLIC_FEED=true) ou a API-Football para buscá-las.")
+        if not has_team_stats and has_player_data:
+            notes.append("Há escalações e/ou números individuais, mas não estatísticas coletivas do time.")
+        elif not has_analysis_data:
+            notes.append("Esta partida só traz placar/gols: não há estatísticas coletivas nem números individuais "
+                         "em nenhuma fonte local. Ative uma fonte de estatísticas quando disponível.")
         return MatchBundle(mid, meta, level, source, boxscore=box, notes=notes)
 
     # ------------------------------------------------- mesma partida, outra base
@@ -204,10 +213,18 @@ class MatchDataService:
         with self.db.connect() as conn:
             rows = conn.execute(
                 """SELECT m.match_id, m.home_team_name, m.away_team_name, m.data_source, m.data_level,
-                          EXISTS(SELECT 1 FROM match_team_stats s WHERE s.match_id = m.match_id) AS has_stats
+                          (
+                            EXISTS(SELECT 1 FROM match_team_stats s WHERE s.match_id = m.match_id)
+                            OR EXISTS(SELECT 1 FROM match_lineups l WHERE l.match_id = m.match_id)
+                            OR EXISTS(SELECT 1 FROM match_player_stats p WHERE p.match_id = m.match_id)
+                          ) AS has_box_data
                    FROM matches m
-                   WHERE m.match_id != ? AND m.match_date BETWEEN date(?, '-1 day') AND date(?, '+1 day')
-                     AND m.data_level IN ('EVENTS', 'BOXSCORE')""",
+                   WHERE m.match_id != ?
+                     AND m.match_date BETWEEN date(?, '-1 day') AND date(?, '+1 day')
+                     AND (m.data_level = 'EVENTS' OR
+                          EXISTS(SELECT 1 FROM match_team_stats s WHERE s.match_id = m.match_id)
+                          OR EXISTS(SELECT 1 FROM match_lineups l WHERE l.match_id = m.match_id)
+                          OR EXISTS(SELECT 1 FROM match_player_stats p WHERE p.match_id = m.match_id))""",
                 (int(mid), d, d)).fetchall()
         best, best_rank = None, -1
         for r in rows:
@@ -234,10 +251,15 @@ class MatchDataService:
                     names[sib.get(s2)] = mine
         ren = lambda df: df.assign(team_name=df["team_name"].map(lambda t: names.get(t, t))) if not df.empty else df
         merged = dict(box)
-        merged["team_stats"] = ren(other["team_stats"])
-        for k in ("lineups", "timeline", "player_stats"):
-            if k in other and (k not in box or box[k].empty) and not other[k].empty:
-                merged[k] = ren(other[k])
+        # Preserva o que a partida atual já tem e preenche somente as lacunas com a fonte irmã.
+        # Uma fonte que só tem escalações não pode apagar o boxscore coletivo já gravado.
+        for k in ("team_stats", "lineups", "timeline", "player_stats"):
+            current = merged.get(k)
+            incoming = other.get(k)
+            current_empty = current is None or getattr(current, "empty", True)
+            incoming_has_data = incoming is not None and not getattr(incoming, "empty", True)
+            if current_empty and incoming_has_data:
+                merged[k] = ren(incoming)
         try:
             payload = {k: v.drop(columns=[c for c in ("match_id", "id") if c in v.columns]).to_dict("records")
                        for k, v in merged.items() if hasattr(v, "to_dict")}
@@ -249,10 +271,12 @@ class MatchDataService:
                         except Exception:
                             p["stats"] = {}
             self.db.save_boxscore(mid, payload)
-            self.db.set_level(mid, DataLevel.BOXSCORE)
+            has_team = not merged["team_stats"].empty
+            has_individual = any(not merged[k].empty for k in ("lineups", "player_stats"))
+            self.db.set_level(mid, DataLevel.BOXSCORE if (has_team or has_individual) else DataLevel.RESULT)
         except Exception:
             pass
-        return merged, f"Estatísticas trazidas da mesma partida na base {sib['data_source']} (data e equipes conferidas)."
+        return merged, f"Dados adicionais trazidos da mesma partida na base {sib['data_source']} (data e equipes conferidas)."
 
     def _espn_on_demand(self, mid: int, meta: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Consulta o placar da ESPN no dia do jogo e baixa o resumo com estatísticas (só se a liga for coberta)."""

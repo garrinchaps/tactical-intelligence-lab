@@ -7,6 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
+
+from src.ui.components import render_chart, styled_dataframe
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import GroupShuffleSplit
 
@@ -181,13 +183,20 @@ def render(ctx=None) -> None:
     use_proxy = t2.toggle("Incluir também jogos sem 360 (densidade estimada por eventos)", value=True,
                           help="Amplia a base com eventos do OpenPlay, Wyscout e StatsBomb sem freeze frame. O campo "
                                "density_is_360 informa a origem; a estimativa não é apresentada como tracking medido.")
+    st.caption(
+        "Importante: esta rede prevê se uma posse termina em finalização e precisa de eventos em sequência. "
+        "Por isso usa partidas com lances (StatsBomb, Wyscout e OpenPlay), não jogos que tenham apenas placar ou "
+        "estatísticas agregadas da FotMob. A conversão prepara até 500 partidas inéditas por rodada; as já "
+        "convertidas ficam no cache e entram nos treinos seguintes. Os jogos só com estatísticas continuam "
+        "disponíveis para o Analista FotMob, ratings e comparações."
+    )
     from src.machine_learning.model_registry import (EXP_BATCH, EXP_EPOCHS, EXP_PATIENCE, EXPERIMENT_ORDER,
                                                      EXPERIMENTS, class_balance, feature_report)
 
     st.markdown("#### 🧪 Experimentos controlados")
     st.caption(f"Todos com Adam, até {EXP_EPOCHS} épocas, lote {EXP_BATCH}, parada antecipada com paciência "
                f"{EXP_PATIENCE}, inicialização He e treino do zero. O campeão só é trocado com superioridade estatística.")
-    st.dataframe(__import__("pandas").DataFrame([
+    styled_dataframe(__import__("pandas").DataFrame([
         {"experimento": k, "arquitetura": " → ".join(map(str, [len(FEATURES), *v["hidden"], 1])),
          "η": v["learning_rate"], "λ": v["l2"]} for k, v in EXPERIMENTS.items()]), hide_index=True, use_container_width=True)
     x1, x2 = st.columns([2, 1])
@@ -247,7 +256,7 @@ def render(ctx=None) -> None:
                         f"({b.get('partidas')} partidas). Ponderar as classes (peso ≈ {b.get('peso_que_equilibraria')}) "
                         "deixaria a rede descalibrada e pioraria a log-loss, que é o critério de promoção — por isso fica "
                         "desligado; a AUC já não depende do desequilíbrio.".replace(",", "."))
-            st.dataframe(diag["feat"], hide_index=True, use_container_width=True)
+            styled_dataframe(diag["feat"], hide_index=True, use_container_width=True)
             st.caption("AUC sozinha: 0,5 = a variável sozinha não separa jogadas perigosas; longe de 0,5 (para cima ou para baixo) = tem sinal. "
                        "Alerta “redundante” = quase igual a outra variável (|r| > 0,95).")
     net = live["net"] if live else reg.champion()
@@ -282,7 +291,7 @@ def render(ctx=None) -> None:
     l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), use_container_width=True)
     with r:
         mw = st.slider("Esconder conexões com |peso| menor que", 0.0, 1.0, 0.0, 0.05)
-        st.plotly_chart(charts.nn_architecture(net, max_per_layer=12, min_abs_weight=mw,
+        render_chart(charts.nn_architecture(net, max_per_layer=12, min_abs_weight=mw,
                                                title="Arquitetura e conexões pai → filho (espessura ∝ |peso|; verde +, vermelho −)"),
                         use_container_width=True)
 
@@ -318,7 +327,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
     v = reg.versions()
     if not v.empty:
         v["versão"] = v["version"].map(lambda x: f"v{x:03d}")
-        st.plotly_chart(charts.lines(v, "versão", ["val_logloss"], "Perda na validação fixa por versão (menor = melhor)",
+        render_chart(charts.lines(v, "versão", ["val_logloss"], "Perda na validação fixa por versão (menor = melhor)",
                                      "log-loss"), use_container_width=True)
         for c in ("cv_logloss_std", "test_gain", "gain_ci_low", "gain_ci_high"):
             if c not in v:
@@ -338,7 +347,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
                 st.session_state["lc"] = reg.learning_curve(DangerModelRegistry.dataset())
         lc = st.session_state.get("lc")
         if lc is not None:
-            st.plotly_chart(charts.lines(lc, "acoes_de_treino", ["perda_validacao"],
+            render_chart(charts.lines(lc, "acoes_de_treino", ["perda_validacao"],
                                          "Perda na validação fixa × quantidade de ações de treino", "log-loss"),
                             use_container_width=True)
             comparison_table(lc, "Mesma arquitetura, mesma validação: a perda cai à medida que entram mais partidas.")
@@ -406,7 +415,7 @@ def _assistant_misses() -> None:
             st.caption("Nenhuma até agora. Quando uma pergunta com alvo cair no resumo geral, ela aparece aqui para "
                        "virar caso de teste.")
             return
-        st.dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, use_container_width=True)
+        styled_dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, use_container_width=True)
         st.caption("Arquivo local data/assistente_sem_alvo.jsonl (não vai para o GitHub). Mande essas perguntas na "
                    "próxima sessão para eu ensinar o Assistente a respondê-las.")
 
@@ -439,11 +448,11 @@ def _benchmark() -> None:
     df = pd.DataFrame(res["resultados"])
     show = df.rename(columns={"modelo": "Modelo", "auc": "AUC", "brier": "Brier", "log_loss": "Log loss", "ece": "Calibração (ECE)",
                               "dif_auc_vs_logistica": "Δ AUC vs logística", "ic95": "IC 95%", "veredito": "Veredito"})
-    st.dataframe(show, hide_index=True, use_container_width=True)
+    styled_dataframe(show, hide_index=True, use_container_width=True)
     note("O que isso quer dizer", res["conclusao"] + " AUC 0,5 = moeda; 1,0 = perfeito. Brier/log loss/ECE menores = "
          "probabilidades melhores. A rede continua como componente didático; o critério de promoção não foi afrouxado.", "info")
     imp = res.get("importancia_permutacao") or {}
     if imp:
         with st.expander("Quais variáveis realmente ajudam (importância por permutação)"):
-            st.dataframe(pd.DataFrame([{"Variável": k, "Queda de AUC sem ela": v} for k, v in imp.items()]),
+            styled_dataframe(pd.DataFrame([{"Variável": k, "Queda de AUC sem ela": v} for k, v in imp.items()]),
                          hide_index=True, use_container_width=True)

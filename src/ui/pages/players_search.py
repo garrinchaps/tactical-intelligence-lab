@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 import pandas as pd
 import streamlit as st
 
+from src.ui.components import render_chart
+
 from src.ui.components import comparison_table, empty_state, hero
 from src.ui.crests import crest_img
 
@@ -19,7 +21,7 @@ def _norm(s: str) -> str:
 
 @st.cache_data(show_spinner=False, ttl=900)
 def player_index(version: str) -> pd.DataFrame:
-    """Uma linha por (nome, fonte): eventos do banco + Transfermarkt + Understat + Simonetti (quando houver)."""
+    """Uma linha por (nome, fonte): eventos do banco + FotMob (boxscore) + Transfermarkt + Understat + Simonetti (quando houver)."""
     from src.ui.context import get_service
 
     rows: List[Dict] = []
@@ -29,6 +31,17 @@ def player_index(version: str) -> pd.DataFrame:
                                    "FROM events WHERE player_name IS NOT NULL GROUP BY player_name, team_name", conn)
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "eventos (StatsBomb/Wyscout)", "jogos": int(r.jogos)}
                      for r in ev.itertuples()]
+        except Exception:
+            pass
+        # Índice também inclui atletas com estatísticas de boxscore (FotMob), mesmo sem eventos com coordenadas.
+        try:
+            fm = pd.read_sql_query(
+                "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos "
+                "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+                "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
+                "GROUP BY s.player_name, s.team_name", conn)
+            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "FotMob (estatísticas)", "jogos": int(r.jogos)}
+                     for r in fm.itertuples()]
         except Exception:
             pass
     try:
@@ -91,7 +104,7 @@ def player_matches(name: str) -> pd.DataFrame:
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=128)
 def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
     """Nota 0–10 do atleta numa partida com lances (None = a partida não tem lances dele → fora da média)."""
-    from src.metrics.player_rating import match_ratings
+    from src.analytics.rating_v2 import match_ratings_v2
     from src.ui.context import load_bundle, processed_events
 
     try:
@@ -99,7 +112,7 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
         if b.events is None or b.events.empty:
             return None
         df, _ = processed_events(int(match_id), b.events)
-        r = match_ratings(df)
+        r = match_ratings_v2(df)
     except Exception:
         return None
     hit = r[r["jogador"].isin(names)] if not r.empty else r
@@ -117,11 +130,21 @@ def player_match_rating(match_id: int, names: tuple) -> Optional[Dict]:
     if hit.empty:
         return None
     x = hit.iloc[0]
-    return {"nota": None if pd.isna(x["nota"]) else float(x["nota"]), "minutos": float(x["minutos"]), "setor": x["setor"]}
+    value = x.get("nota", x.get("nota_final"))
+    return {
+        "nota": None if value is None or pd.isna(value) else float(value),
+        "desempenho": None if pd.isna(x.get("desempenho")) else float(x.get("desempenho")),
+        "impacto": None if pd.isna(x.get("impacto")) else float(x.get("impacto")),
+        "confianca": x.get("confianca"),
+        "minutos": float(x["minutos"]),
+        "setor": x.get("funcao", x.get("posicao", "")),
+    }
 
 
 def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
-    key = "pl_ratings_" + "|".join(sorted(names))
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+
+    key = "pl_ratings_" + RATING_ENGINE_VERSION + "_" + "|".join(sorted(names))
     if st.button("🏅 Calcular a nota em cada jogo (até os 10 mais recentes)", key=key + "_go"):
         out = {}
         bar = st.progress(0.0, text="abrindo as partidas…")
@@ -146,7 +169,7 @@ def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
         if avg["aviso"]:
             st.warning(avg["aviso"].capitalize() + (f" — média provisória {avg['media_bruta']:.1f}." if avg["media_bruta"] else "."))
         st.caption((f"{skipped} jogo(s) sem lances do jogador ficaram fora da média (nunca contam como zero). " if skipped else "")
-                   + "A nota de cada jogo usa pesos do setor em que ele jogou.")
+                   + "Nota 3.0: desempenho por função + impacto decisivo (gols, defesas-chave e disputa de pênaltis), sem transformar dado ausente em zero.")
     return got
 
 
@@ -177,6 +200,16 @@ def render(_ctx=None) -> None:
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
                 f'<div class="d">{p["nome_longo"] if p["nome_longo"] != p["nome"] else ""} · {p["clube"]} · fontes: {p["fontes"]}</div>'
                 f'</div></div>', unsafe_allow_html=True)
+    favorites = st.session_state.setdefault("til_favorite_players", [])
+    is_favorite = any(x.get("core") == p["core"] for x in favorites)
+    if st.button("⭐ Remover dos alvos" if is_favorite else "☆ Adicionar aos alvos de análise",
+                 key=f"til_fav_{p['core']}"):
+        if is_favorite:
+            st.session_state["til_favorite_players"] = [x for x in favorites if x.get("core") != p["core"]]
+        else:
+            st.session_state["til_favorite_players"] = favorites + [{"core": p["core"], "nome": p["nome"],
+                                                                       "clube": p["clube"]}]
+        st.rerun()
     if p["clube"]:
         nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
     _player_card(p["nome"], tuple(names), p["clube"])
@@ -244,7 +277,7 @@ def render(_ctx=None) -> None:
                 if not v.empty:
                     from src.ui import charts
 
-                    st.plotly_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
+                    render_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
                                                  "Valor de mercado ao longo do tempo (€ mi, Transfermarkt)", "€ mi"),
                                     use_container_width=True)
     with t3:
@@ -419,24 +452,30 @@ def _form_data(names: tuple, version: str, club: str = "") -> pd.DataFrame:
 
 
 DIM_SHORT = [("ofensiva", "ATA"), ("criacao", "CRI"), ("progressao", "PRO"), ("defesa", "DEF"), ("eficiencia", "TEC"),
-             ("disciplina", "DIS")]
+             ("disciplina", "DIS"), ("tatica", "TRB")]
 GK_SHORT = [("defesas", "DEF"), ("aereo", "AER"), ("distribuicao", "DIS"), ("seguranca", "SEG"), ("cobertura", "COB")]
 
 
 def _player_card(nome: str, names: tuple, club: str = "") -> None:
     """
-    Cartão no estilo FC/FIFA (rodada 5): qualidade = média da nota 2.0 nos últimos jogos com números por jogador;
+    Cartão no estilo FC/FIFA: qualidade = média da nota 3.0 nos últimos jogos com números por jogador;
     fase = últimos 5; regularidade = quanto a nota oscila. Atributos = média de cada dimensão (0–10 → 0–99).
     Nada é inventado: sem jogos com números por jogador, o cartão não aparece.
     """
     from src.ui.context import get_service
 
-    f = _form_data(names, get_service().db.stable_version(), club or "")
+    from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+    f = _form_data(names, get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, club or "")
     if f is None or f.empty or len(f) < 2:
         return
-    q = float(f["desempenho"].mean())
-    fase = float(f.head(5)["desempenho"].mean())
-    sd = float(f["desempenho"].std() or 0)
+    score_col = "nota" if "nota" in f and f["nota"].notna().any() else "desempenho"
+    scored = pd.to_numeric(f[score_col], errors="coerce").dropna()
+    if scored.empty:
+        return
+    q = float(scored.mean())
+    recent_scores = pd.to_numeric(f[score_col], errors="coerce").dropna().head(5)
+    fase = float(recent_scores.mean()) if not recent_scores.empty else q
+    sd = float(scored.std() or 0)
     reg = "muito regular" if sd < 0.6 else "regular" if sd < 1.0 else "oscila bastante"
     fun = f["funcao"].mode().iloc[0]
     dims = GK_SHORT if fun == "goleiro" else DIM_SHORT
@@ -446,10 +485,14 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<b>{int(round(9.9 * float(f[k].dropna().mean())))}</b></div>' for k, lab in dims if k in f and f[k].notna().any())
     trend = "▲" if fase - q >= 0.3 else "▼" if q - fase >= 0.3 else "●"
     tcol = "#22C55E" if trend == "▲" else "#EF4444" if trend == "▼" else "#94A3B8"
-    spark = " ".join(f'<span title="{r.jogo} ({r.data})" style="display:inline-block;width:10px;height:{int(6 + 5 * r.desempenho)}px;'
-                     f'background:{"#22C55E" if r.desempenho >= 6.5 else "#F59E0B" if r.desempenho >= 5 else "#EF4444"};'
+    spark_df = f.copy()
+    spark_df["score_value"] = pd.to_numeric(spark_df[score_col], errors="coerce")
+    spark_df = spark_df.dropna(subset=["score_value"])
+    spark = " ".join(f'<span title="{game} ({day})" style="display:inline-block;width:10px;height:{int(6 + 5 * score)}px;'
+                     f'background:{"#22C55E" if score >= 7.0 else "#F59E0B" if score >= 5.5 else "#EF4444"};'
                      f'border-radius:3px;margin-right:2px;vertical-align:bottom"></span>'
-                     for r in f.iloc[::-1].itertuples())
+                     for game, day, score in zip(spark_df.iloc[::-1]["jogo"], spark_df.iloc[::-1]["data"],
+                                                 spark_df.iloc[::-1]["score_value"]))
     st.markdown(
         f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:stretch;margin:.4rem 0 1rem">'
         f'<div style="width:190px;background:linear-gradient(160deg,{tier}33,#0F1626 55%);border:2px solid {tier};'
@@ -460,9 +503,8 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<div style="flex:1;min-width:240px;background:#0F1626;border:1px solid #1E2A44;border-radius:18px;padding:14px 16px">'
         f'<div style="color:#94A3B8;font-size:.8rem">QUALIDADE (média de {len(f)} jogos)</div>'
         f'<div style="font-size:1.6rem;font-weight:700">{q:.1f}</div>'
-        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {min(5, len(f))}) '
+        f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {len(recent_scores)} jogos com nota) '
         f'<span style="color:{tcol}">{trend}</span></div><div style="font-size:1.3rem;font-weight:700">{fase:.1f}</div>'
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
         f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
-    st.caption("Cartão = nota 2.0 por estatísticas (FotMob), contra jogadores da mesma função. Número grande = qualidade × 9,9 "
-               "(escala 0–99, estilo jogo de videogame). Fase ≠ qualidade: um bom jogador pode estar em má fase.")
+    st.caption("Cartão = nota 3.0 por estatísticas individuais (FotMob), comparada com jogadores da mesma função. A qualidade e a fase usam a nota final; os atributos mostram as dimensões observadas. Sem dados de tracking, trabalho sem bola não observado não é inventado.")
