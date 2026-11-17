@@ -224,7 +224,7 @@ def test_load_player_history_does_not_sort_the_entire_database_result(monkeypatc
     assert result.empty
     assert "ORDER BY m.match_date DESC" not in captured["query"].upper()
     assert "match_date >= ?" in captured["query"]
-    assert "m.away_team_name,\\n        FROM" not in captured["query"]
+    assert "m.away_team_name,\n        FROM" not in captured["query"]
 
 
 def test_market_universe_attaches_recent_observed_club_and_keeps_market_club():
