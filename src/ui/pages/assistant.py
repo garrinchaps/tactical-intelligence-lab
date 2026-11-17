@@ -12,6 +12,7 @@ import streamlit as st
 
 from src.data_hub.registry import BADGES
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
+from src.intelligence.interaction_feedback import record_interaction, set_feedback
 from src.ui.components import hero, note, result_card_html
 from src.ui.context import chosen_levels
 
@@ -174,6 +175,21 @@ def render(current_context, match_bar) -> None:
             st.markdown(h["a"])
             st.caption(h["meta"])
             _audit_panel(h)
+            if h.get("interaction_id"):
+                fb1, fb2, fb3 = st.columns([1, 1, 5])
+                iid = h["interaction_id"]
+                if fb1.button("👍 Útil", key="fb_up_" + iid, disabled=h.get("feedback") is not None):
+                    set_feedback(iid, True)
+                    h["feedback"] = 1
+                    st.rerun()
+                if fb2.button("👎 Incorreta", key="fb_down_" + iid, disabled=h.get("feedback") is not None):
+                    set_feedback(iid, False)
+                    h["feedback"] = -1
+                    st.rerun()
+                if h.get("feedback") == 1:
+                    fb3.caption("Avaliação registrada para revisão.")
+                elif h.get("feedback") == -1:
+                    fb3.caption("Sinalizada para revisão.")
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked
     if not question:
@@ -193,7 +209,18 @@ def render(current_context, match_bar) -> None:
         nt = (f"📌 Jogo identificado na pergunta: {loc.label}" if switched else f"📌 Jogo da pergunta: {loc.label}")
         if len(loc.candidates) > 1:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
+    match_id = int(st.session_state["match_id"])
+    model_version = ""
+    try:
+        from src.machine_learning.model_registry import DangerModelRegistry
+        model_version = str((DangerModelRegistry().champion_info() or {}).get("version", ""))
+    except Exception:
+        pass
+    interaction_id = record_interaction(
+        question, match_id, str(res.get("engine_used", "analista local")), model_version
+    )
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
-                    "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
-                    "audit": (res.get("number_tags") or {}).get("linhas", [])})
+                    "note": nt, "match_id": match_id, "llm_error": res.get("llm_error"),
+                    "audit": (res.get("number_tags") or {}).get("linhas", []),
+                    "interaction_id": interaction_id, "feedback": None})
     st.rerun()

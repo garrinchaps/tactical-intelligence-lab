@@ -12,7 +12,7 @@ Arquitetura: perceptron multicamadas totalmente conectado.
   de perda por época (treino e validação).
 * Backpropagation explícito (sem diferenciação automática):
       saída:   dZ_L = A_L − y                       (sigmoide + BCE simplificam assim)
-      camada:  dW_l = A_{l−1}ᵀ · dZ_l / m + λ·W_l/m
+      camada:  dW_l = A_{l−1}ᵀ · dZ_l / m + λ·W_l
                db_l = soma(dZ_l) / m
                dA_{l−1} = dZ_l · W_lᵀ
                dZ_{l−1} = dA_{l−1} ⊙ 1[Z_{l−1} > 0]   (derivada da ReLU)
@@ -49,13 +49,21 @@ class Neuron:
 class NeuralNetwork:
     def __init__(self, layer_sizes: Sequence[int], learning_rate: float = 0.05, l2: float = 0.0,
                  seed: int = 42, feature_names: Optional[List[str]] = None):
-        if len(layer_sizes) < 2 or layer_sizes[-1] != 1:
-            raise ValueError("layer_sizes deve ter entrada, ocultas e saída com 1 neurônio, ex.: [8, 16, 8, 1]")
+        if len(layer_sizes) < 2 or int(layer_sizes[-1]) != 1:
+            raise ValueError("layer_sizes deve ter entrada, camadas ocultas opcionais e saída com 1 neurônio")
         self.layer_sizes = [int(s) for s in layer_sizes]
+        if any(s <= 0 for s in self.layer_sizes):
+            raise ValueError("todos os tamanhos de camada devem ser positivos")
         self.learning_rate = float(learning_rate)
         self.l2 = float(l2)
+        if not np.isfinite(self.learning_rate) or self.learning_rate <= 0:
+            raise ValueError("learning_rate deve ser positivo e finito")
+        if not np.isfinite(self.l2) or self.l2 < 0:
+            raise ValueError("l2 deve ser não negativo e finito")
         self.seed = int(seed)
-        self.feature_names = feature_names or [f"x{i}" for i in range(self.layer_sizes[0])]
+        self.feature_names = list(feature_names) if feature_names is not None else [f"x{i}" for i in range(self.layer_sizes[0])]
+        if len(self.feature_names) != self.layer_sizes[0]:
+            raise ValueError("feature_names deve ter exatamente uma entrada por variável")
         rng = np.random.default_rng(self.seed)
         # Inicialização de He: desvio padrão sqrt(2 / fan_in)
         self.weights: List[np.ndarray] = [
@@ -75,7 +83,7 @@ class NeuralNetwork:
 
     @staticmethod
     def relu_grad(z: np.ndarray) -> np.ndarray:
-        return (z > 0).astype(float)
+        return (z > 0).astype(z.dtype, copy=False)
 
     @staticmethod
     def sigmoid(z: np.ndarray) -> np.ndarray:
@@ -84,9 +92,11 @@ class NeuralNetwork:
 
     def loss(self, y_hat: np.ndarray, y: np.ndarray) -> float:
         eps = 1e-12
-        y = y.reshape(-1, 1)
-        bce = -np.mean(y * np.log(y_hat + eps) + (1 - y) * np.log(1 - y_hat + eps))
-        reg = 0.5 * self.l2 * sum(float(np.sum(W * W)) for W in self.weights) / max(len(y), 1)
+        y = np.asarray(y).reshape(-1, 1)
+        p = np.clip(np.asarray(y_hat), eps, 1.0 - eps)
+        bce = -np.mean(y * np.log(p) + (1 - y) * np.log(1 - p))
+        # Objetivo: BCE média + (lambda / 2) * soma(W²). O gradiente é lambda * W.
+        reg = 0.5 * self.l2 * sum(float(np.sum(W * W)) for W in self.weights)
         return float(bce + reg)
 
     # ------------------------------------------------------------ forward
@@ -109,7 +119,7 @@ class NeuralNetwork:
         db = [np.zeros_like(b) for b in self.biases]
         dZ = A[-1] - y                                    # sigmoide + BCE
         for l in range(len(self.weights) - 1, -1, -1):
-            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l] / m
+            dW[l] = A[l].T @ dZ / m + self.l2 * self.weights[l]
             db[l] = dZ.sum(axis=0, keepdims=True) / m
             if l > 0:
                 dA_prev = dZ @ self.weights[l].T
@@ -134,11 +144,41 @@ class NeuralNetwork:
         guarda os pesos da melhor época e para depois de `patience` épocas sem melhora.
         refit_scaler=False: mantém a padronização já aprendida (ajuste fino a partir de outra rede).
         """
-        X = self._standardize(np.asarray(X, dtype=float), fit=refit_scaler or self.mu is None)
+        if optimizer not in {"sgd", "adam"}:
+            raise ValueError("optimizer deve ser 'sgd' ou 'adam'")
+        if int(epochs) <= 0 or int(batch_size) <= 0 or int(patience) < 0:
+            raise ValueError("epochs e batch_size devem ser positivos; patience não pode ser negativo")
+        X_raw = np.asarray(X, dtype=float)
         y = np.asarray(y, dtype=float).reshape(-1)
-        Xv = self._standardize(np.asarray(X_val, dtype=float)) if X_val is not None else None
-        Xs = self._standardize(np.asarray(X_stop, dtype=float)) if X_stop is not None else None
-        ys = np.asarray(y_stop, dtype=float) if y_stop is not None else None
+        if X_raw.ndim != 2 or X_raw.shape[1] != self.layer_sizes[0] or len(X_raw) == 0:
+            raise ValueError(f"X deve ter forma (n_amostras, {self.layer_sizes[0]}) e não pode estar vazio")
+        if len(y) != len(X_raw) or not np.isfinite(X_raw).all() or not np.isfinite(y).all():
+            raise ValueError("X e y devem ter o mesmo número de linhas e conter apenas valores finitos")
+        if not np.isin(y, [0, 1]).all():
+            raise ValueError("y deve conter apenas rótulos binários 0 e 1")
+        if (X_val is None) != (y_val is None):
+            raise ValueError("informe X_val e y_val juntos")
+        if (X_stop is None) != (y_stop is None):
+            raise ValueError("informe X_stop e y_stop juntos")
+        for name, xv, yv in (("validação", X_val, y_val), ("early stopping", X_stop, y_stop)):
+            if xv is not None:
+                xv = np.asarray(xv, dtype=float)
+                yv = np.asarray(yv, dtype=float).reshape(-1)
+                if xv.ndim != 2 or xv.shape[1] != self.layer_sizes[0] or len(xv) != len(yv):
+                    raise ValueError(f"dados de {name} têm dimensões incompatíveis")
+                if not np.isfinite(xv).all() or not np.isfinite(yv).all() or not np.isin(yv, [0, 1]).all():
+                    raise ValueError(f"dados de {name} devem ser finitos e y deve ser binário")
+        if class_weight_balanced and len(np.unique(y)) < 2:
+            raise ValueError("class_weight_balanced exige exemplos das duas classes")
+        # float32 em bases grandes reduz memória e custo das operações matriciais.
+        dt = np.float32 if len(X_raw) > 20_000 else np.float64
+        X = self._standardize(X_raw, fit=refit_scaler or self.mu is None).astype(dt, copy=False)
+        y = y.astype(dt, copy=False)
+        Xv = self._standardize(np.asarray(X_val, dtype=float)).astype(dt, copy=False) if X_val is not None else None
+        Xs = self._standardize(np.asarray(X_stop, dtype=float)).astype(dt, copy=False) if X_stop is not None else None
+        ys = np.asarray(y_stop, dtype=dt).reshape(-1) if y_stop is not None else None
+        self.weights = [W.astype(dt, copy=False) for W in self.weights]
+        self.biases = [b.astype(dt, copy=False) for b in self.biases]
         rng = np.random.default_rng(self.seed + 1)
         w_pos = (len(y) - y.sum()) / max(y.sum(), 1) if class_weight_balanced else 1.0
         adam = optimizer == "adam"
@@ -203,6 +243,7 @@ class NeuralNetwork:
         return self
 
     def _weighted_backward(self, y, Zs, A, w):
+        """Backpropagation da BCE ponderada; L2 usa a mesma escala da perda não ponderada."""
         m = A[0].shape[0]
         y = y.reshape(-1, 1)
         dW = [np.zeros_like(W) for W in self.weights]
