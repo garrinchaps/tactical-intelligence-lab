@@ -8,6 +8,7 @@ on:
     branches:
       - codex/fotmob-depth-routing
       - codex/inteligencia-compartilhada
+      - codex/implementation-foundation
       - main
   workflow_dispatch:
 
