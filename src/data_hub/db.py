@@ -136,7 +136,7 @@ class DataHubDB:
     def __init__(self, db_path: Path | str | None = None, schema_path: Path | str = DEFAULT_SCHEMA):
         # Mantém o caminho local padrão, mas permite apontar para um volume persistente em produção.
         # Um caminho passado explicitamente pelo chamador sempre tem prioridade.
-        configured_path = db_path if db_path is not None else os.getenv("DATABASE_PATH", str(DEFAULT_DB))
+        configured_path = db_path if db_path is not None else (os.getenv("TACTICAL_DB_PATH") or os.getenv("DATABASE_PATH") or str(DEFAULT_DB))
         self.db_path = Path(configured_path)
         self.schema_path = Path(schema_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
