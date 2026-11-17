@@ -239,6 +239,45 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
             st.rerun()
 
 
+
+def _pitch_figure(xi, title):
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+    line = "rgba(255,255,255,.70)"
+    fig.add_shape(type="rect", x0=0, y0=0, x1=120, y1=80, line=dict(color=line, width=2))
+    fig.add_shape(type="line", x0=60, y0=0, x1=60, y1=80, line=dict(color=line, width=1))
+    fig.add_shape(type="circle", x0=50, y0=30, x1=70, y1=50, line=dict(color=line, width=1))
+    fig.add_shape(type="rect", x0=0, y0=18, x1=18, y1=62, line=dict(color=line, width=1))
+    fig.add_shape(type="rect", x0=102, y0=18, x1=120, y1=62, line=dict(color=line, width=1))
+    fig.add_shape(type="rect", x0=0, y0=30, x1=6, y1=50, line=dict(color=line, width=1))
+    fig.add_shape(type="rect", x0=114, y0=30, x1=120, y1=50, line=dict(color=line, width=1))
+    x, y, labels, hover, sizes = [], [], [], [], []
+    for p in xi or []:
+        if p.get("x") is None or p.get("y") is None:
+            continue
+        x.append(float(p["x"]))
+        y.append(float(p["y"]))
+        name = str(p.get("jogador") or "Vaga em aberto")
+        labels.append(name.split()[-1] if name else "—")
+        hover.append(f"{p.get('papel_pt', p.get('papel',''))}<br>{name}<br>Nota: {p.get('nota','—')}")
+        sizes.append(19 if p.get("jogador") else 13)
+    fig.add_trace(go.Scatter(
+        x=x, y=y, mode="markers+text", text=labels, textposition="middle center",
+        textfont=dict(color="#FFFFFF", size=10, family="Arial"),
+        marker=dict(size=sizes, color="#2563EB", line=dict(color="#DBEAFE", width=2), opacity=.96),
+        hovertext=hover, hoverinfo="text", showlegend=False,
+    ))
+    fig.update_layout(
+        title=dict(text=title, font=dict(size=13, color="#E2E8F0")),
+        height=420, margin=dict(l=8, r=8, t=40, b=8),
+        paper_bgcolor="#0D1728", plot_bgcolor="#14532D",
+        xaxis=dict(range=[-2,122], visible=False, fixedrange=True),
+        yaxis=dict(range=[82,-2], visible=False, fixedrange=True, scaleanchor="x", scaleratio=1),
+        font=dict(color="#E2E8F0"),
+    )
+    return fig
+
 def _pdf_bytes(markdown):
     try:
         from reportlab.lib.pagesizes import A4
@@ -645,10 +684,14 @@ def render(_ctx=None):
             a,b=st.columns(2)
             with a:
                 st.markdown("**XI atual**")
+                st.plotly_chart(_pitch_figure(simulation["xi_antes"], "Antes"), use_container_width=True,
+                                config={"displayModeBar": False})
                 comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                for p in simulation["xi_antes"]]))
             with b:
-                st.markdown("**XI depois**")
+                st.markdown("**XI simulado**")
+                st.plotly_chart(_pitch_figure(simulation["xi_depois"], "Depois"), use_container_width=True,
+                                config={"displayModeBar": False})
                 comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                for p in simulation["xi_depois"]]))
             if simulation.get("deltas"):
