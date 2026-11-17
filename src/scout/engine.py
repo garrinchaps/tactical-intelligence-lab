@@ -245,25 +245,35 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                 # Descobre jogadores sem cadastro Transfermarkt por jogos/minutos recentes.
                 # CROSS JOIN fixa matches como tabela externa: usa o índice de data e consulta
                 # as estatísticas pelo match_id, em vez de varrer o índice de todos os atletas.
-                active_names = [
-                    str(row[0]) for row in conn.execute(
-                        """
-                        SELECT p.player_name
-                        FROM matches AS m
-                        CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match
-                        WHERE p.match_id = m.match_id
-                          AND m.match_date >= date('now', '-180 days')
-                          AND COALESCE(p.minutes, 0) > 0
-                          AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
-                        GROUP BY p.player_name
-                        HAVING SUM(COALESCE(p.minutes, 0)) >= 450
-                           AND COUNT(DISTINCT p.match_id) >= 4
-                        """
+                active_since = (date.today() - timedelta(days=180)).isoformat()
+                active_rows = pd.read_sql_query(
+                    """
+                    SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
+                    FROM matches AS m
+                    CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match
+                    WHERE p.match_id = m.match_id
+                      AND m.match_date >= ?
+                      AND COALESCE(p.minutes, 0) > 0
+                      AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+                    GROUP BY p.player_name, p.match_id
+                    """,
+                    conn,
+                    params=[active_since],
+                )
+                if active_rows.empty:
+                    active_cores = set()
+                else:
+                    # Normaliza antes de aplicar a exposição mínima: o mesmo atleta pode
+                    # aparecer com grafias diferentes em fontes distintas.
+                    active_rows["_core"] = active_rows["player_name"].map(player_core)
+                    active_totals = active_rows.groupby("_core").agg(
+                        minutos=("minutes", "sum"),
+                        jogos=("match_id", "nunique"),
                     )
-                ]
-                relevant_cores = target_cores | {
-                    player_core(name) for name in active_names if player_core(name)
-                }
+                    active_cores = set(active_totals.index[
+                        (active_totals["minutos"] >= 450) & (active_totals["jogos"] >= 4)
+                    ])
+                relevant_cores = target_cores | active_cores
                 selected_names = sorted({
                     name for name in known_names if player_core(name) in relevant_cores
                 })
