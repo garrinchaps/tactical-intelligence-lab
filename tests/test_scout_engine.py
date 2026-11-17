@@ -224,3 +224,50 @@ def test_load_player_history_does_not_sort_the_entire_database_result(monkeypatc
     assert result.empty
     assert "ORDER BY m.match_date DESC" not in captured["query"].upper()
     assert "match_date >= ?" in captured["query"]
+
+
+def test_market_universe_attaches_recent_observed_club_and_keeps_market_club():
+    from src.data_lake.ids import player_core
+
+    market = pd.DataFrame([{
+        "nome": "Player Current", "clube": "Old Club", "posicao": "Centre-Forward",
+        "funcao": "Centre-Forward", "transfermarkt_id": "100", "clube_id": "10",
+    }])
+    history = pd.DataFrame([{
+        "core": player_core("Player Current"), "minutos": 1800, "jogos": 20,
+        "minutos_12m": 1500, "jogos_12m": 18, "ultimo_jogo": pd.Timestamp.today().strftime("%Y-%m-%d"),
+        "ultimo_time": "New Club", "nome_observado": "Player Current",
+        "historico_temporadas": [{"temporada": "2026", "jogos": 20}],
+        "ultimos_jogos": [{"match_date": pd.Timestamp.today().strftime("%Y-%m-%d")}],
+    }])
+
+    out = build_market_universe(market, history)
+
+    assert out.loc[0, "clube"] == "New Club"
+    assert out.loc[0, "clube_tm"] == "Old Club"
+    assert bool(out.loc[0, "clube_observado"]) is True
+    assert isinstance(out.loc[0, "historico_temporadas"], str)
+    assert '"temporada": "2026"' in out.loc[0, "historico_temporadas"]
+
+
+def test_market_universe_does_not_attach_ambiguous_history_to_homonyms():
+    from src.data_lake.ids import player_core
+
+    market = pd.DataFrame([
+        {"nome": "Player Same", "clube": "Club A", "posicao": "Centre-Forward", "funcao": "Centre-Forward",
+         "transfermarkt_id": "101"},
+        {"nome": "Player Same", "clube": "Club B", "posicao": "Centre-Forward", "funcao": "Centre-Forward",
+         "transfermarkt_id": "102"},
+    ])
+    history = pd.DataFrame([{
+        "core": player_core("Player Same"), "minutos": 1800, "jogos": 20,
+        "minutos_12m": 1500, "jogos_12m": 18, "ultimo_jogo": pd.Timestamp.today().strftime("%Y-%m-%d"),
+        "ultimo_time": "Club C", "historico_temporadas": [{"temporada": "2026"}], "ultimos_jogos": [],
+    }])
+
+    out = build_market_universe(market, history)
+
+    assert len(out) == 2
+    assert out["minutos"].isna().all()
+    assert out["historico_temporadas"].tolist() == ["[]", "[]"]
+    assert out["historico_ambiguo"].fillna(False).all()
