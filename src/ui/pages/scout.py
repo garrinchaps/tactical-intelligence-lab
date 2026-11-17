@@ -22,10 +22,9 @@ def _market_data(version: str):
     from src.ui.context import get_service
 
     players, clubs = D.table("tm_jogadores"), D.table("tm_clubes")
-    if players.empty:
-        return {"universe": pd.DataFrame(), "clubs": clubs, "status": "Base de mercado indisponível."}
-    last = pd.to_numeric(players.get("ultima_temporada"), errors="coerce")
-    if last.notna().any():
+    last = (pd.to_numeric(players["ultima_temporada"], errors="coerce")
+            if "ultima_temporada" in players else pd.Series(dtype=float))
+    if not players.empty and last.notna().any():
         players = players[(last >= last.max() - 2) |
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
     history = E.load_player_history(get_service().db, days=1825)
