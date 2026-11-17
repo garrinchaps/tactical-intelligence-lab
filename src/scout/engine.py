@@ -974,6 +974,12 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
     target_roles = {_safe_str(n.get("papel")) for n in needs if _safe_str(n.get("papel"))}
     allowed_roles = {role for role in ROLE_LABELS if any(fit(target, role) >= .60 for target in target_roles)}
     eligible = players[players["papel"].isin(allowed_roles)].copy() if "papel" in players else players.iloc[0:0]
+    # Não oferecer atletas já registrados no comprador; usar o clube atual como fonte de vínculo.
+    own_cores = {team_core(x) for x in (buyer.get("club_aliases") or [])}
+    if own_cores and "clube" in eligible:
+        eligible = eligible[~eligible["clube"].map(team_core).isin(own_cores)]
+    if "historico_ambiguo" in eligible:
+        eligible = eligible[~eligible["historico_ambiguo"].fillna(False)]
     # Não varrer o universo inteiro em Python para cada vaga; a filtragem vetorial deixa a tela responsiva.
     rows = []
     for need in needs:
