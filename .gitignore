@@ -40,3 +40,6 @@ data/treino.pid
 data/processed/rating_ref_v2*.parquet
 data/processed/rating_ref_box*.parquet
 data/processed/benchmark_perigo.json
+
+# Inventário local para migração (não versionar)
+public_deploy_inventory.json
