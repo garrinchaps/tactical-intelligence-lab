@@ -424,7 +424,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         )
     raw = raw.sort_values(["_richness", "minutes"], ascending=False).drop_duplicates(
         ["_core", "_fixture", "_club_core"], keep="first"
-    )
+    ).reset_index(drop=True)
 
     # Decodifica cada JSON uma única vez e transforma as métricas em colunas numéricas.
     # As somas por carreira, temporada e 12 meses passam a ser feitas pelo groupby vetorizado.
