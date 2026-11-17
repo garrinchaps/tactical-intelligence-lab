@@ -196,3 +196,7 @@ A área **Scout** combina diagnóstico do clube, qualidade estatística por fun�
 
 - **Wyscout Public Dataset**: Pappalardo, L. et al. *A public data set of spatio-temporal match events in soccer competitions*. Scientific Data 6, 236 (2019). Licença CC BY 4.0. Conversão a partir do repositório processado por koenvo.
 - **API-Football**, **football-data.org** e **ESPN**: dados sujeitos aos termos de cada provedor.
+
+## 🚀 Publicação na internet
+
+A preparação para hospedagem pública, incluindo requisitos de armazenamento persistente e migração validada da base local, está em [`docs/DEPLOY_PUBLICO.md`](docs/DEPLOY_PUBLICO.md). Para gerar um inventário **somente de leitura** antes da migração, execute `python scripts/inventory_deploy_data.py`. O inventário não altera o SQLite nem envia dados ao GitHub.
