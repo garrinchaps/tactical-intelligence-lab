@@ -21,7 +21,7 @@ from src.connectors.empirical_fallback import CI_TEXT, EmpiricalFallback
 from src.connectors.scout_file_parser import ScoutFileError, ScoutFileParser
 from src.connectors.statsbomb_connector import load_demo_events
 from src.guard.policy import GuardPolicy
-from src.machine_learning.danger_dataset import FEATURES
+from src.machine_learning.danger_dataset import FEATURES, LEGACY_FEATURES
 from src.machine_learning.neural_net import NeuralNetwork
 from src.reports.report_builder import NumericHallucinationGuard
 
@@ -252,7 +252,9 @@ def test_protocol_on_demo_sample_reports_baselines_and_marginal_gain():
         assert "interpretacao" in g and "sobre_logistica" in g
     assert 0 < rep["prevalencia_positiva"] < 0.5
     assert all(f["partidas_val"] >= 1 for f in rep["folds"])
-    assert set(FEATURES) <= set(d.columns)
+    # O CSV legado não contém density_is_360; evaluate_danger deriva essa coluna de density_source.
+    assert set(LEGACY_FEATURES) <= set(d.columns)
+    assert "density_is_360" not in d.columns
 
 
 def test_catalog_loads_without_pyyaml():
