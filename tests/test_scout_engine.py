@@ -334,7 +334,7 @@ def _history_fixture(path):
 
     # Jogador Transfermarkt: deve manter todo o recorte de cinco anos e somar métricas JSON.
     add_player(
-        "Alpha Target", 250, 90, 6.0,
+        "Alpha Target", 400, 90, 6.0,
         '{"totalGoals":"2","goalAssists":"1","xg":"0,5","accurate_passes_pct":"80",'
         '"pass_accuracy":"99","duels_won_pct":50,"duelsWonPercentage":99}'
     )

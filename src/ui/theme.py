@@ -257,7 +257,6 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-step .n {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.4rem; font-weight: 700; min-width: 42px; height: 42px;
   border-radius: 12px; display: flex; align-items: center; justify-content: center; background: var(--til-grad); color: white; }}
 .til-step .t {{ font-weight: 800; font-size: 1.02rem; }} .til-step .b {{ color: {P['muted']}; font-size: 0.92rem; margin-top: 3px; }}
-
 /* Scout War Room: contraste alto, informação densa apenas quando solicitada */
 .scout-player {{ display:flex; align-items:center; gap:14px; padding:14px 16px; margin:10px 0 5px;
   border:1px solid #334967; border-radius:16px; background:linear-gradient(120deg,#13243D,#0D1728);
@@ -279,7 +278,6 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .scout-value small {{ display:block; color:#B9C7DA; font-size:.68rem; font-weight:500; }}
 [data-testid="stDataFrame"] [role="columnheader"] {{ background:#20395F !important; color:#FFF !important; }}
 [data-testid="stDataFrame"] [role="gridcell"] {{ color:#F1F5F9 !important; }}
-
 </style>
 """
 

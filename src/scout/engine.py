@@ -435,7 +435,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     ))
     report(f"Decodificando métricas JSON de {len(raw):,} registros...")
     stat_frame = pd.DataFrame.from_records(
-        raw["stats_json"].map(_json_obj).tolist(), columns=stat_fields
+        raw["stats_json"].map(_json_obj).tolist(), columns=stat_fields, index=raw.index
     )
     report("Convertendo métricas JSON para colunas numéricas...")
     for out_key, raw_key in COUNT_KEYS.items():

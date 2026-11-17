@@ -25,8 +25,10 @@ from src.preprocessing.event_cleaner import EventPreprocessor
 
 @st.cache_resource(show_spinner=False)
 def get_service() -> MatchDataService:
-    return MatchDataService()
+    from scripts.fetch_db import ensure_database
 
+    ensure_database()
+    return MatchDataService()
 
 @st.cache_data(show_spinner=False, max_entries=12, ttl=1800)
 def _bundle_parts(match_id: int) -> Dict[str, Any]:
