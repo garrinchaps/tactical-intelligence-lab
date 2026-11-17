@@ -315,6 +315,8 @@ def _history_fixture(path):
         );
         CREATE INDEX idx_matches_date ON matches(match_date);
         CREATE INDEX idx_pstats_match ON match_player_stats(match_id, team_name);
+        CREATE INDEX idx_pstats_match_player_minutes
+            ON match_player_stats(match_id, player_name, minutes);
         CREATE INDEX idx_pstats_player ON match_player_stats(player_name, match_id);
     """)
 
@@ -401,3 +403,71 @@ def test_load_player_history_without_market_names_preserves_full_catalog_behavio
     assert set(history["core"]) == {
         "alpha target", "beta unlisted", "gamma legacy"
     }
+
+
+def test_history_cache_revision_changes_when_database_file_changes(tmp_path):
+    from src.scout.engine import history_cache_revision
+
+    database = tmp_path / "tactical_lab.db"
+    database.write_bytes(b"database-v1")
+    db = type("DB", (), {"db_path": database})()
+
+    first = history_cache_revision(db)
+    database.write_bytes(b"database-v2-with-new-pages")
+    second = history_cache_revision(db)
+
+    assert first != second
+
+
+def test_history_cache_revision_includes_wal_and_rollback_journal(tmp_path):
+    from src.scout.engine import history_cache_revision
+
+    database = tmp_path / "tactical_lab.db"
+    database.write_bytes(b"database")
+    db = type("DB", (), {"db_path": database})()
+
+    base = history_cache_revision(db)
+    wal = tmp_path / "tactical_lab.db-wal"
+    wal.write_bytes(b"committed-wal-frame")
+    with_wal = history_cache_revision(db)
+    assert with_wal != base
+
+    wal.unlink()
+    journal = tmp_path / "tactical_lab.db-journal"
+    journal.write_bytes(b"rollback-journal")
+    with_journal = history_cache_revision(db)
+    assert with_journal != base
+
+
+def test_history_cache_revision_never_reuses_in_memory_database_key():
+    from src.scout.engine import history_cache_revision
+
+    db = type("DB", (), {"db_path": ":memory:"})()
+    assert history_cache_revision(db) != history_cache_revision(db)
+
+
+def test_active_player_scan_uses_covering_history_index(tmp_path):
+    path = tmp_path / "history_index.sqlite"
+    _history_fixture(path)
+
+    conn = sqlite3.connect(path)
+    try:
+        plan = conn.execute(
+            """
+            EXPLAIN QUERY PLAN
+            SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
+            FROM matches AS m
+            CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
+            WHERE p.match_id = m.match_id
+              AND m.match_date >= ?
+              AND COALESCE(p.minutes, 0) > 0
+              AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+            GROUP BY p.player_name, p.match_id
+            """,
+            ("2020-01-01",),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    detail = " ".join(str(row[3]) for row in plan)
+    assert "COVERING INDEX idx_pstats_match_player_minutes" in detail
