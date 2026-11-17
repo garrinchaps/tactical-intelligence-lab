@@ -59,6 +59,7 @@ LEAGUES: Dict[int, str] = {
     59: "Noruega — Eliteserien", 67: "Suécia — Allsvenskan", 252: "Croácia — HNL", 182: "Sérvia — Super Liga",
     196: "Polônia — Ekstraklasa", 122: "Tchéquia — 1. Liga", 441: "Ucrânia — Premier League",
     # UEFA, FIFA e seleções
+    114: "Amistosos internacionais",
     42: "UEFA Champions League", 73: "UEFA Europa League", 10216: "UEFA Conference League", 74: "Supercopa da UEFA",
     50: "Eurocopa", 10607: "Eliminatórias da Eurocopa", 9806: "Liga das Nações A", 78: "Mundial de Clubes",
     # feminino
@@ -69,7 +70,7 @@ LEAGUES: Dict[int, str] = {
 }
 # ordem de prioridade para baixar detalhes: Brasil e Europa principal primeiro
 PRIORITY = [268, 8814, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 8971, 9464, 73, 10216, 112, 48, 140, 146, 86,
-            110, 71, 40, 64, 9429, 10244, 10272, 10273, 10274]
+            110, 71, 40, 64, 114, 9429, 10244, 10272, 10273, 10274]
 
 STAT_MAP = {  # chave da FotMob → chave interna
     "BallPossesion": "possession_pct", "expected_goals": "xg", "expected_goals_open_play": "xg_open_play",
