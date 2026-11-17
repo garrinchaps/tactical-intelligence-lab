@@ -150,14 +150,21 @@ def match_ratings(db, match_id: int, ref: Optional[pd.DataFrame] = None) -> pd.D
     pool = ref if ref is not None else reference()
     pool = pd.concat([pool, ind], ignore_index=True) if not pool.empty else ind
     out = []
+    from src.analytics.opponent_strength import opponent_strength_for_match
+
     for r in ind.to_dict("records"):
         r = {k: (None if isinstance(v, float) and v != v else v) for k, v in r.items()}   # NaN = sem dado (não é zero)
-        ev = evaluate(r, pool)
+        strength = opponent_strength_for_match(db, int(match_id), r.get("equipe"))
+        ev = evaluate(r, pool, {"opponent_adjustment": strength.get("ajuste", 0.0),
+                                "opponent_strength": strength})
         out.append({"jogador": r["jogador"], "equipe": r["equipe"], "funcao": r["funcao"], "minutos": r["minutos"],
                     "gols": r["gols"], "assistencias": r["assistencias"], "desempenho": ev["desempenho"],
                     "nota": ev["nota"], "nota_final": ev["nota_final"], "impacto": ev["impacto"],
                     "confianca": ev["confianca"], "confianca_pct": ev["confianca_pct"],
-                    "classificacao": ev["classificacao"], "pares": ev["pares"], "_detalhe": ev})
+                    "classificacao": ev["classificacao"], "pares": ev["pares"],
+                    "adversario": strength.get("adversario"), "elo_adversario": strength.get("elo"),
+                    "nivel_adversario": strength.get("nivel"), "ajuste_adversario": strength.get("ajuste"),
+                    "_detalhe": ev})
     return pd.DataFrame(out).sort_values("nota", ascending=False, na_position="last").reset_index(drop=True)
 
 
