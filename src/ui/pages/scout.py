@@ -289,8 +289,14 @@ def render(_ctx=None):
     if not options:
         empty_state("Sem clubes no catálogo", "Sincronize Transfermarkt e fontes de jogos/escalações.", "🛡️")
         return
-    default = prefill if prefill in options else options[0]
-    team = st.selectbox("Clube a planejar", options, index=options.index(default), key="scout_club_choice")
+    from src.data_lake.ids import team_core
+    default = prefill if prefill in options else next(
+        (name for name in options if prefill and team_core(name) == team_core(prefill)), options[0])
+    # Ao chegar pelo botão "Planejar elenco" do perfil, sincroniza a seleção com o clube clicado.
+    if prefill and st.session_state.get("scout_club_choice") != default:
+        st.session_state["scout_club_choice"] = default
+    st.session_state.setdefault("scout_club_choice", default)
+    team = st.selectbox("Clube a planejar", options, key="scout_club_choice")
     st.session_state["scout_selected_club"] = team
     aliases = same_team_names(team)
     club = E.market_club(clubs, team)
@@ -347,8 +353,38 @@ def render(_ctx=None):
                              rejected=st.session_state[rejected_key], feedback_reason=feedback_reason, season=next_season) \
             if not pool.empty else pd.DataFrame()
 
-    tabs = st.tabs(["Diagnóstico", "IA · Top 5", "Busca manual", "Joias U23", "Planejamento"])
+    tabs = st.tabs(["IA · Top 5", "Diagnóstico", "Busca manual", "Joias U23", "Planejamento"])
     with tabs[0]:
+        st.markdown("#### Cinco nomes priorizados")
+        if feedback.get("amostra"):
+            st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
+        st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
+        if ranked.empty:
+            empty_state("Ainda não há candidatos suficientes",
+                "Sincronize jogadores/valores do Transfermarkt e estatísticas individuais. A busca manual continua disponível.", "🎯")
+        else:
+            for idx, row in ranked.head(5).iterrows():
+                _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
+            st.markdown("#### Três melhores por posição")
+            roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
+            role = st.selectbox("Posição", roles, format_func=_role, key="scout_top3_role")
+            fa, fb, fc = st.columns(3)
+            age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
+            quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
+            maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
+            filt3 = ranked[ranked["papel_alvo"] == role].copy()
+            filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
+            filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
+            filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
+            nations = ["Todas"] + sorted(filt3["nacionalidade"].dropna().astype(str).unique().tolist())
+            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation")
+            if nation != "Todas":
+                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation]
+            for idx, row in filt3.head(3).iterrows():
+                _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
+            if filt3.empty:
+                st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
+    with tabs[1]:
         quality = pd.to_numeric(roster.get("qualidade"), errors="coerce").mean() if not roster.empty else np.nan
         age = pd.to_numeric(roster.get("idade"), errors="coerce").mean() if not roster.empty else np.nan
         k = st.columns(5)
@@ -416,36 +452,6 @@ def render(_ctx=None):
             st.caption(financial["natureza"] + f" · {financial.get('transferencias_pagas_amostra',0)} taxas pagas na amostra.")
         else:
             st.info("Não há histórico financeiro suficiente para estimar capacidade de investimento.")
-    with tabs[1]:
-        st.markdown("#### Cinco nomes priorizados")
-        if feedback.get("amostra"):
-            st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
-        st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
-        if ranked.empty:
-            empty_state("Ainda não há candidatos suficientes",
-                "Sincronize jogadores/valores do Transfermarkt e estatísticas individuais. A busca manual continua disponível.", "🎯")
-        else:
-            for idx, row in ranked.head(5).iterrows():
-                _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
-            st.markdown("#### Três melhores por posição")
-            roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
-            role = st.selectbox("Posição", roles, format_func=_role, key="scout_top3_role")
-            fa, fb, fc = st.columns(3)
-            age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
-            quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
-            maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
-            filt3 = ranked[ranked["papel_alvo"] == role].copy()
-            filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
-            filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
-            filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
-            nations = ["Todas"] + sorted(filt3["nacionalidade"].dropna().astype(str).unique().tolist())
-            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation")
-            if nation != "Todas":
-                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation]
-            for idx, row in filt3.head(3).iterrows():
-                _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
-            if filt3.empty:
-                st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
     with tabs[2]:
         st.markdown("#### Filtros de jogador")
         if pool.empty:
