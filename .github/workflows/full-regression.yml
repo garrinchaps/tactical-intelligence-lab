@@ -9,6 +9,7 @@ on:
       - codex/fotmob-depth-routing
       - codex/inteligencia-compartilhada
       - codex/implementation-foundation
+      - codex/app-performance-optimization
       - main
   workflow_dispatch:
 
