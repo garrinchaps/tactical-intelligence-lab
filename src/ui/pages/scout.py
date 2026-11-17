@@ -30,9 +30,24 @@ def _market_data(version: str):
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
     history = E.load_player_history(get_service().db, days=1825)
     universe = E.add_quality_scores(E.build_market_universe(players, history))
-    if not clubs.empty and {"transfermarkt_id", "valor_total_eur"} <= set(clubs):
-        cv = clubs.drop_duplicates("transfermarkt_id").set_index(clubs["transfermarkt_id"].astype(str))["valor_total_eur"].to_dict()
-        universe["clube_valor_total_eur"] = universe["clube_id"].astype(str).map(cv)
+    if not clubs.empty:
+        from src.data_lake.ids import team_core
+        club_rows = clubs.copy()
+        if {"transfermarkt_id", "valor_total_eur"} <= set(club_rows.columns):
+            cv_id = club_rows.drop_duplicates("transfermarkt_id").set_index(
+                club_rows["transfermarkt_id"].astype(str))["valor_total_eur"].to_dict()
+            universe["clube_valor_total_eur"] = universe["clube_id"].astype(str).map(cv_id)
+        if "nome" in club_rows:
+            club_rows["_club_core"] = club_rows["nome"].map(team_core)
+            if "valor_total_eur" in club_rows:
+                cv_name = club_rows.drop_duplicates("_club_core").set_index("_club_core")["valor_total_eur"].to_dict()
+                by_name = universe["clube"].map(team_core).map(cv_name)
+                universe["clube_valor_total_eur"] = by_name.combine_first(
+                    universe.get("clube_valor_total_eur", pd.Series(index=universe.index, dtype=float)))
+            for source, target in (("liga", "clube_liga"), ("pais", "clube_pais")):
+                if source in club_rows:
+                    mapping = club_rows.drop_duplicates("_club_core").set_index("_club_core")[source].to_dict()
+                    universe[target] = universe["clube"].map(team_core).map(mapping)
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
     return {"universe": universe, "clubs": clubs, "status": "carregado",
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
@@ -291,14 +306,16 @@ def render(_ctx=None):
         diagnosis = _diagnosis(team, version, records)
     transfers = D.table("tm_transferencias", None, "para_clube_id", [club["transfermarkt_id"]]) \
         if club and club.get("transfermarkt_id") is not None else pd.DataFrame()
-    financial = E.buyer_financial_profile(service.db, club, roster, transfers)
+    country, competition = str((club or {}).get("pais") or ""), str((club or {}).get("liga") or "")
+    next_season = st.selectbox("Temporada do planejamento",
+        [date.today().year + 1, date.today().year], index=0, key="scout_target_season")
+    financial = E.buyer_financial_profile(service.db, club, roster, transfers, season=next_season)
     financial["estilo"] = diagnosis.get("estilo") or {}
     financial["club_aliases"] = aliases
-    country, competition = str((club or {}).get("pais") or ""), str((club or {}).get("liga") or "")
     foreign_count = 0
     if not roster.empty and country and "nacionalidade" in roster:
         foreign_count = int(sum(1 for n in roster["nacionalidade"].dropna().astype(str)
-                                if n.strip() and country.casefold() not in n.casefold()))
+                                if E.is_foreign_player(n, country) is True))
     financial["estrangeiros_atual"] = foreign_count
 
     pool = universe.copy() if universe is not None and not universe.empty else pd.DataFrame()
@@ -317,7 +334,7 @@ def render(_ctx=None):
                  for r in ("GK","CB","LB","RB","DM","CM","AM","LW","RW","ST") if int(counts.get(r, 0)) < 2]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = E.recommend(pool, needs, financial, country, competition, roster=roster,
-                             rejected=st.session_state[rejected_key], season=date.today().year) \
+                             rejected=st.session_state[rejected_key], season=next_season) \
             if not pool.empty else pd.DataFrame()
 
     tabs = st.tabs(["Diagnóstico", "IA · Top 5", "Busca manual", "Joias U23", "Planejamento"])
@@ -401,8 +418,22 @@ def render(_ctx=None):
             st.markdown("#### Três melhores por posição")
             roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
             role = st.selectbox("Posição", roles, format_func=_role, key="scout_top3_role")
-            for idx, row in E.shortlist_by_position(ranked, role, 3).iterrows():
+            fa, fb, fc = st.columns(3)
+            age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
+            quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
+            maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
+            filt3 = ranked[ranked["papel_alvo"] == role].copy()
+            filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
+            filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
+            filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
+            nations = ["Todas"] + sorted(filt3["nacionalidade"].dropna().astype(str).unique().tolist())
+            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation")
+            if nation != "Todas":
+                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation]
+            for idx, row in filt3.head(3).iterrows():
                 _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
+            if filt3.empty:
+                st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
     with tabs[2]:
         st.markdown("#### Filtros de jogador")
         if pool.empty:
@@ -417,19 +448,25 @@ def render(_ctx=None):
             d1,d2,d3 = st.columns(3)
             nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
             nat = d1.selectbox("Nacionalidade", nats)
+            leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+            league_filter = d2.selectbox("Liga atual", leagues)
             clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
-            seller = d2.selectbox("Clube atual", clubs_list)
+            seller = d3.selectbox("Clube atual", clubs_list)
+            e1,e2 = st.columns(2)
             max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
-            vmax = d3.number_input("Valor máximo (€ mi)", min_value=0.0,
-                max_value=float(max(1,max_market/1e6 if pd.notna(max_market) else 300)),
-                value=float(max(1,max_market/1e6 if pd.notna(max_market) else 300)))
+            upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
+            vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
+            vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
             filt = pool.copy()
             if rf!="Todas": filt=filt[filt["papel"]==rf]
             filt=filt[pd.to_numeric(filt["idade"],errors="coerce").between(amin,amax)]
             filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
             if nat!="Todas": filt=filt[filt["nacionalidade"].astype(str)==nat]
+            if league_filter!="Todas" and "clube_liga" in filt:
+                filt=filt[filt["clube_liga"].astype(str)==league_filter]
             if seller!="Todos": filt=filt[filt["clube"].astype(str)==seller]
-            filt=filt[pd.to_numeric(filt["valor_mercado_eur"],errors="coerce").fillna(0)<=vmax*1e6]
+            values=pd.to_numeric(filt["valor_mercado_eur"],errors="coerce").fillna(0)
+            filt=filt[values.between(vmin*1e6,vmax*1e6)]
             filt=filt.sort_values("qualidade",ascending=False,na_position="last")
             st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
             cols = [x for x in ("nome","papel","idade","clube","nacionalidade","valor_mercado_eur",
@@ -443,7 +480,7 @@ def render(_ctx=None):
                 chosen=st.selectbox("Selecionar jogador",filt["nome"].astype(str).tolist(),key="scout_manual_pick")
                 p=filt[filt["nome"].astype(str)==chosen].iloc[0].to_dict()
                 p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
-                p["realismo"]=E.transfer_realism(p,financial,country,competition)
+                p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
                 p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
                 p["sinergia"]=E.chemistry(p,roster)
                 with st.expander("Dossiê do jogador escolhido"):
@@ -474,7 +511,7 @@ def render(_ctx=None):
             if st.button("Adicionar joia ao plano",key="scout_gem_add"):
                 p=gems[gems["nome"].astype(str)==name].iloc[0].to_dict()
                 p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
-                p["realismo"]=E.transfer_realism(p,financial,country,competition)
+                p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
                 p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
                 p["sinergia"]=E.chemistry(p,roster)
                 _add_player(p,plan_key); st.rerun()
