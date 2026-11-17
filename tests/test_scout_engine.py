@@ -337,8 +337,9 @@ def _history_fixture(path):
     add_player("Alpha Target", 40)
 
     # Jogador sem cadastro: quatro jogos recentes e 480 minutos qualificam-no.
-    for offset in (30, 60, 90, 120):
-        add_player("Beta Unlisted", offset, 120)
+    for i, offset in enumerate((30, 60, 90, 120)):
+        # Grafias diferentes precisam ser combinadas antes do corte de exposição.
+        add_player("Beta Unlisted" if i % 2 == 0 else "Beta-Unlisted", offset, 120)
     add_player("Beta Unlisted", 500, 90)
 
     # Jogador antigo sem exposição recente: não entra no universo reduzido.
