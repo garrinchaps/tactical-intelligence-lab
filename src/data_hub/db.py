@@ -148,7 +148,6 @@ class DataHubDB:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.execute("PRAGMA foreign_keys = ON;")
         # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
-        conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         conn.execute("PRAGMA cache_size = -64000;")         # 64 MB de cache por conexão (o PC tem 16 GB)
         conn.execute("PRAGMA temp_store = MEMORY;")
@@ -162,6 +161,7 @@ class DataHubDB:
     def migrate(self) -> None:
         """Aplica DDL leve e backfills legados uma única vez por versão do schema."""
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode = WAL;")
             if self.schema_path.exists():
                 conn.executescript(self.schema_path.read_text(encoding="utf-8"))
             cols = {r[1] for r in conn.execute("PRAGMA table_info(matches)").fetchall()}
