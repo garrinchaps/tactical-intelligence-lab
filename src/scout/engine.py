@@ -447,10 +447,14 @@ def merge_external_ratings(players: pd.DataFrame, ratings: Optional[pd.DataFrame
     ext["_core"] = ext["nome"].map(player_core)
     ext["nota"] = pd.to_numeric(ext["nota"], errors="coerce")
     ext = ext[(ext["_core"] != "") & ext["nota"].between(0, 100)]
-    ext = ext.groupby("_core").agg(
-        nota_externa=("nota", "median"),
-        fontes_nota_externa=("fonte", lambda x: " · ".join(sorted(set(x.dropna().astype(str)))) if "fonte" in ext else "")
-    )
+    if "fonte" in ext:
+        ext = ext.groupby("_core").agg(
+            nota_externa=("nota", "median"),
+            fontes_nota_externa=("fonte", lambda x: " · ".join(sorted(set(x.dropna().astype(str)))))
+        )
+    else:
+        ext = ext.groupby("_core").agg(nota_externa=("nota", "median"))
+        ext["fontes_nota_externa"] = ""
     out["_external_core"] = out["_core"] if "_core" in out else out["nome"].map(player_core)
     duplicated = out["_external_core"].duplicated(keep=False)
     matched = out["_external_core"].map(ext["nota_externa"])
