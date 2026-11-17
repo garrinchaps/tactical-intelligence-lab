@@ -18,9 +18,12 @@ Como cada número vira nota:
 Limites honestos: sem tracking nem vídeo, "impacto tático" é INFERIDO de eventos (recepções entre linhas, participação
 na troca de passes, pressão no campo rival) e o posicionamento/jogo aéreo do goleiro não é observado — aparecem como
 "inferido" / "não observado", nunca como certeza. xGOT não existe nas fontes abertas: usa-se o xG das finalizações no alvo.
+
+Esta implementação não é o motor padrão da aplicação. Para avaliações novas, utilize
+`src.analytics.rating_v2` (régua 3.0). A cópia é mantida para auditoria e reprodutibilidade.
 """
 
-Esta implementação não é o motor padrão da aplicação. Para avaliações novas, utilize\n`src.analytics.rating_v2` (régua 3.0). A cópia é mantida para auditoria e reprodutibilidade.\n\nfrom __future__ import annotations
+from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
