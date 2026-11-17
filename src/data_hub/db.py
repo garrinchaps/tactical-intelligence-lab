@@ -112,6 +112,9 @@ CREATE INDEX IF NOT EXISTS idx_team_stats_match ON match_team_stats(match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_team ON match_lineups(team_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_player ON match_lineups(player_name);
 CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team_name);
+-- Índice de cobertura: atende match_id/player_name/minutes sem buscar a tabela base.
+CREATE INDEX IF NOT EXISTS idx_pstats_match_player_minutes
+    ON match_player_stats(match_id, player_name, minutes);
 CREATE INDEX IF NOT EXISTS idx_pstats_player ON match_player_stats(player_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_coach ON match_lineups(coach, match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
