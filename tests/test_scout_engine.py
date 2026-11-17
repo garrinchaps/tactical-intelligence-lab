@@ -126,3 +126,18 @@ def test_unknown_minutes_do_not_create_a_false_loan_opportunity():
 
 def test_italian_serie_a_does_not_receive_brazilian_foreign_player_rule():
     assert _foreign_rule("Serie A", 2027) is None
+
+
+
+def test_como_1907_alias_resolves_to_same_club_identity():
+    from src.data_lake.ids import team_core
+
+    assert team_core("Como 1907") == team_core("Como")
+
+
+def test_foreign_nationality_check_handles_brazilian_and_dual_nationality():
+    from src.scout.engine import is_foreign_player
+
+    assert is_foreign_player("Brazil", "Brasil") is False
+    assert is_foreign_player("Argentina, Italy", "Brazil") is True
+    assert is_foreign_player(None, "Brazil") is None
