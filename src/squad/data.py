@@ -52,7 +52,7 @@ def table(name: str, columns: Optional[List[str]] = None, col: Optional[str] = N
     if not filtered_read_succeeded:
         df = lk.read(name, columns)
         if col and vals is not None and col in df:
-            df = df[df[col].astype(str).str.replace(r"\\.0$", "", regex=True).isin(vals)]
+            df = df[df[col].astype(str).str.replace(r"\.0$", "", regex=True).isin(vals)]
     if len(_MEM) > 64:
         _MEM.clear()
     _MEM[key] = df
