@@ -165,7 +165,9 @@ def _dossier(player, roster):
         ("Variação TM em 12m (%)", player.get("variacao_tm_12m_pct")),
         ("Minutos 12m", player.get("minutos_12m", player.get("minutos"))),
         ("Jogos 12m", player.get("jogos_12m", player.get("jogos"))),
-        ("Nota média 12m", player.get("rating_12m", player.get("rating_media"))),
+        ("Nota média 12m ajustada", player.get("rating_12m", player.get("rating_media"))),
+        ("Nível médio dos adversários (12m, 0–100)", player.get("nivel_adversario_12m")),
+        ("Ajuste médio por adversário (12m)", player.get("ajuste_adversario_12m")),
         ("Gols/90", player.get("goals_p90")), ("Assistências/90", player.get("assists_p90")),
         ("xG/90", player.get("xg_p90")), ("xA/90", player.get("xa_p90")),
         ("Criação/90", player.get("chances_created_p90")), ("Ações defensivas/90", player.get("def_actions_p90")),
@@ -178,14 +180,19 @@ def _dossier(player, roster):
         st.caption(f"Vínculo observado em partidas recentes: {player.get('clube')}. O cadastro Transfermarkt ainda apontava {player.get('clube_tm')}; transferência não confirmada apenas por esta evidência.")
     if hist:
         d = pd.DataFrame(hist)
-        cols = [c for c in ("temporada", "jogos", "minutos", "rating_media", "goals", "assists", "xg", "xa") if c in d]
+        cols = [c for c in ("temporada", "jogos", "minutos", "rating_media", "nivel_adversario_medio",
+                            "ajuste_adversario_medio", "goals", "assists", "xg", "xa") if c in d]
         comparison_table(d[cols].rename(columns={"temporada":"Temporada","jogos":"Jogos","minutos":"Minutos",
-            "rating_media":"Nota média","goals":"Gols","assists":"Assistências","xg":"xG","xa":"xA"}))
+            "rating_media":"Nota ajustada","nivel_adversario_medio":"Nível adversário médio",
+            "ajuste_adversario_medio":"Ajuste adversário","goals":"Gols","assists":"Assistências","xg":"xG","xa":"xA"}))
     if recent:
         d = pd.DataFrame(recent)
-        cols = [c for c in ("match_date","team_name","competition_name","minutes","rating") if c in d]
+        cols = [c for c in ("match_date", "team_name", "competition_name", "minutes", "rating",
+                            "rating_ajustada", "_opponent_level", "_opponent_adjustment") if c in d]
         comparison_table(d[cols].rename(columns={"match_date":"Data","team_name":"Clube",
-            "competition_name":"Competição","minutes":"Minutos","rating":"Nota"}).head(15))
+            "competition_name":"Competição","minutes":"Minutos","rating":"Nota FotMob",
+            "rating_ajustada":"Nota ajustada","_opponent_level":"Nível adversário (0–100)",
+            "_opponent_adjustment":"Ajuste por adversário"}).head(15))
     realism, fit, syn = player.get("realismo") or {}, player.get("compatibilidade") or {}, player.get("sinergia") or {}
     st.markdown("**Motivo da indicação**")
     st.write(player.get("motivo_principal") or "Encaixe com uma necessidade detectada no elenco.")
