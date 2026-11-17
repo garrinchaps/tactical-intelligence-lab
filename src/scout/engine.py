@@ -148,6 +148,7 @@ def _money(value: Any) -> Optional[float]:
 
 
 def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
+    """Resume uma amostra sem reabrir o mesmo JSON para cada indicador."""
     out: Dict[str, Any] = {}
     mins = pd.to_numeric(rows.get("minutes"), errors="coerce").fillna(0)
     total_minutes = float(mins.sum())
@@ -157,15 +158,20 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     valid = ratings.notna() & (mins > 0)
     out["rating_media"] = round(float(np.average(ratings[valid], weights=mins[valid])), 2) if valid.any() else None
     out["ultimo_jogo"] = _safe_str(rows["match_date"].max()) if "match_date" in rows else ""
-    latest = rows.sort_values("match_date").iloc[-1] if len(rows) else {}
+    latest = rows.loc[pd.to_datetime(rows["match_date"], errors="coerce").idxmax()] if len(rows) else {}
     out["ultimo_time"] = _safe_str(latest.get("team_name", "")) if isinstance(latest, pd.Series) else ""
     out["ultima_competicao"] = _safe_str(latest.get("competition_name", "")) if isinstance(latest, pd.Series) else ""
+
+    # load_player_history injeta _parsed_stats por jogador. Isso evita fazer json.loads repetidamente
+    # em cada métrica, temporada e janela de 12 meses. Chamadas externas continuam aceitando stats_json.
+    if "_parsed_stats" in rows:
+        parsed_stats = [x if isinstance(x, dict) else {} for x in rows["_parsed_stats"].tolist()]
+    else:
+        parsed_stats = [_json_obj(x) for x in rows.get("stats_json", pd.Series(dtype=object)).tolist()]
+
     for out_key, raw_key in COUNT_KEYS.items():
-        vals = []
-        for raw in rows.get("stats_json", pd.Series(dtype=object)).tolist():
-            value = _num(_json_obj(raw).get(raw_key))
-            if value is not None:
-                vals.append(value)
+        vals = [_num(item.get(raw_key)) for item in parsed_stats]
+        vals = [value for value in vals if value is not None]
         out[out_key] = float(sum(vals)) if vals else None
     if out["minutos"] > 0:
         for k in ("goals", "assists", "shots", "shots_on_target", "xg", "xa", "chances_created",
@@ -176,13 +182,13 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     out["pass_accuracy_pct"] = None
     out["duels_won_pct"] = None
     for stat_key in ("accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct"):
-        vals = [_num(_json_obj(x).get(stat_key)) for x in rows.get("stats_json", pd.Series(dtype=object)).tolist()]
+        vals = [_num(item.get(stat_key)) for item in parsed_stats]
         vals = [v for v in vals if v is not None]
         if vals:
             out["pass_accuracy_pct"] = round(float(np.mean(vals)), 2)
             break
     for stat_key in ("duels_won_pct", "duelsWonPercentage"):
-        vals = [_num(_json_obj(x).get(stat_key)) for x in rows.get("stats_json", pd.Series(dtype=object)).tolist()]
+        vals = [_num(item.get(stat_key)) for item in parsed_stats]
         vals = [v for v in vals if v is not None]
         if vals:
             out["duels_won_pct"] = round(float(np.mean(vals)), 2)
@@ -192,7 +198,7 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
 
 
 def load_player_history(db, days: int = 900) -> pd.DataFrame:
-    """Histórico de partidas por jogador em todas as equipes, deduplicado por jogo real."""
+    """Histórico multi-clube; normaliza chaves por valor único e reaproveita JSON por jogador."""
     since = (date.today() - timedelta(days=int(days))).isoformat()
     query = """
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
@@ -211,33 +217,63 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
         return pd.DataFrame()
     if raw.empty:
         return raw
-    raw["_core"] = raw["player_name"].map(player_core)
-    raw["_club_core"] = raw["team_name"].map(team_core)
-    raw["_fixture"] = raw.apply(
-        lambda r: str(r["match_date"])[:10] + "|" + "|".join(sorted((team_core(r["home_team_name"]),
-                                                                      team_core(r["away_team_name"])))),
-        axis=1,
-    )
-    raw["_richness"] = raw["stats_json"].map(lambda x: len(_json_obj(x)))
+
+    # Normaliza cada nome/clube uma única vez, não uma vez por aparição do jogador.
+    player_names = raw["player_name"].dropna().drop_duplicates().tolist()
+    player_map = {name: player_core(name) for name in player_names}
+    raw["_core"] = raw["player_name"].map(player_map)
+
+    club_values = pd.concat(
+        [raw["team_name"], raw["home_team_name"], raw["away_team_name"]],
+        ignore_index=True,
+    ).dropna().drop_duplicates().tolist()
+    club_map = {name: team_core(name) for name in club_values}
+    raw["_club_core"] = raw["team_name"].map(club_map)
+
+    # A chave do confronto depende só dos metadados da partida; calculá-la no nível de match_id
+    # elimina um apply(axis=1) sobre centenas de milhares de aparições.
+    fixtures = raw[["match_id", "match_date", "home_team_name", "away_team_name"]].drop_duplicates("match_id").copy()
+    home = fixtures["home_team_name"].map(club_map).fillna("")
+    away = fixtures["away_team_name"].map(club_map).fillna("")
+    swap = home > away
+    first = home.where(~swap, away)
+    second = away.where(~swap, home)
+    fixtures["_fixture"] = fixtures["match_date"].astype(str).str[:10] + "|" + first + "|" + second
+    fixture_map = fixtures.set_index("match_id")["_fixture"]
+    raw["_fixture"] = raw["match_id"].map(fixture_map)
+
+    duplicate_mask = raw.duplicated(["_core", "_fixture", "_club_core"], keep=False)
+    raw["_richness"] = 0
+    if duplicate_mask.any():
+        # Riqueza só é necessária para escolher entre duplicatas do mesmo jogo real.
+        raw.loc[duplicate_mask, "_richness"] = raw.loc[duplicate_mask, "stats_json"].map(
+            lambda value: len(_json_obj(value))
+        )
     raw = raw.sort_values(["_richness", "minutes"], ascending=False).drop_duplicates(
         ["_core", "_fixture", "_club_core"], keep="first"
     )
+
     summaries = []
+    recent_cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=365)
     for core, group in raw.groupby("_core", sort=False):
+        # O mesmo objeto JSON serve aos totais da carreira, temporada e janela recente deste jogador.
+        group = group.copy()
+        group["_parsed_stats"] = group["stats_json"].map(_json_obj)
         seasons = []
         if "season_name" in group:
-            for season, part in group.groupby("season_name", dropna=False):
+            for season, part in group.groupby("season_name", dropna=False, sort=True):
                 data = _player_season_totals(part)
                 data["temporada"] = _safe_str(season) or "não identificada"
                 seasons.append(data)
         all_data = _player_season_totals(group)
-        latest_row = group.sort_values("match_date", ascending=False).iloc[0]
+        ordered = group.sort_values("match_date", ascending=False, kind="stable")
+        latest_row = ordered.iloc[0]
         observed_positions = group["position"].dropna().astype(str).tolist() if "position" in group else []
         all_data["nome_observado"] = _safe_str(latest_row.get("player_name"))
         all_data["posicao_observada"] = pd.Series(observed_positions).mode().iloc[0] if observed_positions else ""
         all_data["nacionalidade_observada"] = None
-        last_year = group[pd.to_datetime(group["match_date"], errors="coerce") >=
-                          pd.Timestamp.today().normalize() - pd.Timedelta(days=365)]
+        dates = pd.to_datetime(group["match_date"], errors="coerce")
+        last_year = group.loc[dates >= recent_cutoff]
         recent = _player_season_totals(last_year) if not last_year.empty else {}
         all_data.update({
             "minutos_12m": recent.get("minutos", 0),
@@ -248,7 +284,7 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
             "xg_12m": recent.get("xg"),
             "xa_12m": recent.get("xa"),
             "historico_temporadas": seasons[-5:],
-            "ultimos_jogos": group.sort_values("match_date", ascending=False).head(15)[
+            "ultimos_jogos": ordered.head(15)[
                 ["match_date", "team_name", "competition_name", "minutes", "rating", "stats_json"]
             ].to_dict("records"),
         })
