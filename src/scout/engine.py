@@ -547,12 +547,9 @@ def _coach_history_style(db, coach_name: str, current_aliases: Sequence[str], li
         return {"jogos": int(rows["match_id"].nunique()), "tracos": [],
                 "origem": "histórico de jogos encontrado, mas sem estatísticas comparáveis"}
     own_rows, against_rows = [], []
-    for rec in rows.itertuples():
-        part = stats[stats["match_id"] == rec.match_id]
-        mine = part[part["team_name"].map(team_core) == rec._team_core] if "_team_core" in rows.columns else part.iloc[0:0]
-        # itertuples renomeia campos iniciados por underscore; resolve por ID+nome de equipe.
-        if mine.empty:
-            mine = part[part["team_name"].map(team_core) == team_core(rec.team_name)]
+    for _, rec in rows.iterrows():
+        part = stats[stats["match_id"] == rec["match_id"]]
+        mine = part[part["team_name"].map(team_core) == rec["_team_core"]]
         other = part[~part.index.isin(mine.index)]
         if mine.empty or other.empty:
             continue
