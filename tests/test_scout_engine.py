@@ -316,7 +316,7 @@ def _history_fixture(path):
         CREATE INDEX idx_matches_date ON matches(match_date);
         CREATE INDEX idx_pstats_match ON match_player_stats(match_id, team_name);
         CREATE INDEX idx_pstats_match_player_minutes
-            ON match_player_stats(match_id, player_name, minutes);
+            ON match_player_stats(match_id, minutes, player_name);
         CREATE INDEX idx_pstats_player ON match_player_stats(player_name, match_id);
     """)
 
@@ -455,12 +455,12 @@ def test_active_player_scan_uses_covering_history_index(tmp_path):
         plan = conn.execute(
             """
             EXPLAIN QUERY PLAN
-            SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
+            SELECT p.player_name, p.match_id, SUM(p.minutes) AS minutes
             FROM matches AS m
             CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
             WHERE p.match_id = m.match_id
               AND m.match_date >= ?
-              AND COALESCE(p.minutes, 0) > 0
+              AND p.minutes > 0
               AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
             GROUP BY p.player_name, p.match_id
             """,
