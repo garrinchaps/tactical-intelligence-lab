@@ -79,7 +79,7 @@ def _history(db) -> Dict[str, Any]:
     return result
 
 
-def opponent_strength_for_match(db, match_id: int) -> Dict[str, Any]:
+def opponent_strength_for_match(db, match_id: int, team_name: str = "") -> Dict[str, Any]:
     """Força do adversário ANTES da partida; sem usar o placar do próprio jogo."""
     with db.connect() as conn:
         target = conn.execute(
@@ -97,11 +97,12 @@ def opponent_strength_for_match(db, match_id: int) -> Dict[str, Any]:
         return {"elo": 1500.0, "jogos_historicos": 0, "nivel": 50.0, "ajuste": 0.0,
                 "confianca": "baixa", "adversario": away_name}
 
-    rating = float(snap["away_elo"])
-    sample = int(snap["away_games"])
-    opponent = away_name
-    if not home:
+    selected = team_core(team_name)
+    # A nota é contextualizada pelo adversário de cada equipe, não sempre pelo visitante.
+    if selected == away:
         rating, sample, opponent = float(snap["home_elo"]), int(snap["home_games"]), home_name
+    else:
+        rating, sample, opponent = float(snap["away_elo"]), int(snap["away_games"]), away_name
 
     # Amostras curtas são encolhidas para a média; a correção máxima é deliberadamente limitada.
     reliability = min(1.0, sample / 8.0)
