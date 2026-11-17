@@ -386,12 +386,14 @@ def render(_ctx=None):
         likely = roster.copy()
         likely["_selection_score"] = (
             pd.to_numeric(likely.get("qualidade"), errors="coerce").fillna(45) * .65 +
-            pd.to_numeric(likely.get("minutos_12m"), errors="coerce").fillna(0).clip(0, 2500) / 2500 * 35
+            pd.to_numeric(likely.get("minutos_12m", pd.Series(0, index=likely.index)), errors="coerce").fillna(0).clip(0, 2500) / 2500 * 35
         )
         likely = likely.sort_values("_selection_score", ascending=False).head(23)
         foreign_count = int(sum(1 for n in likely["nacionalidade"].dropna().astype(str)
                                 if E.is_foreign_player(n, country) is True))
     financial["estrangeiros_atual"] = foreign_count
+    rejected_key = "scout_rejected_" + _slug(team_core(team))
+    st.session_state.setdefault(rejected_key, [])
     feedback = E.rejection_preferences(service.db, team)
     feedback_reason = " · ".join(feedback.get("motivos", []))
     allow_old_rejections = st.checkbox("Permitir novamente jogadores descartados em pesquisas anteriores",
