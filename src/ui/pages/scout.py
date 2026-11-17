@@ -18,7 +18,7 @@ from src.ui.components import comparison_table, empty_state, page_header
 from src.ui.nav import back_button, open_view, param
 
 
-@st.cache_data(show_spinner=False, ttl=1200, max_entries=3)
+@st.cache_data(show_spinner=False, persist="disk", max_entries=3)
 def _market_data(version: str):
     from src.ui.context import get_service
 
@@ -324,7 +324,10 @@ def render(_ctx=None):
     back_button(key="scout_back")
     page_header("Scout & Planejamento", "War Room de mercado: carências do clube, alvos realistas e simulação do elenco.")
     service = get_service()
-    version = service.db.stable_version()
+    # A chave muda a cada 20 min: preserva a atualização periódica do cache em memória
+    # e permite reaproveitar o mercado já processado após reiniciar o Streamlit.
+    import time
+    version = f"{service.db.stable_version()}:{int(time.time() // 1200)}"
     prefill = str(param("club", "") or st.session_state.get("scout_selected_club", ""))
     try:
         with st.spinner("Carregando mercado e histórico estatístico disponível..."):
