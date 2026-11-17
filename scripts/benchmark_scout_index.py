@@ -7,6 +7,7 @@ import math
 import sqlite3
 import statistics
 import time
+from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -69,7 +70,7 @@ def main() -> int:
 
     # mode=ro impede gravações no banco; query_only adiciona uma segunda proteção.
     uri = f"file:{quote(database.as_posix(), safe='/:')}?mode=ro"
-    since = time.strftime("%Y-%m-%d", time.localtime(time.time() - args.days * 86400))
+    since = (date.today() - timedelta(days=args.days)).isoformat()
     try:
         conn = sqlite3.connect(uri, uri=True, timeout=30)
     except sqlite3.Error as exc:
