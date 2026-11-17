@@ -89,7 +89,8 @@ def _merge_roster(roster, universe):
         lookup = universe.drop_duplicates("_core").set_index("_core")
         cols = [x for x in ("qualidade", "confianca_pct", "rating_media", "rating_12m", "qualidade_estatistica",
                             "nota_externa", "fontes_nota_externa", "fonte_qualidade", "minutos_12m",
-                            "jogos_12m", "nacionalidade", "valor_mercado_eur", "fim_contrato",
+                            "jogos_12m", "nacionalidade", "valor_mercado_eur", "valor_tm_atual",
+                            "valor_tm_media_12m", "valor_tm_ultima_avaliacao", "variacao_tm_12m_pct", "fim_contrato",
                             "goals_p90", "assists_p90", "xg_p90", "xa_p90", "chances_created_p90",
                             "def_actions_p90", "sprints_p90", "historico_temporadas", "ultimos_jogos")
                 if x in lookup]
@@ -139,6 +140,10 @@ def _dossier(player, roster):
     metrics = [
         ("Qualidade calculada por função", player.get("qualidade_estatistica", player.get("qualidade"))),
         ("Nota externa 0–100", player.get("nota_externa")),
+        ("Valor TM no cadastro (€)", player.get("valor_tm_atual", player.get("valor_mercado_eur"))),
+        ("Média de avaliação TM em 12m (€)", player.get("valor_tm_media_12m")),
+        ("Última avaliação TM em 12m (€)", player.get("valor_tm_ultima_avaliacao")),
+        ("Variação TM em 12m (%)", player.get("variacao_tm_12m_pct")),
         ("Minutos 12m", player.get("minutos_12m", player.get("minutos"))),
         ("Jogos 12m", player.get("jogos_12m", player.get("jogos"))),
         ("Nota média 12m", player.get("rating_12m", player.get("rating_media"))),
@@ -150,6 +155,8 @@ def _dossier(player, roster):
                                    for k, v in metrics]))
     if player.get("fontes_nota_externa"):
         st.caption("Fonte(s) da nota externa: " + str(player.get("fontes_nota_externa")))
+    if player.get("clube_observado") and player.get("clube_tm") and str(player.get("clube_tm")) != str(player.get("clube")):
+        st.caption(f"Vínculo observado em partidas recentes: {player.get('clube')}. O cadastro Transfermarkt ainda apontava {player.get('clube_tm')}; transferência não confirmada apenas por esta evidência.")
     if hist:
         d = pd.DataFrame(hist)
         cols = [c for c in ("temporada", "jogos", "minutos", "rating_media", "goals", "assists", "xg", "xa") if c in d]
