@@ -329,40 +329,74 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     p["idade"] = ((pd.Timestamp.today().normalize() - born).dt.days / 365.25).round(1)
     p["valor_mercado_eur"] = pd.to_numeric(p["valor_mercado_eur"], errors="coerce")
     p["fim_contrato"] = pd.to_datetime(p["fim_contrato"], errors="coerce")
-    hmap = _history_map(history)
-    # Pré-declara colunas do histórico antes do merge para evitar criação implícita via .at.
-    for item in hmap.values():
-        for col in item:
+    # Cruza o histórico por chave em uma operação vetorizada.
+    # A implementação anterior percorria o catálogo inteiro com iterrows() e atualizava célula por célula.
+    history_frame = history.copy() if history is not None and not history.empty and "core" in history else pd.DataFrame()
+    history_columns: List[str] = []
+    if not history_frame.empty:
+        history_frame["core"] = history_frame["core"].map(_safe_str)
+        history_frame = history_frame[history_frame["core"] != ""].drop_duplicates("core", keep="last")
+        history_columns = [col for col in history_frame.columns if col != "core"]
+        for col in history_columns:
             if col not in p:
                 p[col] = None
-    dup = p["_core"].duplicated(keep=False)
-    for idx, row in p.iterrows():
-        item = hmap.get(row["_core"])
-        # Homônimos com mais de um registro de mercado não recebem números por nome sem desambiguação.
-        if item and (not bool(dup.loc[idx]) or len(p.loc[dup & (p["_core"] == row["_core"])]) == 1):
-            for k, v in item.items():
-                if k not in ("core", "historico_temporadas", "ultimos_jogos"):
-                    p.at[idx, k] = v
-            p.at[idx, "historico_temporadas"] = json.dumps(item.get("historico_temporadas", []), ensure_ascii=False, default=str)
-            p.at[idx, "ultimos_jogos"] = json.dumps(item.get("ultimos_jogos", []), ensure_ascii=False, default=str)
-            # Se o cadastro de mercado ficou atrasado, a última aparição recente aponta o clube em que o atleta está atuando.
-            # Mantemos o valor/cadastro original para auditoria e não afirmamos que isso, sozinho, comprova a transferência.
-            current_club = _safe_str(row.get("clube"))
-            observed_club = _safe_str(item.get("ultimo_time"))
-            last_game = pd.to_datetime(item.get("ultimo_jogo"), errors="coerce")
-            if observed_club and pd.notna(last_game) and last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=150):
-                p.at[idx, "clube_tm"] = current_club
-                p.at[idx, "clube"] = observed_club
-                p.at[idx, "clube_observado"] = True
-                p.at[idx, "fonte_clube_observado"] = "última partida FotMob nos últimos 150 dias"
-            else:
-                p.at[idx, "clube_observado"] = False
-                p.at[idx, "fonte_clube_observado"] = "cadastro Transfermarkt"
+
+    # Homônimos no catálogo Transfermarkt continuam sem receber estatísticas ambíguas.
+    duplicated_core = p["_core"].duplicated(keep=False)
+    history_cores = set(history_frame["core"].astype(str)) if not history_frame.empty else set()
+    has_history = p["_core"].astype(str).isin(history_cores)
+    attach_mask = has_history & ~duplicated_core
+
+    if history_columns and attach_mask.any():
+        base_columns = set(p.columns)
+        attach = history_frame[history_frame["core"].isin(p.loc[attach_mask, "_core"])].copy()
+        attach["__history_present"] = True
+        rename = {col: f"__history_{col}" for col in history_columns}
+        attach = attach.rename(columns=rename)
+        p = p.merge(attach, left_on="_core", right_on="core", how="left",
+                    sort=False, validate="many_to_one")
+        matched = p["__history_present"].fillna(False).astype(bool)
+        for col in history_columns:
+            hist_col = f"__history_{col}"
+            if hist_col in p:
+                if col in base_columns:
+                    p[col] = p[hist_col].where(matched, p[col])
+                else:
+                    p[col] = p[hist_col]
+                p.drop(columns=[hist_col], inplace=True)
+        p.drop(columns=["core", "__history_present"], errors="ignore", inplace=True)
+    else:
+        matched = pd.Series(False, index=p.index)
+
+    # As coleções continuam serializadas como JSON, como espera o restante do Scout.
+    for col in ("historico_temporadas", "ultimos_jogos"):
+        if col not in p:
+            p[col] = "[]"
         else:
-            p.at[idx, "historico_temporadas"] = "[]"
-            p.at[idx, "ultimos_jogos"] = "[]"
-            if item:
-                p.at[idx, "historico_ambiguo"] = True
+            p.loc[~matched, col] = "[]"
+            p.loc[matched, col] = p.loc[matched, col].map(
+                lambda value: json.dumps(value if isinstance(value, (list, dict)) else [],
+                                         ensure_ascii=False, default=str)
+            )
+
+    ambiguous = duplicated_core.reindex(p.index, fill_value=False) & p["_core"].astype(str).isin(history_cores)
+    p.loc[ambiguous, "historico_ambiguo"] = True
+
+    # Se o cadastro de mercado ficou atrasado, usa o clube da última partida recente como observação,
+    # preservando o clube do Transfermarkt em clube_tm.
+    if "ultimo_jogo" in p and "ultimo_time" in p:
+        observed_club = p["ultimo_time"].map(_safe_str)
+        last_game = pd.to_datetime(p["ultimo_jogo"], errors="coerce")
+        recent = matched & observed_club.ne("") & last_game.notna() & (
+            last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=150)
+        )
+        not_recent = matched & ~recent
+        p.loc[recent, "clube_tm"] = p.loc[recent, "clube"]
+        p.loc[recent, "clube"] = observed_club.loc[recent]
+        p.loc[recent, "clube_observado"] = True
+        p.loc[recent, "fonte_clube_observado"] = "última partida FotMob nos últimos 150 dias"
+        p.loc[not_recent, "clube_observado"] = False
+        p.loc[not_recent, "fonte_clube_observado"] = "cadastro Transfermarkt"
     if club_values is not None and not club_values.empty:
         vals = club_values.copy()
         if {"transfermarkt_id", "valor_mercado_eur"} <= set(vals.columns):
