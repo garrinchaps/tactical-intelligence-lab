@@ -28,7 +28,7 @@ def _market_data(version: str):
         players = players[(last >= last.max() - 2) |
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
     history = E.load_player_history(get_service().db, days=1825)
-    valuations = D.table("tm_valores")
+    valuations = D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"])
     universe = E.add_quality_scores(E.build_market_universe(players, history, valuations))
     # Notas externas (ex.: Simonetti) corroboram a qualidade sem substituir métricas observadas.
     universe = E.merge_external_ratings(universe, D.external_ratings())
@@ -327,11 +327,22 @@ def render(_ctx=None):
     financial["club_aliases"] = aliases
     foreign_count = 0
     if not roster.empty and country and "nacionalidade" in roster:
-        foreign_count = int(sum(1 for n in roster["nacionalidade"].dropna().astype(str)
+        likely = roster.copy()
+        likely["_selection_score"] = (
+            pd.to_numeric(likely.get("qualidade"), errors="coerce").fillna(45) * .65 +
+            pd.to_numeric(likely.get("minutos_12m"), errors="coerce").fillna(0).clip(0, 2500) / 2500 * 35
+        )
+        likely = likely.sort_values("_selection_score", ascending=False).head(23)
+        foreign_count = int(sum(1 for n in likely["nacionalidade"].dropna().astype(str)
                                 if E.is_foreign_player(n, country) is True))
     financial["estrangeiros_atual"] = foreign_count
     feedback = E.rejection_preferences(service.db, team)
     feedback_reason = " · ".join(feedback.get("motivos", []))
+    allow_old_rejections = st.checkbox("Permitir novamente jogadores descartados em pesquisas anteriores",
+                                       value=False, key="scout_allow_old_rejections")
+    rejected_for_run = list(st.session_state[rejected_key])
+    if not allow_old_rejections:
+        rejected_for_run.extend(feedback.get("jogadores_recusados", []))
 
     pool = universe.copy() if universe is not None and not universe.empty else pd.DataFrame()
     if not pool.empty:
@@ -349,7 +360,7 @@ def render(_ctx=None):
                  for r in ("GK","CB","LB","RB","DM","CM","AM","LW","RW","ST") if int(counts.get(r, 0)) < 2]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = E.recommend(pool, needs, financial, country, competition, roster=roster,
-                             rejected=st.session_state[rejected_key], feedback_reason=feedback_reason, season=next_season) \
+                             rejected=rejected_for_run, feedback_reason=feedback_reason, season=next_season) \
             if not pool.empty else pd.DataFrame()
 
     tabs = st.tabs(["IA · Top 5", "Diagnóstico", "Busca manual", "Joias U23", "Planejamento"])
@@ -526,10 +537,11 @@ def render(_ctx=None):
                     from src.squad.formations import ROLE_PT
                     funcao = E.ROLE_LABELS.get(custom_role, custom_role)
                     birth_year = date.today().year - int(custom_age)
+                    observation = (custom_obs + " · " if custom_obs else "") + "Idade declarada; data de nascimento aproximada para cadastro."
                     D.add_player({"nome": custom_name.strip(), "clube": custom_club.strip(),
                         "posicao": custom_role, "funcao": funcao, "nascimento": f"{birth_year}-07-01",
                         "valor_mercado_eur": float(custom_value) if custom_value else None,
-                        "nota_manual": float(custom_rating) if custom_rating else None, "observacao": custom_obs})
+                        "nota_manual": float(custom_rating) if custom_rating else None, "observacao": observation})
                     custom = {"nome": custom_name.strip(), "clube": custom_club.strip(), "papel": custom_role,
                         "papel_alvo": custom_role, "papel_alvo_label": _role(custom_role), "idade": int(custom_age),
                         "nacionalidade": custom_nation, "valor_mercado_eur": float(custom_value) if custom_value else None,
