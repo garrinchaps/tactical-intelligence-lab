@@ -86,7 +86,7 @@ LANGUAGES = {
     "denmark": {"dinamarques"}, "croatia": {"croata"}, "serbia": {"servio"},
     "japan": {"japones"}, "south korea": {"coreano"},
 }
-BR_COMP_TOKENS = ("brasileirao", "serie a", "serie b", "campeonato brasileiro")
+BR_COMP_TOKENS = ("brasileirao", "campeonato brasileiro")
 
 
 def _num(value: Any) -> Optional[float]:
@@ -668,9 +668,14 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
                       "evidencias": {k: own.get(k) for k in ("xg", "shots_total", "shots_on_target", "goals") if k in own}})
         needs.append({"papel": "AM", "urgencia": min(88, 38 + attacking * 115), "motivo": "criação e chegada ao último terço podem elevar o volume ofensivo"})
     if build > .08:
-        needs.append({"papel": "CM", "urgencia": min(95, 42 + build * 150), "motivo": "circulação e retenção de bola abaixo da referência competitiva",
-                      "evidencias": {k: own.get(k) for k in ("possession_pct", "passes_total", "pass_accuracy_pct") if k in own}})
-        needs.append({"papel": "FB", "urgencia": min(80, 35 + build * 100), "motivo": "laterais com qualidade de apoio podem dar saída e amplitude"})
+        build_urgency = min(95, 42 + build * 150)
+        build_evidence = {k: own.get(k) for k in ("possession_pct", "passes_total", "pass_accuracy_pct") if k in own}
+        needs.append({"papel": "CM", "urgencia": build_urgency, "motivo": "circulação e retenção de bola abaixo da referência competitiva",
+                      "evidencias": build_evidence})
+        for fullback in ("LB", "RB"):
+            needs.append({"papel": fullback, "urgencia": min(80, 35 + build * 100),
+                          "motivo": "laterais com qualidade de apoio podem dar saída, amplitude e progressão",
+                          "evidencias": build_evidence})
     squad = roster if roster is not None else pd.DataFrame()
     if not squad.empty:
         counts = squad["papel"].value_counts().to_dict() if "papel" in squad else {}
@@ -825,15 +830,16 @@ def buyer_financial_profile(db, club: Optional[Dict[str, Any]], roster: pd.DataF
 
 
 def _affinity(candidate_nationality: Any, buyer_country: Any) -> Tuple[int, str]:
-    c = _safe_str(candidate_nationality).lower()
-    b = _safe_str(buyer_country).lower()
+    c = _country_core(candidate_nationality)
+    b = _country_core(buyer_country)
     if not c or not b:
         return 50, "nacionalidade/idioma sem dados suficientes"
-    c_lang = set().union(*[v for k, v in LANGUAGES.items() if k in c]) if any(k in c for k in LANGUAGES) else set()
-    b_lang = set().union(*[v for k, v in LANGUAGES.items() if k in b]) if any(k in b for k in LANGUAGES) else set()
+    c_parts = [_country_core(x) for x in re.split(r"[,;/|]", c)]
+    c_lang = set().union(*[v for k, v in LANGUAGES.items() if any(k in part for part in c_parts)]) if c_parts else set()
+    b_lang = set().union(*[v for k, v in LANGUAGES.items() if k in b]) if b else set()
     if c_lang & b_lang:
         return 88, "idioma compartilhado pode facilitar comunicação e adaptação"
-    if any(x in c for x in ("argentina", "uruguay", "chile", "paraguay", "colombia", "ecuador", "peru")) and "brazil" in b:
+    if any(x in " ".join(c_parts) for x in ("argentina", "uruguay", "chile", "paraguay", "colombia", "ecuador", "peru")) and b == "brazil":
         return 75, "contexto sul-americano pode reduzir distância cultural; idioma continua diferente"
     return 52, "não há evidência suficiente para presumir adaptação cultural"
 
@@ -916,11 +922,17 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
         finance = float(np.clip(100 - max(0, ratio - .18) * 72, 8, 96))
     else:
         finance = 48.0
-    mins = _num(candidate.get("minutos_12m")) or 0
+    mins_raw = _num(candidate.get("minutos_12m"))
+    if mins_raw is None:
+        mins_raw = _num(candidate.get("minutos"))
+    minutes_known = mins_raw is not None
+    mins = mins_raw or 0
     quality = _num(candidate.get("qualidade"))
-    usage = float(np.clip(70 - max(0, mins - 1800) / 90 + min(25, max(0, 900 - mins) / 36), 18, 88))
-    loan_opportunity = ((mins < 700 and quality is not None and quality >= 65) or
-                        (months_left is not None and months_left <= 12 and mins < 1500 and quality is not None and quality >= 60))
+    usage = (float(np.clip(70 - max(0, mins - 1800) / 90 + min(25, max(0, 900 - mins) / 36), 18, 88))
+             if minutes_known else 48.0)
+    loan_opportunity = (minutes_known and (
+                        (mins < 700 and quality is not None and quality >= 65) or
+                        (months_left is not None and months_left <= 12 and mins < 1500 and quality is not None and quality >= 60)))
     if loan_opportunity:
         usage = min(96, usage + 10)
     affinity, affinity_note = _affinity(candidate.get("nacionalidade"), buyer_country)
@@ -959,8 +971,9 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if loan_opportunity and score >= 50 else "Alvo difícil / sonho"
     reasons = [
         f"Financeiro: {finance:.0f}/100 — {price_basis}.",
-        f"Utilização recente: {mins:.0f} minutos nos últimos 12 meses; " +
-        ("perfil de empréstimo pode fazer sentido." if loan_opportunity else "minutagem considerada na negociação."),
+        (f"Utilização recente: {mins:.0f} minutos nos últimos 12 meses; " +
+         ("perfil de empréstimo pode fazer sentido." if loan_opportunity else "minutagem considerada na negociação."))
+        if minutes_known else "Minutagem recente indisponível; não foi presumido que o atleta esteja encostado.",
         f"Contrato: {months_left:.1f} mês(es) restante(s)." if months_left is not None else "Prazo contratual indisponível.",
         f"Adaptação: {affinity_note}.", f"Escada de mercado: {tier_note}.", foreign_note,
     ]
@@ -1017,9 +1030,9 @@ def chemistry(candidate: Dict[str, Any], roster: pd.DataFrame) -> Dict[str, Any]
             continue
         score = 50
         reason = "complementaridade funcional provável"
-        if role == "FB" and mr == "WIDE":
+        if role in ("LB", "RB", "LWB", "RWB") and mr in ("LW", "RW", "LM", "RM"):
             score, reason = 76, "lateral e ponta ocupam corredores complementares"
-        elif role == "WIDE" and mr == "FB":
+        elif role in ("LW", "RW", "LM", "RM") and mr in ("LB", "RB", "LWB", "RWB"):
             score, reason = 76, "ponta e lateral podem alternar amplitude e apoio"
         elif role == "ST" and mr in ("ATT_MID", "MID"):
             score, reason = 79, "meia pode alimentar a zona de finalização do atacante"
