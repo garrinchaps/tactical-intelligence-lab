@@ -197,7 +197,7 @@ class MatchDataService:
         if not has_team_stats and has_player_data:
             notes.append("Há escalações e/ou números individuais, mas não estatísticas coletivas do time.")
         elif not has_analysis_data:
-            notes.append("Esta partida só tem placar/gols: não há estatísticas coletivas nem números individuais "
+            notes.append("Esta partida só traz placar/gols: não há estatísticas coletivas nem números individuais "
                          "em nenhuma fonte local. Ative uma fonte de estatísticas quando disponível.")
         return MatchBundle(mid, meta, level, source, boxscore=box, notes=notes)
 
