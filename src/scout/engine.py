@@ -272,6 +272,10 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
             p[col] = pd.Series(dtype=object)
     p["nome"] = p["nome"].fillna("").astype(str)
     p = p[p["nome"].str.strip() != ""].copy()
+    for col in ("historico_temporadas", "ultimos_jogos", "clube_tm", "clube_observado", "fonte_clube_observado",
+                "historico_ambiguo", "sem_cadastro_mercado"):
+        if col not in p:
+            p[col] = None
     p["_core"] = p["nome"].map(player_core)
     p["_role"] = [_role(x, y) for x, y in zip(p["posicao"], p["funcao"])]
     p["papel"] = p["_role"]
@@ -495,7 +499,7 @@ def merge_external_ratings(players: pd.DataFrame, ratings: Optional[pd.DataFrame
     both = stat.notna() & matched.notna()
     only_external = stat.isna() & matched.notna()
     # Nota externa tem peso de corroborar, não dominar a produção observada.
-    out.loc[both, "qualidade"] = .82 * stat[both] + .18 * matched[both]
+    out.loc[both, "qualidade"] = (.82 * stat[both] + .18 * matched[both]).round(1)
     out.loc[only_external, "qualidade"] = matched[only_external]
     out["fonte_qualidade"] = np.select(
         [both, only_external, stat.notna()],
