@@ -379,8 +379,12 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                                          ensure_ascii=False, default=str)
             )
 
-    ambiguous = duplicated_core.reindex(p.index, fill_value=False) & p["_core"].astype(str).isin(history_cores)
+    duplicated_after_merge = p["_core"].duplicated(keep=False)
+    ambiguous = duplicated_after_merge & p["_core"].astype(str).isin(history_cores)
     p.loc[ambiguous, "historico_ambiguo"] = True
+    no_history = ~matched & ~ambiguous
+    p.loc[no_history, "clube_observado"] = False
+    p.loc[no_history, "fonte_clube_observado"] = "cadastro Transfermarkt"
 
     # Se o cadastro de mercado ficou atrasado, usa o clube da última partida recente como observação,
     # preservando o clube do Transfermarkt em clube_tm.
