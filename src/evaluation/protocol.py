@@ -35,7 +35,7 @@ from sklearn.model_selection import GroupKFold
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from src.machine_learning.danger_dataset import BASELINE_FEATURES, FEATURES
+from src.machine_learning.danger_dataset import BASELINE_FEATURES, MODEL_FEATURES as FEATURES
 from src.machine_learning.neural_net import NeuralNetwork
 
 REPORT_DIR = Path("models/evaluation")
