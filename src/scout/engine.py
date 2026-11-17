@@ -158,7 +158,8 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     valid = ratings.notna() & (mins > 0)
     out["rating_media"] = round(float(np.average(ratings[valid], weights=mins[valid])), 2) if valid.any() else None
     out["ultimo_jogo"] = _safe_str(rows["match_date"].max()) if "match_date" in rows else ""
-    latest = rows.loc[pd.to_datetime(rows["match_date"], errors="coerce").idxmax()] if len(rows) else {}
+    date_values = rows["match_date"].dropna().astype(str) if "match_date" in rows else pd.Series(dtype=str)
+    latest = rows.loc[date_values.idxmax()] if not date_values.empty else (rows.iloc[-1] if len(rows) else {})
     out["ultimo_time"] = _safe_str(latest.get("team_name", "")) if isinstance(latest, pd.Series) else ""
     out["ultima_competicao"] = _safe_str(latest.get("competition_name", "")) if isinstance(latest, pd.Series) else ""
 
@@ -272,8 +273,8 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
         all_data["nome_observado"] = _safe_str(latest_row.get("player_name"))
         all_data["posicao_observada"] = pd.Series(observed_positions).mode().iloc[0] if observed_positions else ""
         all_data["nacionalidade_observada"] = None
-        dates = pd.to_datetime(group["match_date"], errors="coerce")
-        last_year = group.loc[dates >= recent_cutoff]
+        dates = group["match_date"].astype(str)
+        last_year = group.loc[dates >= recent_cutoff.strftime("%Y-%m-%d")]
         recent = _player_season_totals(last_year) if not last_year.empty else {}
         all_data.update({
             "minutos_12m": recent.get("minutos", 0),
