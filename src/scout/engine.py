@@ -383,12 +383,14 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                 report("Carregando partidas dos atletas selecionados...")
                 raw = pd.read_sql_query(selected_query, conn, params=[since])
                 report(f"Registros históricos carregados: {len(raw):,}")
-    except Exception:
+    except Exception as exc:
+        report(f"Falha ao consultar o histórico do Scout: {type(exc).__name__}: {exc}")
         return pd.DataFrame()
     if raw.empty:
+        report("Nenhum registro de histórico encontrado para os jogadores selecionados.")
         return raw
 
-    report("Agregando temporadas, estatísticas e últimos jogos...")
+    report("Normalizando nomes e partidas do histórico...")
     # Normaliza cada nome/clube uma única vez, não uma vez por aparição do jogador.
     player_names = raw["player_name"].dropna().drop_duplicates().tolist()
     player_map = {name: player_core(name) for name in player_names}
