@@ -29,3 +29,18 @@ def test_opponent_elo_uses_only_results_before_target_match(tmp_path):
     assert strength["elo"] > 1500
     assert strength["ajuste"] > 0
     assert strength["confianca"] == "média"
+
+
+def test_rating_adjustment_is_small_and_explicitly_contextual():
+    from src.analytics.rating_v2 import evaluate
+
+    ref = pd.DataFrame({
+        "funcao": ["ponta"] * 8,
+        "xg90": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
+    })
+    row = {"jogador": "Atacante", "equipe": "A", "funcao": "ponta", "minutos": 90, "xg90": 0.9}
+    baseline = evaluate(row, ref)
+    adjusted = evaluate(row, ref, {"opponent_adjustment": 0.3,
+                                   "opponent_strength": {"adversario": "Rival", "nivel": 75.0}})
+    assert adjusted["desempenho"] == min(10.0, round(baseline["desempenho"] + 0.3, 1))
+    assert adjusted["forca_adversario"]["adversario"] == "Rival"
