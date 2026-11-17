@@ -67,6 +67,12 @@ def _make_xgb():
 
 # --------------------------------------------------------------------- A
 def evaluate_danger(data: pd.DataFrame, k: int = 5, seed: int = 42, nn_epochs: Optional[int] = None) -> Dict[str, Any]:
+    # Compatibilidade com datasets legados: a variável de proveniência 360 não existia
+    # no CSV de demonstração. Deriva-a da origem registrada, sem confundir proxy com tracking.
+    data = data.copy()
+    if "density_is_360" not in data.columns:
+        data["density_is_360"] = (data["density_source"].eq("statsbomb_360").astype(float)
+                                  if "density_source" in data.columns else 0.0)
     data = data.dropna(subset=FEATURES + ["target"]).reset_index(drop=True)
     X = data[FEATURES].to_numpy(float)
     Xb = data[BASELINE_FEATURES].to_numpy(float)
