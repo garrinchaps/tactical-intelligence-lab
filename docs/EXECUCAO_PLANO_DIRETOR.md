@@ -13,6 +13,8 @@ Esta rodada adiciona:
 - um workflow independente de regressão completa;
 - proteção do bootstrap contra substituição silenciosa de banco SQLite existente;
 - alinhamento da precedência de TACTICAL_DB_PATH entre o bootstrap e DataHubDB;
+- preservação da régua individual 2.0 em `src/analytics/rating_v2_legacy.py`, enquanto a 3.0.1 permanece padrão;
+- testes de compatibilidade da régua legada;
 - este registro de estado e pendências.
 
 Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O bootstrap agora preserva bancos existentes; uma substituição de banco pequeno que contém tabelas exige opt-in explícito e cria backup consistente antes da troca. O inventário continua sem importar/rodar módulos do app e a leitura do SQLite é read-only.
@@ -27,6 +29,7 @@ Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O b
 | PR #3 | `codex/scout-history-index-alignment` → `codex/fotmob-depth-routing`; 1 arquivo | Aberto; dependente da branch/PR #2 |
 | CI anterior | Workflow `Scout module checks` compila parte do Scout e executa `test_scout_engine.py` e `test_database_path_config.py` | Não representa a suíte completa |
 | CI anterior — último head consultado | Duas execuções do job `scout-engine` em `1a7afaf` concluíram com sucesso | Aprovado somente para esse job e esses testes |
+| CI integral — head `daf387b` | `compileall`, inventário read-only e `pytest` completo aprovados: **324 passed, 1 skipped, 21 warnings** (Python 3.11) | Aprovado para o checkout/ambiente do GitHub Actions; não substitui validação visual end-to-end nem auditoria do banco local |
 
 **Importante:** os PRs são propostas de alteração, não prova de que o código já está na branch `main`. PR #2 está direcionado a uma branch intermediária, e PR #3 é empilhado sobre PR #2. Não altere essas bases nem mescle automaticamente.
 
@@ -37,7 +40,7 @@ Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O b
 | Inventário de páginas, módulos, símbolos e imports | Parcial; `docs/ARQUITETURA.md` documenta o mapa, mas precisa ser atualizado automaticamente | Usar `scripts/project_audit.py`; revisar discrepâncias com o mapa manual |
 | Inventário SQLite | Parcial; novo script lê schema, colunas, índices e FKs em modo read-only | Executar no banco local com `--database`; contagem de linhas e quick_check são opcionais por custo |
 | Bootstrap seguro do banco | Implementado na branch de trabalho; testes adicionados | Banco pequeno com tabelas não é sobrescrito sem `TACTICAL_ALLOW_DB_REPLACE=1`; substituição intencional gera backup via SQLite Backup API |
-| Testes de regressão gerais | Lacuna de CI confirmada: workflow anterior testa somente dois arquivos | Novo workflow executa compileall e `pytest` completo; aceitação somente após execução verde |
+| Testes de regressão gerais | Novo workflow executou compileall, inventário e a suíte completa em `daf387b`: **324 passed, 1 skipped, 21 warnings** | Aprovado para esse checkout; ampliar cobertura visual/integrada e testar com o banco local real |
 | Alinhamento do histórico do Scout | Correção existe na linha de desenvolvimento/PRs de trabalho | Reexecutar teste dedicado e comparar dados agregados com fixture independente |
 | Benchmark do Scout | Script dedicado existe na branch de trabalho | Medir baseline e pós-otimização no mesmo banco/hardware, guardando p50/p95 e número de candidatos |
 | Pré-agregação de jogador/temporada/365 dias/5 partidas/competição/clube | Não comprovada como camada persistente incremental | Implementar depois de medir consultas; exigir equivalência numérica com cálculo bruto e rollback |
@@ -64,7 +67,7 @@ Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O b
 | xT | Modelo/visualização já documentados na arquitetura | Fórmula, normalização, validação temporal e comparação com baseline |
 | xG / xA / xPass | Existem componentes e campos em algumas fontes; modelos próprios não estão todos comprovados como validados | Dataset com definição do alvo, validação fora da amostra, calibração e comparação com baseline |
 | VAEP | Não comprovado como motor completo validado | Implementação conforme estado/ação, valor ofensivo/defensivo e avaliação temporal |
-| Player Rating | Avaliações e versões existem em branches de trabalho | Separar desempenho-base, ajustes, confiança e amostras; backtest cego por função |
+| Player Rating | Régua 3.0.1 em desenvolvimento; versão 2.0 preservada em `rating_v2_legacy.py` para reprodução histórica | Separar desempenho-base, ajustes, confiança e amostras; backtest cego por função e comparar 2.0 × 3.0.1 |
 | Team Rating / Match Strength / forecast | Parcial ou não verificado | Protocolo, calibração, incerteza, baseline e validação fora da amostra |
 | Redes neurais | Rede MLP própria em NumPy está presente na arquitetura | PyTorch é opcional; só entra quando superar baseline simples em validação repetível |
 | Player DNA / Team DNA | Parcial em ratings e históricos, sem cobertura demonstrada para todos os atributos | Perfil dinâmico com atributos observados, derivados e não observados explicitamente separados |
