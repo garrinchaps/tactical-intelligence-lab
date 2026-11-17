@@ -67,6 +67,14 @@ def _market_data(version: str):
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
 
 
+@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+def _rank_candidates(version, team, country, competition, season, rejected, feedback_reason,
+                     _pool, _needs, _financial, _roster):
+    """Reaproveita o ranking caro entre interações; a revisão invalida quando o histórico muda."""
+    return E.recommend(_pool, _needs, _financial, country, competition, roster=_roster,
+                       rejected=rejected, feedback_reason=feedback_reason, season=season)
+
+
 def _slug(value):
     return re.sub(r"[^a-z0-9]+", "_", str(value).casefold()).strip("_")[:50] or "item"
 
@@ -432,9 +440,9 @@ def render(_ctx=None):
         needs = [{"papel": r, "urgencia": 55, "motivo": "profundidade posicional reduzida"}
                  for r in ("GK","CB","LB","RB","DM","CM","AM","LW","RW","ST") if int(counts.get(r, 0)) < 2]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
-        ranked = E.recommend(pool, needs, financial, country, competition, roster=roster,
-                             rejected=rejected_for_run, feedback_reason=feedback_reason, season=next_season) \
-            if not pool.empty else pd.DataFrame()
+        ranked = _rank_candidates(version, team, country, competition, next_season,
+                                  tuple(rejected_for_run), feedback_reason,
+                                  pool, needs, financial, roster) if not pool.empty else pd.DataFrame()
 
     tabs = st.tabs(["IA · Top 5", "Diagnóstico", "Busca manual", "Joias U23", "Planejamento"])
     with tabs[0]:

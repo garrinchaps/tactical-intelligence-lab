@@ -112,12 +112,22 @@ CREATE INDEX IF NOT EXISTS idx_team_stats_match ON match_team_stats(match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_team ON match_lineups(team_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_player ON match_lineups(player_name);
 CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team_name);
--- Índice de cobertura: atende match_id/player_name/minutes sem buscar a tabela base.
-CREATE INDEX IF NOT EXISTS idx_pstats_match_player_minutes
-    ON match_player_stats(match_id, minutes, player_name);
 CREATE INDEX IF NOT EXISTS idx_pstats_player ON match_player_stats(player_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_coach ON match_lineups(coach, match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
+-- Revisão leve do catálogo: triggers também capturam gravações feitas por outros processos.
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_insert AFTER INSERT ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_update AFTER UPDATE ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_delete AFTER DELETE ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
 """
 
 
@@ -151,7 +161,6 @@ class DataHubDB:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.execute("PRAGMA foreign_keys = ON;")
         # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
-        conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA synchronous = NORMAL;")
         conn.execute("PRAGMA cache_size = -64000;")         # 64 MB de cache por conexão (o PC tem 16 GB)
         conn.execute("PRAGMA temp_store = MEMORY;")
@@ -163,7 +172,9 @@ class DataHubDB:
             conn.close()
 
     def migrate(self) -> None:
+        """Aplica DDL leve e backfills legados uma única vez por versão do schema."""
         with self.connect() as conn:
+            conn.execute("PRAGMA journal_mode = WAL;")
             if self.schema_path.exists():
                 conn.executescript(self.schema_path.read_text(encoding="utf-8"))
             cols = {r[1] for r in conn.execute("PRAGMA table_info(matches)").fetchall()}
@@ -171,31 +182,53 @@ class DataHubDB:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
             conn.executescript(DATA_HUB_DDL)
+            now = utc_now()
+            conn.executemany(
+                """INSERT OR IGNORE INTO source_state (source,state_key,state_value,updated_at)
+                   VALUES ('cache',?,?,?)""",
+                [("catalog_revision", "1", now), ("player_history_revision", "1", now)],
+            )
         self._seed_demo_catalog()
         try:
             self._fix_levels()
         except Exception:
             pass
         with self.connect() as conn:
-            # Classifica linhas antigas que ainda não têm fonte/nível
-            rows = conn.execute(
-                "SELECT match_id FROM matches WHERE data_source IS NULL OR data_level IS NULL"
-            ).fetchall()
-            for (mid,) in rows:
-                src = source_from_internal_id(int(mid))
-                if _is_simulated(int(mid)):
-                    level = DataLevel.SIMULATED
-                elif int(mid) == UPLOAD_ID:
-                    level = DataLevel.UPLOAD
-                else:
-                    has_events = conn.execute(
-                        "SELECT 1 FROM events WHERE match_id = ? LIMIT 1", (int(mid),)
-                    ).fetchone()
-                    level = DataLevel.EVENTS if (has_events or src in ("statsbomb", "wyscout")) else DataLevel.RESULT
-                conn.execute(
-                    "UPDATE matches SET data_source = ?, data_level = ?, source_match_id = ? WHERE match_id = ?",
-                    (src, level, str(to_source_id(int(mid))), int(mid)),
-                )
+            schema_version = int((conn.execute("PRAGMA user_version").fetchone() or [0])[0])
+            if schema_version < 27:
+                # Backfill histórico caro: roda apenas na primeira abertura desta versão.
+                rows = conn.execute(
+                    "SELECT match_id FROM matches WHERE data_source IS NULL OR data_level IS NULL"
+                ).fetchall()
+                for (mid,) in rows:
+                    src = source_from_internal_id(int(mid))
+                    if _is_simulated(int(mid)):
+                        level = DataLevel.SIMULATED
+                    elif int(mid) == UPLOAD_ID:
+                        level = DataLevel.UPLOAD
+                    else:
+                        has_events = conn.execute(
+                            "SELECT 1 FROM events WHERE match_id = ? LIMIT 1", (int(mid),)
+                        ).fetchone()
+                        level = DataLevel.EVENTS if (has_events or src in ("statsbomb", "wyscout")) else DataLevel.RESULT
+                    conn.execute(
+                        "UPDATE matches SET data_source = ?, data_level = ?, source_match_id = ? WHERE match_id = ?",
+                        (src, level, str(to_source_id(int(mid))), int(mid)),
+                    )
+                if int((conn.execute("PRAGMA user_version").fetchone() or [0])[0]) >= 26:
+                    conn.execute("PRAGMA user_version = 27")
+
+    def _bump_cache_revision(self, key: str) -> None:
+        """Incrementa revisão lógica sem ler/contar o catálogo ou o histórico."""
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT INTO source_state (source,state_key,state_value,updated_at)
+                   VALUES ('cache',?,'1',?)
+                   ON CONFLICT(source,state_key) DO UPDATE SET
+                     state_value=CAST(COALESCE(source_state.state_value,'0') AS INTEGER)+1,
+                     updated_at=excluded.updated_at""",
+                (key, utc_now()),
+            )
 
     def _fix_levels(self) -> None:
         """BOXSCORE só quando há estatísticas de equipe; placar + gols/escalações = RESULT (corrige bases antigas)."""
@@ -346,6 +379,11 @@ class DataHubDB:
         promovido). Antes incluía o relógio e, a cada 10 min, o app relia o catálogo inteiro do banco.
         """
         with self.connect() as conn:
+            row = conn.execute(
+                "SELECT state_value FROM source_state WHERE source='cache' AND state_key='catalog_revision'"
+            ).fetchone()
+            if row and row[0] is not None:
+                return str(row[0])
             n, rich = conn.execute(
                 "SELECT COUNT(*), SUM(CASE WHEN data_level IN ('EVENTS','BOXSCORE') THEN 1 ELSE 0 END) FROM matches"
             ).fetchone()
@@ -455,6 +493,7 @@ class DataHubDB:
                     (mid, p["team_name"], p["player_name"], p.get("position"), p.get("minutes"),
                      p.get("rating"), json.dumps(p.get("stats") or {}, ensure_ascii=False, separators=(",", ":"))),
                 )
+        self._bump_cache_revision("player_history_revision")
 
     def load_boxscore(self, match_id: int) -> Dict[str, Any]:
         mid = int(match_id)

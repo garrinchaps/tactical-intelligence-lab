@@ -33,21 +33,23 @@ def table(name: str, columns: Optional[List[str]] = None, col: Optional[str] = N
         return pd.DataFrame()
     path = lk.path(name)
     vals = None if values is None else sorted({str(v).replace(".0", "") for v in values if v is not None})
-    key = f"{name}|{path.stat().st_mtime}|{columns}|{col}|{vals}"
+    stat = path.stat()
+    key = f"{name}|{stat.st_mtime_ns}|{stat.st_size}|{columns}|{col}|{vals}"
     if key in _MEM:
         return _MEM[key]
     df = pd.DataFrame()
+    filtered_read_succeeded = False
     if path.suffix == ".parquet" and col and vals is not None:
         try:
             import pyarrow.dataset as ds
-
-            d = ds.dataset(str(path))
-            typ = d.schema.field(col).type
+            dataset = ds.dataset(str(path))
+            typ = dataset.schema.field(col).type
             cast = [int(v) for v in vals if v.lstrip("-").isdigit()] if "int" in str(typ) else vals
-            df = d.to_table(columns=columns, filter=ds.field(col).isin(cast)).to_pandas()
+            df = dataset.to_table(columns=columns, filter=ds.field(col).isin(cast)).to_pandas()
+            filtered_read_succeeded = True
         except Exception:
-            df = pd.DataFrame()
-    if df.empty:
+            filtered_read_succeeded = False
+    if not filtered_read_succeeded:
         df = lk.read(name, columns)
         if col and vals is not None and col in df:
             df = df[df[col].astype(str).str.replace(r"\.0$", "", regex=True).isin(vals)]

@@ -76,14 +76,16 @@ COUNT_KEYS = {
 
 
 def history_cache_revision(db: Any) -> str:
-    """Fingerprint conservador do SQLite para versionar caches do Scout.
+    """Revisão seletiva: logs e sincronizações alheias não invalidam o histórico do Scout."""
+    getter = getattr(db, "get_state", None)
+    if callable(getter):
+        try:
+            revision = getter("cache", "player_history_revision")
+            if revision is not None:
+                return f"player-history:{revision}"
+        except Exception:
+            pass
 
-    O conteúdo de uma base WAL pode estar dividido entre o arquivo principal e
-    o -wal. O -shm é deliberadamente ignorado porque é um índice compartilhado
-    transitório, não a fonte persistente dos dados. Se não for possível
-    verificar o arquivo com segurança, a chave é volátil e o cache não é
-    reutilizado entre chamadas.
-    """
     import time
 
     raw_path = getattr(db, "db_path", None)
@@ -385,20 +387,33 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                 # as estatísticas pelo match_id, em vez de varrer o índice de todos os atletas.
                 report("Identificando atletas ativos nos últimos 180 dias...")
                 active_since = (date.today() - timedelta(days=180)).isoformat()
-                active_rows = pd.read_sql_query(
+                has_covering_index = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
+                    ("idx_pstats_match_player_minutes",),
+                ).fetchone() is not None
+                if has_covering_index:
+                    active_query = """
+                        SELECT p.player_name, p.match_id, SUM(p.minutes) AS minutes
+                        FROM matches AS m
+                        CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
+                        WHERE p.match_id = m.match_id
+                          AND m.match_date >= ?
+                          AND p.minutes > 0
+                          AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+                        GROUP BY p.player_name, p.match_id
                     """
-                    SELECT p.player_name, p.match_id, SUM(p.minutes) AS minutes
-                    FROM matches AS m
-                    CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
-                    WHERE p.match_id = m.match_id
-                      AND m.match_date >= ?
-                      AND p.minutes > 0
-                      AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
-                    GROUP BY p.player_name, p.match_id
-                    """,
-                    conn,
-                    params=[active_since],
-                )
+                else:
+                    active_query = """
+                        SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
+                        FROM matches AS m
+                        CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match
+                        WHERE p.match_id = m.match_id
+                          AND m.match_date >= ?
+                          AND COALESCE(p.minutes, 0) > 0
+                          AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
+                        GROUP BY p.player_name, p.match_id
+                    """
+                active_rows = pd.read_sql_query(active_query, conn, params=[active_since])
                 if active_rows.empty:
                     active_cores = set()
                 else:

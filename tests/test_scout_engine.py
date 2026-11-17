@@ -394,6 +394,17 @@ def test_load_player_history_filters_names_but_keeps_full_history_and_active_unl
     assert by_core.loc["beta unlisted", "minutos"] == 570
 
 
+def test_load_player_history_falls_back_before_covering_index_is_installed(tmp_path):
+    path = tmp_path / "history_without_covering_index.sqlite"
+    _history_fixture(path)
+    with sqlite3.connect(path) as conn:
+        conn.execute("DROP INDEX idx_pstats_match_player_minutes")
+    history = load_player_history(_SQLiteHistoryDB(path), days=1825, player_names=["Alpha Target"])
+    by_core = history.set_index("core")
+    assert by_core.loc["alpha target", "jogos"] == 2
+    assert by_core.loc["beta unlisted", "jogos"] == 5
+
+
 def test_load_player_history_without_market_names_preserves_full_catalog_behavior(tmp_path):
     path = tmp_path / "history_all.sqlite"
     _history_fixture(path)
@@ -444,6 +455,20 @@ def test_history_cache_revision_never_reuses_in_memory_database_key():
 
     db = type("DB", (), {"db_path": ":memory:"})()
     assert history_cache_revision(db) != history_cache_revision(db)
+
+
+def test_history_cache_revision_prefers_logical_player_history_revision(tmp_path):
+    from src.scout.engine import history_cache_revision
+    database = tmp_path / "tactical_lab.db"
+    database.write_bytes(b"same database")
+    state = {"revision": "10"}
+    db = type("DB", (), {"db_path": database,
+        "get_state": lambda self, source, key: state["revision"]})()
+    first = history_cache_revision(db)
+    (tmp_path / "tactical_lab.db-wal").write_bytes(b"unrelated sync/log activity")
+    assert history_cache_revision(db) == first
+    state["revision"] = "11"
+    assert history_cache_revision(db) != first
 
 
 def test_active_player_scan_uses_covering_history_index(tmp_path):
