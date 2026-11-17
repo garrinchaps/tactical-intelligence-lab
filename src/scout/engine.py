@@ -288,6 +288,19 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                     p.at[idx, k] = v
             p.at[idx, "historico_temporadas"] = json.dumps(item.get("historico_temporadas", []), ensure_ascii=False, default=str)
             p.at[idx, "ultimos_jogos"] = json.dumps(item.get("ultimos_jogos", []), ensure_ascii=False, default=str)
+            # Se o cadastro de mercado ficou atrasado, a última aparição recente aponta o clube em que o atleta está atuando.
+            # Mantemos o valor/cadastro original para auditoria e não afirmamos que isso, sozinho, comprova a transferência.
+            current_club = _safe_str(row.get("clube"))
+            observed_club = _safe_str(item.get("ultimo_time"))
+            last_game = pd.to_datetime(item.get("ultimo_jogo"), errors="coerce")
+            if observed_club and pd.notna(last_game) and last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=150):
+                p.at[idx, "clube_tm"] = current_club
+                p.at[idx, "clube"] = observed_club
+                p.at[idx, "clube_observado"] = True
+                p.at[idx, "fonte_clube_observado"] = "última partida FotMob nos últimos 150 dias"
+            else:
+                p.at[idx, "clube_observado"] = False
+                p.at[idx, "fonte_clube_observado"] = "cadastro Transfermarkt"
         else:
             p.at[idx, "historico_temporadas"] = "[]"
             p.at[idx, "ultimos_jogos"] = "[]"
@@ -826,7 +839,8 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     mins = _num(candidate.get("minutos_12m")) or 0
     quality = _num(candidate.get("qualidade"))
     usage = float(np.clip(70 - max(0, mins - 1800) / 90 + min(25, max(0, 900 - mins) / 36), 18, 88))
-    loan_opportunity = mins < 700 and quality is not None and quality >= 65
+    loan_opportunity = ((mins < 700 and quality is not None and quality >= 65) or
+                        (months_left is not None and months_left <= 12 and mins < 1500 and quality is not None and quality >= 60))
     if loan_opportunity:
         usage = min(96, usage + 10)
     affinity, affinity_note = _affinity(candidate.get("nacionalidade"), buyer_country)
@@ -861,7 +875,7 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     foreign_count = int(buyer.get("estrangeiros_atual", foreign_count) or 0)
     score = (.30 * finance + .18 * usage + .16 * tier + .14 * contract_score + .12 * affinity + .10 * 72) - foreign_penalty
     score = int(round(float(np.clip(score, 0, 100))))
-    label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if score >= 56 or loan_opportunity else "Alvo difícil / sonho"
+    label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if loan_opportunity and score >= 50 else "Alvo difícil / sonho"
     reasons = [
         f"Financeiro: {finance:.0f}/100 — {price_basis}.",
         f"Utilização recente: {mins:.0f} minutos nos últimos 12 meses; " +
