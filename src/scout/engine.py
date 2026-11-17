@@ -385,12 +385,12 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                 active_since = (date.today() - timedelta(days=180)).isoformat()
                 active_rows = pd.read_sql_query(
                     """
-                    SELECT p.player_name, p.match_id, SUM(COALESCE(p.minutes, 0)) AS minutes
+                    SELECT p.player_name, p.match_id, SUM(p.minutes) AS minutes
                     FROM matches AS m
                     CROSS JOIN match_player_stats AS p INDEXED BY idx_pstats_match_player_minutes
                     WHERE p.match_id = m.match_id
                       AND m.match_date >= ?
-                      AND COALESCE(p.minutes, 0) > 0
+                      AND p.minutes > 0
                       AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
                     GROUP BY p.player_name, p.match_id
                     """,
