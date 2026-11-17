@@ -3,9 +3,10 @@ name: Full regression and project audit
 on:
   push:
     branches:
-      - codex/fotmob-depth-routing
+      - codex/**
   pull_request:
     branches:
+      - codex/fotmob-depth-routing
       - codex/inteligencia-compartilhada
       - main
   workflow_dispatch:
