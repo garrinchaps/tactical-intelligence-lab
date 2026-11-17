@@ -181,3 +181,46 @@ def test_player_season_totals_reuses_preparsed_stats_without_changing_results():
     assert actual["xg"] == 1.0
     assert actual["pass_accuracy_pct"] == 80.0
     assert actual["duels_won_pct"] == 55.0
+
+
+
+def test_player_season_totals_form_uses_latest_matches_not_input_order():
+    from src.scout.engine import _player_season_totals
+
+    rows = pd.DataFrame([
+        {"match_id": 4, "match_date": "2026-11-14", "minutes": 90, "rating": 4.0, "stats_json": "{}"},
+        {"match_id": 1, "match_date": "2026-11-11", "minutes": 90, "rating": 1.0, "stats_json": "{}"},
+        {"match_id": 6, "match_date": "2026-11-16", "minutes": 90, "rating": 6.0, "stats_json": "{}"},
+        {"match_id": 2, "match_date": "2026-11-12", "minutes": 90, "rating": 2.0, "stats_json": "{}"},
+        {"match_id": 7, "match_date": "2026-11-17", "minutes": 90, "rating": 7.0, "stats_json": "{}"},
+        {"match_id": 3, "match_date": "2026-11-13", "minutes": 90, "rating": 3.0, "stats_json": "{}"},
+        {"match_id": 5, "match_date": "2026-11-15", "minutes": 90, "rating": 5.0, "stats_json": "{}"},
+    ])
+
+    result = _player_season_totals(rows)
+
+    assert result["forma_5"] == [3.0, 4.0, 5.0, 6.0, 7.0]
+
+
+def test_load_player_history_does_not_sort_the_entire_database_result(monkeypatch):
+    from contextlib import contextmanager
+    from src.scout import engine
+
+    class FakeDB:
+        @contextmanager
+        def connect(self):
+            yield object()
+
+    captured = {}
+
+    def fake_read_sql_query(query, conn, params=None):
+        captured["query"] = query
+        return pd.DataFrame()
+
+    monkeypatch.setattr(engine.pd, "read_sql_query", fake_read_sql_query)
+
+    result = engine.load_player_history(FakeDB(), days=1825)
+
+    assert result.empty
+    assert "ORDER BY m.match_date DESC" not in captured["query"].upper()
+    assert "match_date >= ?" in captured["query"]
