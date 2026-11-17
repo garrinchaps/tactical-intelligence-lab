@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
+import sys
 import time
+from pathlib import Path
+
+# Permite executar diretamente: python scripts/benchmark_scout.py
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import pandas as pd
 
