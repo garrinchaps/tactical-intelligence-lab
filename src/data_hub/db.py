@@ -115,6 +115,19 @@ CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team
 CREATE INDEX IF NOT EXISTS idx_pstats_player ON match_player_stats(player_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_coach ON match_lineups(coach, match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
+-- Revisão leve do catálogo: triggers também capturam gravações feitas por outros processos.
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_insert AFTER INSERT ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_update AFTER UPDATE ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
+CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_delete AFTER DELETE ON matches BEGIN
+    UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
+        updated_at = CURRENT_TIMESTAMP WHERE source='cache' AND state_key='catalog_revision';
+END;
 """
 
 
@@ -206,14 +219,15 @@ class DataHubDB:
                     conn.execute("PRAGMA user_version = 27")
 
     def _bump_cache_revision(self, key: str) -> None:
-        revision = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+        """Incrementa revisão lógica sem ler/contar o catálogo ou o histórico."""
         with self.connect() as conn:
             conn.execute(
                 """INSERT INTO source_state (source,state_key,state_value,updated_at)
-                   VALUES ('cache',?,?,?)
+                   VALUES ('cache',?,'1',?)
                    ON CONFLICT(source,state_key) DO UPDATE SET
-                     state_value=excluded.state_value, updated_at=excluded.updated_at""",
-                (key, revision, utc_now()),
+                     state_value=CAST(COALESCE(source_state.state_value,'0') AS INTEGER)+1,
+                     updated_at=excluded.updated_at""",
+                (key, utc_now()),
             )
 
     def _fix_levels(self) -> None:
@@ -329,7 +343,6 @@ class DataHubDB:
                     )
                     added += 1
         if added or updated:
-            self._bump_cache_revision("catalog_revision")
             self._touched()
         return {"added": added, "updated": updated, "rejected": len(rejected)}
 
@@ -339,7 +352,6 @@ class DataHubDB:
                 "UPDATE matches SET data_level = ?, last_synced = ? WHERE match_id = ?",
                 (level, utc_now(), int(match_id)),
             )
-        self._bump_cache_revision("catalog_revision")
 
     def get_match(self, match_id: int) -> Optional[Dict[str, Any]]:
         with self.connect() as conn:
