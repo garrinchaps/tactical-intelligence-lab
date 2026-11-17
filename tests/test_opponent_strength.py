@@ -38,7 +38,7 @@ def test_rating_adjustment_is_small_and_explicitly_contextual():
         "funcao": ["ponta"] * 8,
         "xg90": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8],
     })
-    row = {"jogador": "Atacante", "equipe": "A", "funcao": "ponta", "minutos": 90, "xg90": 0.9}
+    row = {"jogador": "Atacante", "equipe": "A", "funcao": "ponta", "minutos": 90, "xg90": 0.55}
     baseline = evaluate(row, ref)
     adjusted = evaluate(row, ref, {"opponent_adjustment": 0.3,
                                    "opponent_strength": {"adversario": "Rival", "nivel": 75.0}})
