@@ -454,9 +454,11 @@ def _coach_profile(db, names: Sequence[str], matches: pd.DataFrame) -> Dict[str,
         cur = pd.DataFrame()
     if cur.empty:
         return {"nome": None, "jogos": 0, "origem": "sem escalações com técnico registrado"}
-    coach = cur["coach"].value_counts().index[0]
+    # O técnico em exercício é o nome da escalação mais recente, não o que acumulou mais partidas antigas.
+    cur = cur.sort_values("match_date", ascending=False)
+    coach = str(cur.iloc[0]["coach"])
     current = cur[cur["coach"] == coach]
-    if len(current) >= 5:
+    if current["match_id"].nunique() >= 5:
         return {"nome": coach, "jogos": int(current["match_id"].nunique()), "origem": "jogos recentes no clube",
                 "partidas_no_clube": int(current["match_id"].nunique())}
     # Técnico novo: usa a amostra histórica dele em outros clubes, se houver; não mistura como se fosse o estilo atual.
@@ -791,6 +793,33 @@ def _affinity(candidate_nationality: Any, buyer_country: Any) -> Tuple[int, str]
     return 52, "não há evidência suficiente para presumir adaptação cultural"
 
 
+def _country_core(value: Any) -> str:
+    raw = _safe_str(value).lower().strip()
+    aliases = {
+        "brasil": "brazil", "brasileiro": "brazil", "brasileira": "brazil", "brazilian": "brazil",
+        "argentino": "argentina", "argentina": "argentina", "argentinian": "argentina",
+        "uruguaio": "uruguay", "uruguayan": "uruguay", "ingles": "england", "inglês": "england",
+        "english": "england", "espanhol": "spain", "spanish": "spain", "alemao": "germany",
+        "alemão": "germany", "german": "germany", "italiano": "italy", "italian": "italy",
+        "frances": "france", "francês": "france", "french": "france", "portugues": "portugal",
+        "português": "portugal", "portuguese": "portugal",
+    }
+    return aliases.get(raw, raw)
+
+
+def is_foreign_player(nationality: Any, buyer_country: Any) -> Optional[bool]:
+    """Retorna None se não há nacionalidade confiável; duplas cidadanias são consideradas."""
+    buyer = _country_core(buyer_country)
+    raw = _safe_str(nationality)
+    if not buyer or not raw:
+        return None
+    countries = [_country_core(x) for x in re.split(r"[,;/|]", raw) if x.strip()]
+    countries = [x for x in countries if x]
+    if not countries:
+        return None
+    return buyer not in countries
+
+
 def _foreign_rule(competition: str, season: int) -> Optional[Dict[str, Any]]:
     c = _safe_str(competition).lower()
     if any(x in c for x in BR_COMP_TOKENS):
@@ -819,6 +848,9 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     if market is None:
         fee = None
         price_basis = "sem valor de mercado confiável; taxa não estimada"
+    elif months_left is not None and months_left < 0:
+        fee = 0.0
+        price_basis = "contrato cadastrado como expirado; possível agente livre, sem incluir luvas/salários"
     elif months_left is not None and months_left <= 6:
         fee = market * .28
         price_basis = "estimativa de oportunidade por contrato perto do fim"
@@ -847,11 +879,12 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     rule = _foreign_rule(competition, year)
     foreign_penalty = 0
     foreign_note = "regra estrangeira não identificada para esta competição"
-    nationality = _safe_str(candidate.get("nacionalidade")).lower()
-    is_foreign = bool(nationality and buyer_country and buyer_country.lower() not in nationality)
-    if rule and is_foreign:
+    foreign_status = is_foreign_player(candidate.get("nacionalidade"), buyer_country)
+    if rule and foreign_status is True:
         foreign_penalty = 24 if foreign_count >= int(rule["limite"]) - 1 else 8 if foreign_count >= int(rule["limite"]) - 3 else 0
         foreign_note = f"{foreign_count} estrangeiro(s) identificados no elenco; limite indicativo {rule['limite']} ({rule['status']})"
+    elif foreign_status is None:
+        foreign_note = "nacionalidade não confirmada; não foi aplicada penalidade de estrangeiro"
     # Distância entre o porte de quem vende e o comprador, usada como sinal e não como veto.
     seller_value = _num(candidate.get("clube_valor_total_eur"))
     buyer_value = _num(buyer.get("valor_elenco_eur"))
