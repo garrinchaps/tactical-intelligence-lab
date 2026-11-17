@@ -27,7 +27,7 @@ from src.ui.context import build_context, get_service, load_bundle, teams_of  # 
 from src.ui import nav  # noqa: E402
 from src.ui.i18n import LANGS, t  # noqa: E402
 from src.ui.pages import (ai_analyst, assistant, catalog, clubs, compare, competition, games, lab,  # noqa: E402
-                          ml_inspection, neural, players_search, search_all, squad)
+                          ml_inspection, neural, players_search, search_all, squad, scout)
 
 DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — disponível offline em data/demo
 
@@ -109,6 +109,7 @@ MAIN = [
     st.Page(_named(lambda: compare.render_page(current_context, match_bar), "page_comparar"), title="Comparar", icon="🆚",
             url_path="comparar"),
     st.Page(standalone(squad.render), title="Escalação", icon="📋", url_path="escalacao"),
+    st.Page(standalone(scout.render), title="Scout", icon="🎯", url_path="scout"),
 ]
 VIEWS = {   # telas abertas pelo clique (fora do menu)
     "jogo": st.Page(_named(lambda: games.render(current_context), "page_jogo"), title="Jogo", icon="🏟️", url_path="jogo"),
@@ -126,9 +127,10 @@ BACKSTAGE = [
 
 
 def _logo(col) -> None:
-    col.markdown('<div style="font-family:Space Grotesk,sans-serif;font-weight:700;font-size:1.18rem;line-height:2.4rem">'
-                 '⚽ Tactical <span style="background:var(--til-grad);-webkit-background-clip:text;color:transparent">'
-                 'Intelligence</span> Lab</div>', unsafe_allow_html=True)
+    if col.button("⚽ Tactical Intelligence Lab", key="til_logo_home", help="Voltar ao início",
+                  use_container_width=True):
+        st.session_state[nav.STACK] = []
+        nav.open_view("assistente")
 
 
 def _go_search() -> None:
@@ -233,7 +235,8 @@ def main() -> None:
     st.session_state["recent_match_ids"] = recent[:5]
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
-    nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3], **VIEWS})
+    nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3],
+                   "scout": MAIN[4], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo
     if goto:
         if goto == "jogos":
@@ -242,7 +245,8 @@ def main() -> None:
             st.switch_page({"assistente": MAIN[0], "comparar": MAIN[2], "buscar": MAIN[1]}.get(goto, MAIN[0]))
     focused = getattr(page, "url_path", "") in {p.url_path for p in VIEWS.values()}
     if not focused:                                      # página do menu = ponto de partida do "← Voltar"
-        key = {"assistente": "assistente", "buscar": "buscar", "comparar": "comparar", "escalacao": "escalacao"}.get(getattr(page, "url_path", ""))
+        key = {"assistente": "assistente", "buscar": "buscar", "comparar": "comparar",
+               "escalacao": "escalacao", "scout": "scout"}.get(getattr(page, "url_path", ""))
         if key and nav.current().get("kind") != key:
             st.session_state[nav.VIEW] = {"kind": key, **({"q": st.session_state.get("_last_q", "")} if key == "buscar" else {})}
     top_bar(focused)
