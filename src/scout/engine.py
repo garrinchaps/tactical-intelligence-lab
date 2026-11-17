@@ -211,7 +211,7 @@ def load_player_history(db, days: int = 900) -> pd.DataFrame:
     since = (date.today() - timedelta(days=int(days))).isoformat()
     query = """
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
-               m.match_date, m.season_name, m.competition_name, m.home_team_name, m.away_team_name,
+               m.match_date, m.season_name, m.competition_name, m.home_team_name, m.away_team_name
         FROM match_player_stats p
         JOIN matches m ON m.match_id = p.match_id
         WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0
