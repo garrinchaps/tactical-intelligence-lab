@@ -173,6 +173,15 @@ def _safe_str(value: Any) -> str:
     return "" if value is None or pd.isna(value) else str(value).strip()
 
 
+def _boolean_mask(values: pd.Series) -> pd.Series:
+    """Normaliza flags vindas de CSV/SQLite (bool, 0/1 ou texto) para máscara booleana."""
+    if pd.api.types.is_bool_dtype(values):
+        return values.fillna(False).astype(bool)
+    if pd.api.types.is_numeric_dtype(values):
+        return pd.to_numeric(values, errors="coerce").fillna(0).ne(0)
+    return values.astype("string").str.strip().str.casefold().isin({"1", "true", "yes", "sim", "y"})
+
+
 def _role(value: Any, funcao: Any = None) -> str:
     role = natural_role(_safe_str(funcao), _safe_str(value))
     return role if role in ROLE_LABELS else ""
@@ -1577,17 +1586,7 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
     if own_cores and "clube" in eligible:
         eligible = eligible[~eligible["clube"].map(team_core).isin(own_cores)]
     if "historico_ambiguo" in eligible:
-        # A coluna pode vir do catálogo como 0/1 (int) ou texto, não necessariamente bool.
-        # Inverter uma Series inteira produz -1/-2 e o Pandas tenta usá-los como nomes de coluna.
-        ambiguous = eligible["historico_ambiguo"].fillna(False)
-        if not pd.api.types.is_bool_dtype(ambiguous):
-            if pd.api.types.is_numeric_dtype(ambiguous):
-                ambiguous = pd.to_numeric(ambiguous, errors="coerce").fillna(0).ne(0)
-            else:
-                ambiguous = ambiguous.astype(str).str.strip().str.casefold().isin(
-                    {"1", "true", "yes", "sim", "y"}
-                )
-        eligible = eligible.loc[~ambiguous]
+        eligible = eligible.loc[~_boolean_mask(eligible["historico_ambiguo"])]
     if rejected_cores and "_core" in eligible:
         eligible = eligible[~eligible["_core"].astype(str).isin(rejected_cores)]
     if eligible.empty:
