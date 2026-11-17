@@ -18,6 +18,7 @@ Esta rodada adiciona:
 - índice de cobertura para a descoberta de jogadores ativos no histórico do Scout;
 - versão do cache do mercado baseada no estado do SQLite, WAL e journal, preservando a renovação periódica de fontes externas;
 - testes de plano de consulta e invalidação de cache;
+- benchmark somente de leitura que compara a consulta antiga e a nova, verifica equivalência dos resultados e registra p50/p95;
 - este registro de estado e pendências.
 
 Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O bootstrap agora preserva bancos existentes; uma substituição de banco pequeno que contém tabelas exige opt-in explícito e cria backup consistente antes da troca. O inventário continua sem importar/rodar módulos do app e a leitura do SQLite é read-only.
@@ -45,7 +46,7 @@ Nenhuma página, rota, algoritmo de análise, modelo ou tabela foi removida. O b
 | Bootstrap seguro do banco | Implementado na branch de trabalho; testes adicionados | Banco pequeno com tabelas não é sobrescrito sem `TACTICAL_ALLOW_DB_REPLACE=1`; substituição intencional gera backup via SQLite Backup API |
 | Testes de regressão gerais | Novo workflow executou compileall, inventário e a suíte completa em `daf387b`: **324 passed, 1 skipped, 21 warnings** | Aprovado para esse checkout; ampliar cobertura visual/integrada e testar com o banco local real |
 | Alinhamento do histórico do Scout | Correção existe na linha de desenvolvimento/PRs de trabalho | Reexecutar teste dedicado e comparar dados agregados com fixture independente |
-| Benchmark do Scout | Script dedicado existe na branch de trabalho | Medir baseline e pós-otimização no mesmo banco/hardware, guardando p50/p95 e número de candidatos |
+| Benchmark do Scout | `scripts/benchmark_scout_index.py` compara as duas consultas em modo read-only, exige resultados idênticos e informa p50/p95 e fator p50; benchmark completo do pipeline continua em `scripts/benchmark_scout.py` | Rodar no banco local após a migração criar o índice; registrar tempos, hardware, tamanho e data para comparação antes/depois |
 | Pré-agregação de jogador/temporada/365 dias/5 partidas/competição/clube | Ainda pendente; esta rodada acelera a seleção dos atletas ativos e o reaproveitamento do resultado agregado via cache Streamlit, mas não grava agregados incrementais no banco | Implementar em etapa própria; exigir equivalência numérica com cálculo bruto, checkpoint por partida e rollback |
 | Cache com invalidação/versionamento | Cache do War Room agora inclui assinatura do SQLite/WAL/journal e mantém a renovação periódica do mercado externo; ainda não é invalidação seletiva por domínio | Testar inserção/atualização em banco real, confirmar mudança da assinatura e medir hit/miss no Streamlit |
 | SQLite + DuckDB + Parquet | SQLite está presente; data lake/Parquet aparece no código/documentação; integração DuckDB e ganho real não comprovados | Benchmark isolado; preservar SQLite; só ativar o caminho analítico se houver ganho mensurável e consistência |
