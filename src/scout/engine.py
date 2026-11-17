@@ -206,6 +206,78 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     return out
 
 
+def _history_numeric(values: pd.Series) -> pd.Series:
+    """Conversão numérica vetorizada equivalente ao _num usado nas estatísticas JSON."""
+    numeric = pd.to_numeric(values, errors="coerce")
+    needs_parse = numeric.isna() & values.notna()
+    if needs_parse.any():
+        text = values.loc[needs_parse].astype(str).str.strip().str.replace(",", ".", regex=False)
+        text = text.mask(text.str.lower().isin({"", "-", "—", "nan", "none", "null"}))
+        extracted = text.str.extract(r"(-?\d+(?:\.\d+)?)", expand=False)
+        numeric.loc[needs_parse] = pd.to_numeric(extracted, errors="coerce")
+    return numeric
+
+
+def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataFrame:
+    """Agrega métricas de vários atletas/temporadas em operações vetorizadas do Pandas."""
+    if rows.empty:
+        return pd.DataFrame()
+
+    grouped = rows.groupby(group_keys, dropna=False, sort=False, observed=True)
+    out = pd.DataFrame(index=grouped.size().index)
+
+    out["minutos"] = grouped["_minutes_num"].sum().fillna(0).astype(int)
+    out["jogos"] = grouped["match_id"].nunique().astype(int)
+
+    weighted = grouped["_rating_weight"].sum()
+    weight_minutes = grouped["_rating_minutes"].sum()
+    out["rating_media"] = (weighted / weight_minutes.replace(0, np.nan)).round(2)
+    out["ultimo_jogo"] = grouped["match_date"].max().astype(str)
+
+    metric_names = list(COUNT_KEYS)
+    metric_sums = grouped[metric_names].sum(min_count=1)
+    for name in metric_names:
+        out[name] = metric_sums[name]
+
+    for name in ("goals", "assists", "shots", "shots_on_target", "xg", "xa",
+                 "chances_created", "def_actions", "sprints", "touches", "interceptions",
+                 "tackles", "recoveries", "clearances", "aerials_won", "dribbles",
+                 "fouls", "errors", "saves", "xgot_faced"):
+        out[name + "_p90"] = (
+            out[name] * 90 / out["minutos"].replace(0, np.nan)
+        ).round(3)
+
+    pass_means = grouped[["_pass_accurate_passes_pct", "_pass_pass_accuracy",
+                          "_pass_pass_accuracy_pct"]].mean()
+    pass_accuracy = pass_means["_pass_accurate_passes_pct"]
+    pass_accuracy = pass_accuracy.combine_first(pass_means["_pass_pass_accuracy"])
+    pass_accuracy = pass_accuracy.combine_first(pass_means["_pass_pass_accuracy_pct"])
+    out["pass_accuracy_pct"] = pass_accuracy.round(2)
+
+    duel_means = grouped[["_duels_duels_won_pct", "_duels_duelsWonPercentage"]].mean()
+    duels = duel_means["_duels_duels_won_pct"].combine_first(
+        duel_means["_duels_duelsWonPercentage"]
+    )
+    out["duels_won_pct"] = duels.round(2)
+
+    chronological = rows.sort_values("match_date", ascending=True, kind="stable")
+    forms = chronological.groupby(
+        group_keys, dropna=False, sort=False, observed=True
+    )["_rating_num"].agg(
+        lambda values: [round(float(value), 2) for value in values.dropna().tail(5)]
+    )
+    out["forma_5"] = forms.reindex(out.index)
+
+    latest = (
+        rows.sort_values("match_date", ascending=False, kind="stable")
+        .drop_duplicates(group_keys, keep="first")
+        .set_index(group_keys)
+    )
+    out["ultimo_time"] = latest["team_name"].reindex(out.index).fillna("")
+    out["ultima_competicao"] = latest["competition_name"].reindex(out.index).fillna("")
+    return out
+
+
 def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None,
                         progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """Resume histórico completo dos atletas relevantes sem carregar todo o universo de aparições.
@@ -352,42 +424,96 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         ["_core", "_fixture", "_club_core"], keep="first"
     )
 
+    # Decodifica cada JSON uma única vez e transforma as métricas em colunas numéricas.
+    # As somas por carreira, temporada e 12 meses passam a ser feitas pelo groupby vetorizado.
+    stat_fields = list(dict.fromkeys(
+        list(COUNT_KEYS.values()) +
+        ["accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct",
+         "duels_won_pct", "duelsWonPercentage"]
+    ))
+    stat_frame = pd.DataFrame.from_records(
+        raw["stats_json"].map(_json_obj).tolist(), columns=stat_fields
+    )
+    for out_key, raw_key in COUNT_KEYS.items():
+        raw[out_key] = _history_numeric(stat_frame[raw_key]) if raw_key in stat_frame else np.nan
+
+    for field in ("accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct"):
+        raw[f"_pass_{field}"] = (
+            _history_numeric(stat_frame[field]) if field in stat_frame else np.nan
+        )
+    for field in ("duels_won_pct", "duelsWonPercentage"):
+        raw[f"_duels_{field}"] = (
+            _history_numeric(stat_frame[field]) if field in stat_frame else np.nan
+        )
+    del stat_frame
+
+    raw["_minutes_num"] = pd.to_numeric(raw["minutes"], errors="coerce").fillna(0)
+    raw["_rating_num"] = pd.to_numeric(raw["rating"], errors="coerce")
+    valid_minutes = raw["_minutes_num"].where(raw["_rating_num"].notna(), 0)
+    raw["_rating_minutes"] = valid_minutes
+    raw["_rating_weight"] = raw["_rating_num"].fillna(0) * valid_minutes
+
+    report("Calculando estatísticas por jogador e temporada...")
+    career = _history_group_totals(raw, ["_core"])
+
+    raw["_season_group"] = raw["season_name"].where(
+        raw["season_name"].notna(), "__SEASON_NOT_IDENTIFIED__"
+    )
+    season_totals = _history_group_totals(raw, ["_core", "_season_group"])
+    if not season_totals.empty:
+        season_rows = season_totals.reset_index()
+        season_rows["temporada"] = season_rows["_season_group"].replace(
+            {"__SEASON_NOT_IDENTIFIED__": "não identificada"}
+        )
+        season_rows = season_rows.sort_values(
+            ["_core", "temporada"], ascending=True, kind="stable"
+        )
+        season_by_core = {
+            core: group.drop(columns=["_core", "_season_group"]).to_dict("records")
+            for core, group in season_rows.groupby("_core", sort=False)
+        }
+    else:
+        season_by_core = {}
+
+    recent_cutoff = (pd.Timestamp.today().normalize() - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
+    recent_rows = raw.loc[raw["match_date"].astype(str) >= recent_cutoff]
+    recent_totals = _history_group_totals(recent_rows, ["_core"]) if not recent_rows.empty else pd.DataFrame()
+
+    ordered = raw.sort_values("match_date", ascending=False, kind="stable")
+    latest = ordered.drop_duplicates("_core", keep="first").set_index("_core")
+    recent_games = ordered.groupby("_core", sort=False, group_keys=False).head(15)
+    games_by_core = {
+        core: group[["match_date", "team_name", "competition_name", "minutes", "rating", "stats_json"]]
+        .to_dict("records")
+        for core, group in recent_games.groupby("_core", sort=False)
+    }
+    positions = raw.groupby("_core", sort=False)["position"].agg(
+        lambda values: values.dropna().astype(str).mode().iloc[0]
+        if values.dropna().size else ""
+    )
+
+    recent_by_core = recent_totals.to_dict("index") if not recent_totals.empty else {}
+    season_by_core = season_by_core or {}
     summaries = []
-    recent_cutoff = pd.Timestamp.today().normalize() - pd.Timedelta(days=365)
-    for core, group in raw.groupby("_core", sort=False):
-        # O mesmo objeto JSON serve aos totais da carreira, temporada e janela recente deste jogador.
-        group = group.copy()
-        group["_parsed_stats"] = group["stats_json"].map(_json_obj)
-        seasons = []
-        if "season_name" in group:
-            for season, part in group.groupby("season_name", dropna=False, sort=True):
-                data = _player_season_totals(part)
-                data["temporada"] = _safe_str(season) or "não identificada"
-                seasons.append(data)
-        all_data = _player_season_totals(group)
-        ordered = group.sort_values("match_date", ascending=False, kind="stable")
-        latest_row = ordered.iloc[0]
-        observed_positions = group["position"].dropna().astype(str).tolist() if "position" in group else []
-        all_data["nome_observado"] = _safe_str(latest_row.get("player_name"))
-        all_data["posicao_observada"] = pd.Series(observed_positions).mode().iloc[0] if observed_positions else ""
+    career_by_core = career.to_dict("index") if not career.empty else {}
+    for core, all_data in career_by_core.items():
+        recent = recent_by_core.get(core, {})
+        all_data["nome_observado"] = _safe_str(latest.at[core, "player_name"])
+        all_data["posicao_observada"] = _safe_str(positions.get(core, ""))
         all_data["nacionalidade_observada"] = None
-        dates = group["match_date"].astype(str)
-        last_year = group.loc[dates >= recent_cutoff.strftime("%Y-%m-%d")]
-        recent = _player_season_totals(last_year) if not last_year.empty else {}
         all_data.update({
-            "minutos_12m": recent.get("minutos", 0),
-            "jogos_12m": recent.get("jogos", 0),
+            "minutos_12m": int(recent.get("minutos", 0) or 0),
+            "jogos_12m": int(recent.get("jogos", 0) or 0),
             "rating_12m": recent.get("rating_media"),
             "gols_12m": recent.get("goals"),
             "assistencias_12m": recent.get("assists"),
             "xg_12m": recent.get("xg"),
             "xa_12m": recent.get("xa"),
-            "historico_temporadas": seasons[-5:],
-            "ultimos_jogos": ordered.head(15)[
-                ["match_date", "team_name", "competition_name", "minutes", "rating", "stats_json"]
-            ].to_dict("records"),
+            "historico_temporadas": season_by_core.get(core, [])[-5:],
+            "ultimos_jogos": games_by_core.get(core, []),
         })
         summaries.append({"core": core, **all_data})
+
     result = pd.DataFrame(summaries)
     report(f"Histórico agregado: {len(result):,} jogadores")
     return result
