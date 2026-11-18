@@ -141,6 +141,42 @@ def upcoming(names) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=32)
+def _roster_cached(names: tuple) -> pd.DataFrame:
+    from src.squad.matchday import fotmob_roster
+    from src.ui.context import get_service
+
+    return fotmob_roster(get_service().db, list(names))
+
+
+def _official_roster(name: str, names: List[str]) -> None:
+    """Rodada 8: o elenco inscrito HOJE (FotMob) vem primeiro; o cadastro do Transfermarkt fica abaixo, como histórico."""
+    with st.spinner("Buscando o elenco atual…"):
+        r = _roster_cached(tuple(dict.fromkeys([name] + list(names))))
+    if r.empty:
+        st.caption("Elenco atual da FotMob indisponível para este clube — abaixo, o cadastro do Transfermarkt "
+                   "(pode estar atrasado em relação à última janela).")
+        return
+    from datetime import date
+
+    def _age(b):
+        try:
+            d = date.fromisoformat(str(b)[:10])
+            t = date.today()
+            return t.year - d.year - ((t.month, t.day) < (d.month, d.day))
+        except Exception:
+            return None
+    order = {"keepers": 0, "defenders": 1, "midfielders": 2, "attackers": 3}
+    t = r.assign(_o=r["role"].map(order).fillna(9), _n=pd.to_numeric(r["jersey"], errors="coerce")).sort_values(["_o", "_n"])
+    view = pd.DataFrame({"nº": t["jersey"], "jogador": t["name"], "posição": t["position"],
+                         "idade": t["birth"].map(_age), "altura (cm)": t["height"], "país": t["country"],
+                         "valor (€ mi)": (pd.to_numeric(t["market_value"], errors="coerce") / 1e6).round(1),
+                         "lesão": t["lesao"].replace("", "—")})
+    st.markdown(f"##### 👥 Elenco atual — {len(view)} inscritos")
+    comparison_table(view, f"Fonte: FotMob (lista do clube hoje, atualizada a cada 24 h; valor estimado pela FotMob). "
+                           f"Atualizado em {str(t['fetched_at'].iloc[0])[:16].replace('T', ' ')} UTC.")
+
+
 def render(_ctx=None) -> None:
     from src.ui import nav
     from src.ui.names import pt
@@ -219,6 +255,7 @@ def render(_ctx=None) -> None:
                 st.session_state[pk] = shown + PAGE
                 st.rerun()
     with t2:
+        _official_roster(name, names)
         if lake is None or ids.empty or not lake.exists("tm_clubes"):
             empty_state("Sem dados do Transfermarkt para este clube", "", "💶",
                         "python -m src.data_hub.sync --only transfermarkt lake")

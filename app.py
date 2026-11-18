@@ -255,6 +255,26 @@ def top_bar(focused: bool = False) -> None:
         st.rerun()
 
 
+@st.cache_data(show_spinner=False)
+def _app_version() -> str:
+    """Branch + commit em uso (lidos do .git, sem rodar git): confirma na tela qual versão está aberta."""
+    from pathlib import Path
+
+    try:
+        head = Path(".git/HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(" ", 1)[1]
+            branch = ref.rsplit("/", 1)[-1] if "/" not in ref[11:] else ref[11:]
+            p = Path(".git") / ref
+            sha = p.read_text(encoding="utf-8").strip() if p.exists() else next(
+                (ln.split()[0] for ln in Path(".git/packed-refs").read_text(encoding="utf-8").splitlines()
+                 if ln.endswith(ref)), "")
+            return f"versão: {branch} · {sha[:7]}"
+        return f"versão: {head[:7]}"
+    except Exception:
+        return "versão: rodada 8"
+
+
 def main() -> None:
     theme.inject_theme()
     st.session_state.setdefault("match_id", DEFAULT_MATCH_ID)
@@ -284,7 +304,7 @@ def main() -> None:
             from src.data_hub import autosync
             from src.ui.context import get_service
 
-            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)))
+            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)) + "  ·  " + _app_version())
             fm = autosync.fotmob_status()
             if fm:
                 st.caption(fm)

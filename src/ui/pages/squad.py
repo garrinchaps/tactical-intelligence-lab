@@ -110,9 +110,20 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
             if not local.empty:
                 sq = squad_frame(local, [], [local["clube"].iloc[0]], added)
                 source = "escalações da base + nacionalidade confirmada"
-    from src.squad.planner import filter_national_team_players, national_team_key
+    from src.squad.planner import apply_official_roster, filter_national_team_players, national_team_key
     if national_team_key(team):
         sq = filter_national_team_players(sq, team)
+    else:                                                # rodada 8: elenco inscrito hoje (FotMob) manda
+        try:
+            from src.squad import matchday as M
+
+            official = M.fotmob_roster(get_service().db, [team] + names)
+            if not official.empty:
+                sq, extra = apply_official_roster(sq, official)
+                changes = [c for c in changes if c.get("nome") not in {e["nome"] for e in extra}] + extra
+                source = (source + " + " if source else "") + "elenco atual da FotMob"
+        except Exception:
+            pass
 
     usage = pd.DataFrame()
     if "transfermarkt_id" in sq and sq["transfermarkt_id"].notna().any():

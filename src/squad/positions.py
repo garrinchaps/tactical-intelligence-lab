@@ -165,7 +165,7 @@ def player_roles(starts: pd.DataFrame, tm_role: Optional[str] = None, roster_pos
         r_role, ok = classify(roster_pos, "roster")
         if r_role and ok:
             cnt[r_role] += 1.0
-            origem = "elenco da ESPN"
+            origem = "elenco atual (FotMob/ESPN)"
         elif gen:
             g = gen.most_common(1)[0][0]
             cnt[g] += sum(gen.values())

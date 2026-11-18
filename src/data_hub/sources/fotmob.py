@@ -551,6 +551,115 @@ class FotmobProvider:
                 return None
         return mid
 
+    # ------------------------------------------------------------------ elenco atual (rodada 8)
+    ROSTER_DDL = ("CREATE TABLE IF NOT EXISTS fotmob_rosters (team_id INTEGER, team TEXT, player_id INTEGER, name TEXT, "
+                  "position TEXT, role TEXT, jersey TEXT, birth TEXT, height INTEGER, country TEXT, injury TEXT, "
+                  "market_value REAL, fetched_at TEXT, PRIMARY KEY (team_id, player_id))")
+
+    def _team_ids_table(self, conn) -> None:
+        conn.execute("CREATE TABLE IF NOT EXISTS fotmob_teams (name TEXT PRIMARY KEY, team_id INTEGER)")
+        conn.execute(self.ROSTER_DDL)
+
+    def team_id(self, team_names: List[str]) -> Optional[int]:
+        """Id do clube na FotMob: guardado, ou lido de um jogo recente dele na FotMob (1 pedido, só na 1ª vez)."""
+        names = [n for n in dict.fromkeys(team_names) if n]
+        if not names:
+            return None
+        ph = ",".join("?" * len(names))
+        with self.db.connect() as conn:
+            self._team_ids_table(conn)
+            r = conn.execute(f"SELECT team_id FROM fotmob_teams WHERE name IN ({ph}) AND team_id IS NOT NULL LIMIT 1",
+                             names).fetchone()
+            if r:
+                return int(r[0])
+            rows = conn.execute(f"SELECT match_id FROM matches WHERE match_id >= ? AND (home_team_name IN ({ph}) OR "
+                                f"away_team_name IN ({ph})) AND match_date <= date('now') ORDER BY match_date DESC LIMIT 2",
+                                [to_internal_id("fotmob", 0), *names, *names]).fetchall()
+        from src.data_lake.ids import team_core
+
+        cores = {team_core(n) for n in names}
+        for (mid,) in rows:
+            try:
+                d = self._get("matchDetails", {"matchId": int(mid) - to_internal_id("fotmob", 0)}, max_age_s=None)
+            except Exception:
+                continue
+            g = d.get("general") or {}
+            for side in ("homeTeam", "awayTeam"):
+                t = g.get(side) or {}
+                if t.get("id") and (t.get("name") in names or team_core(t.get("name", "")) in cores):
+                    with self.db.connect() as conn:
+                        for n in set(names) | {t.get("name")}:
+                            conn.execute("INSERT OR REPLACE INTO fotmob_teams VALUES (?, ?)", (n, int(t["id"])))
+                    return int(t["id"])
+        return None
+
+    @staticmethod
+    def parse_squad(d: Dict[str, Any], team_id: int, team: str, fetched_at: str) -> List[Dict[str, Any]]:
+        out = []
+        groups = (d.get("squad") or {}).get("squad") or []
+        for g in groups:
+            if (g.get("title") or "") == "coach":
+                continue
+            for m in g.get("members") or []:
+                if not m.get("id") or not m.get("name"):
+                    continue
+                inj = m.get("injury")
+                inj_txt = ""
+                if isinstance(inj, dict):
+                    inj_txt = str(inj.get("name") or inj.get("expectedReturn") or "lesionado")
+                elif inj:
+                    inj_txt = "lesionado"
+                out.append({"team_id": int(team_id), "team": team, "player_id": int(m["id"]), "name": m["name"],
+                            "position": m.get("positionIdsDesc") or ("GK" if g.get("title") == "keepers" else ""),
+                            "role": g.get("title") or "",
+                            "jersey": str(m.get("shirtNumber") or ""), "birth": m.get("dateOfBirth") or "",
+                            "height": m.get("height"), "country": m.get("cname") or "", "injury": inj_txt,
+                            "market_value": m.get("transferValue"), "fetched_at": fetched_at})
+        return out
+
+    def roster(self, team_names: List[str], max_age_h: float = 24, fetch: bool = True) -> List[Dict[str, Any]]:
+        """Elenco ATUAL do clube na FotMob (quem está inscrito hoje, com lesões). Guarda por `max_age_h` horas."""
+        names = [n for n in dict.fromkeys(team_names) if n]
+        if not names:
+            return []
+        with self.db.connect() as conn:
+            self._team_ids_table(conn)
+        tid = self.team_id(names) if (fetch and self.enabled) else None
+        if tid is None:
+            with self.db.connect() as conn:
+                ph = ",".join("?" * len(names))
+                r = conn.execute(f"SELECT team_id FROM fotmob_teams WHERE name IN ({ph}) LIMIT 1", names).fetchone()
+            tid = int(r[0]) if r and r[0] is not None else None
+        if tid is None:
+            return []
+        with self.db.connect() as conn:
+            cur = conn.execute("SELECT * FROM fotmob_rosters WHERE team_id = ?", (tid,))
+            cols = [c[0] for c in cur.description]
+            rows = [dict(zip(cols, x)) for x in cur.fetchall()]
+        fresh = False
+        if rows:
+            try:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(rows[0]["fetched_at"])).total_seconds() / 3600
+                fresh = age < max_age_h
+            except Exception:
+                fresh = False
+        if (fresh or not fetch or not self.enabled) and rows:
+            return rows
+        try:
+            d = self._get("teams", {"id": tid}, max_age_s=None, cache=False)
+        except Exception:
+            return rows
+        team = ((d.get("details") or {}).get("name")) or names[0]
+        new = self.parse_squad(d, tid, team, now_iso())
+        if not new:
+            return rows
+        with self.db.connect() as conn:
+            conn.execute("DELETE FROM fotmob_rosters WHERE team_id = ?", (tid,))
+            cols = list(new[0].keys())
+            conn.executemany(f"INSERT INTO fotmob_rosters ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
+                             [tuple(r[k] for k in cols) for r in new])
+        return new
+
     def _has_frozen(self) -> bool:
         try:
             with self.db.connect() as conn:

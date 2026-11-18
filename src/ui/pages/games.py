@@ -9,7 +9,8 @@ from src.ui import nav
 from src.ui.components import source_gap
 from src.ui.names import pt
 
-SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico"]
+SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico",
+            "🧠 Perigo (IA)"]
 
 
 def render(current_context, match_bar=None) -> None:
@@ -94,6 +95,10 @@ def render(current_context, match_bar=None) -> None:
 
     if sec == SECTIONS[0]:
         match_center.render(ctx)
+    elif sec == SECTIONS[6]:
+        from src.ui.pages import danger_view
+
+        danger_view.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
     elif sec == SECTIONS[5]:
         from src.ui.pages import patterns
 

@@ -261,6 +261,20 @@ Rodada 7 (18/11/2026, 370 testes verdes) — velocidade e reclamações com prin
   enxutas (sem as 9 zonas). Na amostra de desenvolvimento o G deu ganho +0,002 mas com IC incluindo zero → rejeitado
   (critério mantido). No PC, com mais jogos, rodar E,F,G.
 
+Rodada 8 (18/11/2026, 372 testes verdes):
+- Diagnóstico: "Scout sumiu / sem Voltar / interface velha / jogos repetidos" = o PC do usuário NÃO estava neste branch
+  (a `main` é a v35 antiga, sem Scout). Agora a barra do topo mostra "versão: <branch> · <commit>" (`_app_version`).
+- ✅ Tema escuro nativo em `.streamlit/config.toml`: no Streamlit 1.67 o CSS não alcançava botões/caixas (brancos com
+  texto branco); seletores do tema atualizados (`stBaseButton-*`).
+- ✅ Elenco ATUAL pela FotMob (`FotmobProvider.roster`, tabelas `fotmob_teams` e `fotmob_rosters`, 24 h de validade,
+  1º acesso ~2 pedidos): manda na Escalação (`matchday.roster`, `apply_official_roster` no `_squad`, usado também pelo
+  Scout) — quem não está inscrito sai, quem chegou entra com posição/idade/altura; aba "💶 Elenco e valores" do clube
+  mostra o elenco inscrito hoje com lesões antes do cadastro do Transfermarkt.
+- ✅ Rede neural na página do jogo: seção "🧠 Perigo (IA)" (`src/ui/pages/danger_view.py`) — ações perigosas por time,
+  quem mais criou perigo, mapa das ações coloridas pela chance. Onde a rede é usada: Assistente (ranking de perigo,
+  2ª opinião), página do jogo e Bastidores. Ela só avalia jogos com lances (coordenadas); FotMob/ESPN não têm ações.
+- ✅ Comparar jogo × jogo sem duplicar a mesma partida de duas fontes.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

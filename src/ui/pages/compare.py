@@ -388,6 +388,9 @@ def _match_vs_match() -> None:
             col.caption("Nenhum jogo encontrado.")
             chosen.append(None)
             continue
+        from src.ui.pages.search_all import one_per_game
+
+        c = one_per_game(c)                          # rodada 8: o mesmo jogo de duas fontes aparece uma vez
         opts = c.head(8).to_dict("records")
         i = col.selectbox("Resultado", range(len(opts)), key=key + "_s",
                           format_func=lambda j: f"{opts[j]['match_date']} · {opts[j]['home_team_name']} x {opts[j]['away_team_name']}")

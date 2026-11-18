@@ -34,8 +34,32 @@ def _names_sql(names: Sequence[str]) -> Tuple[str, list]:
     return ",".join("?" * len(names)), list(names)
 
 
+def fotmob_roster(db, team_names: Sequence[str], fetch: bool = True) -> pd.DataFrame:
+    """
+    Rodada 8: elenco ATUAL pela FotMob (inscritos hoje no clube, com lesão) — mais em dia que o cadastro do
+    Transfermarkt (dataset aberto atrasado) e que "quem jogou nos últimos 180 dias" (inclui quem já saiu e esquece quem
+    acabou de chegar). Mesmas colunas do elenco da ESPN. Vazio se a FotMob não conhece o clube ou está desligada.
+    """
+    try:
+        from src.data_hub.sources.fotmob import FotmobProvider
+
+        rows = FotmobProvider(db).roster(list(team_names), fetch=fetch)
+    except Exception:
+        rows = []
+    if not rows:
+        return pd.DataFrame()
+    r = pd.DataFrame(rows)
+    r["position"] = r["position"].fillna("").astype(str).str.split(",").str[0].str.strip()
+    r["lesao"] = r["injury"].fillna("").astype(str)
+    r["fonte"] = "FotMob"
+    return r
+
+
 def roster(db, team_names: Sequence[str]) -> pd.DataFrame:
-    """Elenco atual (ESPN) com lesões. Vazio se o clube ainda não teve o elenco baixado (`--only espn_elencos`)."""
+    """Elenco atual com lesões: FotMob (rodada 8) e, se ela não tiver o clube, ESPN (`--only espn_elencos`)."""
+    fm = fotmob_roster(db, team_names)
+    if not fm.empty:
+        return fm
     ph, ps = _names_sql(team_names)
     try:
         with db.connect() as conn:
@@ -44,6 +68,7 @@ def roster(db, team_names: Sequence[str]) -> pd.DataFrame:
         return pd.DataFrame()
     if r.empty:
         return r
+    r["fonte"] = "ESPN"
 
     def inj(js):
         try:
@@ -324,7 +349,8 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
     stale = None if newest is None or pd.isna(newest) else int((pd.Timestamp(date.today()) - newest).days)
     return {"jogadores": df.sort_values(["prob_titular", "qualidade"], ascending=False).reset_index(drop=True),
             "jogos": games, "formacao": forms.most_common(1)[0][0] if forms else None, "escalacoes": lu,
-            "fonte_elenco": "ESPN (elenco atual)" if not ros.empty else "escalações recentes", "destaques": dest,
+            "fonte_elenco": (f"{ros['fonte'].iloc[0]} (elenco atual)" if "fonte" in ros else "ESPN (elenco atual)")
+            if not ros.empty else "escalações recentes", "destaques": dest,
             "dias_desde_ultima_escalacao": stale}
 
 

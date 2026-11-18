@@ -679,3 +679,59 @@ def lineup_from_lineups_table(lu: pd.DataFrame, game_col: str, date_col: str, na
         return pd.DataFrame(columns=["jogo", "data", "jogador", "titular"])
     return pd.DataFrame({"jogo": lu[game_col], "data": lu[date_col].astype(str), "jogador": lu[name_col],
                          "titular": (lu[starter_col] == starter_value).astype(int)})
+
+
+FM_POS_TO_TM = {"GK": "Goalkeeper", "CB": "Centre-Back", "LB": "Left-Back", "RB": "Right-Back", "LWB": "Left-Back",
+                "RWB": "Right-Back", "DM": "Defensive Midfield", "CDM": "Defensive Midfield", "CM": "Central Midfield",
+                "AM": "Attacking Midfield", "CAM": "Attacking Midfield", "LM": "Left Midfield", "RM": "Right Midfield",
+                "LW": "Left Winger", "RW": "Right Winger", "ST": "Centre-Forward", "CF": "Centre-Forward"}
+
+
+def apply_official_roster(squad: pd.DataFrame, official: Optional[pd.DataFrame],
+                          ref: Optional[date] = None) -> Tuple[pd.DataFrame, List[Dict[str, Any]]]:
+    """
+    Rodada 8 — o elenco INSCRITO hoje (FotMob) manda:
+      * quem está no cadastro/nas escalações mas NÃO está na lista atual → sai (com o motivo);
+      * quem está na lista atual e faltava (contratação recente, base promovida) → entra, com posição, idade e altura
+        da FotMob.
+    Nomes casam pela mesma regra da Escalação (sem acento, "Alisson" ⊂ "Alisson Becker", inicial + sobrenome), nunca
+    por palpite. Sem lista oficial, o elenco volta como veio.
+    """
+    if official is None or official.empty or "name" not in official:
+        return squad, []
+    from src.squad.matchday import canonical_names
+
+    sq = squad.copy() if squad is not None else pd.DataFrame(columns=["nome", "papel", "idade"])
+    off_names = official["name"].dropna().astype(str).tolist()
+    canon = canonical_names(sq["nome"].dropna().astype(str).tolist(), off_names) if not sq.empty else {}
+    offset = set(off_names)
+    matched = {n: canon.get(n) for n in sq.get("nome", pd.Series(dtype=str))}
+    keep = [bool(canon.get(n) in offset) for n in sq.get("nome", pd.Series(dtype=str))]
+    changes = [{"nome": n, "mudanca": "saiu", "motivo": "não está no elenco inscrito hoje (FotMob)"}
+               for n, k in zip(sq.get("nome", []), keep) if not k]
+    sq = sq[keep].copy() if len(sq) else sq
+    if len(sq):                                          # duas grafias do mesmo atleta → uma linha, com o nome oficial
+        sq["_oficial"] = [matched.get(n) for n in sq["nome"]]
+        sq = sq.drop_duplicates("_oficial", keep="first")
+        sq["nome"] = sq["_oficial"]
+        sq = sq.drop(columns=["_oficial"])
+        matched = {n: n for n in sq["nome"]}
+    have = set(sq.get("nome", []))
+    new_rows = []
+    for r in official.to_dict("records"):
+        if r["name"] in have:
+            continue
+        pos = str(r.get("position") or "").split(",")[0].strip()
+        new_rows.append({"nome": r["name"], "funcao": FM_POS_TO_TM.get(pos), "posicao": None,
+                         "nascimento": r.get("birth") or None, "altura_cm": r.get("height"),
+                         "nacionalidade": r.get("country") or None, "valor_mercado_eur": r.get("market_value"),
+                         "origem": "FotMob (elenco atual)"})
+        changes.append({"nome": r["name"], "mudanca": "chegou", "motivo": "inscrito hoje no clube (FotMob)"})
+    if new_rows:
+        add = pd.DataFrame(new_rows)
+        add["papel"] = [natural_role(f, p) for f, p in zip(add["funcao"], add["posicao"])]
+        add["idade"] = add["nascimento"].map(lambda b: age_on(b, ref))
+        sq = pd.concat([sq, add], ignore_index=True, sort=False)
+    inj = dict(zip(official["name"], official.get("lesao", official.get("injury", pd.Series("", index=official.index)))))
+    sq["lesao"] = [inj.get(matched.get(n, n), "") or "" for n in sq["nome"]]
+    return sq.reset_index(drop=True), changes

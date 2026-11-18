@@ -74,10 +74,10 @@ div[role="radiogroup"] > label {{ background: {P['surface_2']}; border: 1px soli
   padding: 4px 14px !important; margin: 0 !important; }}
 div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246,0.18); border-color: {P['primary']}; }}
 /* botões e campos */
-.stButton > button, .stDownloadButton > button, [data-testid="stPopover"] button {{ border-radius: 12px;
+.stButton button, .stDownloadButton button, [data-testid="stPopover"] button, [data-testid="stBaseButton-secondary"] {{ border-radius: 12px;
   border: 1px solid {P['border']}; background: {P['surface_2']}; color: {P['text']}; font-weight: 700;
   transition: all .15s ease; }}
-.stButton > button:hover, [data-testid="stPopover"] button:hover {{ border-color: {P['accent']}; color: {P['accent']};
+.stButton button:hover, [data-testid="stPopover"] button:hover, [data-testid="stBaseButton-secondary"]:hover {{ border-color: {P['accent']}; color: {P['accent']};
   box-shadow: 0 0 15px rgba(34,211,238,0.3); }}
 [data-testid="stPageLink"] a {{ border-radius: 999px; padding: 4px 12px; border: 1px solid transparent; transition: all .15s ease; }}
 [data-testid="stPageLink"] a:hover {{ border-color: {P['accent']}; box-shadow: 0 0 12px rgba(34,211,238,0.25); }}
@@ -89,7 +89,7 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 [data-testid="stMetricValue"] {{ font-family: 'Space Grotesk', sans-serif; }}
 [data-testid="stMetric"] {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); border: 1px solid {P['border']};
   border-radius: 16px; padding: 12px 14px; }}
-.stButton > button[kind="primary"] {{ background: var(--til-grad); border: none; color: white; }}
+.stButton button[kind="primary"], [data-testid="stBaseButton-primary"] {{ background: var(--til-grad); border: none; color: white; }}
 .stTextInput input, .stNumberInput input, .stTextArea textarea, [data-baseweb="select"] > div {{
   background: #0B1120 !important; border-radius: 12px !important; border-color: {P['border']} !important; color: {P['text']} !important; }}
 .stTextInput input:focus, .stNumberInput input:focus, .stTextArea textarea:focus {{ border-color: {P['primary']} !important; }}

@@ -1,0 +1,19 @@
+# Tema escuro nativo (rodada 8): no Streamlit 1.67 o CSS injetado não alcança mais botões e caixas de seleção
+# (ficavam brancos com texto branco). Com o tema escuro aqui, todo componente já nasce nas cores do app.
+[theme]
+base = "dark"
+primaryColor = "#3B82F6"
+backgroundColor = "#090D16"
+secondaryBackgroundColor = "#111A2E"
+textColor = "#F5F7FB"
+borderColor = "#1E2A44"
+font = "sans-serif"
+
+[server]
+runOnSave = false
+
+[runner]
+fastReruns = true
+
+[client]
+toolbarMode = "minimal"

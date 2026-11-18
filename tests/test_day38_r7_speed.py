@@ -152,3 +152,41 @@ def test_compact_experiment_saves_feature_names_and_scores(tmp_path):
     X = R.DangerModelRegistry._model_matrix(net, data)
     assert X.shape[1] == len(R.COMPACT_FEATURES)
     assert "E" in R.EXPERIMENTS and R.EXPERIMENT_ORDER[0] == "E"
+
+
+def test_fotmob_squad_parse_and_official_roster():
+    import pandas as pd
+
+    from src.data_hub.sources.fotmob import FotmobProvider
+    from src.squad.planner import apply_official_roster
+
+    d = {"squad": {"squad": [
+        {"title": "coach", "members": [{"id": 1, "name": "Treinador"}]},
+        {"title": "keepers", "members": [{"id": 2, "name": "Cássio", "shirtNumber": 1}]},
+        {"title": "defenders", "members": [{"id": 3, "name": "Matías Viña", "positionIdsDesc": "LB,LWB",
+                                            "injury": {"name": "Joelho"}}]},
+        {"title": "attackers", "members": [{"id": 4, "name": "Luis Sinisterra", "positionIdsDesc": "LW"}]}]}}
+    rows = FotmobProvider.parse_squad(d, 99, "Cruzeiro", "2026-11-18T00:00:00+00:00")
+    assert [r["name"] for r in rows] == ["Cássio", "Matías Viña", "Luis Sinisterra"]   # sem o treinador
+    assert rows[0]["position"] == "GK" and rows[1]["injury"] == "Joelho"
+    off = pd.DataFrame(rows).assign(lesao=lambda x: x["injury"])
+    sq = pd.DataFrame({"nome": ["Cassio", "Matias Vina", "Jogador Que Saiu"], "papel": ["GK", "LB", "ST"],
+                       "idade": [39, 28, 30]})
+    out, ch = apply_official_roster(sq, off)
+    assert set(out["nome"]) == {"Cássio", "Matías Viña", "Luis Sinisterra"}
+    assert {"nome": "Jogador Que Saiu", "mudanca": "saiu",
+            "motivo": "não está no elenco inscrito hoje (FotMob)"} in ch
+    assert any(c["mudanca"] == "chegou" and c["nome"] == "Luis Sinisterra" for c in ch)
+    assert out.loc[out["nome"] == "Luis Sinisterra", "papel"].iloc[0] == "LW"
+    assert out.loc[out["nome"] == "Matías Viña", "lesao"].iloc[0] == "Joelho"
+    same, none = apply_official_roster(sq, pd.DataFrame())
+    assert len(same) == 3 and none == []
+
+
+def test_game_page_has_neural_section():
+    from src.ui.pages import games
+
+    assert games.SECTIONS[6] == "🧠 Perigo (IA)"
+    import src.ui.pages.danger_view as dv
+
+    assert callable(dv.render)
