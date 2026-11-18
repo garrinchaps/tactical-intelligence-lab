@@ -415,6 +415,10 @@ def multi_fit(slot_role: str, posicoes: Dict[str, int], main: Optional[str]) -> 
     return best
 
 
+PHYSICAL_KEYS = {"sprints", "distance_covered", "distance", "top_speed", "high_intensity_runs", "accelerations",
+                 "walking_distance", "running_distance", "sprinting_distance"}
+
+
 def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles: Dict[str, str],
                       canon: Optional[Dict[str, str]] = None) -> Dict[str, Dict[str, Any]]:
     """
@@ -465,8 +469,10 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
         # rodada 7: número medido só em parte dos jogos é escalado para os minutos totais — o "por 90" final usa
         # apenas os jogos em que ele existe (antes, um dado ausente em alguns jogos puxava a média para baixo)
         tot_m = agg["minutes"]
+        # rodada 13: SÓ números físicos (que a liga mede ou não) são escalados. A FotMob OMITE a estatística que deu
+        # zero no jogo; escalar isso inflava tudo ("Erros que deram chance 20,0" de um único erro em 20 jogos).
         for k in list(agg):
-            if k != "minutes" and mins_k.get(k) and mins_k[k] < tot_m:
+            if k in PHYSICAL_KEYS and mins_k.get(k) and mins_k[k] < tot_m:
                 agg[k] = agg[k] * tot_m / mins_k[k]
         role = roles.get(name)
         row = pd.DataFrame([{"team_name": g["team_name"].iloc[0], "player_name": name, "position": g["position"].iloc[0],
@@ -475,6 +481,9 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
         if ind.empty:
             continue
         r = ind.iloc[0].to_dict()
+        for k in ("gols_evitados", "gk_erros"):          # totais da temporada → por 90 (a régua é por jogo)
+            if r.get(k) is not None and agg.get("minutes"):
+                r[k] = float(r[k]) * 90 / float(agg["minutes"])
         model_score = evaluate(r, ref)
         peers = _peer_group(ref, r["funcao"])
         inds = GK_INDICATORS if r["funcao"] == "goleiro" else INDICATORS
@@ -482,6 +491,11 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
         for k, (_dim, _w, hi) in inds.items():
             v = r.get(k)
             if v is None or (isinstance(v, float) and v != v) or k not in peers:
+                continue
+            pk = pd.to_numeric(pd.Series(peers[k]), errors="coerce").dropna()
+            # rodada 13: indicador que dá ZERO na maioria dos jogos (bloqueios de centroavante, perdas, erros) não
+            # vira destaque: a média da temporada contra jogos isolados cheios de zero dava "melhor que 92%" falso
+            if len(pk) and float((pk == 0).mean()) > 0.45:
                 continue
             pc = _pct(v, peers[k])
             if pc is None:

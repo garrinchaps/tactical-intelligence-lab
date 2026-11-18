@@ -36,14 +36,15 @@ ROLE_METRICS = {
     "GK": [("saves_p90", .30, True), ("xgot_faced_p90", .20, True),
            ("rating_media", .25, True), ("goals_conceded_p90", .15, False),
            ("errors_p90", .10, False)],
-    "CB": [("def_actions_p90", .22, True), ("interceptions_p90", .18, True),
-           ("clearances_p90", .18, True), ("aerials_won_p90", .17, True),
+    "CB": [("def_actions_p90", .16, True), ("interceptions_p90", .16, True),
+           ("clearances_p90", .08, True), ("aerials_won_p90", .14, True),
+           ("line_breaking_p90", .16, True), ("dribbled_past_p90", .10, False),
            ("pass_accuracy_pct", .15, True), ("errors_p90", .10, False), ("rating_media", .15, True)],
     "FB": [("def_actions_p90", .18, True), ("interceptions_p90", .12, True),
            ("chances_created_p90", .20, True), ("xa_p90", .14, True),
            ("assists_p90", .12, True), ("sprints_p90", .12, True),
            ("pass_accuracy_pct", .12, True), ("rating_media", .15, True)],
-    "DM": [("def_actions_p90", .22, True), ("interceptions_p90", .18, True),
+    "DM": [("def_actions_p90", .18, True), ("interceptions_p90", .16, True), ("line_breaking_p90", .14, True),
            ("tackles_p90", .14, True), ("pass_accuracy_pct", .16, True),
            ("chances_created_p90", .12, True), ("xa_p90", .08, True),
            ("errors_p90", .10, False), ("rating_media", .15, True)],
@@ -73,6 +74,9 @@ COUNT_KEYS = {
     "aerials_won": "aerials_won", "dribbles": "successful_dribbles",
     "fouls": "foulsCommitted", "errors": "errors_led_to_goal", "saves": "saves",
     "xgot_faced": "xgot_faced", "yellow_cards": "yellow_cards", "red_cards": "red_cards",
+    # rodada 13: construção (zagueiro que joga, como Cubarsí, não pode ser medido só por cortes e desarmes)
+    "line_breaking": "line_breaking_passes", "final_third_passes": "passes_into_final_third",
+    "long_balls": "long_balls_accurate", "dribbled_past": "dribbled_past",
 }
 
 
@@ -739,8 +743,30 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                                          ensure_ascii=False, default=str)
             )
 
+    # rodada 13: homônimo no cadastro (dois "Zé Lucas") não fica mais sem números — o histórico vai para o atleta cujo
+    # clube no cadastro é o MESMO clube dos jogos recentes; sem um único casamento pelo clube, continua bloqueado.
+    if history_columns and duplicated_core.any() and "ultimo_time" in history_frame:
+        hmap = history_frame.set_index("core")
+        cand = p[duplicated_core & p["_core"].astype(str).isin(history_cores)]
+        for core, grp in cand.groupby("_core"):
+            last_team = team_core(_safe_str(hmap.at[core, "ultimo_time"])) if core in hmap.index else ""
+            if not last_team:
+                continue
+            hits = grp[grp["clube"].map(lambda c: team_core(_safe_str(c)) == last_team)]
+            if len(hits) != 1:
+                continue
+            i = hits.index[0]
+            for col in history_columns:
+                v = hmap.at[core, col]
+                if col in ("historico_temporadas", "ultimos_jogos"):
+                    v = json.dumps(v if isinstance(v, (list, dict)) else [], ensure_ascii=False, default=str)
+                p.at[i, col] = v
+            matched.loc[i] = True
+            p.loc[grp.index.difference([i]), "historico_ambiguo"] = True
+            p.at[i, "historico_ambiguo"] = False
     duplicated_after_merge = p["_core"].duplicated(keep=False)
-    ambiguous = duplicated_after_merge & p["_core"].astype(str).isin(history_cores)
+    ambiguous = duplicated_after_merge & p["_core"].astype(str).isin(history_cores) & \
+        ~p.get("historico_ambiguo", pd.Series(False, index=p.index)).eq(False)
     p.loc[ambiguous, "historico_ambiguo"] = True
     no_history = ~matched & ~ambiguous
     p.loc[no_history, "clube_observado"] = False
@@ -938,8 +964,16 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
                 perf = 50 + (perf - 50) * factor
             # reputação de mercado na mesma função (o mercado já precifica nível e regularidade) — só quando existe
             rep = rep_pct.get(row_idx)
+            # rodada 13: sem minutos medidos E sem valor de mercado não há o que avaliar — antes virava "48" (puro
+            # preenchimento) e dezenas de jovens apareciam com a mesma nota. Agora fica sem nota (lacuna é lacuna).
+            if mins < 90 and rep is None:
+                continue
             lvl100 = 100 * lvl if lvl is not None else 45.0
-            q = .6 * perf + .3 * (rep if rep is not None else lvl100) + .1 * lvl100
+            # rodada 13: jovem já muito valorizado na função (topo do mercado aos ≤ 23) — o mercado enxerga seleção,
+            # liderança e projeção que as estatísticas abertas não mostram (ex.: Cubarsí); pesa mais a reputação
+            age_i = _num(d.at[row_idx, "idade"])
+            w_rep = .45 if (rep is not None and rep >= 85 and age_i is not None and age_i <= 23) else .3
+            q = (.9 - w_rep) * perf + w_rep * (rep if rep is not None else lvl100) + .1 * lvl100
             d.at[row_idx, "qualidade"] = round(q, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)
     # Potencial de revenda: indicador exploratório, separado da qualidade atual.

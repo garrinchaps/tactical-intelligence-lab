@@ -301,7 +301,7 @@ def render(_ctx=None) -> None:
     with t1:
         level_filter = st.selectbox(
             "Exibir partidas",
-            ["Com estatísticas ou lances (sem só placar)", "Todos os jogos", "Somente com lances",
+            ["Todos os jogos", "Com estatísticas ou lances (sem só placar)", "Somente com lances",
              "Somente com estatísticas", "Somente placares"],
             key=f"team_level_filter_{name}",
             help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",

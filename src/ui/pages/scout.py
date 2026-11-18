@@ -197,13 +197,66 @@ def _nat_market(version, country, team_key, _universe, _roster):
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=16)
 def _loans(team, version):
+    out = []
     try:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
 
-        return get_service().fotmob.loans(same_team_names(team))
+        out = list(get_service().fotmob.loans(same_team_names(team)) or [])
+    except Exception:
+        out = []
+    known = {(x.get("name"), x.get("direction")) for x in out}
+    return out + [x for x in _manual_loans(team) if (x["name"], x["direction"]) not in known]
+
+
+MANUAL_LOANS_DDL = ("CREATE TABLE IF NOT EXISTS scout_manual_loans (club TEXT, name TEXT, direction TEXT, other_club TEXT, "
+                    "to_date TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (club, name, direction))")
+
+
+def _manual_loans(team):
+    """rodada 13: empréstimos registrados à mão (quando a FotMob não traz) — ficam no banco local."""
+    try:
+        from src.ui.context import get_service
+
+        with get_service().db.connect() as conn:
+            conn.execute(MANUAL_LOANS_DDL)
+            rows = conn.execute("SELECT name, direction, other_club, to_date FROM scout_manual_loans WHERE club = ?",
+                                (team,)).fetchall()
+        return [{"name": n, "direction": d, "other_club": o, "to_date": t or "—", "manual": True} for n, d, o, t in rows]
     except Exception:
         return []
+
+
+def _manual_loan_form(team, roster):
+    with st.expander("➕ Registrar empréstimo à mão (quando a fonte não trouxer)"):
+        st.caption("Use para gerir quem veio emprestado ao clube (comprar / deixar acabar / renovar) e quem o clube "
+                   "emprestou (reintegrar / vender / renovar). Fica salvo no banco local.")
+        with st.form(f"scout_manual_loan_{_slug(team)}", border=False):
+            a, b, c, d = st.columns([1.2, 1.4, 1.4, 1])
+            direction = a.radio("Tipo", ["Veio emprestado", "Emprestado pelo clube"], key="sml_dir")
+            names = roster["nome"].astype(str).tolist() if roster is not None and not roster.empty else []
+            if direction == "Veio emprestado" and names:
+                name = b.selectbox("Jogador do elenco", names, key="sml_name_in")
+            else:
+                name = b.text_input("Nome do jogador", key="sml_name_out")
+            other = c.text_input("Clube dono / clube onde está", key="sml_other")
+            until = d.text_input("Até (ex.: 2026-12-31)", key="sml_until")
+            ok = st.form_submit_button("Salvar empréstimo")
+        if ok and str(name).strip():
+            from src.ui.context import get_service
+
+            with get_service().db.connect() as conn:
+                conn.execute(MANUAL_LOANS_DDL)
+                conn.execute("INSERT OR REPLACE INTO scout_manual_loans (club, name, direction, other_club, to_date) "
+                             "VALUES (?,?,?,?,?)", (team, str(name).strip(), "in" if direction == "Veio emprestado" else "out",
+                                                     other.strip() or "?", until.strip() or None))
+            _loans.clear()
+            st.success(f"Empréstimo de {name} registrado — aparece nos cartões da janela.")
+            st.rerun()
+        man = _manual_loans(team)
+        if man:
+            st.caption("Registrados à mão: " + "; ".join(f"{x['name']} ({'veio do' if x['direction'] == 'in' else 'está no'} "
+                                                        f"{x['other_club']})" for x in man))
 
 
 def _club_averages_chart(diagnosis, team):
@@ -1054,6 +1107,7 @@ def render(_ctx=None):
         st.markdown("#### Janela de transferências")
         if not roster.empty:
             st.caption("Marque quem fica, sai ou deve ser emprestado — por setor. Vendas usam deságio estimado.")
+            _manual_loan_form(team, roster)
             rows=_window_cards(roster, decisions, _loans(team, version))
             if rows: comparison_table(pd.DataFrame(rows))
         plan=st.session_state[plan_key]

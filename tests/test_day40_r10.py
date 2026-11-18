@@ -50,7 +50,7 @@ def test_scout_quality_shrinks_tiny_samples_and_rewards_level():
 
     q = E.add_quality_scores(_role_frame()).set_index("nome")["qualidade"]
     assert q["P0"] >= 85                       # craque de clube forte, temporada inteira
-    assert q["P1"] <= 55                       # 21 minutos não viram nota de elite
+    assert pd.isna(q["P1"]) or q["P1"] <= 55   # 21 minutos não viram nota de elite (rodada 13: sem valor = sem nota)
     assert q["P0"] == q.max()
 
 

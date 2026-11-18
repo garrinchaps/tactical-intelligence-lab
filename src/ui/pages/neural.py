@@ -189,11 +189,41 @@ def _lab_ai_panel() -> None:
     c[2].metric("👍 / 👎 (fatos)", f"{int(y.sum())} / {int(len(y) - y.sum())}" if len(y) else "0 / 0")
     ref = LR.load()
     c[3].metric("Régua da base", f"{len(ref)} números")
+    # rodada 13: treino no mesmo molde da rede de perigo — hiperparâmetros, curva treino × validação, versões
+    from src.intelligence.lab_ai import trainer as TR
+
+    st.markdown("#### 🏋️ Treinar a IA do Assistente (como a rede de perigo)")
+    last = sel.meta["versions"][-1] if sel.meta.get("versions") else {}
+    sug = TR.suggest(last)
+    st.caption("Sugestão da própria IA a partir do último treino: " + " · ".join(sug["porque"]))
+    h1, h2, h3, h4 = st.columns(4)
+    lr = h1.select_slider("Taxa de aprendizado (η)", [0.01, 0.03, 0.05, 0.1, 0.2, 0.5], value=min(
+        [0.01, 0.03, 0.05, 0.1, 0.2, 0.5], key=lambda v: abs(v - sug["sugerido"]["learning_rate"])), key="as_lr")
+    l2 = h2.select_slider("Regularização L2 (λ)", [0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], value=min(
+        [0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], key=lambda v: abs(v - sug["sugerido"]["l2"])), key="as_l2")
+    ep = h3.slider("Épocas (máximo)", 20, 1000, int(min(max(sug["sugerido"]["epochs"], 20), 1000)), 20, key="as_ep")
+    weak = h4.toggle("Usar rótulo automático", value=True, key="as_weak",
+                     help="Perguntas que pedem um número reconhecível viram exemplos de treino sozinhas.")
     b1, b2 = st.columns(2)
-    if b1.button("🧠 Treinar com as avaliações", type="primary", use_container_width=True):
-        r = sel.train()
-        (st.success if r.get("promoted") else st.info)(r["reason"])
+    if b1.button("🧠 Treinar a IA do Assistente", type="primary", use_container_width=True):
+        with st.spinner("Treinando (descida do gradiente com parada antecipada)…"):
+            r = TR.train(learning_rate=lr, l2=l2, epochs=ep, use_weak=weak)
+        (st.success if r.get("promoted") else st.info)(
+            f"{r['reason']}" + (f" · {r['n_perguntas']} perguntas, {r['n_exemplos']} exemplos, "
+                                f"{r.get('epochs_run', 0)} épocas" if r.get("n_exemplos") else ""))
         sel = Selector()
+    hist_v = [v for v in sel.meta.get("versions", []) if v.get("history")]
+    if hist_v:
+        import plotly.graph_objects as go
+
+        hv = hist_v[-1]
+        fig = go.Figure()
+        fig.add_scatter(y=hv["history"]["train_loss"], name="treino", line=dict(color="#3B82F6"))
+        fig.add_scatter(y=hv["history"]["val_loss"], name="validação", line=dict(color="#EF4444"))
+        fig.update_layout(height=260, paper_bgcolor="#090D16", plot_bgcolor="#0B1120", font=dict(color="#F5F7FB"),
+                          title=f"Curva do último treino (v{hv['version']:03d})", margin=dict(l=40, r=10, t=40, b=30))
+        st.plotly_chart(fig, use_container_width=True, key="as_curve")
+        st.caption(f"Diagnóstico: {TR.suggest(hv)['diagnostico']['texto']}")
     if b2.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True):
         from src.ui.context import get_service
 
@@ -201,11 +231,11 @@ def _lab_ai_panel() -> None:
             ref = LR.build(get_service().db)
         st.success(f"Régua refeita: {len(ref)} números.")
     if n_rated < MIN_RATED:
-        st.caption(f"Faltam {MIN_RATED - n_rated} respostas avaliadas para o primeiro treino dos pesos "
-                   f"(as frases já aprendem desde a 1ª avaliação).")
+        st.caption(f"{n_rated} respostas avaliadas com 👍/👎 — o treino já funciona com o rótulo automático; cada "
+                   "avaliação a mais pesa 3 vezes.")
     with st.expander("O que a IA olha para escolher os números (pesos da versão em uso)"):
         comparison_table(pd.DataFrame(sel.weight_table()), "Peso positivo = aumenta a chance de o fato entrar na resposta.")
-        hist = pd.DataFrame([{k: v for k, v in x.items() if k != "weights"} for x in sel.meta["versions"]])
+        hist = pd.DataFrame([{k: v for k, v in x.items() if k not in ("weights", "history")} for x in sel.meta["versions"]])
         comparison_table(hist, "Histórico de versões.")
 
 
@@ -490,9 +520,9 @@ def _learning_activity_panel() -> None:
     k[1].metric("Com feedback positivo", s["positive_feedback"])
     k[2].metric("Com feedback negativo", s["negative_feedback"])
     k[3].metric("Aguardando revisão", s["feedback_pending_review"])
-    st.caption("Cada pergunta fica registrada para auditoria e para encontrar lacunas. Perguntas e 👍/👎 não alteram os pesos: "
-               "o feedback fica pendente de revisão. O treino só usa exemplos com rótulo verificável, como a sequência real "
-               "de eventos e se a posse terminou em finalização.")
+    st.caption("Cada pergunta fica registrada. Desde a rodada 13 ela vira exemplo de treino da IA do Assistente: as "
+               "avaliações 👍/👎 contam direto (peso 3) e as perguntas que pedem um número reconhecível ganham rótulo "
+               "automático. O treino só troca a versão se ela errar menos nas perguntas de validação.")
 
 
 def _assistant_misses() -> None:

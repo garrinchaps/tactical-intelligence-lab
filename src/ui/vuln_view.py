@@ -5,7 +5,7 @@ com gravidade, evidência e como explorar. Usa `src/analytics/vulnerabilities.py
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Optional, Any, Dict, List, Sequence
 
 import plotly.graph_objects as go
 import streamlit as st
@@ -156,10 +156,24 @@ def cards_html(found: List[Dict[str, Any]], color: str = "#EF4444") -> str:
 
 
 def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], version: str, mine: bool = False,
-           where: str = "") -> None:
+           where: str = "", lineup: Optional[Sequence[str]] = None, out: Optional[Sequence[str]] = None) -> None:
+    """`lineup` = provável/oficial do próximo jogo e `out` = desfalques: fragilidade de quem NÃO vai jogar sai da
+    leitura (rodada 13: Piquerez lesionado aparecia como alvo). Fragilidades do time (contra-ataque, chutes de
+    fora…) continuam."""
     with st.spinner(f"Procurando fragilidades de {rival} nos últimos jogos..."):
         r = _findings(tuple(rival_names), tuple(our_names or ()), version)
     found = r.get("achados") or []
+    if lineup or out:
+        from src.data_lake.ids import player_core
+
+        on = {player_core(x) for x in (lineup or []) if x}
+        off = {player_core(x) for x in (out or []) if x}
+        removed = [f for f in found if f.get("jogador") and (player_core(f["jogador"]) in off or
+                                                              (on and player_core(f["jogador"]) not in on))]
+        found = [f for f in found if f not in removed]
+        if removed:
+            st.caption("Fora desta leitura por não estar na escalação provável/oficial (lesão, suspensão ou reserva): "
+                       + ", ".join(dict.fromkeys(f["jogador"] for f in removed)) + ".")
     title = f"🛡️ Onde {rival} sofre (nossos pontos a corrigir)" if mine else f"🎯 Onde atacar {rival}"
     st.markdown(f"### {title}")
     if not found:

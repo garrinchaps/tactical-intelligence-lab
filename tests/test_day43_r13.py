@@ -157,3 +157,59 @@ def test_opening_the_database_does_not_build_heavy_indexes(tmp_path):
     assert set(db.missing_speed_indexes()) == {n for n, _ in SPEED_INDEXES}
     assert set(db.ensure_speed_indexes()) == {n for n, _ in SPEED_INDEXES}
     assert db.missing_speed_indexes() == []
+
+
+def test_homonym_gets_history_by_club():
+    from src.scout import engine as E
+
+    tm = pd.DataFrame({"nome": ["Zé Lucas", "Zé Lucas"], "clube": ["Cruzeiro", "Outro FC"], "posicao": ["Midfield"] * 2,
+                       "funcao": ["Defensive Midfield"] * 2, "nascimento": ["2008-01-01", "1995-01-01"],
+                       "valor_mercado_eur": [None, 1e5], "transfermarkt_id": ["1", "2"]})
+    hist = pd.DataFrame([{"core": "ze lucas", "ultimo_time": "Cruzeiro", "minutos_12m": 1737, "jogos_12m": 25,
+                          "rating_12m": 6.9, "historico_temporadas": [], "ultimos_jogos": []}])
+    u = E.build_market_universe(tm, hist).set_index("clube")
+    assert u.loc["Cruzeiro", "minutos_12m"] == 1737
+    assert pd.isna(u.loc["Outro FC", "minutos_12m"]) and bool(u.loc["Outro FC", "historico_ambiguo"])
+
+
+def test_one_per_game_keeps_two_legs_with_same_score():
+    from src.ui.pages.search_all import one_per_game
+
+    df = pd.DataFrame([dict(match_id=1, data_level="BOXSCORE", home_team_name="Cruzeiro", away_team_name="Atlético-MG",
+                            home_score=2, away_score=0, match_date="2025-08-27", competition_name="Copa do Brasil"),
+                       dict(match_id=2, data_level="BOXSCORE", home_team_name="Cruzeiro", away_team_name="Atlético-MG",
+                            home_score=2, away_score=0, match_date="2025-09-11", competition_name="Copa do Brasil")])
+    assert sorted(one_per_game(df)["match_id"]) == [1, 2]
+
+
+def test_assistant_trainer_uses_weak_labels_and_records_curve(tmp_path):
+    import json
+
+    from src.intelligence.lab_ai import trainer as TR
+    from src.intelligence.lab_ai.facts import N_FEATURES
+    from src.intelligence.lab_ai.selector import Selector
+
+    rng = np.random.default_rng(0)
+    shown = tmp_path / "shown.jsonl"
+    with shown.open("w", encoding="utf-8") as f:
+        for i in range(40):
+            facts = []
+            for key in ("passes_total", "long_balls_accurate", "corners"):
+                feats = list(rng.uniform(0, 1, N_FEATURES))
+                feats[1] = 0.9 if key == "long_balls_accurate" else 0.1     # sinal que separa o fato certo
+                facts.append({"key": key, "features": feats})
+            f.write(json.dumps({"interaction_id": str(i), "question": "quantas bolas longas o time fez?", "facts": facts}) + "\n")
+    sel = Selector(root=tmp_path / "reg")
+    r = TR.train(epochs=60, sel=sel, shown_path=shown, feedback_path=tmp_path / "none.jsonl")
+    assert r["n_perguntas"] == 40 and len(r["history"]["val_loss"]) >= 2
+    assert Selector(root=tmp_path / "reg").meta["versions"][-1]["history"]["train_loss"]
+    assert "sugerido" in TR.suggest(Selector(root=tmp_path / "reg").meta["versions"][-1])
+
+
+def test_pagerank_rewards_beating_strong_teams():
+    from src.analytics.pagerank import team_strength
+
+    m = pd.DataFrame([("A", "B", 2, 0), ("B", "C", 1, 0), ("C", "D", 3, 0), ("D", "A", 0, 1), ("C", "A", 0, 0)],
+                     columns=["home_team_name", "away_team_name", "home_score", "away_score"])
+    t = team_strength(m).set_index("time")
+    assert t["forca_pagerank"].idxmax() == "A" and t.loc["D", "forca_pagerank"] == 0

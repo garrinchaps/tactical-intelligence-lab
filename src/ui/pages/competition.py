@@ -7,7 +7,7 @@ import streamlit as st
 
 from src.data_hub.registry import BADGES
 from src.ui import nav
-from src.ui.components import comparison_table, empty_state, result_card_html
+from src.ui.components import styled_dataframe, comparison_table, empty_state, result_card_html
 from src.ui.names import pt
 
 PAGE = 25
@@ -126,5 +126,18 @@ def render(_ctx=None) -> None:
             st.caption("Calculada a partir dos placares da base (3 pontos por vitória). Em copas e fases de grupo, "
                        "é só um resumo de desempenho, não a tabela oficial.")
             st.markdown(standings_html(tab, allm), unsafe_allow_html=True)
+            with st.expander("🔗 Força real pelo PageRank (quem você venceu importa)"):
+                from src.analytics.pagerank import team_strength
+
+                pr = team_strength(allm)
+                if not pr.empty:
+                    pr["diferença"] = pr["posicao_pontos"] - pr["posicao_pagerank"]
+                    st.caption("Cada derrota é um \"voto\" do perdedor no vencedor (peso maior com saldo maior; empate = meio "
+                               "voto). Vencer quem vence muita gente vale mais. Diferença positiva = o time é mais forte do que "
+                               "a tabela mostra (venceu adversários fortes); negativa = somou pontos contra os fracos.")
+                    styled_dataframe(pr.rename(columns={"time": "Time", "forca_pagerank": "Força (0–100)", "jogos": "Jogos",
+                                                        "pontos": "Pontos", "posicao_pagerank": "Pos. PageRank",
+                                                        "posicao_pontos": "Pos. pontos", "diferença": "Diferença"}),
+                                     hide_index=True, use_container_width=True)
             pick = st.selectbox("Abrir o time", tab["time"].tolist(), format_func=pt, key=f"comp_team_{name}_{sea}")
             nav.link(f"🛡️ Ver {pt(pick)}", "time", key=f"comp_team_open_{name}", name=pick)

@@ -462,8 +462,8 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
         if d.get("fortes") or d.get("fracos"):
             hl = ('<div style="margin-top:6px">' + box(d.get("fortes") or [], "rgba(34,197,94,.14)", "#22C55E", "✅")
                   + box(d.get("fracos") or [], "rgba(239,68,68,.14)", "#EF4444", "⚠️") + "</div>"
-                  + f'<div style="color:#64748B;font-size:.75rem;margin-top:3px">temporada: {d["jogos"]} jogos, {d["minutos"]} min, '
-                  f'contra {d["funcao"]}s de outros jogos</div>')
+                  + f'<div style="color:#64748B;font-size:.75rem;margin-top:3px">números por jogador de {d["jogos"]} jogos ({d["minutos"]} min) — só os jogos em que a fonte publicou estatística individual, '
+                  f'contra {_pl(d["funcao"])} de outros jogos</div>')
         rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:9px 12px;'
                     f'margin-bottom:8px"><b style="font-size:1rem;color:#F5F7FB">{p["papel_pt"]}: {p["jogador"]}</b>{chips}{hl}'
                     f'<div style="color:#CBD5E1;font-size:.82rem;margin-top:5px">{why}</div></div>')
@@ -624,7 +624,10 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
     with tabs[0]:
         from src.ui import vuln_view
 
-        vuln_view.render(rival, rv["names"], me["names"], version, where=w)   # rodada 7: mapa de onde atacar
+        out_rv = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
+            if not b["jogadores"].empty and "indisponivel" in b["jogadores"] else []
+        vuln_view.render(rival, rv["names"], me["names"], version, where=w,
+                         lineup=[x.get("jogador") for x in xr if x.get("jogador")], out=out_rv)
     with tabs[1]:
         c1, c2 = st.columns(2)
         with c1:
@@ -690,7 +693,10 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         from src.ui import vuln_view
 
         st.caption(f"Onde {team} sofre — pontos a corrigir antes do jogo.")
-        vuln_view.render(team, me["names"], rv["names"], version, mine=True, where=w)
+        out_me = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
+            if not a["jogadores"].empty and "indisponivel" in a["jogadores"] else []
+        vuln_view.render(team, me["names"], rv["names"], version, mine=True, where=w,
+                         lineup=[x.get("jogador") for x in xm if x.get("jogador")], out=out_me)
     with tabs[4]:
         c1, c2 = st.columns(2)
         with c1:
@@ -713,6 +719,12 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
             st.caption("Notícia, não dado confirmado.")
             for nw in pv["noticias"]:
                 st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
+
+
+def _pl(word):
+    from src.analytics.vulnerabilities import _pl as plural
+
+    return plural(word)
 
 
 def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -> None:

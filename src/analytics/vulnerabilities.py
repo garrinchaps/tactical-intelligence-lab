@@ -36,6 +36,12 @@ ROLE_PT = {"GK": "goleiro", "CB": "zagueiro", "LB": "lateral-esquerdo", "RB": "l
            "RM": "meia pela direita", "LW": "ponta-esquerda", "RW": "ponta-direita", "ST": "centroavante"}
 
 
+def _pl(word: str) -> str:
+    """Plural em português (lateral → laterais, zagueiro → zagueiros)."""
+    w = str(word or "")
+    return w[:-1] + "is" if w.endswith("l") else (w + "es" if w.endswith(("r", "z")) else w + "s")
+
+
 def _recent_ids(db, names: Sequence[str], n: int) -> List[int]:
     ph = ",".join("?" * len(names))
     # só jogos com MINUTOS por jogador (FotMob): a ESPN não informa minutos, e sem minutos não existe "por 90"
@@ -158,14 +164,14 @@ def team_vulnerabilities(db, names: Sequence[str], n: int = 12, our_names: Optio
             p_dp = _pct(dp, ref.get("driblado90", pd.Series(dtype=float)))
             if role in ("LB", "RB", "LWB", "RWB", "CB", "DM") and p_dp is not None and p_dp >= 80:
                 add(f"{nome} é muito driblado", setor, lado, nome,
-                    f"{dp:.2f} vezes driblado por 90 — mais que {p_dp:.0f}% dos {fun}s", p_dp,
+                    f"{dp:.2f} vezes driblado por 90 — mais que {p_dp:.0f}% dos {_pl(fun)}", p_dp,
                     f"Colocar o nosso melhor driblador no 1x1 contra ele{(' pela ' + lado) if lado else ''}; isolar o lado "
                     "com inversão rápida para chegar com ele de frente.", base)
             tk = r.get("matchstats.headers.tackles_90")
             p_tk = _pct(tk, ref.get("desarmes_ganhos90", pd.Series(dtype=float)))
             if role in ("DM", "CB", "LB", "RB") and p_tk is not None and p_tk <= 20:
                 add(f"{nome} desarma pouco", setor, lado, nome,
-                    f"{tk:.2f} desarmes por 90 — abaixo de {100 - p_tk:.0f}% dos {fun}s", 100 - p_tk,
+                    f"{tk:.2f} desarmes por 90 — abaixo de {100 - p_tk:.0f}% dos {_pl(fun)}", 100 - p_tk,
                     ("Atrair a marcação dele e jogar no espaço às costas: o volante não corta a jogada, a bola chega limpa "
                      "na entrada da área." if role == "DM" else
                      f"Atacar com condução e tabelas{(' pela ' + lado) if lado else ''}: ele acompanha, mas não rouba."), base)
@@ -191,7 +197,7 @@ def team_vulnerabilities(db, names: Sequence[str], n: int = 12, our_names: Optio
                 if p_da is not None and p_da <= 20:
                     extra = f" e corre {km / 1000:.1f} km por 90 (dado físico da liga)" if km else ""
                     add(f"{nome} quase não defende", setor, lado, nome,
-                        f"{da:.2f} desarmes + interceptações + recuperações por 90 — abaixo de {100 - p_da:.0f}% dos {fun}s{extra}",
+                        f"{da:.2f} desarmes + interceptações + recuperações por 90 — abaixo de {100 - p_da:.0f}% dos {_pl(fun)}{extra}",
                         90 - p_da, f"Construir {('pela ' + lado + ' dele') if lado else 'pelo setor dele'}: o lateral/volante "
                                    "atrás dele fica em inferioridade quando ele não volta.", base)
             if role in ("CB", "GK"):

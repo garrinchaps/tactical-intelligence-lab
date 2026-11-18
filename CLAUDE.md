@@ -393,6 +393,28 @@ Rodada 13 (18/11/2026, 422 testes verdes):
 - Site idêntico: NÃO feito. Caminho honesto para ficar idêntico: publicar o próprio app Streamlit (não reescrever em
   React) com uma cópia só-leitura do banco — exige hospedar o banco (vários GB) e decidir onde.
 
+Rodada 14 (18/11/2026, 427 testes verdes):
+- ✅ Travamento do pytest/app: índices de velocidade fora da abertura do banco (`ensure_speed_indexes`,
+  `python -m src.tools.criar_indices`, worker com a tela parada).
+- ✅ Pré-jogo: "Onde atacar/Onde sofremos" ignora quem não joga (desfalque ou fora da provável) — `vuln_view.render(...,
+  lineup=, out=)`. "Porquês" do XI: FotMob omite stat zero → só físicos são escalados (`PHYSICAL_KEYS`); totais de
+  goleiro viram por 90; indicador com > 45% de zeros na régua não vira destaque (acabou "bloqueios 0,11 melhor que
+  92%" de centroavante e "erros que deram chance 20,0"); plural correto ("laterais"); texto diz "números de N jogos".
+- ✅ Scout: homônimo do cadastro recebe o histórico pelo CLUBE (Zé Lucas, Otávio etc. tinham nota 48 de preenchimento);
+  sem minutos e sem valor = sem nota (lacuna); zagueiro/volante medidos também pela construção (passes que quebram
+  linhas, vezes driblado); jovem ≤ 23 no topo do valor da função pesa mais a reputação (Cubarsí); fotografia v5.
+  `python -m src.tools.onde_esta "Nome"` explica por que um jogador não aparece (Mauro Coronel: liga paraguaia está na
+  lista da FotMob, id 199, mas os jogos dele ainda não foram baixados com detalhes).
+- ✅ Empréstimos registráveis à mão (`scout_manual_loans`) somados aos da FotMob na janela (comprar/deixar acabar/renovar;
+  reintegrar/vender/renovar).
+- ✅ Jogo de ida "sumido": não era apagado — o filtro padrão do clube escondia jogos só com placar. Padrão agora "Todos os
+  jogos"; teste garante que dois jogos com mesmo placar/times/competição em datas diferentes nunca se juntam.
+- ✅ PageRank (`src/analytics/pagerank.py`): força real dos times na página da competição (perdedor "vota" no vencedor,
+  laço para quem vence); já existia na rede de passes.
+- ✅ IA do Assistente treinável como a rede de perigo (`src/intelligence/lab_ai/trainer.py`): 👍/👎 (peso 3) + rótulo
+  automático das perguntas que pedem um número, separação por pergunta, curva treino × validação, parada antecipada,
+  promoção só se errar menos, sugestão dos próximos parâmetros; "Treinar tudo" usa isso.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
