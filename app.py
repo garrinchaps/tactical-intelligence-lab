@@ -146,7 +146,7 @@ VIEWS = {   # telas abertas pelo clique (fora do menu)
     "competicao": st.Page(standalone(competition_render), title="Competição", icon="🏆", url_path="competicao"),
 }
 BACKSTAGE = [
-    st.Page(standalone(neural_render, pass_ctx=True), title="Como a IA aprende", icon="🧠", url_path="como-a-ia-aprende"),
+    st.Page(standalone(neural_render, pass_ctx=True), title="IA do laboratório (treino e bastidores)", icon="🧠", url_path="como-a-ia-aprende"),
     st.Page(needs_match(ml_render), title="Machine Learning & Avaliação", icon="🤖", url_path="ml"),
     st.Page(needs_match(ai_analyst_render), title="Analista técnico (guard)", icon="🛡️", url_path="analista-tecnico"),
     st.Page(standalone(catalog_render), title="Dados & Fontes", icon="🗄️", url_path="dados"),
@@ -277,6 +277,12 @@ def _app_version() -> str:
 
 def main() -> None:
     theme.inject_theme()
+    try:                                                 # rodada 11: avisa o processo de fundo que a tela está em uso
+        from src.data_hub import activity
+
+        activity.touch()
+    except Exception:
+        pass
     st.session_state.setdefault("match_id", DEFAULT_MATCH_ID)
     recent = st.session_state.setdefault("recent_match_ids", [])
     current_mid = int(st.session_state["match_id"])

@@ -113,22 +113,42 @@ def _answer(question: str, current_context, use_llm: bool):
     from src.guard.present import present
 
     present(res)                                        # confere os números; trechos sem origem saem do texto
-    if st.session_state.get("lab_ai_on", True):          # rodada 9: a IA do laboratório (nossa, treinável) responde junto
+    if st.session_state.get("lab_ai_on", True):          # rodada 11: a NOSSA IA responde direto ou não acrescenta nada
         try:
+            from src.intelligence.lab_ai import direct as DIRECT
             from src.intelligence.lab_ai import engine as LAB
-            from src.ui.context import get_service
+            from src.intelligence.lab_ai.availability import data_map, summary_line
+            from src.ui.names import pt as _pt
 
-            lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team, db=get_service().db,
-                             interaction_id=res.get("interaction_id"))
-            specific = bool((res.get("scope") or {}).get("ask")) and not str(res.get("engine_used", "")).startswith("LOCAL_SCOPE")
-            # rodada 10: a IA só SUBSTITUI a resposta quando achou números que respondem à pergunta; senão complementa
-            if specific or not lab.get("matched"):
-                res["report_markdown"] = (res["report_markdown"] + "\n\n---\n\n#### 🧠 Leitura da IA do laboratório\n\n"
-                                          + lab["markdown"])
+            engine = str(res.get("engine_used", ""))
+            off_topic = engine.startswith("LOCAL_SCOPE")
+            ask = (res.get("scope") or {}).get("ask")
+            generic = (not ask) or ask in ("overview", "panorama")
+            foot = "\n\n_" + summary_line(data_map(meta, ctx.df, ctx.bundle.boxscore)) + "_"
+            if off_topic:
+                pass                                      # fora do futebol/jogo: nada a acrescentar
+            elif not generic:
+                pass                                      # o analista já respondeu exatamente o que foi perguntado
             else:
-                res["report_markdown"] = lab["markdown"]
-            res["engine_used"] = lab["engine"] + (" + analista clássico" if (specific or not lab.get("matched")) else "")
-            res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
+                d = DIRECT.answer(question, meta, ctx.df, ctx.bundle.boxscore, pt=_pt)
+                who = LAB.asked_player(question, ctx.df)
+                if d is not None:
+                    res["report_markdown"] = d["markdown"] + foot
+                    res["engine_used"] = "IA DO LABORATÓRIO (resposta direta)"
+                    res["lab_ai"] = {"direct": d["key"], "kind": d["kind"], "n_facts": 0}
+                elif who:
+                    lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
+                                     db=get_service().db, interaction_id=res.get("interaction_id"))
+                    res["report_markdown"] = lab["markdown"]
+                    res["engine_used"] = lab["engine"]
+                    res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
+                elif any(w in question.lower() for w in LAB.PLAN_WORDS):
+                    lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
+                                     db=get_service().db, interaction_id=res.get("interaction_id"))
+                    res["report_markdown"] = lab["markdown"]
+                    res["engine_used"] = lab["engine"]
+                    res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
+                # sem número reconhecido, sem jogador e sem plano: fica a resposta do analista, sem bloco extra
         except Exception as exc:
             res["lab_ai_error"] = f"{type(exc).__name__}: {exc}"
     res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))

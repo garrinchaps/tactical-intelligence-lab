@@ -33,7 +33,9 @@ def one_per_game(out: pd.DataFrame) -> pd.DataFrame:
     canon = _team_canon()
     keys = [tuple(sorted((canon(h), canon(a)))) for h, a in zip(out["home_team_name"], out["away_team_name"])]
     days = pd.to_datetime(out["match_date"].astype(str).str[:10], errors="coerce")
-    out = out.assign(_t1=[k[0] for k in keys], _t2=[k[1] for k in keys], _day=days).sort_values(["_day", "_lv"])
+    out = out.assign(_t1=[k[0] for k in keys], _t2=[k[1] for k in keys], _day=days,
+                     _h=[canon(h) for h in out["home_team_name"]], _a=[canon(a) for a in out["away_team_name"]]
+                     ).sort_values(["_day", "_lv"])
     from src.data_hub.service import _same
 
     rows = out.to_dict("records")
@@ -52,11 +54,24 @@ def one_per_game(out: pd.DataFrame) -> pd.DataFrame:
             same = (r["_t1"] == s["_t1"] and r["_t2"] == s["_t2"]) or (
                 _same(r["_t1"], s["_t1"]) and _same(r["_t2"], s["_t2"])) or (
                 _same(r["_t1"], s["_t2"]) and _same(r["_t2"], s["_t1"]))
+            if not same:
+                # rodada 11: um time igual + MESMO placar (na mesma ordem) em ±1 dia = a mesma partida, mesmo que a outra
+                # fonte escreva o adversário de outro jeito ("Racing Santander" × "R. Racing Club", "LDU" × "Liga de Quito")
+                one = {r["_h"], r["_a"]} & {s["_h"], s["_a"]}
+                same = bool(one) and _score(r) is not None and _score(r) == _score(s) and (
+                    (r["_h"] == s["_h"]) or (r["_a"] == s["_a"]))
             if same:
                 group[j] = gid
         gid += 1
     out = out.assign(_g=group).sort_values(["_g", "_lv"])
-    return out.drop_duplicates("_g").drop(columns=["_t1", "_t2", "_day", "_g"])
+    return out.drop_duplicates("_g").drop(columns=["_t1", "_t2", "_day", "_g", "_h", "_a"])
+
+
+def _score(r):
+    try:
+        return (int(r["home_score"]), int(r["away_score"]))
+    except (TypeError, ValueError, KeyError):
+        return None
 
 
 def _team_canon():

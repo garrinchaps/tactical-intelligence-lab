@@ -140,6 +140,9 @@ def _openplay_prefetch_loop(db=None) -> None:
                     _OPENPLAY["phase"] = f"pausado: apenas {free_gb:.1f} GB livres (mínimo {min_free_gb} GB)"
                     time.sleep(interval)
                     continue
+                from src.data_hub import activity
+
+                activity.wait_idle(_OPENPLAY, "phase")          # rodada 11: não grava enquanto você usa o app
                 _OPENPLAY["phase"] = "convertendo eventos locais"
                 result = provider.prefetch_events(limit=batch, progress=lambda msg: None,
                                                    stop=lambda: not enabled() or not openplay_prefetch_enabled())
@@ -228,19 +231,24 @@ def _fotmob_loop(db=None) -> None:
                 _fm["fase"] = "jogos dos últimos 10 dias"
                 r1 = fm.fetch_details(None, since=(datetime.now().date() - timedelta(days=10)).isoformat(), limit=200,
                                       stop=lambda: not enabled())
+                from src.data_hub import activity
+
+                activity.wait_idle(_fm, "fase")                 # rodada 11: histórico só com a tela parada
                 _fm["fase"] = "histórico"
                 r2 = fm.fetch_details(None, since=f"{datetime.now().year - 5}-01-01", limit=300, stop=lambda: not enabled())
                 _fm["baixados"] += r1["detalhes"] + r2["detalhes"]
                 _fm["pendentes"] = fm.pending()
                 _fm["fase"] = "atualizando réguas de desempenho"
-                _refresh_rating_references(svc)
+                if (r1["detalhes"] + r2["detalhes"]) and not activity.ui_active():   # régua pesada: só com a tela parada
+                    _refresh_rating_references(svc)
+                activity.checkpoint(svc.db)
                 _fm["ultimo"] = datetime.now(timezone.utc)
                 _fm["erro"] = None
                 if r1["detalhes"] + r2["detalhes"] == 0:
                     _fm["fase"] = "em dia"
                     time.sleep(30 * 60)
                 else:
-                    time.sleep(5)
+                    time.sleep(60)                              # rodada 11: respiro entre lotes (antes 5 s)
             except Exception as exc:            # sem internet, site fora: tenta de novo em 10 min, nunca derruba o app
                 _fm["erro"] = f"{type(exc).__name__}: {exc}"
                 time.sleep(10 * 60)

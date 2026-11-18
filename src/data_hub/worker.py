@@ -140,6 +140,10 @@ def _scout_snapshot_loop(db) -> None:
     while True:
         try:
             a = S.age_hours()
+            from src.data_hub import activity
+
+            if a is not None:                            # já existe fotografia: refaz só com a tela parada
+                activity.wait_idle(_scout_state, "fase")
             if a is None or a >= S.max_age_hours():
                 _scout_state["rodando"] = True
                 m = S.rebuild(db)
@@ -160,6 +164,9 @@ def _baselines_loop(db) -> None:
 
     time.sleep(120)
     while True:
+        from src.data_hub import activity
+
+        activity.wait_idle(_base_state, "fase")      # rodada 11: jogo típico e régua só com a tela parada
         try:                                         # rodada 9: régua da IA do laboratório, refeita 1x por dia
             from src.intelligence.lab_ai import reference as LR
 
@@ -200,9 +207,15 @@ def main(argv=None) -> int:
     threading.Thread(target=_scheduled_sync_loop, args=(db,), daemon=True, name="til-autosync").start()
     threading.Thread(target=_scout_snapshot_loop, args=(db,), daemon=True, name="til-scout").start()
     threading.Thread(target=_baselines_loop, args=(db,), daemon=True, name="til-referencia").start()
+    beats = 0
     try:
         while True:
             write_status({"scout": _jsonable(_scout_state), "referencia": _jsonable(_base_state)})
+            beats += 1
+            if beats % 24 == 0:                          # ~2 min: enxuga o arquivo de escrita do SQLite (WAL)
+                from src.data_hub import activity
+
+                activity.checkpoint(db)
             if a.pai and not pid_alive(a.pai):
                 break                                    # o app fechou: encerra junto
             time.sleep(HEARTBEAT_S)

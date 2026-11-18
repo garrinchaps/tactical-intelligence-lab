@@ -518,7 +518,11 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         if st.button(f"🔎 Analisar este jogo (plano de jogo e escalação contra {rival})", type="primary",
                      key=f"hy_analyse_{team}"):
             st.session_state["sq_rival_choice"], st.session_state["sq_rival_src"] = rival, "jogo hipotético"
+            st.session_state[f"hy_go_{team}"] = rival
             st.rerun()
+        if st.session_state.get(f"hy_go_{team}") != rival:   # rodada 11: só calcula depois de confirmar (era pesado)
+            st.caption("Escolha o adversário e clique em 'Analisar este jogo' — a análise completa só roda depois disso.")
+            return
         st.caption("Jogo hipotético: mesma leitura do próximo jogo (provável, desfalques, fragilidades e plano), sem "
                    "escalação oficial nem notícias, que só existem para jogos marcados.")
         f = None

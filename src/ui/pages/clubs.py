@@ -22,6 +22,47 @@ def _team_names(version: str) -> List[str]:
     return sorted(pd.unique(pd.concat([c["home_team_name"], c["away_team_name"]]).dropna()))
 
 
+_COUNTRY_KEYS = [
+    ("ec", ("equador", "ecuador", "ligapro")), ("uy", ("uruguai", "uruguay")), ("ar", ("argentina", "primera nacional")),
+    ("cl", ("chile",)), ("co", ("colômbia", "colombia")), ("pe", ("peru", "liga 1")), ("py", ("paraguai", "paraguay")),
+    ("bo", ("bolívia", "bolivia")), ("ve", ("venezuela",)), ("mx", ("liga mx", "méxico", "mexico")),
+    ("us", ("mls", "usa", "estados unidos")), ("br", ("brasil", "brasileir", "copa do brasil", "paulist", "carioca",
+                                                     "mineiro", "gaúcho", "serie a brazil")),
+    ("es", ("la liga", "laliga", "copa del rey", "espanha", "spain", "segunda división", "la liga 2")),
+    ("en", ("premier league", "championship", "fa cup", "efl", "england", "inglaterra")),
+    ("it", ("serie a", "serie b", "coppa italia", "itália", "italy")), ("de", ("bundesliga", "dfb", "alemanha", "germany")),
+    ("fr", ("ligue 1", "ligue 2", "coupe de france", "frança", "france")), ("pt", ("primeira liga", "liga portugal",
+                                                                                 "taça de portugal", "portugal")),
+    ("nl", ("eredivisie", "eerste divisie", "knvb")), ("tr", ("süper lig", "super lig", "turquia", "turkey")),
+]
+
+
+def _comp_country(comp: str):
+    c = str(comp or "").lower()
+    if any(k in c for k in ("champions", "europa", "conference", "libertadores", "sul-americana", "sudamericana",
+                            "mundial", "world", "amistoso", "friendl", "recopa", "supercopa da uefa", "super cup")):
+        return None                                      # competição internacional: não diz o país
+    return next((code for code, keys in _COUNTRY_KEYS if any(k in c for k in keys)), None)
+
+
+@st.cache_data(show_spinner=False, max_entries=2)
+def _name_countries(version: str) -> dict:
+    """Nome do time → países das competições nacionais que ele disputa (pela base inteira, uma vez por versão)."""
+    from src.ui.context import cached_catalog
+
+    c = cached_catalog(include_score_only=True)
+    if c.empty:
+        return {}
+    comp_c = {k: _comp_country(k) for k in c["competition_name"].dropna().unique()}
+    out: dict = {}
+    for col in ("home_team_name", "away_team_name"):
+        for n, comp in zip(c[col], c["competition_name"]):
+            cc = comp_c.get(comp)
+            if cc and isinstance(n, str):
+                out.setdefault(n, set()).add(cc)
+    return out
+
+
 def same_team_names(name: str) -> List[str]:
     """Variações do mesmo time entre as fontes ('Man United', 'Manchester United', 'Manchester United FC')."""
     from src.data_hub.search import fast_scores
@@ -47,6 +88,26 @@ def same_team_names(name: str) -> List[str]:
         same = {n for n in same if identity.issubset(set(_re.findall(r"[a-z0-9]+", str(n).casefold())))}
     else:
         same = {n for n in same if not (set(_re.findall(r"[a-z0-9]+", str(n).casefold())) & distinctive)}
+    # rodada 11: homônimos de países diferentes (Barcelona × Barcelona SC de Guayaquil; Liverpool × Liverpool de
+    # Montevidéu) — pelo país das competições que cada nome disputa; e nome com palavra a mais que não é sufixo
+    # ("RCD Espanyol de Barcelona") não é o mesmo time.
+    from src.data_lake.ids import SUFFIXES
+
+    countries = _name_countries(get_service().db.stable_version())
+    mine = countries.get(name, set())
+    base_toks = set(core.split())
+
+    def compatible(n: str) -> bool:
+        if n == name:
+            return True
+        other = countries.get(n, set())
+        if mine and other and not (mine & other):
+            return False
+        ct = set(team_core(n).split())
+        extra = (ct - base_toks) - SUFFIXES
+        missing = (base_toks - ct) - SUFFIXES
+        return team_core(n) == core or not (extra and missing) and not (extra and len(base_toks) == 1)
+    same = {n for n in same if compatible(n)}
     # time feminino, sub-20, reservas etc. não são "o mesmo time" (Barcelona × Barcelona WFC)
     import re as _re
 
@@ -68,6 +129,13 @@ def team_matches(name, include_score_only: bool = False) -> pd.DataFrame:
     m = m[m["home_score"].notna() & m["away_score"].notna()]
     if m.empty:
         return m
+    # rodada 11: jogo de liga NACIONAL de outro país não é deste clube (homônimo com o mesmo nome em alguma fonte)
+    cc = m["competition_name"].map(_comp_country)
+    known = cc.dropna()
+    if len(known) >= 10:
+        share = known.value_counts(normalize=True)
+        ok = set(share[share >= 0.2].index)
+        m = m[cc.isna() | cc.isin(ok)]
     return one_per_game(m).sort_values("match_date", ascending=False)
 
 
@@ -110,6 +178,7 @@ def filter_team_matches(matches: pd.DataFrame, level: str = "Todos os jogos") ->
         return matches.copy() if matches is not None else pd.DataFrame()
     levels = {
         "Somente com lances": {"EVENTS"},
+        "Com estatísticas ou lances (sem só placar)": {"EVENTS", "BOXSCORE"},
         "Somente com estatísticas": {"BOXSCORE"},
         "Somente placares": {"RESULT"},
     }
@@ -232,7 +301,8 @@ def render(_ctx=None) -> None:
     with t1:
         level_filter = st.selectbox(
             "Exibir partidas",
-            ["Todos os jogos", "Somente com lances", "Somente com estatísticas", "Somente placares"],
+            ["Com estatísticas ou lances (sem só placar)", "Todos os jogos", "Somente com lances",
+             "Somente com estatísticas", "Somente placares"],
             key=f"team_level_filter_{name}",
             help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",
         )

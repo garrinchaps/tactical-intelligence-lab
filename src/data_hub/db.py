@@ -165,6 +165,7 @@ class DataHubDB:
         conn.execute("PRAGMA cache_size = -64000;")         # 64 MB de cache por conexão (o PC tem 16 GB)
         conn.execute("PRAGMA temp_store = MEMORY;")
         conn.execute("PRAGMA mmap_size = 268435456;")      # 256 MB mapeados: leituras grandes sem copiar
+        conn.execute("PRAGMA journal_size_limit = 67108864;")   # rodada 11: o arquivo de escrita volta a ≤ 64 MB
         try:
             yield conn
             conn.commit()
