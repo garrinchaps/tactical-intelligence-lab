@@ -75,3 +75,41 @@ def test_zebra_has_no_light_gradient_and_marks_missing():
     df = pd.DataFrame({"Jogador": ["A", "B", None], "Finalizações": [1.0, 5.0, 3.0], "Perdeu a posse": [2.0, 0.0, 1.0]})
     html = zebra(df).to_html()
     assert "background-color: #" in html and "None" not in html
+
+
+def test_vulnerabilities_find_dribbled_fullback_and_counterattacks(tmp_path, monkeypatch):
+    import json as _j
+
+    import numpy as np
+
+    from src.analytics import rating_box as RB
+    from src.analytics import vulnerabilities as V
+    from src.data_hub.db import DataHubDB
+    from src.data_hub.sources.fotmob import FotmobProvider
+
+    db = DataHubDB(tmp_path / "w.db")
+    FotmobProvider(db, enabled=False).ensure_tables()
+    rng = np.random.default_rng(0)
+    ref = pd.DataFrame({"funcao": ["lateral"] * 60, "driblado90": rng.uniform(0.2, 0.9, 60),
+                        "desarmes_ganhos90": rng.uniform(1, 3, 60)})
+    monkeypatch.setattr(RB, "reference", lambda path=None: ref)
+    for i in range(5):
+        mid = 12_000_100_000 + i
+        db.upsert_matches([{"match_id": mid, "source_match_id": str(mid), "competition_name": "Liga", "season_name": "2026",
+                            "match_date": f"2026-10-{i + 1:02d}", "home_team_name": "Alvo", "away_team_name": f"R{i}",
+                            "home_score": 0, "away_score": 1, "status": "FT", "data_source": "fotmob", "data_level": "BOXSCORE"}])
+        db.save_boxscore(mid, {"team_stats": [], "timeline": [],
+                               "lineups": [{"team_name": "Alvo", "player_name": "Lateral Fraco", "shirt_number": "2",
+                                            "position": "RB", "is_starter": 1, "formation": "4-4-2", "coach": ""}],
+                               "player_stats": [{"team_name": "Alvo", "player_name": "Lateral Fraco", "position": "",
+                                                 "minutes": 90, "rating": 6.0,
+                                                 "stats": {"minutes": 90, "dribbled_past": 3, "matchstats.headers.tackles": 2}}]})
+        with db.connect() as c:
+            c.executemany("INSERT INTO match_shots (match_id, team_name, player_name, minute, x, y, xg, outcome, situation, "
+                          "on_target, own_goal, source) VALUES (?,?,?,?,?,?,?,?,?,1,0,'fotmob')",
+                          [(mid, f"R{i}", "Atacante", 30, 110, 40, 0.3, "Miss", "FastBreak")])
+    r = V.team_vulnerabilities(db, ["Alvo"], 12)
+    titles = [a["titulo"] for a in r["achados"]]
+    assert any("Lateral Fraco é muito driblado" in t for t in titles)
+    assert any("contra-ataque" in t for t in titles)
+    assert all(0 <= a["gravidade"] <= 100 and a["evidencia"] and a["explorar"] for a in r["achados"])

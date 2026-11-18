@@ -335,7 +335,7 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
         d = p.get("destaques") or {}
         box = lambda items, bg, bd, icon: "".join(
             f'<div style="background:{bg};border:1px solid {bd};border-radius:10px;padding:5px 9px;margin:4px 6px 0 0;'
-            f'display:inline-block;font-size:.85rem"><b>{icon} {x["rotulo"]}</b> {x["valor"]} '
+            f'display:inline-block;font-size:.85rem;color:#F1F5F9"><b>{icon} {x["rotulo"]}</b> {x["valor"]} '
             f'<span style="opacity:.8">(melhor que {x["percentil"]}% da função)</span></div>' for x in items)
         hl = ""
         if d.get("fortes") or d.get("fracos"):
@@ -344,7 +344,7 @@ def _xi_cards(xi: List[Dict[str, Any]], color: str) -> None:
                   + f'<div style="color:#64748B;font-size:.75rem;margin-top:3px">temporada: {d["jogos"]} jogos, {d["minutos"]} min, '
                   f'contra {d["funcao"]}s de outros jogos</div>')
         rows.append(f'<div style="border-left:4px solid {color};background:#0F1626;border-radius:12px;padding:9px 12px;'
-                    f'margin-bottom:8px"><b style="font-size:1rem">{p["papel_pt"]}: {p["jogador"]}</b>{chips}{hl}'
+                    f'margin-bottom:8px"><b style="font-size:1rem;color:#F5F7FB">{p["papel_pt"]}: {p["jogador"]}</b>{chips}{hl}'
                     f'<div style="color:#CBD5E1;font-size:.82rem;margin-top:5px">{why}</div></div>')
     st.markdown("".join(rows), unsafe_allow_html=True)
 
@@ -452,12 +452,8 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         from src.ui.drag_pitch import pitch_tips  # noqa: F401  (mesmo estilo de marcas do campinho principal)
 
         fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})", vertical=True)
-        for t in tips:
-            fig.add_trace(go.Scatter(x=[t["y"]], y=[t["x"]], mode="markers+text", text=[t["marca"]], showlegend=False,
-                                     marker=dict(size=22, color=t["cor"], line=dict(color="#090D16", width=1)),
-                                     textfont=dict(color="#090D16", size=10), hovertext=[t["texto"]], hoverinfo="text"))
         render_chart(fig, use_container_width=True, key="nx_pitch_m")
-        st.caption("Marcas F = fragilidades do rival, no lado do campo em que vamos atacá-las (passe o mouse).")
+        st.caption("As fragilidades do rival estão no mapa logo abaixo (zonas pintadas + como explorar).")
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
             st.markdown("**Nossos desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
@@ -470,6 +466,11 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         with st.expander(f"📰 Notícias que citam os clubes ({len(pv['noticias'])}) — notícia, não dado confirmado"):
             for nw in pv["noticias"]:
                 st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
+    from src.ui import vuln_view
+
+    vuln_view.render(rival, rv["names"], me["names"], version)          # rodada 7: mapa de onde atacar
+    with st.expander(f"🛡️ E onde {team} sofre (pontos a corrigir antes do jogo)"):
+        vuln_view.render(team, me["names"], rv["names"], version, mine=True)
     st.markdown(f"### 🔍 Leitura de {rival}")
     k1, k2 = st.columns(2)
     with k1:
@@ -672,9 +673,14 @@ def render(_ctx=None) -> None:
             from src.squad.planner import rival_diagnosis
 
             dg = rival_diagnosis(theirs)
-            st.markdown(f"##### 🔍 Diagnóstico de {rival}")
+            from src.ui import vuln_view
+            from src.ui.pages.clubs import same_team_names as _stn
+
+            vuln_view.render(rival, _stn(rival), _stn(team), version)   # rodada 7: fragilidades reais por setor/jogador
+            st.markdown(f"##### 🔍 Diagnóstico de {rival} pelas estatísticas do time")
             if not dg["suficiente"]:
-                note("Base insuficiente para diagnóstico", dg["aviso"].capitalize() + ".", "warn")
+                st.caption("Pelas médias do time, não há 2 pontos fortes e 2 fracos claros — veja acima as fragilidades por "
+                           "jogador e setor, que usam os números individuais.")
             cards = st.columns(2)
             for col, (title, items, color) in zip(cards, ((f"💪 Onde {rival} é forte", dg["fortalezas"], "#EF4444"),
                                                          (f"🎯 Onde {rival} pode ser explorado", dg["vulnerabilidades"], "#22C55E"))):
