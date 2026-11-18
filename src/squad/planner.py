@@ -725,13 +725,16 @@ def apply_official_roster(squad: pd.DataFrame, official: Optional[pd.DataFrame],
         new_rows.append({"nome": r["name"], "funcao": FM_POS_TO_TM.get(pos), "posicao": None,
                          "nascimento": r.get("birth") or None, "altura_cm": r.get("height"),
                          "nacionalidade": r.get("country") or None, "valor_mercado_eur": r.get("market_value"),
-                         "origem": "FotMob (elenco atual)"})
+                         "grupo": r.get("role"), "origem": "FotMob (elenco atual)"})
         changes.append({"nome": r["name"], "mudanca": "chegou", "motivo": "inscrito hoje no clube (FotMob)"})
     if new_rows:
         add = pd.DataFrame(new_rows)
         add["papel"] = [natural_role(f, p) for f, p in zip(add["funcao"], add["posicao"])]
         add["idade"] = add["nascimento"].map(lambda b: age_on(b, ref))
         sq = pd.concat([sq, add], ignore_index=True, sort=False)
+    grp = dict(zip(official["name"], official.get("role", pd.Series("", index=official.index))))
+    sq["grupo"] = [grp.get(matched.get(n, n)) if not (isinstance(g, str) and g) else g
+                   for n, g in zip(sq["nome"], sq.get("grupo", pd.Series(None, index=sq.index)))]
     inj = dict(zip(official["name"], official.get("lesao", official.get("injury", pd.Series("", index=official.index)))))
     sq["lesao"] = [inj.get(matched.get(n, n), "") or "" for n in sq["nome"]]
     return sq.reset_index(drop=True), changes

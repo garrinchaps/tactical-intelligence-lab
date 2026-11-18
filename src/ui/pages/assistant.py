@@ -121,14 +121,23 @@ def _answer(question: str, current_context, use_llm: bool):
             from src.ui.names import pt as _pt
 
             engine = str(res.get("engine_used", ""))
-            off_topic = engine.startswith("LOCAL_SCOPE")
+            off_topic = engine.startswith("LOCAL_SCOPE_GUARD")       # o motor normal é LOCAL_SCOPED_ENGINE
             ask = (res.get("scope") or {}).get("ask")
             generic = (not ask) or ask in ("overview", "panorama")
             foot = "\n\n_" + summary_line(data_map(meta, ctx.df, ctx.bundle.boxscore)) + "_"
             if off_topic:
                 pass                                      # fora do futebol/jogo: nada a acrescentar
             elif not generic:
-                pass                                      # o analista já respondeu exatamente o que foi perguntado
+                # o analista respondeu; mas se a NOSSA IA reconhece um número MAIS específico que ele não citou
+                # ("chutes PARA FORA" × finalizações totais), a resposta direta dela é a certa
+                d = DIRECT.answer(question, meta, ctx.df, ctx.bundle.boxscore, pt=_pt)
+                spec = {"off_target": "para fora", "on_target": "no alvo", "blocked": "bloquead", "final_third": "terço final",
+                        "box_passes": "área", "progressive": "progressiv", "dribbled_past": "driblado",
+                        "aerials_won": "aére", "aerials_lost": "aére", "fouled": "sofrid", "losses": "perd"}
+                if d is not None and d["key"] in spec and spec[d["key"]] not in (res.get("report_markdown") or "").lower():
+                    res["report_markdown"] = d["markdown"] + foot
+                    res["engine_used"] = "IA DO LABORATÓRIO (resposta direta)"
+                    res["lab_ai"] = {"direct": d["key"], "kind": d["kind"], "n_facts": 0}
             else:
                 d = DIRECT.answer(question, meta, ctx.df, ctx.bundle.boxscore, pt=_pt)
                 who = LAB.asked_player(question, ctx.df)
@@ -151,6 +160,15 @@ def _answer(question: str, current_context, use_llm: bool):
                 # sem número reconhecido, sem jogador e sem plano: fica a resposta do analista, sem bloco extra
         except Exception as exc:
             res["lab_ai_error"] = f"{type(exc).__name__}: {exc}"
+            try:                                          # registro para diagnóstico (sem dados pessoais)
+                import traceback
+                from pathlib import Path
+
+                Path("data/learning").mkdir(parents=True, exist_ok=True)
+                with open("data/learning/lab_ai_erros.log", "a", encoding="utf-8") as fh:
+                    fh.write(traceback.format_exc()[-2000:] + "\n")
+            except Exception:
+                pass
     res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
     return res, loc, switched
 

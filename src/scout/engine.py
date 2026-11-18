@@ -932,11 +932,18 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     market = pd.to_numeric(d["valor_mercado_eur"], errors="coerce")
     market_pct = market.groupby(d["papel"]).rank(pct=True) * 100
     quality = pd.to_numeric(d["qualidade"], errors="coerce")
-    age_upside = ((25 - age) / 8 * 100).clip(0, 100)
-    d["potencial_revenda"] = (0.58 * quality + 0.27 * age_upside + 0.15 * (100 - market_pct)).where(
-        age.le(23) & quality.notna())
-    d["projecao_valorizacao_24m_pct"] = ((d["potencial_revenda"] - 55) * 1.1).clip(0, 50).round(0)
-    d["potencial_natureza"] = "heurística de triagem; não é previsão de preço"
+    # rodada 11: TETO projetado = qualidade atual + crescimento esperado até ~26 anos. Nunca fica abaixo da qualidade.
+    # Cresce mais quem já produz cedo (confiança alta) e em nível mais alto; é projeção, não certeza.
+    conf = pd.to_numeric(d["confianca_pct"], errors="coerce").fillna(0) / 100
+    lvl_s = pd.Series({i: v for i, v in level.items()}, dtype=float).reindex(d.index).fillna(.5)
+    years = (26 - age.fillna(30)).clip(lower=0, upper=9)
+    growth = years * (1.2 + 1.6 * conf) * (.7 + .5 * lvl_s)
+    d["potencial_teto"] = (quality + growth).clip(upper=96).where(quality.notna()).round(1)
+    d["potencial_revenda"] = (0.55 * d["potencial_teto"] + 0.25 * ((25 - age) / 8 * 100).clip(0, 100)
+                              + 0.20 * (100 - market_pct)).where(age.le(23) & quality.notna()).round(1)
+    d["projecao_valorizacao_24m_pct"] = ((d["potencial_teto"] - quality) * 2.2 + (100 - market_pct) * .15).clip(0, 60
+                                         ).where(age.le(23) & quality.notna()).round(0)
+    d["potencial_natureza"] = "projeção pela idade, produção e nível; não é previsão de preço"
     return d
 
 
@@ -983,11 +990,12 @@ def merge_external_ratings(players: pd.DataFrame, ratings: Optional[pd.DataFrame
     only_external = stat.isna() & matched.notna()
     # Nota externa tem peso de corroborar, não dominar a produção observada.
     out.loc[both, "qualidade"] = (.82 * stat[both] + .18 * matched[both]).round(1)
-    out.loc[only_external, "qualidade"] = matched[only_external]
+    # rodada 11: sem números próprios, a nota externa sozinha vale metade (puxada para a média): ela não viu os jogos
+    out.loc[only_external, "qualidade"] = (50 + (matched[only_external] - 50) * .5).round(1)
     out["fonte_qualidade"] = np.select(
         [both, only_external, stat.notna()],
         ["82% métricas estatísticas + 18% nota externa",
-         "nota externa isolada; confiança baixa", "métricas estatísticas por posição"],
+         "nota externa isolada (puxada à média); confiança baixa", "métricas estatísticas por posição"],
         default="sem avaliação confiável",
     )
     if "confianca_pct" in out:
@@ -1198,6 +1206,7 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
     matches = _team_matches(db, aliases, 50)
     own, against, sample = _stats_for_matches(db, matches, aliases)
     coach = _coach_profile(db, aliases, matches)
+    used = roles_used(db, aliases)                       # rodada 11: funções que o time realmente escala
     needs = []
     baseline = {}
     if matches is not None and not matches.empty:
@@ -1247,7 +1256,7 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
     if not squad.empty:
         counts = squad["papel"].value_counts().to_dict() if "papel" in squad else {}
         avg = squad.groupby("papel")["qualidade"].mean().to_dict() if "qualidade" in squad and "papel" in squad else {}
-        for role in ("GK", "CB", "LB", "RB", "DM", "CM", "AM", "LW", "RW", "ST"):
+        for role in (sorted(used) if used else ("GK", "CB", "LB", "RB", "DM", "CM", "AM", "LW", "RW", "ST")):
             count = int(counts.get(role, 0))
             q = _num(avg.get(role))
             shortage = 100 if count == 0 else 72 if count == 1 else 38 if count == 2 else 0
@@ -1256,6 +1265,23 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
                 needs.append({"papel": role, "urgencia": min(100, shortage * .58 + low_quality * .42),
                               "motivo": f"profundidade atual: {count} atleta(s) cadastrados nesta função" +
                                         (f"; qualidade média estimada {q:.0f}/100" if q is not None else "; desempenho individual com pouca cobertura")})
+    # rodada 11: carência só nas posições que o time USA. Se o técnico não joga com meia central, "meia central" não é
+    # carência — a necessidade vira a função equivalente do desenho dele (volante ou meia ofensivo).
+    if used:
+        equiv = {"CM": ["DM", "AM"], "AM": ["CM", "LW", "RW"], "DM": ["CM"], "LB": ["LWB", "LM"], "RB": ["RWB", "RM"],
+                 "LWB": ["LB"], "RWB": ["RB"], "LW": ["LM", "AM"], "RW": ["RM", "AM"], "LM": ["LW", "LWB"],
+                 "RM": ["RW", "RWB"], "ST": ["AM"]}
+        mapped = []
+        for item in needs:
+            r = item["papel"]
+            if r in used:
+                mapped.append(item)
+                continue
+            alt = next((a for a in equiv.get(r, []) if a in used), None)
+            if alt:
+                mapped.append({**item, "papel": alt, "motivo": item["motivo"] + f" (o time não usa {ROLE_LABELS.get(r, r)}; "
+                                                                             f"vira {ROLE_LABELS.get(alt, alt)} no desenho dele)"})
+        needs = mapped
     # deduplica funções e preserva a prioridade mais alta
     merged: Dict[str, Dict[str, Any]] = {}
     for item in needs:
@@ -1264,7 +1290,12 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
             merged[role] = item
     needs = sorted(merged.values(), key=lambda x: x["urgencia"], reverse=True)
     squad_style = _derive_style(own, against)
-    squad_style["fonte"] = "até 50 partidas recentes com estatísticas disponíveis" if sample.get("n") else "sem amostra suficiente"
+    n_games = int(sample.get("n") or 0)
+    # rodada 11: 8 jogos já formam identidade; de 30 a 50 ela fica detalhada; abaixo de 8, leitura superficial
+    squad_style["nivel_identidade"] = ("detalhada" if n_games >= 30 else "inicial" if n_games >= 8 else "superficial")
+    squad_style["fonte"] = (f"{n_games} partidas recentes com estatísticas — identidade "
+                            f"{squad_style['nivel_identidade']}" if n_games else "sem partidas com estatísticas")
+    squad_style["formacoes"] = used_formations(db, aliases)
     coach_style = {"jogos": 0, "tracos": []}
     if coach.get("nome") and coach.get("jogos", 0) <= 5:
         coach_style = _coach_history_style(db, coach["nome"], aliases, 50)
@@ -1287,6 +1318,35 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
         "estilo": style, "treinador": coach,
         "ultima_partida": _safe_str(matches["match_date"].max()) if not matches.empty else None,
     }
+
+
+def roles_used(db, aliases: Sequence[str], n: int = 20, min_share: float = .15) -> set:
+    """Funções que o time escala como titular em pelo menos 15% dos últimos jogos com escalação."""
+    try:
+        from src.squad.matchday import recent_lineups
+
+        lu = recent_lineups(db, list(aliases), n)
+    except Exception:
+        return set()
+    if lu is None or lu.empty or "papel" not in lu:
+        return set()
+    st_ = lu[lu["titular"] == 1]
+    games = max(1, st_["match_id"].nunique())
+    share = st_.drop_duplicates(["match_id", "papel"]).groupby("papel")["match_id"].nunique() / games
+    return {r for r, v in share.items() if isinstance(r, str) and v >= min_share and not r.endswith("?")}
+
+
+def used_formations(db, aliases: Sequence[str], n: int = 20) -> List[Tuple[str, int]]:
+    try:
+        from src.squad.matchday import recent_lineups
+
+        lu = recent_lineups(db, list(aliases), n)
+    except Exception:
+        return []
+    if lu is None or lu.empty:
+        return []
+    f = lu.drop_duplicates("match_id")["formation"].dropna().astype(str)
+    return [(k, int(v)) for k, v in f.value_counts().head(3).items()]
 
 
 def _derive_style(own: Dict[str, float], against: Dict[str, float]) -> Dict[str, Any]:
@@ -1402,6 +1462,8 @@ def _affinity(candidate_nationality: Any, buyer_country: Any) -> Tuple[int, str]
     if not c or not b:
         return 50, "nacionalidade/idioma sem dados suficientes"
     c_parts = [_country_core(x) for x in re.split(r"[,;/|]", c)]
+    if b in c_parts or c == b:
+        return 100, "mesmo país do clube: sem barreira de idioma, cultura ou vaga de estrangeiro"
     c_lang = set().union(*[v for k, v in LANGUAGES.items() if any(k in part for part in c_parts)]) if c_parts else set()
     b_lang = set().union(*[v for k, v in LANGUAGES.items() if k in b]) if b else set()
     if c_lang & b_lang:
@@ -1409,6 +1471,78 @@ def _affinity(candidate_nationality: Any, buyer_country: Any) -> Tuple[int, str]
     if any(x in " ".join(c_parts) for x in ("argentina", "uruguay", "chile", "paraguay", "colombia", "ecuador", "peru")) and b == "brazil":
         return 75, "contexto sul-americano pode reduzir distância cultural; idioma continua diferente"
     return 52, "não há evidência suficiente para presumir adaptação cultural"
+
+
+def _first_nat(v: Any) -> str:
+    s_ = _safe_str(v)
+    return re.split(r"[,;/|]", s_)[0].strip() if s_ else ""
+
+
+def nationality_market(pool: pd.DataFrame, buyer_country: Any, roster: Optional[pd.DataFrame] = None) -> Dict[str, Tuple[int, str]]:
+    """
+    Rodada 11 — quão COMUM é cada nacionalidade na liga do clube comprador (elencos do Transfermarkt), mais o próprio
+    elenco do clube. Um irlandês ou um norueguês no Brasil existe, mas é raríssimo; argentinos e colombianos são comuns.
+    Devolve nacionalidade → (adaptação 0–100, explicação). Mesmo país = 100.
+    """
+    b = _country_core(buyer_country)
+    out: Dict[str, Tuple[int, str]] = {}
+    if pool is None or pool.empty or "nacionalidade" not in pool:
+        return out
+    nat = pool["nacionalidade"].map(_first_nat)
+    country_col = pool["clube_pais"] if "clube_pais" in pool else pd.Series("", index=pool.index)
+    in_league = country_col.astype(str).map(_country_core) == b if b else pd.Series(False, index=pool.index)
+    league_n = int(in_league.sum())
+    share = nat[in_league].value_counts(normalize=True) if league_n >= 50 else pd.Series(dtype=float)
+    club_nats = set()
+    if roster is not None and not roster.empty and "nacionalidade" in roster:
+        club_nats = set(roster["nacionalidade"].dropna().map(_first_nat))
+    for n in nat.dropna().unique():
+        if not n or n == "nan":
+            continue
+        if _country_core(n) == b:
+            out[n] = (100, "mesmo país do clube")
+            continue
+        sh = float(share.get(n, 0.0))
+        if league_n < 50:
+            base, why = _affinity(n, buyer_country)[0], "sem amostra da liga; só idioma/região"
+        else:
+            base = 92 if sh >= .03 else 84 if sh >= .01 else 70 if sh >= .003 else 52 if sh >= .001 else 34 if sh > 0 else 18
+            why = (f"{100 * sh:.1f}% dos jogadores da liga do clube são desta nacionalidade" if sh > 0 else
+                   "praticamente nenhum jogador desta nacionalidade na liga do clube — chegada seria exceção")
+        lang, _ = _affinity(n, buyer_country)
+        if lang >= 75:
+            base += 6
+        if n in club_nats:
+            base += 8
+            why += "; o clube já tem atletas deste país"
+        out[n] = (int(min(98, base)), why)
+    return out
+
+
+def career_context(candidate: Dict[str, Any], buyer: Dict[str, Any]) -> Tuple[int, str]:
+    """
+    Rodada 11 — contexto de carreira: titular no auge num clube muito mais rico raramente desce de patamar (Vini Jr.,
+    Raphinha); veterano voltando para casa é comum (Payet, Paquetá foram exceções e são tratados como exceção).
+    """
+    age = _num(candidate.get("idade"))
+    mins = _num(candidate.get("minutos_12m")) or _num(candidate.get("minutos")) or 0
+    seller = _num(candidate.get("clube_valor_total_eur"))
+    buyer_v = _num(buyer.get("valor_elenco_eur"))
+    if not seller or not buyer_v:
+        return 60, "porte dos clubes indisponível; contexto de carreira neutro"
+    ratio = seller / buyer_v
+    starter = mins >= 1800
+    if ratio >= 3 and starter and (age or 26) <= 29:
+        return 12, "titular no auge em clube muito maior — descer de patamar agora seria exceção rara"
+    if ratio >= 3 and starter and (age or 26) <= 32:
+        return 38, "titular em clube muito maior, já perto do fim do auge — possível só com contexto especial"
+    if ratio >= 3 and (age or 26) >= 33:
+        return 66, "veterano em clube maior — volta para casa ou fim de carreira é um caminho comum"
+    if ratio >= 3 and not starter:
+        return 58, "reserva em clube muito maior — pode buscar minutos (empréstimo ou venda)"
+    if ratio >= 1.5:
+        return 55 if starter else 68, "clube vendedor maior — exige proposta forte ou oportunidade de contrato"
+    return 85, "clube vendedor de porte igual ou menor — passo natural na carreira"
 
 
 def _country_core(value: Any) -> str:
@@ -1502,7 +1636,10 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
                         (months_left is not None and months_left <= 12 and mins < 1500 and quality is not None and quality >= 60)))
     if loan_opportunity:
         usage = min(96, usage + 10)
-    affinity, affinity_note = _affinity(candidate.get("nacionalidade"), buyer_country)
+    nm = buyer.get("nat_market") or {}
+    nat0 = _first_nat(candidate.get("nacionalidade"))
+    affinity, affinity_note = nm.get(nat0) or _affinity(candidate.get("nacionalidade"), buyer_country)
+    career, career_note = career_context(candidate, buyer)
     rule = _foreign_rule(competition, year)
     foreign_penalty = 0
     foreign_note = "regra estrangeira não identificada para esta competição"
@@ -1533,7 +1670,14 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
     if mins >= 2400 and tier < 35:
         tier -= 12
     foreign_count = int(buyer.get("estrangeiros_atual", foreign_count) or 0)
-    score = (.30 * finance + .18 * usage + .16 * tier + .14 * contract_score + .12 * affinity + .10 * 72) - foreign_penalty
+    # rodada 11: nacionalidade (mercado da liga) e contexto de carreira pesam muito mais — antes um irlandês ou um
+    # alemão saía "Viável" para o Cruzeiro só por caber no orçamento
+    score = (.22 * finance + .12 * usage + .10 * tier + .10 * contract_score + .24 * affinity + .17 * career
+             + .05 * 72) - foreign_penalty
+    if affinity < 40:                                     # nacionalidade quase inexistente na liga: exceção, não regra
+        score = min(score, 55)
+    if career < 30:                                       # titular no auge em clube muito maior
+        score = min(score, 45)
     score = int(round(float(np.clip(score, 0, 100))))
     label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if loan_opportunity and score >= 50 else "Alvo difícil / sonho"
     reasons = [
@@ -1542,12 +1686,13 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
          ("perfil de empréstimo pode fazer sentido." if loan_opportunity else "minutagem considerada na negociação."))
         if minutes_known else "Minutagem recente indisponível; não foi presumido que o atleta esteja encostado.",
         f"Contrato: {months_left:.1f} mês(es) restante(s)." if months_left is not None else "Prazo contratual indisponível.",
-        f"Adaptação: {affinity_note}.", f"Escada de mercado: {tier_note}.", foreign_note,
+        f"Adaptação ({affinity}/100): {affinity_note}.", f"Contexto de carreira ({career}/100): {career_note}.",
+        f"Escada de mercado: {tier_note}.", foreign_note,
     ]
     return {"score": score, "rotulo": label, "taxa_estimada_eur": fee, "base_taxa": price_basis,
             "meses_contrato": months_left, "oportunidade_emprestimo": loan_opportunity,
             "financeiro": round(finance), "porte": round(tier), "contrato": round(contract_score),
-            "afinidade": affinity, "penalidade_estrangeiros": foreign_penalty, "regra_estrangeiros": rule,
+            "afinidade": affinity, "carreira": career, "penalidade_estrangeiros": foreign_penalty, "regra_estrangeiros": rule,
             "motivos": reasons}
 
 
@@ -1697,9 +1842,26 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
         if buyer_budget:
             ratio = market / max(buyer_budget, 1.0)
             finance.loc[market.notna()] = (100 - (ratio.loc[market.notna()] - .18).clip(lower=0) * 72).clip(8, 96)
-        candidates["_scout_pre"] = (.43 * q + .19 * candidates["_scout_role_fit"] * 100 +
-                                     .16 * usage + .12 * contract_score + .10 * finance)
-        candidates = candidates.sort_values("_scout_pre", ascending=False).head(max(20, int(max_per_position)))
+        # rodada 11: a nacionalidade (quão comum é na liga do clube) já entra no corte inicial — antes o corte só via
+        # qualidade, e os 20 melhores do mundo na posição eram quase todos inviáveis para o clube
+        nm = buyer.get("nat_market") or {}
+        nat0 = candidates.get("nacionalidade", pd.Series("", index=candidates.index)).map(_first_nat)
+        aff = nat0.map(lambda n: (nm.get(n) or (50, ""))[0]).astype(float)
+        candidates["_scout_pre"] = (.34 * q + .15 * candidates["_scout_role_fit"] * 100 + .12 * usage +
+                                     .09 * contract_score + .10 * finance + .20 * aff)
+        # não sugerir quem não melhora o time: abaixo do titular atual da posição só entra jovem promissor ou oportunidade
+        starter_q = None
+        if roster is not None and not roster.empty and {"papel", "qualidade"} <= set(roster.columns):
+            rq = pd.to_numeric(roster.loc[roster["papel"] == role, "qualidade"], errors="coerce").dropna()
+            starter_q = float(rq.max()) if len(rq) else None
+        if starter_q is not None:
+            age_c = pd.to_numeric(candidates.get("idade", pd.Series(np.nan, index=candidates.index)), errors="coerce")
+            pot = pd.to_numeric(candidates.get("potencial_teto", pd.Series(np.nan, index=candidates.index)), errors="coerce")
+            keep = (q >= starter_q - 2) | ((age_c <= 21) & (pot.fillna(q) >= starter_q)) | (contract_score >= 83)
+            candidates = candidates[keep]
+            if candidates.empty:
+                continue
+        candidates = candidates.sort_values("_scout_pre", ascending=False).head(max(60, int(max_per_position)))
         for c in candidates.drop(columns=["_scout_pre"]).to_dict("records"):
             role_fit = float(c.pop("_scout_role_fit", 0))
             realism = transfer_realism(c, buyer, buyer_country, competition, season,
@@ -1710,8 +1872,8 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
             sample_conf = _num(c.get("confianca_pct")) or 0
             sporting = quality if quality is not None else 48
             need_score = float(need.get("urgencia") or 50)
-            score = (.29 * sporting + .24 * realism["score"] + .18 * tactical["score"] +
-                     .13 * chemistry_score["score"] + .10 * need_score + .06 * (role_fit * 100))
+            score = (.27 * sporting + .32 * realism["score"] + .15 * tactical["score"] +
+                     .11 * chemistry_score["score"] + .10 * need_score + .05 * (role_fit * 100))
             score += _feedback_adjust(feedback_reason, realism, c)
             if quality is None:
                 score -= 8

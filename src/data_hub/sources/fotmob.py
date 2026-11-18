@@ -617,6 +617,39 @@ class FotmobProvider:
                             "market_value": m.get("transferValue"), "fetched_at": fetched_at})
         return out
 
+    LOANS_DDL = ("CREATE TABLE IF NOT EXISTS fotmob_loans (team_id INTEGER, player_id INTEGER, name TEXT, direction TEXT, "
+                 "other_club TEXT, from_date TEXT, to_date TEXT, fetched_at TEXT, PRIMARY KEY (team_id, player_id, direction))")
+
+    @staticmethod
+    def parse_loans(d: Dict[str, Any], team_id: int) -> List[Dict[str, Any]]:
+        """Empréstimos ATIVOS: 'in' = jogador emprestado AO clube; 'out' = jogador do clube emprestado a outro."""
+        data = ((d.get("transfers") or {}).get("data")) or {}
+        today = date.today().isoformat()
+        out = []
+        for key, direction in (("Players in", "in"), ("Players out", "out")):
+            for t in data.get(key) or []:
+                if not t.get("onLoan") or not t.get("playerId"):
+                    continue
+                to_date = str(t.get("toDate") or "")[:10]
+                if to_date and to_date < today:
+                    continue
+                out.append({"player_id": int(t["playerId"]), "name": t.get("name") or "", "direction": direction,
+                            "other_club": t.get("fromClub") if direction == "in" else t.get("toClub"),
+                            "from_date": str(t.get("fromDate") or "")[:10], "to_date": to_date})
+        return out
+
+    def loans(self, team_names: List[str]) -> List[Dict[str, Any]]:
+        """Empréstimos ativos guardados com o elenco (busca o elenco se ainda não tem)."""
+        self.roster(team_names)
+        tid = self.team_id(team_names) if self.enabled else None
+        if tid is None:
+            return []
+        with self.db.connect() as conn:
+            conn.execute(self.LOANS_DDL)
+            cur = conn.execute("SELECT name, direction, other_club, from_date, to_date FROM fotmob_loans WHERE team_id = ?",
+                               (tid,))
+            return [dict(zip(("name", "direction", "other_club", "from_date", "to_date"), r)) for r in cur.fetchall()]
+
     def roster(self, team_names: List[str], max_age_h: float = 24, fetch: bool = True) -> List[Dict[str, Any]]:
         """Elenco ATUAL do clube na FotMob (quem está inscrito hoje, com lesões). Guarda por `max_age_h` horas."""
         names = [n for n in dict.fromkeys(team_names) if n]
@@ -651,6 +684,16 @@ class FotmobProvider:
             return rows
         team = ((d.get("details") or {}).get("name")) or names[0]
         new = self.parse_squad(d, tid, team, now_iso())
+        try:                                             # rodada 11: empréstimos ativos (de entrada e de saída)
+            loans = self.parse_loans(d, tid)
+            with self.db.connect() as conn:
+                conn.execute(self.LOANS_DDL)
+                conn.execute("DELETE FROM fotmob_loans WHERE team_id = ?", (tid,))
+                conn.executemany("INSERT OR REPLACE INTO fotmob_loans VALUES (?,?,?,?,?,?,?,?)",
+                                 [(tid, x["player_id"], x["name"], x["direction"], x["other_club"], x["from_date"],
+                                   x["to_date"], now_iso()) for x in loans])
+        except Exception:
+            pass
         if not new:
             return rows
         with self.db.connect() as conn:

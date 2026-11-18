@@ -115,7 +115,7 @@ def test_external_rating_is_a_secondary_signal_not_a_market_value_proxy():
     out = merge_external_ratings(players, ratings)
     assert out.loc[0, "qualidade"] == 76.4
     assert out.loc[0, "nota_externa"] == 60.0
-    assert out.loc[1, "qualidade"] == 75.0
+    assert out.loc[1, "qualidade"] == 62.5      # rodada 11: nota externa sozinha vale metade (puxada à média)
     assert out.loc[1, "confianca_pct"] == 25
 
 

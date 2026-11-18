@@ -20,8 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v2.pkl")    # v2: nova régua de qualidade (rodada 10)
-META_PATH = Path("data/processed/scout_universe_v2.json")
+SNAP_PATH = Path("data/processed/scout_universe_v3.pkl")    # v3: régua + teto de potencial (rodada 11)
+META_PATH = Path("data/processed/scout_universe_v3.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v2.pkl"), Path("data/processed/scout_universe.pkl")]
 
 
 def max_age_hours() -> float:
@@ -104,11 +105,44 @@ def age_hours() -> Optional[float]:
 
 def load() -> Optional[Dict[str, Any]]:
     if not SNAP_PATH.exists():
-        return None
+        return _upgrade_old()
     try:
         return pd.read_pickle(SNAP_PATH)
     except Exception:
         return None
+
+
+def _upgrade_old() -> Optional[Dict[str, Any]]:
+    """
+    Rodada 11: a fotografia nova ainda não existe — aproveita a anterior e só RECALCULA as notas (segundos), em vez de
+    montar o mercado inteiro de novo dentro da tela (minutos). O processo de fundo refaz a fotografia completa depois.
+    """
+    from src.scout import engine as E
+
+    for old in OLD_SNAPS:
+        if not old.exists():
+            continue
+        try:
+            data = pd.read_pickle(old)
+            u = data.get("universe")
+            if u is None or u.empty:
+                continue
+            for c in ("qualidade", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
+                      "qualidade_estatistica", "nota_externa", "fontes_nota_externa", "fonte_qualidade"):
+                if c in u:
+                    u = u.drop(columns=[c])
+            try:
+                from src.squad import data as D
+
+                ext = D.external_ratings()
+            except Exception:
+                ext = None
+            data["universe"] = E.merge_external_ratings(E.add_quality_scores(u), ext)
+            save(data)
+            return data
+        except Exception:
+            continue
+    return None
 
 
 def version() -> str:

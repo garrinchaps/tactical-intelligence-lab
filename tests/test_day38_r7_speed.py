@@ -42,6 +42,7 @@ def test_scout_snapshot_roundtrip_and_stable_version(tmp_path, monkeypatch):
 
     monkeypatch.setattr(S, "SNAP_PATH", tmp_path / "u.pkl")
     monkeypatch.setattr(S, "META_PATH", tmp_path / "u.json")
+    monkeypatch.setattr(S, "OLD_SNAPS", [])
     assert S.load() is None and S.age_hours() is None
     S.save({"universe": pd.DataFrame({"nome": ["A", "B"]}), "clubs": pd.DataFrame(), "status": "carregado"})
     v1 = S.version()

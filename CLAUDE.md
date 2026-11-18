@@ -319,6 +319,31 @@ Rodada 10 (18/11/2026, 390 testes verdes):
   Assistente: jogador citado → leitura dele primeiro; a IA só substitui a resposta clássica quando achou números da
   pergunta. Leitura do rival ("Onde atacar") com Fato/Padrão/Interpretação/Como explorar/Hipótese.
 
+Rodada 11 (18/11/2026, 399 testes verdes):
+- ✅ Lentidão: "modo leve" (`src/data_hub/activity.py`): a tela marca `data/ui_active`; OpenPlay, FotMob histórico,
+  réguas, fotografia do Scout e jogo típico ESPERAM enquanto o app está em uso; `wal_checkpoint(TRUNCATE)` periódico e
+  `journal_size_limit` (o arquivo de escrita do SQLite inchava e deixava toda leitura lenta). FotMob: 60 s entre lotes.
+  Jogo hipotético só calcula após "Analisar". `TIL_MODO_LEVE=0` desliga.
+- ✅ Homônimos: `same_team_names` separa pelo país das competições nacionais (`_comp_country`, `_name_countries`) e
+  recusa nome com palavra a mais (Barcelona × Barcelona SC × RCD Espanyol de Barcelona); `team_matches` tira liga
+  nacional de outro país. `one_per_game`: mesmo placar + um time igual em ±1 dia = mesma partida. Filtro do clube
+  "Com estatísticas ou lances (sem só placar)" (padrão).
+- ✅ Assistente: BUG que fazia a IA colar blocos irrelevantes — o motor normal "LOCAL_SCOPED_ENGINE" era tratado como
+  "fora do assunto". Agora `lab_ai/direct.py` detecta o número perguntado (para fora, no alvo, terço final, desarmes,
+  posse…) e responde direto com ranking e fonte; sem número reconhecido não acrescenta nada; sem o dado diz "não tenho".
+  Página de treino renomeada "IA do laboratório (treino e bastidores)".
+- ✅ Scout: viabilidade com `nationality_market` (quão comum é a nacionalidade na liga do clube + no próprio elenco;
+  mesmo país = 100) e `career_context` (titular no auge em clube muito maior = exceção); pesos novos (nacionalidade 24%,
+  carreira 17%) e tetos; corte inicial já considera nacionalidade; não sugere quem é pior que o titular (salvo jovem
+  promissor ou oportunidade de contrato). Carências só nas posições que o time escala (`roles_used`; meia central vira
+  volante/meia se o técnico não usa). Identidade: superficial < 8 jogos, inicial 8–29, detalhada 30+ e desenhos usados.
+  "Três melhores por posição" ranqueia só a posição (antes vinha vazio) e filtros num formulário; idade inclusiva.
+  Teto de potencial (`potencial_teto` ≥ qualidade); joias só dentro do alcance do clube. Nota externa sozinha vale
+  metade. Nomes do elenco ligados ao mercado (`_merge_roster` com `canonical_names`). Empréstimos da FotMob
+  (`fotmob_loans`): comprar/deixar acabar/renovar e aba dos emprestados pelo clube; janela num formulário com
+  "Finalizar planejamento". Gráfico de médias × competição; radar antes × depois; dossiê PDF com campinho
+  (`src/scout/dossier_pdf.py`). Fotografia `scout_universe_v3.pkl` (aproveita a v2 recalculando só as notas).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

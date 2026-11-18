@@ -95,51 +95,176 @@ SECTORS = [("🧤 Goleiros", {"GK"}), ("🛡️ Defesa", {"CB", "LB", "RB", "LWB
            ("⚙️ Meio-campo", {"DM", "CM", "AM", "LM", "RM"}), ("⚡ Ataque", {"LW", "RW", "ST"})]
 
 
-def _window_cards(roster, decisions):
-    """Rodada 10: janela de transferências em cartões por setor (antes: uma caixa de seleção por atleta, em lista)."""
+def _window_cards(roster, decisions, loans=None):
+    """
+    Rodada 11: janela de transferências em cartões por setor DENTRO de um formulário — nada recarrega até
+    "Finalizar planejamento". Emprestados ao clube: comprar / deixar acabar / renovar. Emprestados pelo clube: seção
+    própria (reintegrar / vender / renovar).
+    """
+    from src.squad.matchday import canonical_names
+
+    loans = loans or []
+    l_in = {x["name"]: x for x in loans if x.get("direction") == "in"}
+    l_out = [x for x in loans if x.get("direction") == "out"]
+    canon = canonical_names(roster["nome"].astype(str).tolist(), list(l_in)) if l_in else {}
     rows = []
     r = roster.copy()
     r["_q"] = pd.to_numeric(r.get("qualidade"), errors="coerce")
     known = set().union(*[s_ for _, s_ in SECTORS])
+    # sem posição exata: usa o setor informado pela FotMob (goleiros/defensores/meias/atacantes) só para agrupar
+    gmap = {"keepers": "GK", "defenders": "CB", "midfielders": "CM", "attackers": "ST"}
+    if "grupo" in r:
+        r["papel"] = [p_ if isinstance(p_, str) and p_ in known else gmap.get(str(g), p_)
+                      for p_, g in zip(r["papel"], r["grupo"])]
     groups = SECTORS + [("❔ Posição não identificada", None)]
-    tabs_ = st.tabs([f"{label} ({int((r['papel'].isin(roles) if roles else ~r['papel'].isin(known)).sum())})"
-                     for label, roles in groups])
-    opts = ["Fica", "Vender", "Emprestar"]
-    color = {"Fica": "#22C55E", "Vender": "#EF4444", "Emprestar": "#FBBF24"}
-    for tab, (label, roles) in zip(tabs_, groups):
-        with tab:
-            part = r[r["papel"].isin(roles)] if roles else r[~r["papel"].isin(known)]
-            part = part.sort_values("_q", ascending=False, na_position="last")
-            if part.empty:
-                st.caption("Ninguém neste setor.")
-                continue
+    base_opts = ["Fica", "Vender", "Emprestar"]
+    loan_opts = ["Comprar em definitivo", "Deixar o empréstimo acabar", "Renovar empréstimo"]
+    color = {"Fica": "#22C55E", "Vender": "#EF4444", "Emprestar": "#FBBF24", "Comprar em definitivo": "#22D3EE",
+             "Deixar o empréstimo acabar": "#EF4444", "Renovar empréstimo": "#A78BFA", "Reintegrar": "#22C55E"}
+    with st.form("scout_window_form", border=False):
+        tabs_ = st.tabs([f"{label} ({int((r['papel'].isin(roles) if roles else ~r['papel'].isin(known)).sum())})"
+                         for label, roles in groups] + [f"🔁 Emprestados pelo clube ({len(l_out)})"])
+        picks = {}
+        for tab, (label, roles) in zip(tabs_, groups):
+            with tab:
+                part = r[r["papel"].isin(roles)] if roles else r[~r["papel"].isin(known)]
+                part = part.sort_values("_q", ascending=False, na_position="last")
+                if part.empty:
+                    st.caption("Ninguém neste setor.")
+                    continue
+                cols = st.columns(3)
+                for k, p in enumerate(part.to_dict("records")):
+                    name = str(p["nome"])
+                    loan = l_in.get(canon.get(name, name))
+                    opts = loan_opts if loan else base_opts
+                    cur = decisions.get(name, opts[1] if loan else "Fica")
+                    cur = cur if cur in opts else opts[0]
+                    q = p.get("_q")
+                    age = pd.to_numeric(pd.Series([p.get("idade")]), errors="coerce").iloc[0]
+                    badge = (f'<div style="color:#C4B5FD;font-size:.78rem">🔁 emprestado pelo {html.escape(str(loan.get("other_club") or "?"))}'
+                             f' até {html.escape(str(loan.get("to_date") or "?"))}</div>' if loan else "")
+                    with cols[k % 3]:
+                        st.markdown(
+                            f'<div style="background:#0B1120;border:1px solid #1E2A44;border-left:4px solid {color.get(cur, "#22C55E")};'
+                            f'border-radius:14px;padding:10px 12px;margin-bottom:6px">'
+                            f'<div style="font-weight:700;color:#F5F7FB">{html.escape(name)}</div>'
+                            f'<div style="color:#98A6BF;font-size:.82rem">{html.escape(_role(p.get("papel")))}'
+                            f'{f" · {int(age)} anos" if pd.notna(age) else ""}</div>{badge}'
+                            f'<div style="display:flex;gap:14px;margin-top:4px;font-size:.85rem;color:#DCE6F4">'
+                            f'<span>⭐ {f"{q:.0f}" if pd.notna(q) else "—"}</span><span>💶 {_money(p.get("valor_mercado_eur"))}</span>'
+                            f'</div></div>', unsafe_allow_html=True)
+                        picks[name] = (st.radio("Decisão", opts, index=opts.index(cur), key=f"scout_dec_{_slug(name)}",
+                                                horizontal=not loan, label_visibility="collapsed"), p)
+        with tabs_[-1]:
+            if not l_out:
+                st.caption("Nenhum jogador do clube emprestado a outro time (segundo a FotMob).")
+            out_opts = ["Reintegrar", "Vender", "Renovar empréstimo"]
             cols = st.columns(3)
-            for i, p in enumerate(part.to_dict("records")):
-                name = str(p["nome"])
-                cur = decisions.get(name, "Fica")
-                q = p.get("_q")
-                age = pd.to_numeric(pd.Series([p.get("idade")]), errors="coerce").iloc[0]
-                with cols[i % 3]:
-                    st.markdown(
-                        f'<div style="background:#0B1120;border:1px solid #1E2A44;border-left:4px solid {color[cur]};'
-                        f'border-radius:14px;padding:10px 12px;margin-bottom:6px">'
-                        f'<div style="font-weight:700;color:#F5F7FB">{html.escape(name)}</div>'
-                        f'<div style="color:#98A6BF;font-size:.82rem">{html.escape(_role(p.get("papel")))}'
-                        f'{f" · {int(age)} anos" if pd.notna(age) else ""}</div>'
-                        f'<div style="display:flex;gap:14px;margin-top:4px;font-size:.85rem;color:#DCE6F4">'
-                        f'<span>⭐ {f"{q:.0f}" if pd.notna(q) else "—"}</span><span>💶 {_money(p.get("valor_mercado_eur"))}</span>'
-                        f'</div></div>', unsafe_allow_html=True)
-                    key = f"scout_dec_{_slug(name)}"
-                    if hasattr(st, "segmented_control"):
-                        choice = st.segmented_control("Decisão", opts, default=cur, key=key,
-                                                      label_visibility="collapsed") or "Fica"
-                    else:
-                        choice = st.radio("Decisão", opts, index=opts.index(cur), key=key, horizontal=True,
-                                          label_visibility="collapsed")
-                decisions[name] = choice
-                if choice != "Fica":
-                    rows.append({"Jogador": name, "Decisão": choice, "Valor referência": _money(p.get("valor_mercado_eur"))})
+            for k, x in enumerate(l_out):
+                name = str(x["name"])
+                cur = decisions.get(f"out::{name}", "Renovar empréstimo")
+                with cols[k % 3]:
+                    st.markdown(f'<div style="background:#0B1120;border:1px solid #1E2A44;border-left:4px solid #A78BFA;'
+                                f'border-radius:14px;padding:10px 12px;margin-bottom:6px"><div style="font-weight:700;color:#F5F7FB">'
+                                f'{html.escape(name)}</div><div style="color:#98A6BF;font-size:.82rem">no {html.escape(str(x.get("other_club") or "?"))}'
+                                f' até {html.escape(str(x.get("to_date") or "?"))}</div></div>', unsafe_allow_html=True)
+                    picks[f"out::{name}"] = (st.radio("Decisão", out_opts, index=out_opts.index(cur),
+                                                      key=f"scout_out_{_slug(name)}", label_visibility="collapsed"), {})
+        done = st.form_submit_button("✅ Finalizar planejamento", type="primary", use_container_width=True)
+    if done:
+        for name, (choice, _) in picks.items():
+            decisions[name] = choice
+        st.success("Planejamento registrado.")
+    for name, choice in decisions.items():
+        if name.startswith("out::"):
+            if choice != "Renovar empréstimo":
+                rows.append({"Jogador": name[5:], "Decisão": choice + " (emprestado pelo clube)", "Valor referência": "—"})
+            continue
+        if choice in ("Fica", "Renovar empréstimo"):
+            continue
+        p = picks.get(name, (None, {}))[1] or {}
+        rows.append({"Jogador": name, "Decisão": choice, "Valor referência": _money(p.get("valor_mercado_eur"))})
     return rows
+
+
+@st.cache_data(show_spinner=False, max_entries=16)
+def _nat_market(version, country, team_key, _universe, _roster):
+    return E.nationality_market(_universe, country, _roster)
+
+
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=16)
+def _loans(team, version):
+    try:
+        from src.ui.context import get_service
+        from src.ui.pages.clubs import same_team_names
+
+        return get_service().fotmob.loans(same_team_names(team))
+    except Exception:
+        return []
+
+
+def _club_averages_chart(diagnosis, team):
+    """
+    Rodada 11: em vez da tabela, barras divergentes — quanto o clube está acima/abaixo da média da competição em cada
+    número, já com o SENTIDO certo (xG a favor alto é bom; xG contra alto é ruim) e o valor real na legenda.
+    """
+    import plotly.graph_objects as go
+
+    from src.ui.components import render_chart
+
+    ref = diagnosis.get("referencia") or {}
+    specs = [("A favor", diagnosis.get("medias_pro") or {}, [("xg", "xG criado", 1), ("shots_total", "Finalizações", 1),
+             ("shots_on_target", "No alvo", 1), ("possession_pct", "Posse", 0), ("passes_total", "Passes", 0),
+             ("crosses_total", "Cruzamentos", 0), ("interceptions", "Interceptações", 1), ("tackles_won", "Desarmes certos", 1)]),
+             ("Contra", diagnosis.get("medias_contra") or {}, [("xg", "xG cedido", -1), ("shots_total", "Finalizações sofridas", -1),
+             ("shots_on_target", "No alvo sofridas", -1)])]
+    rows = []
+    for side, src, keys in specs:
+        for k, label, sense in keys:
+            v, b = src.get(k), ref.get(k)
+            if v is None or b in (None, 0):
+                continue
+            pct = 100 * (float(v) - float(b)) / abs(float(b))
+            good = None if sense == 0 else (pct * sense > 0)
+            rows.append((label, pct, good, float(v), float(b)))
+    if not rows:
+        st.caption("Sem referência da competição para comparar.")
+        return
+    rows.sort(key=lambda r: r[1])
+    colors = ["#94A3B8" if g is None else ("#22C55E" if g else "#EF4444") for _, _, g, _, _ in rows]
+    fig = go.Figure(go.Bar(x=[r[1] for r in rows], y=[r[0] for r in rows], orientation="h", marker_color=colors,
+                           text=[f"{r[3]:.1f} por jogo (média da competição {r[4]:.1f})" for r in rows], textposition="auto",
+                           hovertemplate="%{y}: %{x:+.0f}% em relação à média<extra></extra>"))
+    fig.add_vline(x=0, line_color="#98A6BF", line_width=1)
+    fig.update_layout(height=max(260, 34 * len(rows)), margin=dict(l=10, r=10, t=10, b=10),
+                      xaxis_title="% acima (+) ou abaixo (−) da média da competição")
+    render_chart(fig, use_container_width=True, key=f"scout_avg_{_slug(team)}")
+    st.caption("🟢 melhor que a média · 🔴 pior que a média · cinza = estilo (nem bom nem ruim por si só). "
+               f"Base: {diagnosis.get('partidas_analisadas', 0)} jogos do clube com estatísticas e as mesmas competições "
+               "nos últimos 12 meses como referência.")
+
+
+def _sim_radar(deltas, team):
+    """Rodada 11: radar sobreposto antes × depois (cada eixo normalizado pelo maior dos dois valores)."""
+    import plotly.graph_objects as go
+
+    from src.ui.components import render_chart
+
+    if not deltas:
+        return
+    labels = [d["indicador"] for d in deltas]
+    top = [max(abs(float(d["antes"])), abs(float(d["depois"])), 1e-9) * 1.15 for d in deltas]
+    fig = go.Figure()
+    for key, name, color in (("antes", "XI atual", "#98A6BF"), ("depois", "XI com a mudança", "#22D3EE")):
+        vals = [float(d[key]) / t * 100 for d, t in zip(deltas, top)]
+        fig.add_trace(go.Scatterpolar(r=vals + vals[:1], theta=labels + labels[:1], fill="toself", name=name,
+                                      line_color=color, opacity=.75,
+                                      hovertext=[f"{d['indicador']}: {d[key]}" for d in deltas] + [""], hoverinfo="text"))
+    fig.update_layout(height=380, polar=dict(radialaxis=dict(visible=False, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20))
+    render_chart(fig, use_container_width=True, key=f"scout_radar_{_slug(team)}")
+    ups = [f"{d['indicador']} {d['variacao_pct']:+.0f}%" for d in deltas if d.get("variacao_pct") not in (None, 0)]
+    if ups:
+        st.caption("Variação do XI: " + " · ".join(ups) + ". Projeção pela composição do time, não resultado de jogo.")
 
 
 def _slug(value):
@@ -164,15 +289,26 @@ def _role(role):
     return E.ROLE_LABELS.get(str(role), str(role or "Não identificado"))
 
 
-def _merge_roster(roster, universe):
+def _merge_roster(roster, universe, team=None):
     if roster is None or roster.empty:
         return pd.DataFrame()
-    from src.data_lake.ids import player_core
+    from src.data_lake.ids import player_core, team_core
 
     r = roster.copy()
     r["_core"] = r["nome"].map(player_core)
     if universe is not None and not universe.empty:
         lookup = universe.drop_duplicates("_core").set_index("_core")
+        # rodada 11: nome do elenco ≠ nome do mercado ("Lucas Romero" × "Lucas Daniel Romero") — liga pela mesma regra
+        # da Escalação, só entre atletas do PRÓPRIO clube (nunca junta dois jogadores diferentes por palpite)
+        miss = ~r["_core"].isin(lookup.index)
+        if team and miss.any() and "clube" in universe:
+            from src.squad.matchday import canonical_names
+
+            tc = team_core(team)
+            mine = universe[universe["clube"].map(lambda c: team_core(str(c)) == tc)]
+            if not mine.empty:
+                canon = canonical_names(r.loc[miss, "nome"].astype(str).tolist(), mine["nome"].astype(str).tolist())
+                r.loc[miss, "_core"] = [player_core(canon.get(n, n)) for n in r.loc[miss, "nome"].astype(str)]
         cols = [x for x in ("qualidade", "confianca_pct", "rating_media", "rating_12m", "qualidade_estatistica",
                             "nota_externa", "fontes_nota_externa", "fonte_qualidade", "minutos_12m",
                             "jogos_12m", "nacionalidade", "valor_mercado_eur", "valor_tm_atual",
@@ -207,13 +343,13 @@ def _club_squad(team, version, universe):
     try:
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
-        return {**data, "squad": _merge_roster(data.get("squad"), universe)}
+        return {**data, "squad": _merge_roster(data.get("squad"), universe, team)}
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
         club = E.market_club(D.table("tm_clubes"), team)
         roster = E.current_roster(get_service().db, club, same_team_names(team), D.table("tm_jogadores"), universe)
-        return {"squad": _merge_roster(roster, universe), "club": club, "fonte": "Transfermarkt + escalações"}
+        return {"squad": _merge_roster(roster, universe, team), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
 def _dossier(player, roster):
@@ -230,7 +366,7 @@ def _dossier(player, roster):
         ("Média de avaliação TM em 12m (€)", player.get("valor_tm_media_12m")),
         ("Última avaliação TM em 12m (€)", player.get("valor_tm_ultima_avaliacao")),
         ("Variação TM em 12m (%)", player.get("variacao_tm_12m_pct")),
-        ("Minutos 12m", player.get("minutos_12m", player.get("minutos"))),
+        ("Minutos (últimos 12 meses)", player.get("minutos_12m", player.get("minutos"))),
         ("Jogos 12m", player.get("jogos_12m", player.get("jogos"))),
         ("Nota média 12m ajustada", player.get("rating_12m", player.get("rating_media"))),
         ("Nível médio dos adversários (12m, 0–100)", player.get("nivel_adversario_12m")),
@@ -320,7 +456,8 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         _dossier(player, roster)
     with st.expander("Descartar e recalcular"):
         reason = st.selectbox("Motivo", ["Muito caro","Muito velho","Perfil físico inadequado",
-            "Limite de estrangeiros","Quero outra característica","Não é prioridade","Outro motivo"],
+            "Limite de estrangeiros","Nacionalidade/contexto inviável","Quero outra característica","Não é prioridade",
+            "Outro motivo"],
             key=f"scout_reason_{_slug(name)}_{idx}")
         if st.button("Descartar este alvo", key=f"scout_reject_{_slug(name)}_{idx}"):
             from src.ui.context import get_service
@@ -505,6 +642,7 @@ def render(_ctx=None):
         foreign_count = int(sum(1 for n in likely["nacionalidade"].dropna().astype(str)
                                 if E.is_foreign_player(n, country) is True))
     financial["estrangeiros_atual"] = foreign_count
+    financial["nat_market"] = _nat_market(version, country, team_core(team), universe, roster)   # rodada 11
     rejected_key = "scout_rejected_" + _slug(team_core(team))
     st.session_state.setdefault(rejected_key, [])
     feedback = E.rejection_preferences(service.db, team)
@@ -527,8 +665,9 @@ def render(_ctx=None):
     needs = diagnosis.get("necessidades") or []
     if not needs and not roster.empty:
         counts = roster["papel"].value_counts()
+        used = E.roles_used(service.db, aliases) or {"GK","CB","LB","RB","DM","CM","AM","LW","RW","ST"}
         needs = [{"papel": r, "urgencia": 55, "motivo": "profundidade posicional reduzida"}
-                 for r in ("GK","CB","LB","RB","DM","CM","AM","LW","RW","ST") if int(counts.get(r, 0)) < 2]
+                 for r in sorted(used) if int(counts.get(r, 0)) < 2]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = _rank_candidates(version, team, country, competition, next_season,
                                   tuple(rejected_for_run), feedback_reason,
@@ -550,32 +689,40 @@ def render(_ctx=None):
             # rodada 10: TODAS as posições (não só as carentes) — a IA ranqueia sob demanda a posição escolhida
             need_roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
             roles = need_roles + [r for r in E.ROLE_LABELS if r not in need_roles]
-            role = st.selectbox("Posição", roles, key="scout_top3_role",
-                                format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
-            fa, fb, fc = st.columns(3)
-            age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
-            quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
-            maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
-            if role in need_roles:
+            # rodada 11: tudo num formulário — só recalcula ao clicar "Aplicar filtros" (antes cada mexida recalculava)
+            all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
+            nm = financial.get("nat_market") or {}
+            aff = {n: nm.get(n) or E._affinity(n, country) for n in all_nat}
+            nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
+            with st.form("scout_top3_form", border=False):
+                role = st.selectbox("Posição", roles, key="scout_top3_role",
+                                    format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
+                fa, fb, fc = st.columns(3)
+                age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
+                quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
+                maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
+                nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
+                                      format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
+                st.form_submit_button("🔎 Aplicar filtros", type="primary")
+            if False:
                 base_rank = ranked
             else:
+                # rodada 11: sempre só esta posição — no ranking geral o mesmo atleta fica na posição em que pontua mais
+                # (um lateral virava "ala"/"ponta") e a lista desta posição chegava vazia
+                urg = next((float(n.get("urgencia") or 40) for n in needs if n.get("papel") == role), 40)
                 with st.spinner(f"A IA está garimpando {_role(role).lower()}s…"):
                     base_rank = _rank_candidates(version, team, country, competition, next_season,
                                                  tuple(rejected_for_run), feedback_reason, pool,
-                                                 [{"papel": role, "urgencia": 40,
-                                                   "motivo": "posição escolhida por você (reforço/concorrência)"}],
+                                                 [{"papel": role, "urgencia": urg,
+                                                   "motivo": next((n.get("motivo") for n in needs if n.get("papel") == role),
+                                                                  "posição escolhida por você (reforço/concorrência)")}],
                                                  financial, roster)
             filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
             if not filt3.empty:
-                filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
+                ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
+                filt3 = filt3[ages.isna() | ages.between(*age_band)]
                 filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
                 filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
-            # rodada 10: TODAS as nações do mercado, cada uma com a leitura de adaptação ao país do clube
-            all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
-            aff = {n: E._affinity(n, country) for n in all_nat}
-            nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
-            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
-                                  format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
             if nation != "Todas":
                 st.caption(f"Contexto: {aff[nation][1]}. Exceções existem, mas a IA pesa a adaptação no índice de realismo.")
                 filt3 = filt3[filt3["nacionalidade"].astype(str) == nation] if not filt3.empty else filt3
@@ -604,7 +751,15 @@ def render(_ctx=None):
             st.info("Sem carência posicional suficientemente sustentada. Use a busca manual para explorar oportunidades.")
         st.markdown("#### Identidade tática e treinador")
         style = diagnosis.get("estilo") or {}
-        st.write(" · ".join(style.get("tracos") or ["Amostra insuficiente"]))
+        lvl = style.get("nivel_identidade")
+        badge = {"detalhada": "🟢 identidade detalhada (30+ jogos)", "inicial": "🟡 identidade inicial (8–29 jogos)",
+                 "superficial": "🟠 leitura superficial (menos de 8 jogos)"}.get(lvl, "")
+        if badge:
+            st.caption(badge)
+        forms = style.get("formacoes") or []
+        if forms:
+            st.write("**Desenhos usados:** " + " · ".join(f"{f} ({n} jogo{'s' if n != 1 else ''})" for f, n in forms))
+        st.write(" · ".join(style.get("tracos") or ["Amostra insuficiente para traços de estilo"]))
         st.caption(style.get("fonte","") + " · " + style.get("contexto_tecnico","") + " · " + style.get("limite",""))
         if style.get("tracos_tecnico"):
             st.write("**Padrões anteriores do treinador:** " + " · ".join(style["tracos_tecnico"]))
@@ -613,18 +768,8 @@ def render(_ctx=None):
         coach = diagnosis.get("treinador") or {}
         st.write(f"**Técnico identificado:** {coach.get('nome') or 'não identificado'} · "
                  f"{coach.get('jogos',0)} jogos observados no clube")
-        st.markdown("#### Médias do clube nas partidas disponíveis")
-        labels = {"xg":"xG","shots_total":"Finalizações","shots_on_target":"No alvo","possession_pct":"Posse (%)",
-                  "passes_total":"Passes","crosses_total":"Cruzamentos","interceptions":"Interceptações","tackles_won":"Desarmes certos"}
-        rows = []
-        for side, source in (("A favor", diagnosis.get("medias_pro") or {}),
-                             ("Contra", diagnosis.get("medias_contra") or {})):
-            for key, value in source.items():
-                if key in labels:
-                    rows.append({"Lado": side, "Indicador": labels[key], "Média/jogo": value,
-                                 "Referência": (diagnosis.get("referencia") or {}).get(key)})
-        if rows:
-            comparison_table(pd.DataFrame(rows))
+        st.markdown("#### O clube por jogo × a média da competição")
+        _club_averages_chart(diagnosis, team)
         if not roster.empty:
             st.markdown("#### Elenco e notas")
             show = roster.copy()
@@ -632,7 +777,7 @@ def render(_ctx=None):
             cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","valor_mercado_eur",
                                 "minutos_12m","rating_12m") if x in show]
             display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
-                "confianca_pct":"Confiança (%)","valor_mercado_eur":"Valor de mercado","minutos_12m":"Minutos 12m",
+                "confianca_pct":"Confiança (%)","valor_mercado_eur":"Valor de mercado","minutos_12m":"Minutos (últimos 12 meses)",
                 "rating_12m":"Nota média 12m"})
             if "Valor de mercado" in display:
                 display["Valor de mercado"] = display["Valor de mercado"].map(_money)
@@ -677,7 +822,7 @@ def render(_ctx=None):
             vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
             filt = pool.copy()
             if rf!="Todas": filt=filt[filt["papel"]==rf]
-            filt=filt[pd.to_numeric(filt["idade"],errors="coerce").between(amin,amax)]
+            _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
             filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
             if nat!="Todas": filt=filt[filt["nacionalidade"].astype(str)==nat]
             if league_filter!="Todas" and "clube_liga" in filt:
@@ -691,7 +836,7 @@ def render(_ctx=None):
                                 "qualidade","confianca_pct","minutos_12m","rating_12m") if x in filt]
             display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
                 "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
-                "confianca_pct":"Confiança (%)","minutos_12m":"Minutos 12m","rating_12m":"Nota 12m"}).head(100)
+                "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
             if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)
             styled_dataframe(display,use_container_width=True,hide_index=True)
             if not filt.empty:
@@ -753,20 +898,36 @@ def render(_ctx=None):
 
     with tabs[3]:
         st.markdown("#### Joias subvalorizadas e potencial")
-        st.caption("Triagem de atletas até 23 anos, com qualidade baseada em dados observados e valor comparado aos pares. O upside é heurístico, não previsão de preço.")
+        # rodada 11: só jovens que ESTE clube consegue contratar (preço dentro do alcance, nacionalidade viável e clube
+        # de origem de porte igual ou menor). Craques de elite (Yamal, Karl…) não são "joia subvalorizada" para o Cruzeiro.
+        budget = float(financial.get("orcamento_proxy_eur") or 0) or None
+        own_value = float(financial.get("valor_elenco_eur") or 0) or None
+        cap = max(budget * 1.5, 2e6) if budget else 8e6
+        st.caption(f"Até 23 anos, com produção observada, valor de mercado até {_money(cap)} (alcance estimado do clube), "
+                   "nacionalidade comum na liga e clube de origem de porte igual ou menor. Teto = qualidade atual + "
+                   "crescimento esperado pela idade e nível — projeção, não certeza.")
         gems=pool.copy()
-        if not gems.empty and "potencial_revenda" in gems:
-            gems=gems[pd.to_numeric(gems["idade"],errors="coerce").le(23) &
-                      pd.to_numeric(gems["potencial_revenda"],errors="coerce").notna()]
-            gems=gems.sort_values(["potencial_revenda","confianca_pct"],ascending=False).head(30)
+        if not gems.empty and "potencial_teto" in gems:
+            ages=np.floor(pd.to_numeric(gems["idade"],errors="coerce"))
+            mv=pd.to_numeric(gems["valor_mercado_eur"],errors="coerce")
+            nm=financial.get("nat_market") or {}
+            affs=gems["nacionalidade"].map(lambda n: (nm.get(E._first_nat(n)) or (50,""))[0])
+            cv=pd.to_numeric(gems.get("clube_valor_total_eur",pd.Series(np.nan,index=gems.index)),errors="coerce")
+            ok=(ages.le(23) & pd.to_numeric(gems["potencial_teto"],errors="coerce").notna() & (mv.isna() | mv.le(cap))
+                & (affs >= 45) & (cv.isna() | (own_value is None) | (cv <= (own_value or 0) * 1.5)))
+            gems=gems[ok].assign(_aff=affs[ok])
+            gems=gems.assign(_rank=pd.to_numeric(gems["potencial_teto"],errors="coerce")*.6
+                             + pd.to_numeric(gems["qualidade"],errors="coerce").fillna(40)*.25 + gems["_aff"]*.15)
+            gems=gems.sort_values(["_rank","confianca_pct"],ascending=False).head(30)
         if gems.empty:
             empty_state("Nenhuma joia com amostra mínima", "Só aparecem jovens com dados estatísticos suficientes.", "💎")
         else:
             table=gems.rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
-                "qualidade":"Qualidade","confianca_pct":"Confiança (%)","potencial_revenda":"Potencial /100",
-                "projecao_valorizacao_24m_pct":"Upside estimado 24m (%)","valor_mercado_eur":"Valor (€)"})
-            keep=[x for x in ("Jogador","Posição","Idade","Clube","Qualidade","Confiança (%)",
-                              "Potencial /100","Upside estimado 24m (%)","Valor (€)") if x in table]
+                "nacionalidade":"Nacionalidade","qualidade":"Qualidade hoje","potencial_teto":"Teto projetado",
+                "confianca_pct":"Confiança (%)","_aff":"Adaptação (%)",
+                "projecao_valorizacao_24m_pct":"Valorização possível 24m (%)","valor_mercado_eur":"Valor (€)"})
+            keep=[x for x in ("Jogador","Posição","Idade","Clube","Nacionalidade","Qualidade hoje","Teto projetado",
+                              "Confiança (%)","Adaptação (%)","Valorização possível 24m (%)","Valor (€)") if x in table]
             table=table[keep].copy()
             if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])
             if "Valor (€)" in table: table["Valor (€)"]=table["Valor (€)"].map(_money)
@@ -783,7 +944,7 @@ def render(_ctx=None):
         st.markdown("#### Janela de transferências")
         if not roster.empty:
             st.caption("Marque quem fica, sai ou deve ser emprestado — por setor. Vendas usam deságio estimado.")
-            rows=_window_cards(roster, decisions)
+            rows=_window_cards(roster, decisions, _loans(team, version))
             if rows: comparison_table(pd.DataFrame(rows))
         plan=st.session_state[plan_key]
         if plan:
@@ -821,18 +982,20 @@ def render(_ctx=None):
                 comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                for p in simulation["xi_depois"]]))
             if simulation.get("deltas"):
-                styled_dataframe(pd.DataFrame(simulation["deltas"]),use_container_width=True,hide_index=True)
-                chart=pd.DataFrame(simulation["deltas"]).set_index("indicador")[["antes","depois"]]
-                st.bar_chart(chart)
+                _sim_radar(simulation["deltas"], team)
+                styled_dataframe(pd.DataFrame(simulation["deltas"]).rename(columns={"indicador":"Indicador","antes":"Antes",
+                    "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),use_container_width=True,hide_index=True)
             st.caption(simulation.get("limite",""))
         incoming=sum(float((p.get("realismo") or {}).get("taxa_estimada_eur") or 0) for p in plan)
         sales=0.0
         if not roster.empty:
             for name,decision in decisions.items():
-                if decision=="Vender":
+                if decision in ("Vender","Comprar em definitivo"):
                     row=roster[roster["nome"]==name]
                     value=pd.to_numeric(row["valor_mercado_eur"],errors="coerce").iloc[0] if not row.empty else np.nan
-                    if pd.notna(value): sales+=float(value)*.60
+                    if pd.notna(value):
+                        if decision=="Vender": sales+=float(value)*.60
+                        else: incoming+=float(value)*.90          # compra do emprestado: ~90% do valor (estimativa)
         st.metric("Saldo estimado da janela",_money(sales-incoming),
                   help="Vendas estimadas a 60% do valor de referência menos taxas estimadas.")
         st.caption("Sem salários e orçamento oficial: as faixas são proxies e podem divergir da negociação real.")
@@ -841,9 +1004,18 @@ def render(_ctx=None):
         a,b=st.columns(2)
         a.download_button("⇩ Dossiê Markdown",markdown,file_name=f"scout_{_slug(team)}.md",
                           mime="text/markdown",use_container_width=True)
-        pdf=_pdf_bytes(markdown)
+        # rodada 11: dossiê visual — campinho com o XI planejado, um cartão por chegada (porquê + viabilidade), saídas
+        from src.scout import dossier_pdf as DP
+
+        xi_plan=(simulation or {}).get("xi_depois") or (simulation or {}).get("xi_antes") or []
+        if not xi_plan and not roster.empty:
+            try:
+                xi_plan=E.build_simulation(roster,None,None,formation)["xi_antes"]
+            except Exception:
+                xi_plan=[]
+        pdf=DP.build(team, formation, xi_plan, plan, decisions, sales-incoming, next_season) or _pdf_bytes(markdown)
         if pdf:
-            b.download_button("⇩ Relatório PDF",pdf,file_name=f"scout_{_slug(team)}.pdf",
+            b.download_button("⇩ Dossiê PDF (campinho + decisões)",pdf,file_name=f"scout_{_slug(team)}.pdf",
                               mime="application/pdf",use_container_width=True)
         else:
             b.caption("Para PDF, instale a dependência reportlab.")
