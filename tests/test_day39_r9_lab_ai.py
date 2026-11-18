@@ -157,4 +157,6 @@ def test_api_lab_and_genetic(tmp_path):
 def test_game_page_has_report_section():
     from src.ui.pages import games
 
-    assert games.SECTIONS[7] == "📑 Relatório da IA"
+    # rodada 13: o relatório da IA virou parte de "Padrões e histórico" (abre sob demanda)
+    src = open(games.__file__, encoding="utf-8").read()
+    assert "lab_report.render" in src and "player_intel_view.render" in src

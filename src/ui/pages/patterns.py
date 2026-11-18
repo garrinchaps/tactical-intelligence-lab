@@ -74,7 +74,7 @@ def _ai_reading(ctx, team: str) -> None:
                 st.markdown(b["markdown"], unsafe_allow_html=True)
 
 
-def render(ctx, team: str) -> None:
+def render(ctx, team: str, kp: str = "") -> None:
     from src.ui.context import get_service
 
     meta = ctx.bundle.meta or {}
@@ -129,7 +129,7 @@ def render(ctx, team: str) -> None:
     from src.analytics import match_patterns as MP
 
     st.markdown("---")
-    t1, t2, t3 = st.tabs(["🎯 Bola parada", "🔄 Substituições", "📈 Conforme o placar"])
+    t1, t2, t3 = st.tabs(["🎯 Bola parada", "🔄 Substituições", "📈 Conforme o placar"], key=f"pat_tabs_{kp}")
     with t1:
         sp = MP.set_pieces(ctx.df, team)
         if sp.get("fatia_xg_bola_parada_pct") is not None:

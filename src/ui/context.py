@@ -62,11 +62,8 @@ REAL_SQL = "data_level NOT IN ('SIMULATED', 'UPLOAD')"
 
 
 def only_real() -> bool:
-    """Padrão: só partidas reais (sem simulações nem uploads). Alternável ao lado da busca."""
-    try:
-        return bool(st.session_state.get("_only_real", True))
-    except Exception:
-        return True
+    """Sempre só partidas reais (rodada 13: o interruptor saiu da barra do topo)."""
+    return True
 
 
 LEVEL_CHOICES = {"🟢 Lances": "EVENTS", "📊 Estatísticas": "BOXSCORE", "📄 Só placar": "RESULT"}

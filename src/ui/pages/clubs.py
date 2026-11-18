@@ -403,6 +403,14 @@ def _style_data(names: tuple, version: str) -> dict:
     return out
 
 
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+def _formation_data(names, version):
+    from src.analytics.team_history import formation_patterns
+    from src.ui.context import get_service
+
+    return formation_patterns(get_service().db, list(names))
+
+
 def _style_tab(name: str, names: List[str]) -> None:
     """Hub do clube (rodada 5): estilo habitual, problemas que se repetem, evolução do xG e próximos jogos."""
     import plotly.graph_objects as go
@@ -415,6 +423,24 @@ def _style_tab(name: str, names: List[str]) -> None:
     idn, vu, ser = d["identidade"], d["vulneraveis"], d["serie"]
     card = lambda txt, c: st.markdown(f'<div class="fm-card" style="border-left:4px solid {c};border-radius:14px;padding:.6rem .9rem;'
                                       f'margin-bottom:.45rem">{txt}</div>', unsafe_allow_html=True)
+    try:                                                 # rodada 13: o que cada desenho muda no ataque e na defesa
+        fp = _formation_data(tuple(names), get_service().db.stable_version())
+        if fp.get("formacoes"):
+            st.markdown("#### 🧩 Formações usadas: o que muda no ataque e na defesa")
+            cols = st.columns(min(3, len(fp["formacoes"])))
+            for i, f in enumerate(fp["formacoes"][:3]):
+                with cols[i]:
+                    att = "".join(f"<div style='font-size:.82rem'>⚔️ {x}</div>" for x in f["ataque"]) or \
+                        "<div style='font-size:.82rem;color:#98A6BF'>ataque dentro do normal do time</div>"
+                    dfn = "".join(f"<div style='font-size:.82rem;color:{'#86EFAC' if x.startswith('✓') else '#FCA5A5'}'>"
+                                  f"🛡️ {x[2:]}</div>" for x in f["defesa"]) or \
+                        "<div style='font-size:.82rem;color:#98A6BF'>defesa dentro do normal do time</div>"
+                    card(f"<div style='font-size:1.25rem;font-weight:800;color:#22D3EE'>{f['formacao']}</div>"
+                         f"<div style='color:#98A6BF;font-size:.82rem'>{f['jogos']} jogos · {f['pontos_por_jogo']} pts/jogo · "
+                         f"gols {f['gols_pro']} × {f['gols_contra']}</div>{att}{dfn}", "#22D3EE")
+            st.caption(fp.get("criterio", ""))
+    except Exception:
+        pass
     if ser is not None and not ser.empty:
         k = st.columns(4)
         xg_f, xg_c = pd.to_numeric(ser["f_xg"], errors="coerce"), pd.to_numeric(ser["c_xg"], errors="coerce")

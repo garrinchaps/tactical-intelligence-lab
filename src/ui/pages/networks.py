@@ -53,13 +53,23 @@ def render(ctx: MatchContext) -> None:
         field = on_field(df, team, minute)
         d_net = df[(df["minute"] >= field["de"]) & (df["minute"] < field["ate"])]
         st.caption(f"Em campo aos {minute}': {len(field['jogadores'])} jogadores · trecho analisado: "
-                   f"{int(field['de'])}' a {int(field['ate'])}' (sem trocas no meio).")
+                   f"{int(field['de'])}' a {int(field['ate'])}' (sem trocas no meio). Ameaça (xT), jogadas e "
+                   "volume × importância abaixo seguem este mesmo trecho.")
+        d_scope = d_net
+    else:
+        last = int(df["minute"].max()) if "minute" in df else 90
+        lo, hi = st.slider("Período analisado (xT, jogadas e importância)", 0, max(last, 1), (0, max(last, 1)),
+                           key="net_range", help="Recorte por minuto: os números de ameaça e as jogadas mostradas "
+                                                 "passam a contar só esse trecho do jogo.")
+        d_scope = df[(df["minute"] >= lo) & (df["minute"] <= hi)] if "minute" in df else df
+        if (lo, hi) != (0, max(last, 1)):
+            d_net = d_scope
     try:
         net = PassingNetworkAnalyzer.build_pass_network(
             d_net, team, until_first_sub=(view == "xi"), min_pass_count=min_pass,
             players_only=(field["jogadores"] if field else starters if view in ("xi", "xi_full") and starters else None))
         gm = net["graph_metrics"]
-        xt = ExpectedThreatModel.compute_team_xt_summary(df, team)
+        xt = ExpectedThreatModel.compute_team_xt_summary(d_scope, team)
     except Exception as exc:
         error_state("Não foi possível montar a rede", exc)
         return
@@ -100,13 +110,13 @@ def render(ctx: MatchContext) -> None:
             st.caption(f"Mostrando só quem começou jogando ({len(starters)}). Quem entrou depois: "
                        + ", ".join(came_in) + ".")
     with r:
-        render_chart(charts.xt_progression(df, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
+        render_chart(charts.xt_progression(d_scope, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
                         use_container_width=True)
         st.caption("As 60 ações com maior ganho de ameaça (xT). Verde: passe · amarelo: condução.")
 
     st.markdown("##### Quem mais toca na bola × quem mais leva o time ao ataque")
     keep = set(field["jogadores"]) if field else set(starters) if view in ("xi", "xi_full") and starters else None
-    d2 = df if keep is None else df[df["player_name"].isin(keep) | (df["team_name"] != team)]
+    d2 = d_scope if keep is None else d_scope[d_scope["player_name"].isin(keep) | (d_scope["team_name"] != team)]
     comp = centrality_comparison(d2, team)
     if comp.empty:
         empty_state("Sem passes certos suficientes para comparar.", icon="📉")

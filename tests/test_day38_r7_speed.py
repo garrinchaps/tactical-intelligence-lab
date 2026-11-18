@@ -187,7 +187,9 @@ def test_fotmob_squad_parse_and_official_roster():
 def test_game_page_has_neural_section():
     from src.ui.pages import games
 
-    assert games.SECTIONS[6] == "🧠 Perigo (IA)"
+    # rodada 13: o perigo da rede neural virou parte de "Redes & xT" (abre sob demanda)
+    src = open(games.__file__, encoding="utf-8").read()
+    assert "danger_view.render" in src and "🧠 Perigo (IA)" not in games.SECTIONS
     import src.ui.pages.danger_view as dv
 
     assert callable(dv.render)

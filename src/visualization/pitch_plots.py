@@ -453,43 +453,40 @@ class TacticalVisualizer:
         4A. Cria gráfico interativo Plotly comparando a vulnerabilidade defensiva
         nos 5 setores horizontais (ações progressivas cedidas vs. entradas na área).
         """
+        # rodada 13: em vez de barras soltas, o CAMPO dividido nos 5 corredores do time que defende (gol à esquerda):
+        # cor = entradas na área cedidas por aquele corredor; o texto traz as progressões e as entradas.
         breakdown = def_org_metrics.get("corridor_vulnerability_breakdown", {})
         sectors = list(breakdown.keys())
-        prog_conceded = [
-            breakdown[s]["progressive_actions_conceded"] for s in sectors
-        ]
-        box_conceded = [breakdown[s]["box_entries_conceded"] for s in sectors]
-
+        prog = [float(breakdown[s_]["progressive_actions_conceded"]) for s_ in sectors]
+        box = [float(breakdown[s_]["box_entries_conceded"]) for s_ in sectors]
         fig = go.Figure()
-        fig.add_trace(
-            go.Bar(
-                name="Progressões Cedidas ao Adversário",
-                x=sectors,
-                y=prog_conceded,
-                marker_color="#f43f5e",
-                text=prog_conceded,
-                textposition="auto",
-            )
-        )
-        fig.add_trace(
-            go.Bar(
-                name="Entradas na Área Cedidas",
-                x=sectors,
-                y=box_conceded,
-                marker_color="#facc15",
-                text=box_conceded,
-                textposition="auto",
-            )
-        )
-
-        fig.update_layout(
-            title=f"Vulnerabilidade por Corredor Defensivo — {target_team}",
-            barmode="group",
-            template="plotly_dark",
-            xaxis_title="Setor Defensivo da Equipe",
-            yaxis_title="Contagem de Eventos Cedidos",
-            height=420,
-        )
+        line = "rgba(255,255,255,.55)"
+        n = max(len(sectors), 1)
+        top = max(box) if box and max(box) > 0 else 1.0
+        worst = int(np.argmax([b_ * 3 + p_ for b_, p_ in zip(box, prog)])) if sectors else -1
+        for i, name in enumerate(sectors):
+            y0, y1 = 80 - (i + 1) * 80 / n, 80 - i * 80 / n
+            k = box[i] / top
+            color = f"rgba(239,68,68,{0.12 + 0.6 * k:.2f})"
+            fig.add_shape(type="rect", x0=0, x1=120, y0=y0, y1=y1, fillcolor=color,
+                          line=dict(color="#F59E0B" if i == worst else "rgba(255,255,255,.12)",
+                                    width=3 if i == worst else 1), layer="below")
+            fig.add_annotation(x=60, y=(y0 + y1) / 2, showarrow=False,
+                               text=(f"<b>{name}</b>{'  ⚠️ mais exposto' if i == worst else ''}<br>"
+                                     f"{int(prog[i])} progressões cedidas · <b>{int(box[i])} entradas na área</b>"),
+                               font=dict(color="#F5F7FB", size=12), align="center")
+        for shp in (dict(type="rect", x0=0, y0=0, x1=120, y1=80), dict(type="line", x0=60, y0=0, x1=60, y1=80),
+                    dict(type="rect", x0=0, y0=18, x1=18, y1=62), dict(type="rect", x0=0, y0=30, x1=6, y1=50),
+                    dict(type="rect", x0=102, y0=18, x1=120, y1=62)):
+            fig.add_shape(**shp, line=dict(color=line, width=1.5))
+        fig.add_annotation(x=3, y=84, text="⬅ gol defendido por " + str(target_team), showarrow=False,
+                           xanchor="left", font=dict(color="#98A6BF", size=11))
+        fig.update_layout(title=f"Por onde {target_team} foi atacado — corredores defensivos",
+                          height=430, paper_bgcolor="#090D16", plot_bgcolor="#0E3B26",
+                          margin=dict(l=10, r=10, t=50, b=10), showlegend=False,
+                          xaxis=dict(range=[-1, 121], visible=False, fixedrange=True),
+                          yaxis=dict(range=[-1, 88], visible=False, fixedrange=True, scaleanchor="x"),
+                          font=dict(color="#F5F7FB"))
         return fig
 
     @classmethod

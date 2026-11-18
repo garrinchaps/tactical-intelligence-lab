@@ -191,7 +191,7 @@ def top_bar(focused: bool = False) -> None:
         st.caption(t("Como tudo foi feito — separado do programa."))
         for page in BACKSTAGE:
             st.page_link(page, label=t(page.title), icon=page.icon)
-    q1, q4, q3, q5, q2 = st.columns([5, 2.6, 1.4, 1.2, 1])
+    q1, q4, q5, q2 = st.columns([5.6, 3, 1.3, 1])
     st.session_state.setdefault("w_lang", st.session_state.get("_lang", "pt"))
     q5.selectbox(t("Idioma"), list(LANGS), format_func=LANGS.get, key="w_lang", label_visibility="collapsed",
                  on_change=lambda: st.session_state.__setitem__("_lang", st.session_state["w_lang"]),
@@ -209,10 +209,8 @@ def top_bar(focused: bool = False) -> None:
                    label_visibility="collapsed", placeholder=t("Nível de dado"),
                    help="Que jogos aparecem na busca, no Assistente e nas listas: 🟢 com lances e coordenadas, "
                         "📊 com estatísticas da partida, 📄 só com o placar. Marque os três para ver tudo.")
-    st.session_state.setdefault("w_only_real", bool(st.session_state.get("_only_real", True)))
-    q3.toggle(t("Só partidas reais"), key="w_only_real",
-              on_change=lambda: st.session_state.__setitem__("_only_real", st.session_state["w_only_real"]),
-              help="Ligado: só jogos que aconteceram de verdade (sem simulações nem arquivos enviados).")
+    # rodada 13: "Só partidas reais" saiu — simulações e uploads nunca aparecem nas buscas; jogo sem estatística em
+    # nenhuma fonte mostra o placar e avisa que nenhuma base achou números.
     if "global_q" not in st.session_state:               # a caixa some nas telas de foco; ao voltar, a busca reaparece
         st.session_state["global_q"] = st.session_state.get("_last_q", "")
     q = q1.text_input("Busca", placeholder=t("🔎  Jogo, time, jogador ou competição — ex.: Brasil x Croácia, Leverkusen, "

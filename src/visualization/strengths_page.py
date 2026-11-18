@@ -92,18 +92,20 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
          "referências a métrica não recebe percentil (amostra insuficiente). A referência usa partidas com eventos do "
          "banco local, sempre da mesma família de fonte (StatsBomb com StatsBomb, Wyscout com Wyscout, OpenPlay com OpenPlay).")
     a, b, c = st.columns([0.9, 2.0, 1.1])
-    mode = a.radio("Analisar", ["Atleta", "Equipe"], horizontal=True)
+    kp = str(target_team)                      # rodada 13: chaves por lado (a página aparece 2× em "Os dois times")
+    mode = a.radio("Analisar", ["Atleta", "Equipe"], horizontal=True, key=f"sw_mode_{kp}")
     if mode == "Atleta":
         pl = df_events.loc[df_events["team_name"].notna(), ["player_name", "team_name"]].dropna().drop_duplicates()
         pl = pl[~pl["player_name"].astype(str).str.lower().isin(["não identificado", "nao identificado", "unknown"])]
         options = [f"{r.player_name} — {r.team_name}" for r in pl.itertuples()]
         idx = next((i for i, o in enumerate(options) if o.endswith(f"— {target_team}")), 0)
-        chosen = b.selectbox("Atleta", options, index=idx) if options else None
+        chosen = b.selectbox("Atleta", options, index=idx, key=f"sw_ath_{kp}") if options else None
         entity = chosen.split(" — ")[0] if chosen else None
     else:
         teams = df_events["team_name"].dropna().unique().tolist()
-        entity = b.selectbox("Equipe", teams, index=teams.index(target_team) if target_team in teams else 0)
-    use_llm = c.checkbox("Interpretação com Gemini (auditada pelo guard)", value=False)
+        entity = b.selectbox("Equipe", teams, index=teams.index(target_team) if target_team in teams else 0,
+                             key=f"sw_team_{kp}")
+    use_llm = c.checkbox("Interpretação com Gemini (auditada pelo guard)", value=False, key=f"sw_llm_{kp}")
     if not entity:
         empty_state("Nenhum atleta disponível nesta partida.")
         return
@@ -145,7 +147,7 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
 
     what_is(["Percentil", "xT", "PPDA", "Field Tilt", "xG"], key=f"sw_gloss_{entity}")
     tab1, tab4, tab2, tab3 = st.tabs(["🟢🔴 Fortes e fracos", "📊 Todas as métricas (fora da curva)",
-                                      "🧠 Gráfico e interpretação", "🔬 Métricas avançadas"])
+                                      "🧠 Gráfico e interpretação", "🔬 Métricas avançadas"], key=f"sw_tabs_{kp}")
     with tab4:
         _outlier_tab(ctx, mode, entity)
     with tab1:
@@ -158,7 +160,7 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
             metric_bars(an["weaknesses"], "fraco", "Nada muito abaixo do normal neste jogo.")
     with tab2:
         r, t = st.columns([1.1, 1.0])
-        r.plotly_chart(radar(an), use_container_width=True)
+        r.plotly_chart(radar(an), use_container_width=True, key=f"sw_radar_{kp}_{entity}")
         with t:
             st.markdown("#### 🧠 Interpretação")
             res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)

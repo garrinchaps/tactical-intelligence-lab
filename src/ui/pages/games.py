@@ -9,15 +9,28 @@ from src.ui import nav
 from src.ui.components import source_gap
 from src.ui.names import pt
 
-SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico",
-            "🧠 Perigo (IA)", "📑 Relatório da IA", "🔬 Jogador (IA)"]
+SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico"]
+BOTH = "⚖️ Os dois times"
+
+
+def _swap(ctx):
+    """Mesmo jogo pelo outro lado (para analisar os dois times de uma vez)."""
+    import dataclasses
+
+    return dataclasses.replace(ctx, target_team=ctx.opponent, opponent=ctx.target_team,
+                               summary=ctx.opp_summary, opp_summary=ctx.summary)
+
+
+def _lazy(label: str, key: str) -> bool:
+    """Seções pesadas da IA só calculam quando o usuário abre (a página do jogo abre na hora)."""
+    return st.toggle(label, key=key, value=False)
 
 
 def render(current_context, match_bar=None) -> None:
     top = st.columns([1.1, 6, 2.2])
     with top[0]:
         nav.back_button(key="game_back")
-    if st.session_state.get("game_focus"):          # escolha do lado feita na rodada anterior
+    if st.session_state.get("game_focus") and st.session_state["game_focus"] != BOTH:   # lado escolhido antes
         st.session_state["team_focus"] = st.session_state["game_focus"]
     ctx = current_context()
     if ctx is None:
@@ -75,7 +88,7 @@ def render(current_context, match_bar=None) -> None:
         # O selo precisa refletir conteúdo real, não apenas a existência do contêiner de boxscore.
         dep_loaded = depth_of(ctx.bundle.level, has_team_stats=has_team, has_individual=has_ind)
         dep = max(dep_db or 0, dep_loaded)
-        st.caption(f"{badge(dep)} — " + {0: "só o placar: sem estatísticas para analisar.",
+        st.caption(f"{badge(dep)} — " + {0: "nenhuma das nossas bases (FotMob, ESPN, StatsBomb, Wyscout, OpenPlay, API-Football…) achou estatísticas desta partida — só o placar.",
                                          1: "estatísticas do time; sem escalação nem números por jogador.",
                                          2: "escalação e números por jogador; sem lances com coordenadas.",
                                          3: "todos os lances com coordenadas (análise completa).",
@@ -85,50 +98,71 @@ def render(current_context, match_bar=None) -> None:
         pass
     teams = [t for t in (h, a) if t]
     if teams:
-        if st.session_state.get("game_focus") not in teams:   # outro jogo: o lado guardado não vale mais
+        opts = teams + ([BOTH] if len(teams) == 2 else [])
+        if st.session_state.get("game_focus") not in opts:    # outro jogo: o lado guardado não vale mais
             st.session_state["game_focus"] = ctx.target_team if ctx.target_team in teams else teams[0]
-        st.radio("Analisar pelo lado de", teams, horizontal=True, key="game_focus", format_func=pt)
+        st.radio("Analisar pelo lado de", opts, horizontal=True, key="game_focus",
+                 format_func=lambda x: x if x == BOTH else pt(x))
+    both = st.session_state.get("game_focus") == BOTH
+    focus_team = ctx.target_team if both else (st.session_state.get("game_focus") or ctx.target_team)
+    sides = [(ctx.target_team, ctx), (ctx.opponent, _swap(ctx))] if both and ctx.opponent else [(focus_team, ctx)]
     from src.ui.i18n import t
 
     sec = st.radio("Seção", SECTIONS, horizontal=True, key="games_section", label_visibility="collapsed", format_func=t)
     from src.ui.pages import compare, match_center, networks, players, strengths
 
+    def each(fn):
+        for i, (team, c) in enumerate(sides):
+            if both:
+                st.markdown(f"## {'🔵' if i == 0 else '🔴'} {pt(team)}")
+            fn(team, c, i)
+            if both and i == 0:
+                st.markdown("---")
+
     if sec == SECTIONS[0]:
         match_center.render(ctx)
-    elif sec == SECTIONS[8]:
-        from src.ui.pages import player_intel_view
-
-        player_intel_view.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
-    elif sec == SECTIONS[7]:
-        from src.ui.pages import lab_report
-
-        lab_report.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
-    elif sec == SECTIONS[6]:
-        from src.ui.pages import danger_view
-
-        danger_view.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
     elif sec == SECTIONS[5]:
         from src.ui.pages import patterns
 
-        patterns.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
-    elif not ctx.has_events and sec == SECTIONS[1]:
-        from src.ui.pages import fotmob_depth
+        each(lambda team, c, i: patterns.render(c, team, kp=str(i)))
+        # rodada 13: o antigo "📑 Relatório da IA" virou parte dos padrões (abre sob demanda)
+        if _lazy("📑 Relatório completo da IA do laboratório (plano, fases, destaques)", f"lab_rep_{ctx.match_id}"):
+            from src.ui.pages import lab_report
 
-        fotmob_depth.render(ctx)                     # rodada 5: momentum, corredores, xG acumulado, destaques (FotMob)
-    elif not ctx.has_events and sec == SECTIONS[3]:
-        from src.ui.pages import fotmob_strengths
+            for team, c in sides:
+                lab_report.render(c, team)
+    elif sec == SECTIONS[1]:
+        if ctx.has_events:
+            networks.render(ctx)
+            # rodada 13: o antigo "🧠 Perigo (IA)" fica junto da leitura de ameaça (xT)
+            st.markdown("---")
+            if _lazy("🧠 Perigo de cada ação pela rede neural (chance de a posse terminar em chute)", f"danger_{ctx.match_id}"):
+                from src.ui.pages import danger_view
 
-        fotmob_strengths.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
-    elif not ctx.has_events and sec != SECTIONS[2]:
+                danger_view.render(ctx, focus_team)
+        else:
+            from src.ui.pages import fotmob_depth
+
+            fotmob_depth.render(ctx)                 # rodada 5: momentum, corredores, xG acumulado, destaques (FotMob)
+    elif sec == SECTIONS[3]:
+        if ctx.has_events:
+            each(lambda team, c, i: strengths.render(c))
+        else:
+            from src.ui.pages import fotmob_strengths
+
+            each(lambda team, c, i: fotmob_strengths.render(c, team))
+    elif sec == SECTIONS[2]:
+        players.render(ctx)
+        # rodada 13: o antigo "🔬 Jogador (IA)" fica na aba dos jogadores
+        st.markdown("---")
+        if _lazy("🔬 Leitura de um jogador pela IA (lance, partida ou vários jogos)", f"pintel_{ctx.match_id}"):
+            from src.ui.pages import player_intel_view
+
+            player_intel_view.render(ctx, focus_team)
+    elif not ctx.has_events:
         source_gap("eventos com coordenadas", ctx.bundle.source,
                    "Comparações espaciais precisam de jogos ✅ (StatsBomb/Wyscout/OpenPlay).", "🗺️",
                    ctx.bundle.level)
-    elif sec == SECTIONS[1]:
-        networks.render(ctx)
-    elif sec == SECTIONS[2]:
-        players.render(ctx)
-    elif sec == SECTIONS[3]:
-        strengths.render(ctx)
     else:
         compare._two_teams(ctx)
 

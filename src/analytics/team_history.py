@@ -295,3 +295,64 @@ def similar(db, names: Sequence[str], match_id: int, k: int = 3, pool: int = 150
             break
     return {"semelhantes": out, "base": f"{len(Z)} atuações com estatísticas", "variaveis": cols,
             "criterio": "distância média entre as estatísticas padronizadas (0 = idêntico); só o estilo do time, não o placar"}
+
+
+# ------------------------------------------------------------------ rodada 13: padrões de cada FORMAÇÃO usada
+FORM_KEYS = [("possession_pct", "posse", 1), ("shots_total", "finalizações", 1), ("xg", "xG", 1),
+             ("big_chances", "grandes chances", 1), ("touches_opp_box", "toques na área rival", 1),
+             ("crosses_total", "cruzamentos", 0), ("long_balls_accurate", "bolas longas certas", 0)]
+FORM_DEF = [("c_xg", "xG cedido", -1), ("c_shots_total", "finalizações cedidas", -1),
+            ("c_big_chances", "grandes chances cedidas", -1), ("c_touches_opp_box", "toques do rival na nossa área", -1),
+            ("f_interceptions", "interceptações", 1), ("f_tackles_won", "desarmes", 1)]
+
+
+def formation_patterns(db, names: Sequence[str], n: int = 40) -> Dict[str, Any]:
+    """Para cada desenho (escalação inicial da fonte), o que muda no jogo do time: resultado, ataque e defesa,
+    comparado com a média do próprio time. Só desenhos com ≥ 3 jogos com estatísticas."""
+    from src.squad.matchday import recent_lineups
+
+    lu = recent_lineups(db, list(names), n)
+    if lu is None or lu.empty or "formation" not in lu:
+        return {"formacoes": [], "motivo": "sem escalações com desenho nos jogos recentes"}
+    form = lu.drop_duplicates("match_id").set_index("match_id")["formation"].dropna().astype(str)
+    m = _matches(db, names, n=n)
+    v = _vectors(db, m, names)
+    if v.empty:
+        return {"formacoes": [], "motivo": "sem estatísticas dos jogos recentes"}
+    # mesma data = mesmo jogo em outra fonte: herda o desenho pela data
+    lu_d = lu.drop_duplicates("match_id")
+    by_date = dict(zip(lu_d["data"].astype(str).str[:10], lu_d["formation"].astype(str)))
+    v["formacao"] = v["match_id"].map(form)
+    v["formacao"] = v["formacao"].fillna(v["match_date"].astype(str).str[:10].map(by_date))
+    v = v.dropna(subset=["formacao"])
+    if v.empty:
+        return {"formacoes": [], "motivo": "os jogos com desenho não têm estatísticas"}
+    home = v["home_team_name"].isin(names)
+    gf = np.where(home, v["home_score"], v["away_score"]).astype(float)
+    ga = np.where(home, v["away_score"], v["home_score"]).astype(float)
+    v["pts"] = np.where(gf > ga, 3, np.where(gf == ga, 1, 0))
+    v["gf"], v["ga"] = gf, ga
+    out = []
+    for f, g in v.groupby("formacao"):
+        if len(g) < 3:
+            continue
+        rec = {"formacao": f, "jogos": int(len(g)), "pontos_por_jogo": round(float(g["pts"].mean()), 2),
+               "gols_pro": round(float(g["gf"].mean()), 2), "gols_contra": round(float(g["ga"].mean()), 2),
+               "ataque": [], "defesa": []}
+        for key, label, _ in FORM_KEYS:
+            col = f"f_{key}"
+            if col in g and g[col].notna().sum() >= 3 and v[col].notna().sum() >= 5:
+                a, b = float(g[col].mean()), float(v[col].mean())
+                if b and abs(a - b) / abs(b) >= .08:
+                    rec["ataque"].append(f"{'mais' if a > b else 'menos'} {label}: {a:.1f} por jogo (média do time {b:.1f})")
+        for col, label, sense in FORM_DEF:
+            if col in g and g[col].notna().sum() >= 3 and v[col].notna().sum() >= 5:
+                a, b = float(g[col].mean()), float(v[col].mean())
+                if b and abs(a - b) / abs(b) >= .08:
+                    good = (a - b) * sense > 0
+                    rec["defesa"].append(f"{'✓' if good else '!'} {label}: {a:.1f} por jogo (média {b:.1f})")
+        out.append(rec)
+    out.sort(key=lambda r: -r["jogos"])
+    return {"formacoes": out, "jogos": int(len(v)),
+            "criterio": "desenho da escalação inicial informada pela fonte; diferenças ≥ 8% da média do próprio time "
+                        "nos jogos com estatísticas. Associação, não causa: o adversário e o placar também mudam o jogo."}

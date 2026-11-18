@@ -269,29 +269,22 @@ class BenchmarkDiscrepancyEngine:
             & (team_ev["end_x"] >= 80.0)
         ]
 
-        duels = team_ev[team_ev["type_name"] == "Duel"]
-        aerial_duels = duels[
-            duels.get("duel_type_name", pd.Series("", index=duels.index))
-            .fillna("")
-            .str.contains("Aerial", case=False)
-        ]
-
-        if len(aerial_duels) >= 3:
-            total_aerial = int(len(aerial_duels))
-            won_aerial = int(
-                aerial_duels.get("duel_outcome_name", pd.Series("", index=aerial_duels.index))
-                .fillna("")
-                .isin(["Won", "Success", "Success In Play"])
-                .sum()
-                + aerial_duels.get("duel_type_name", pd.Series("", index=aerial_duels.index))
-                .fillna("")
-                .str.contains("Won", case=False)
-                .sum()
-            )
-            won_aerial = min(won_aerial, total_aerial)
+        # rodada 13: contagem HONESTA das disputas aéreas. No StatsBomb só o PERDEDOR recebe "Aerial Lost";
+        # então nossas vitórias = "Aerial Lost" do adversário. Antes, sem duelos aéreos, o código contava passes
+        # altos completados como "disputas ganhas" e aparecia "12 de 12 (100%)" em jogo que não teve isso.
+        all_duels = df_events[df_events["type_name"] == "Duel"]
+        typ = all_duels.get("duel_type_name", pd.Series("", index=all_duels.index)).fillna("").astype(str)
+        outc = all_duels.get("duel_outcome_name", pd.Series("", index=all_duels.index)).fillna("").astype(str)
+        is_aer = typ.str.contains("Aerial", case=False)
+        lost_f = typ.str.contains("Lost", case=False) | outc.isin(["Lost", "Lost In Play", "Lost Out", "Fail"])
+        won_f = ~typ.str.contains("Lost", case=False) & outc.isin(["Won", "Success", "Success In Play", "Success Out"])
+        mine = all_duels["team_name"] == target_team
+        if bool((is_aer & won_f).any()):
+            won_aerial = int((is_aer & won_f & mine).sum())
+            total_aerial = int((is_aer & mine & (won_f | lost_f)).sum())
         else:
-            total_aerial = int(len(high_passes_att))
-            won_aerial = int(high_passes_att["is_pass_completed"].sum())
+            won_aerial = int((is_aer & lost_f & ~mine).sum())
+            total_aerial = won_aerial + int((is_aer & lost_f & mine).sum())
 
         aerial_win_pct = (
             round((won_aerial / max(total_aerial, 1)) * 100.0, 1)
@@ -345,12 +338,9 @@ class BenchmarkDiscrepancyEngine:
         simple_conclusions: List[str] = []
 
         if (
-            aerial["aerial_duels_total"] >= 6
-            and (
-                aerial["aerial_win_pct"] >= 55.0
-                or aerial["headed_goals"] >= 1
-                or aerial["headed_shots"] >= 2
-            )
+            aerial["aerial_duels_total"] >= 8
+            and aerial["aerial_win_pct"] >= 55.0
+            and (aerial["headed_shots"] >= 1 or aerial["crosses_completed"] >= 3)
         ):
             goal_txt = (
                 f", marcando **{aerial['headed_goals']} gol(s) de cabeça**"
@@ -361,7 +351,7 @@ class BenchmarkDiscrepancyEngine:
                 f"🟢 **Força na Bola Aérea e Jogo Pelos Lados (Ponto Fraco de {opponent_team}):** "
                 f"O **{target_team}** ganhou **{aerial['aerial_duels_won']} das {aerial['aerial_duels_total']} disputas pelo alto ({aerial['aerial_win_pct']}%)**, "
                 f"explorou **{aerial['crosses_attempted']} cruzamentos** ({aerial['crosses_completed']} certos) e finalizou **{aerial['headed_shots']} vez(es) de cabeça** "
-                f"(gerando {aerial['headed_xg']} xG pelo alto{goal_txt}). **Conclusão simples:** A bola aérea ofensiva funcionou muito acima da média normal (50%) e expôs a defesa do {opponent_team}."
+                f"(gerando {aerial['headed_xg']} xG pelo alto{goal_txt}). **Conclusão simples:** A bola aérea funcionou {'muito ' if aerial['aerial_win_pct'] >= 65 else ''}acima da média normal (50%) e expôs a defesa do {opponent_team}."
             )
         elif aerial["crosses_attempted"] >= 15 and aerial["cross_accuracy_pct"] < 20.0:
             simple_conclusions.append(

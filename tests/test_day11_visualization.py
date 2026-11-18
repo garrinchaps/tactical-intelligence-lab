@@ -86,7 +86,10 @@ def test_pitch_plots_and_plotly_generation(tmp_path: Path):
     fig_bar = TacticalVisualizer.create_corridor_vulnerability_plotly(
         def_org, "Time Visual"
     )
-    assert len(fig_bar.data) == 2
+    # rodada 13: campo dividido nos corredores (um texto por corredor com progressões e entradas na área)
+    n_sec = len(def_org.get("corridor_vulnerability_breakdown", {}))
+    texts = [a.text for a in fig_bar.layout.annotations if "entradas na área" in (a.text or "")]
+    assert n_sec >= 3 and len(texts) == n_sec
 
     players_df = PlayerTacticalEvaluator.evaluate_team_players(df_xt, "Time Visual")
     fig_radar = TacticalVisualizer.create_player_comparison_radar_plotly(
