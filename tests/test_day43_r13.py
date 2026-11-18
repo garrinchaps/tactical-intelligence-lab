@@ -90,3 +90,32 @@ def test_planned_roster_and_depth():
     rows = {d["role"]: d for d in depth_rows(r)}
     assert any("só uma opção" in x for x in rows["ST"]["atencao"])
     assert rows["GK"]["players"][0]["nome"] == "Novo"
+
+
+def test_matchups_find_clear_duel_and_respect_thresholds():
+    from src.squad import matchups as MU
+
+    rng = np.random.default_rng(1)
+    ref = pd.DataFrame({"drb_p90": rng.uniform(0, 2, 200), "drb_past_p90": rng.uniform(0, 2, 200),
+                        "aer_pct": rng.uniform(20, 80, 200), "fouled_p90": rng.uniform(0, 3, 200),
+                        "fouls_p90": rng.uniform(0, 3, 200), "duel_pct": rng.uniform(30, 70, 200),
+                        "tob_p90": rng.uniform(0, 5, 200), "int_p90": rng.uniform(0, 3, 200)})
+    my_xi = [{"papel": "RW", "jogador": "Ponta", "x": 100, "y": 70}]
+    rv_xi = [{"papel": "LB", "jogador": "Lateral", "x": 30, "y": 10}]
+    ms = pd.DataFrame([{"player_name": "Ponta", "mins": 900, "jogos": 10, "drb_p90": 1.95, "aer_pct": 50,
+                        "fouled_p90": 1.0, "duel_pct": 50, "tob_p90": 1.0}])
+    rs = pd.DataFrame([{"player_name": "Lateral", "mins": 900, "jogos": 10, "drb_past_p90": 1.9, "aer_pct": 50,
+                        "fouls_p90": 1.0, "duel_pct": 50, "int_p90": 1.5}])
+    f = MU.duel_findings(my_xi, rv_xi, ms, rs, ref, "Nós", "Eles", attack=True)
+    assert f and f[0]["dimensao"] == "drible" and f[0]["nivel"] == "escancarado" and f[0]["acao"].startswith("FORÇAR")
+    assert MU.duel_findings(my_xi, rv_xi, ms, rs, ref, "Nós", "Eles", attack=False) == []
+
+
+def test_double_pitch_and_cards_render():
+    from src.ui import matchday_view as MV
+
+    h = MV.double_pitch([{"jogador": "A", "x": 10, "y": 40, "qualidade": 7}], [{"jogador": "B", "x": 10, "y": 40}],
+                        "Nós", "Eles", {"B": 1})
+    assert "A" in h and "B" in h and "#F59E0B" in h
+    c = MV.finding_card(1, {"titulo": "Drible", "nivel": "claro", "evidencia": "x", "acao": "FORÇAR: y", "base": "z"})
+    assert "FORÇAR" in c

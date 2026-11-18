@@ -1,0 +1,292 @@
+"""
+Rodada 13 — CONFRONTOS do próximo jogo: a qualidade do MEU time contra o defeito do RIVAL (e o contrário).
+
+Duas camadas, sempre com número e base:
+1. Duelos individuais pelo desenho provável: meu ponta-direita × lateral-esquerdo deles, meu centroavante × zagueiros,
+   meu meia × volante — e os deles contra os meus. Cada duelo é testado em vários fundamentos (drible × marcação no
+   1×1, jogo aéreo, cruzamento × zagueiro fraco pelo alto, faltas sofridas × faltas cometidas, pressão × perda de bola).
+2. Estilo do time × problema sistêmico do rival (últimos jogos): bola parada, cruzamentos, chutes de fora, presença na
+   área, grandes chances.
+
+Percentis = régua da base (jogadores FotMob/ESPN dos últimos 12 meses com ≥ 450 min; times nas mesmas competições).
+"Escancarado" só quando a qualidade está no topo (≥ P80) E o defeito no fundo (≤ P25); "claro" com ≥ P70 e ≤ P35.
+Associação, não garantia: o técnico adversário pode corrigir.
+"""
+
+from __future__ import annotations
+
+import json
+import time
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Sequence
+
+import numpy as np
+import pandas as pd
+
+REF_PATH = Path("data/processed/matchup_ref.parquet")
+REF_MAX_AGE_S = 86400
+
+# chave do stats_json → nome curto
+KEYS = {"dribbles_succeeded": "drb", "dribbles_succeeded_total": "drb_t", "dribbled_past": "drb_past",
+        "aerials_won": "aer", "aerials_won_total": "aer_t", "duel_won": "duel_w", "duel_lost": "duel_l",
+        "accurate_crosses": "crs", "chances_created": "cc", "xg": "xg", "xa": "xa", "touches_opp_box": "tob",
+        "was_fouled": "fouled", "foulsCommitted": "fouls", "interceptions": "int", "dispossessed": "disp",
+        "recoveries": "rec", "defensive_actions": "def", "matchstats.headers.tackles": "tkl",
+        "ground_duels_won": "gd_w", "ground_duels_won_total": "gd_t"}
+
+FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
+          "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST", "CF": "ST"}
+
+# catálogo de qualidades (ataque) × defeitos (defesa): (id, título, métrica do atacante, métrica do defensor,
+# o defensor é RUIM quando a métrica é alta?, texto de como explorar)
+DIMENSIONS = [
+    ("drible", "Drible no 1×1", "drb_p90", "drb_past_p90", True,
+     "isolar {att} contra {deff}: abrir o lado, receber de frente e partir no mano a mano"),
+    ("aereo", "Jogo aéreo", "aer_pct", "aer_pct", False,
+     "buscar {att} pelo alto: bola longa e cruzamento na direção de {deff}"),
+    ("faltas", "Faltas perigosas", "fouled_p90", "fouls_p90", True,
+     "provocar {deff} com {att} em velocidade: falta perto da área vira bola parada"),
+    ("duelo", "Duelo físico no chão", "duel_pct", "duel_pct", False,
+     "jogar no corpo a corpo: {att} ganha duelos e {deff} perde"),
+    ("presenca", "Ataque à área", "tob_p90", "int_p90", False,
+     "{att} vive dentro da área e {deff} intercepta pouco: atacar o espaço nas costas dele"),
+]
+
+PAIRS_ATTACK = [  # (minha função, funções deles que marcam)
+    ("RW", ["LB", "LWB", "LM"]), ("RM", ["LB", "LWB", "LM"]), ("RWB", ["LM", "LW", "LB"]),
+    ("LW", ["RB", "RWB", "RM"]), ("LM", ["RB", "RWB", "RM"]), ("LWB", ["RM", "RW", "RB"]),
+    ("ST", ["CB"]), ("CF", ["CB"]), ("AM", ["DM", "CM"]),
+]
+
+TEAM_PAIRS = [  # (coluna a favor, coluna contra do rival, título, como explorar)
+    ("pct_xg_bola_parada", "c_xg_set_play", "Bola parada",
+     "levar o jogo para escanteios e faltas laterais: é a nossa arma e o ponto fraco deles"),
+    ("crosses_total", "c_crosses_total", "Jogo pelos lados com cruzamento",
+     "abrir o campo e cruzar: eles costumam sofrer muitos cruzamentos"),
+    ("touches_opp_box", "c_touches_opp_box", "Presença na área",
+     "encher a área: eles deixam o rival tocar muito dentro da própria área"),
+    ("big_chances", "c_big_chances", "Chances claras",
+     "atacar o espaço com passes de ruptura: eles cedem grandes chances com frequência"),
+    ("shots_outside_box", "c_shots_outside_box", "Chute de fora",
+     "finalizar de média distância: eles deixam chutar de fora"),
+    ("pct_bolas_longas", "c_xg", "Jogo direto",
+     "bola longa nas costas: eles cedem muito xG e nós jogamos direto"),
+]
+
+
+# ------------------------------------------------------------------ dados
+def _sum_sql(alias: str = "p") -> str:
+    return ", ".join(f"SUM(COALESCE(json_extract({alias}.stats_json, '$.\"{k}\"'), 0)) AS {v}" for k, v in KEYS.items())
+
+
+def _per90(df: pd.DataFrame) -> pd.DataFrame:
+    d = df.copy()
+    m = pd.to_numeric(d["mins"], errors="coerce").replace(0, np.nan)
+    for v in ("drb", "drb_past", "aer", "crs", "cc", "xg", "xa", "tob", "fouled", "fouls", "int", "disp", "rec", "def", "tkl"):
+        if v in d:
+            d[f"{v}_p90"] = d[v] * 90 / m
+    d["drb_pct"] = 100 * d["drb"] / d["drb_t"].replace(0, np.nan)
+    d["aer_pct"] = (100 * d["aer"] / d["aer_t"].replace(0, np.nan)).where(d["aer_t"] >= 6)
+    tot = d["duel_w"] + d["duel_l"]
+    d["duel_pct"] = (100 * d["duel_w"] / tot.replace(0, np.nan)).where(tot >= 10)
+    return d
+
+
+def reference(db, force: bool = False) -> pd.DataFrame:
+    """Régua dos jogadores (últimos 365 dias, ≥ 450 min): números somados no SQLite (json_extract), em disco por 24 h."""
+    if not force and REF_PATH.exists() and time.time() - REF_PATH.stat().st_mtime < REF_MAX_AGE_S:
+        try:
+            return pd.read_parquet(REF_PATH)
+        except Exception:
+            pass
+    q = f"""SELECT p.player_name, p.team_name, SUM(p.minutes) AS mins, COUNT(*) AS jogos, {_sum_sql()}
+            FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+            WHERE m.match_date >= date('now', '-365 day') AND COALESCE(p.minutes, 0) > 0
+              AND p.stats_json LIKE '%dribbled_past%'
+            GROUP BY p.player_name, p.team_name HAVING SUM(p.minutes) >= 450"""
+    try:
+        with db.connect() as conn:
+            ref = pd.read_sql_query(q, conn)
+    except Exception:
+        return pd.DataFrame()
+    ref = _per90(ref)
+    try:
+        REF_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ref.to_parquet(REF_PATH, index=False)
+    except Exception:
+        pass
+    return ref
+
+
+def team_players(db, team_names: Sequence[str], n_games: int = 15) -> pd.DataFrame:
+    names = [str(x) for x in team_names if x]
+    if not names:
+        return pd.DataFrame()
+    ph = ",".join("?" * len(names))
+    q = f"""SELECT p.player_name, SUM(p.minutes) AS mins, COUNT(*) AS jogos, {_sum_sql()}
+            FROM match_player_stats p WHERE p.team_name IN ({ph}) AND p.match_id IN (
+                SELECT m.match_id FROM matches m JOIN match_player_stats q ON q.match_id = m.match_id
+                WHERE q.team_name IN ({ph}) AND q.stats_json LIKE '%dribbled_past%'
+                GROUP BY m.match_id ORDER BY m.match_date DESC LIMIT {int(n_games)})
+              AND COALESCE(p.minutes, 0) > 0
+            GROUP BY p.player_name"""
+    try:
+        with db.connect() as conn:
+            d = pd.read_sql_query(q, conn, params=names + names)
+    except Exception:
+        return pd.DataFrame()
+    return _per90(d) if not d.empty else d
+
+
+def _pct(ref: pd.DataFrame, col: str, value) -> Optional[float]:
+    if value is None or pd.isna(value) or ref.empty or col not in ref:
+        return None
+    s = pd.to_numeric(ref[col], errors="coerce").dropna()
+    if len(s) < 30:
+        return None
+    return float((s < value).mean() * 100)
+
+
+# ------------------------------------------------------------------ duelos individuais
+def _find(xi: List[Dict[str, Any]], roles: Sequence[str]) -> List[Dict[str, Any]]:
+    out = []
+    for r in roles:
+        out += [s for s in xi if str(s.get("papel") or "").upper() == r and s.get("jogador")]
+    return out
+
+
+def _stats_row(stats: pd.DataFrame, name: str) -> Optional[Dict[str, Any]]:
+    if stats is None or stats.empty or not name:
+        return None
+    from src.data_lake.ids import player_core
+
+    core = player_core(name)
+    hit = stats[stats["player_name"].map(player_core) == core]
+    if hit.empty:
+        last = core.split()[-1] if core else ""
+        hit = stats[stats["player_name"].map(lambda x: player_core(x).split()[-1:] == [last])] if last else hit
+        if len(hit) != 1:
+            return None
+    r = hit.sort_values("mins", ascending=False).iloc[0].to_dict()
+    return r if (r.get("mins") or 0) >= 180 else None
+
+
+def _label(p: float) -> str:
+    return f"melhor que {p:.0f}% da base" if p >= 50 else f"pior que {100 - p:.0f}% da base"
+
+
+def duel_findings(my_xi, rv_xi, my_stats, rv_stats, ref, me: str, rival: str, attack: bool = True) -> List[Dict[str, Any]]:
+    """attack=True: meus atacantes × defensores deles (onde FORÇAR); False: os deles × os meus (onde PROTEGER)."""
+    a_xi, d_xi = (my_xi, rv_xi) if attack else (rv_xi, my_xi)
+    a_st, d_st = (my_stats, rv_stats) if attack else (rv_stats, my_stats)
+    out = []
+    seen = set()
+    for role, def_roles in PAIRS_ATTACK:
+        for att in _find(a_xi, [role]):
+            defs = _find(d_xi, def_roles)[:2]
+            for dfd in defs:
+                key = (att["jogador"], dfd["jogador"])
+                if key in seen:
+                    continue
+                seen.add(key)
+                ra, rd = _stats_row(a_st, att["jogador"]), _stats_row(d_st, dfd["jogador"])
+                if not ra or not rd:
+                    continue
+                for did, title, am, dm, bad_high, how in DIMENSIONS:
+                    pa = _pct(ref, am, ra.get(am))
+                    pdv = _pct(ref, dm, rd.get(dm))
+                    if pa is None or pdv is None:
+                        continue
+                    d_good = 100 - pdv if bad_high else pdv        # quão BOM o defensor é nisso (0–100)
+                    if pa >= 80 and d_good <= 25:
+                        level = "escancarado"
+                    elif pa >= 70 and d_good <= 35:
+                        level = "claro"
+                    else:
+                        continue
+                    an, dn = att["jogador"], dfd["jogador"]
+                    out.append({
+                        "tipo": "duelo", "dimensao": did, "titulo": title, "nivel": level,
+                        "atacante": an, "defensor": dn, "papel_atacante": role, "papel_defensor": dfd.get("papel"),
+                        "lado_x": dfd.get("x"), "lado_y": dfd.get("y"), "gap": round(pa - d_good, 1),
+                        "evidencia": (f"{an}: {_fmt(am, ra.get(am))} ({_label(pa)}) · {dn}: {_fmt(dm, rd.get(dm))} "
+                                      f"({'ruim' if d_good <= 35 else 'fraco'} nisso — {_label(d_good)})"),
+                        "acao": (("FORÇAR: " if attack else "PROTEGER: ") +
+                                 (how.format(att=an, deff=dn) if attack else
+                                  f"{an} ({rival}) contra {dn} — dobrar a marcação por esse lado, não deixar {dn} sozinho "
+                                  f"no {title.lower()}")),
+                        "base": f"{int(ra.get('jogos') or 0)} e {int(rd.get('jogos') or 0)} jogos recentes com números por jogador",
+                    })
+    out.sort(key=lambda x: (x["nivel"] != "escancarado", -x["gap"]))
+    return out
+
+
+def _fmt(metric: str, v) -> str:
+    if v is None or pd.isna(v):
+        return "—"
+    names = {"drb_p90": "dribles certos por 90", "drb_past_p90": "vezes driblado por 90", "aer_pct": "% de duelos aéreos ganhos",
+             "fouled_p90": "faltas sofridas por 90", "fouls_p90": "faltas cometidas por 90", "duel_pct": "% de duelos ganhos",
+             "tob_p90": "toques na área rival por 90", "int_p90": "interceptações por 90"}
+    return f"{float(v):.1f} {names.get(metric, metric)}" if metric.endswith("_pct") else f"{float(v):.2f} {names.get(metric, metric)}"
+
+
+# ------------------------------------------------------------------ estilo × problema sistêmico
+def style_findings(db, my_names: Sequence[str], rv_names: Sequence[str], me: str, rival: str, n: int = 15) -> List[Dict[str, Any]]:
+    from src.analytics import team_history as TH
+
+    try:
+        vm = TH._vectors(db, TH._matches(db, list(my_names), n), list(my_names))
+        vr = TH._vectors(db, TH._matches(db, list(rv_names), n), list(rv_names))
+    except Exception:
+        return []
+    if vm.empty or vr.empty:
+        return []
+    comps = list(dict.fromkeys(vm["competition_name"].dropna().tolist() + vr["competition_name"].dropna().tolist()))
+    ref = TH._reference(db, comps)
+    if ref.empty:
+        return []
+    out = []
+    for fcol, ccol, title, how in TEAM_PAIRS:
+        mine = pd.to_numeric(vm.get(f"f_{fcol}"), errors="coerce").dropna()
+        theirs = pd.to_numeric(vr.get(ccol), errors="coerce").dropna()
+        rs_f = pd.to_numeric(ref.get(fcol), errors="coerce").dropna()
+        rs_c = pd.to_numeric(ref.get(ccol[2:]), errors="coerce").dropna()
+        if len(mine) < 4 or len(theirs) < 4 or len(rs_f) < 50 or len(rs_c) < 50:
+            continue
+        # média de vários jogos contra a régua de jogos: usa a frequência de jogos acima da mediana (mais honesto)
+        p_me = float((mine > rs_f.median()).mean() * 100)
+        p_rv = float((theirs > rs_c.median()).mean() * 100)
+        if p_me >= 65 and p_rv >= 65:
+            level = "escancarado" if p_me >= 80 and p_rv >= 80 else "claro"
+            out.append({"tipo": "estilo", "titulo": title, "nivel": level,
+                        "evidencia": (f"{me}: acima do normal em {p_me:.0f}% dos últimos {len(mine)} jogos "
+                                      f"(média {mine.mean():.1f}) · {rival} cede acima do normal em {p_rv:.0f}% dos últimos "
+                                      f"{len(theirs)} jogos (média {theirs.mean():.1f})"),
+                        "acao": "FORÇAR: " + how, "base": f"normal = mediana de {len(rs_f)} atuações nas mesmas competições"})
+        # o contrário: o rival é forte nisso e nós cedemos (onde EVITAR)
+        their_f = pd.to_numeric(vr.get(f"f_{fcol}"), errors="coerce").dropna()
+        my_c = pd.to_numeric(vm.get(ccol), errors="coerce").dropna()
+        if len(their_f) >= 4 and len(my_c) >= 4:
+            q_rv = float((their_f > rs_f.median()).mean() * 100)
+            q_me = float((my_c > rs_c.median()).mean() * 100)
+            if q_rv >= 65 and q_me >= 65:
+                out.append({"tipo": "estilo_contra", "titulo": title, "nivel": "escancarado" if min(q_rv, q_me) >= 80 else "claro",
+                            "evidencia": (f"{rival}: acima do normal em {q_rv:.0f}% dos jogos · {me} cede acima do normal em "
+                                          f"{q_me:.0f}% dos jogos"),
+                            "acao": f"EVITAR: não dar a {rival} o jogo de {title.lower()} — é a força deles e o nosso ponto fraco",
+                            "base": f"normal = mediana de {len(rs_f)} atuações nas mesmas competições"})
+    out.sort(key=lambda x: (x["nivel"] != "escancarado", x["tipo"] != "estilo"))
+    return out
+
+
+def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi) -> Dict[str, Any]:
+    ref = reference(db)
+    ms, rs = team_players(db, my_names), team_players(db, rv_names)
+    force = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=True)
+    protect = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=False)
+    style = style_findings(db, my_names, rv_names, me, rival)
+    return {"forcar": force, "proteger": protect, "estilo": [s for s in style if s["tipo"] == "estilo"],
+            "evitar": [s for s in style if s["tipo"] == "estilo_contra"],
+            "base": (f"régua: {len(ref)} jogadores com ≥ 450 min nos últimos 12 meses" if not ref.empty
+                     else "sem régua de jogadores ainda (precisa de jogos com números por jogador)"),
+            "sem_numeros": not (len(ms) and len(rs))}
