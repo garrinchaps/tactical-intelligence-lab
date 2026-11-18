@@ -136,7 +136,11 @@ def ensure_database(
             "Configure HF_TOKEN ou forneça DATABASE_PATH/TACTICAL_DB_PATH."
         )
 
-    from huggingface_hub import hf_hub_download
+    try:
+        from huggingface_hub import hf_hub_download
+    except ImportError as exc:                      # dependência opcional (não está no requirements.txt)
+        raise RuntimeError("Para baixar o banco da nuvem instale à parte: pip install huggingface_hub. "
+                           "No PC com o banco local, este script não é necessário.") from exc
 
     target.parent.mkdir(parents=True, exist_ok=True)
     print(f"Baixando banco de {selected_repo}...")

@@ -22,4 +22,5 @@ fastapi>=0.115.0,<1
 uvicorn>=0.30.0
 PyJWT>=2.8.0,<3
 
-huggingface_hub
+# huggingface_hub NÃO entra aqui: puxa o pyyaml (proibido no projeto e sem build no Python 3.15). Só o script
+# opcional scripts/fetch_db.py usa (baixar o banco na nuvem); quem precisar instala à parte: pip install huggingface_hub
