@@ -19,13 +19,42 @@ def _norm(s: str) -> str:
     return player_core(s)
 
 
-@st.cache_data(show_spinner=False, ttl=900)
+INDEX_PATH = __import__("pathlib").Path("data/processed/player_index.parquet")
+
+
+@st.cache_data(show_spinner=False)
 def player_index(version: str) -> pd.DataFrame:
-    """Uma linha por (nome, fonte): eventos do banco + FotMob (boxscore) + Transfermarkt + Understat + Simonetti (quando houver)."""
+    """
+    Rodada 12: o índice de jogadores é PESADO (soma todos os lances da base e une as grafias de ~100 mil nomes).
+    Antes era refeito a cada 15 min dentro da tela. Agora fica salvo em data/processed/player_index.parquet: a tela só
+    lê o arquivo; o processo de fundo o refaz 1x por dia, com a tela parada. Sem arquivo, monta uma vez e salva.
+    """
+    try:
+        if INDEX_PATH.exists():
+            return pd.read_parquet(INDEX_PATH)
+    except Exception:
+        pass
     from src.ui.context import get_service
 
+    df = build_player_index(get_service().db)
+    save_player_index(df)
+    return df
+
+
+def save_player_index(df: pd.DataFrame) -> None:
+    try:
+        INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = INDEX_PATH.with_suffix(".tmp")
+        df.astype({c: "string" for c in df.columns if df[c].dtype == object}).to_parquet(tmp, index=False)
+        __import__("os").replace(tmp, INDEX_PATH)
+    except Exception:
+        pass
+
+
+def build_player_index(db) -> pd.DataFrame:
+    """Uma linha por (nome, fonte): eventos do banco + FotMob (boxscore) + Transfermarkt + Understat + Simonetti (quando houver)."""
     rows: List[Dict] = []
-    with get_service().db.connect() as conn:
+    with db.connect() as conn:
         try:
             ev = pd.read_sql_query("SELECT player_name AS nome, team_name AS clube, COUNT(DISTINCT match_id) AS jogos "
                                    "FROM events WHERE player_name IS NOT NULL GROUP BY player_name, team_name", conn)
@@ -75,7 +104,7 @@ def player_index(version: str) -> pd.DataFrame:
         # pares duvidosos vão para player_merge_candidates em vez de serem fundidos
         df["pessoa"], review = resolve(df)
         try:
-            save_candidates(get_service().db, review)
+            save_candidates(db, review)
         except Exception:
             pass
     return df

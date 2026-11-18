@@ -189,6 +189,11 @@ def find_matches(q: str) -> pd.DataFrame:
     return one_per_game(out).sort_values(["match_date", "_lv"], ascending=[False, True])
 
 
+@st.cache_data(show_spinner=False, max_entries=64, ttl=3600)
+def _search_all(q: str, version: str, only: str, real: bool):
+    return find_matches(q), find_teams(q, version, only), find_players(q, version), find_competitions(q, version, only)
+
+
 def _n(v) -> str:
     v = int(v)
     return f"{v} jogo" if v == 1 else f"{v} jogos"
@@ -216,11 +221,10 @@ def render(_ctx=None) -> None:
     from src.ui.context import chosen_levels
 
     version, only = get_service().db.stable_version(), "|".join(chosen_levels())   # níveis escolhidos no topo
-    with st.spinner("Procurando..."):
-        matches = find_matches(q)
-        teams = find_teams(q, version, only)
-        players = find_players(q, version)
-        comps = find_competitions(q, version, only)
+    from src.ui.context import only_real
+
+    with st.spinner("Procurando..."):                    # rodada 12: resultado guardado por busca (cliques não refazem)
+        matches, teams, players, comps = _search_all(q.strip().lower(), version, only, only_real())
     st.markdown(f"#### Resultados para “{q}”")
     if matches.empty and teams.empty and players.empty and comps.empty:
         empty_state("Nada encontrado com dados para analisar", "Confira a grafia, tente só o nome do time ou do jogador.",

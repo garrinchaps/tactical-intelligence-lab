@@ -42,27 +42,62 @@ def _zone(f: Dict[str, Any]):
     return x, y
 
 
-def pitch_figure(found: List[Dict[str, Any]], title: str) -> go.Figure:
+ROLE_XY = {"GK": (6, 40), "CB": (24, 40), "LB": (30, 10), "RB": (30, 70), "LWB": (40, 8), "RWB": (40, 72),
+           "DM": (44, 40), "CM": (54, 40), "AM": (72, 40), "LM": (62, 10), "RM": (62, 70), "LW": (86, 12),
+           "RW": (86, 68), "ST": (98, 40)}
+
+
+def _player_points(xi: List[Dict[str, Any]]) -> Dict[str, tuple]:
+    """Posição de cada jogador do rival no campo em pé (ele defende em cima; o lado esquerdo DELE é a nossa direita)."""
+    by_role: Dict[str, List[str]] = {}
+    for p in xi:
+        if p.get("papel") in ROLE_XY:
+            by_role.setdefault(p["papel"], []).append(p["jogador"])
+    pts = {}
+    for role, names in by_role.items():
+        bx, by = ROLE_XY[role]
+        n = len(names)
+        for k, nm in enumerate(names):
+            off = (k - (n - 1) / 2) * (22 if role in ("CB", "CM", "DM", "ST", "AM") else 10)
+            pts[nm] = (80 - (by + off), 120 - bx)            # (x horizontal, y vertical) no campo em pé
+    return pts
+
+
+def pitch_figure(found: List[Dict[str, Any]], title: str, xi: List[Dict[str, Any]] | None = None) -> go.Figure:
+    """
+    Rodada 12: os JOGADORES do rival na posição em que jogam (XI habitual dos últimos jogos), com o nome escrito; quem
+    tem fragilidade ganha anel vermelho e o número do cartão. Fragilidade do time inteiro (contra-ataque, corredor,
+    cruzamentos) aparece como zona clara.
+    """
     from src.ui import charts
 
-    fig = charts.pitch_vertical(title=title, height=560)
-    seen: Dict[tuple, int] = {}
+    fig = charts.pitch_vertical(title=title, height=600)
+    pts = _player_points(xi or [])
+    flagged: Dict[str, List[int]] = {}
     for i, f in enumerate(found[:8], 1):
-        (x0, x1), (y0, y1) = _zone(f)
-        a = 0.10 + 0.25 * f["gravidade"] / 100
-        fig.add_shape(type="rect", x0=x0 + 0.6, x1=x1 - 0.6, y0=y0 + 0.6, y1=y1 - 0.6, line=dict(color="#EF4444", width=1.5),
-                      fillcolor=f"rgba(239,68,68,{a:.2f})", layer="above")
-        key = (x0, y0)
-        k = seen.get(key, 0)
-        seen[key] = k + 1
-        # vários achados na mesma zona: números lado a lado, sem se sobrepor
-        cx = min(max(x0 + 6 + k * 7 % max(x1 - x0 - 10, 7), x0 + 4), x1 - 4)
-        cy = y1 - 7 - (k * 7 // max(x1 - x0 - 10, 7)) * 8
-        fig.add_trace(go.Scatter(x=[cx], y=[cy], mode="markers+text", text=[str(i)], showlegend=False,
-                                 marker=dict(size=26, color="#EF4444", line=dict(color="#FFFFFF", width=2)),
-                                 textfont=dict(color="#FFFFFF", size=12), hovertext=[f"{f['titulo']}<br>{f['evidencia']}"],
-                                 hoverinfo="text"))
-    fig.add_annotation(x=40, y=-2, text="↑ nosso ataque", showarrow=False, font=dict(color="#94A3B8", size=11))
+        if f.get("jogador") and f["jogador"] in pts:
+            flagged.setdefault(f["jogador"], []).append(i)
+        else:                                              # do time: zona clara, número no canto
+            (x0, x1), (y0, y1) = _zone(f)
+            fig.add_shape(type="rect", x0=x0 + 0.6, x1=x1 - 0.6, y0=y0 + 0.6, y1=y1 - 0.6,
+                          line=dict(color="rgba(239,68,68,.55)", width=1, dash="dot"),
+                          fillcolor=f"rgba(239,68,68,{0.06 + 0.12 * f['gravidade'] / 100:.2f})", layer="below")
+            fig.add_trace(go.Scatter(x=[x0 + 4], y=[y1 - 4], mode="markers+text", text=[str(i)], showlegend=False,
+                                     marker=dict(size=20, color="rgba(239,68,68,.85)"), textfont=dict(color="#fff", size=11),
+                                     hovertext=[f"{f['titulo']}<br>{f['evidencia']}"], hoverinfo="text"))
+    for nm, (x, y) in pts.items():
+        nums = flagged.get(nm)
+        fig.add_trace(go.Scatter(
+            x=[x], y=[y], mode="markers+text", showlegend=False,
+            marker=dict(size=30 if nums else 22, color="#EF4444" if nums else "#334155",
+                        line=dict(color="#FFFFFF" if nums else "#94A3B8", width=2.5 if nums else 1)),
+            text=[",".join(map(str, nums)) if nums else ""], textfont=dict(color="#fff", size=11),
+            hovertext=[nm + ("<br>" + "<br>".join(found[j - 1]["titulo"] for j in nums) if nums else "")], hoverinfo="text"))
+        fig.add_annotation(x=x, y=y - 6.5, text=nm.split()[-1] if len(nm) > 14 else nm, showarrow=False,
+                           font=dict(color="#F5F7FB" if nums else "#CBD5E1", size=11 if nums else 10),
+                           bgcolor="rgba(9,13,22,.75)", borderpad=2)
+    fig.add_annotation(x=40, y=-2, text="↑ nosso ataque · posições = função mais usada nos últimos jogos", showarrow=False,
+                       font=dict(color="#94A3B8", size=11))
     return fig
 
 
@@ -135,7 +170,12 @@ def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], ver
                "jogadores da mesma função; só entra o que foge da referência com amostra mínima.")
     a, b = st.columns([1, 1.25])
     with a:
-        st.plotly_chart(pitch_figure(found, f"Zonas frágeis de {rival}"), use_container_width=True,
+        st.plotly_chart(pitch_figure(found, f"{rival}: onde estão as fragilidades", r.get("xi")), use_container_width=True,
                         key=f"vuln_pitch_{where}_{rival}_{mine}")   # a mesma tela aparece em 2 abas
     with b:
         st.markdown(cards_html(found, "#F59E0B" if mine else "#EF4444"), unsafe_allow_html=True)
+        names = list(dict.fromkeys(f["jogador"] for f in found[:8] if f.get("jogador")))
+        if names:                                          # rodada 12: clicar no nome abre a página do jogador/time
+            from src.ui.components import entity_chips
+
+            entity_chips(names[:6], [rival], key=f"vuln_chips_{where}_{rival}_{mine}")

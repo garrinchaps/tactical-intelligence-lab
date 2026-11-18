@@ -497,17 +497,40 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
 
     if not names:
         return {}
+    # rodada 12: também as grafias parecidas ("Lucas Romero" ⊂ "Lucas Daniel Romero"): primeiro e último nome
+    import unicodedata as _u
+
+    def fold(x):
+        return _u.normalize("NFKD", str(x).lower()).encode("ascii", "ignore").decode()
+    likes = []
+    for nm in names:
+        toks = [t for t in fold(nm).split() if len(t) >= 3]
+        if len(toks) >= 2:
+            likes.append((f"%{toks[0]}%{toks[-1]}%", toks))
     ph = ",".join("?" * len(names))
+    extra = " OR ".join("LOWER(s.player_name) LIKE ?" for _ in likes)
     with get_service().db.connect() as conn:
-        d = pd.read_sql_query(f"SELECT s.match_id, s.team_name, s.rating, s.stats_json, m.match_date FROM match_player_stats s "
-                              f"JOIN matches m ON m.match_id = s.match_id WHERE s.player_name IN ({ph}) AND m.data_source = 'fotmob' "
-                              f"ORDER BY m.match_date DESC LIMIT 200", conn, params=list(names))
+        d = pd.read_sql_query(f"SELECT s.match_id, s.player_name, s.team_name, s.rating, s.stats_json, m.match_date "
+                              f"FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+                              f"WHERE (s.player_name IN ({ph}){' OR ' + extra if extra else ''}) AND m.data_source = 'fotmob' "
+                              f"ORDER BY m.match_date DESC LIMIT 600", conn,
+                              params=list(names) + [lk for lk, _ in likes])
     if d.empty:
         return {}
+    if likes:                                            # LIKE sem acento pode trazer "Lucas Romeroso": confere os tokens
+        d = d[[n in names or any(all(t in fold(n).split() for t in toks) for _, toks in likes) for n in d["player_name"]]]
+        if d.empty:
+            return {}
     d["st"] = [_j.loads(x or "{}") for x in d["stats_json"]]
-    d["fid"] = [s.get("fotmob_id") for s in d["st"]]
+    d["fid"] = [s.get("fotmob_id") or f"{p}|{t}" for s, p, t in zip(d["st"], d["player_name"], d["team_name"])]
+    # o atleta certo é o que MAIS jogou no último ano (não o da linha mais recente, que pode ser um homônimo)
+    recent = pd.to_datetime(d["match_date"], errors="coerce") >= pd.Timestamp.today() - pd.Timedelta(days=365)
+    counts = d[recent].groupby("fid").size() if recent.any() else d.groupby("fid").size()
+    best = counts.idxmax()
+    others = [f"{g['player_name'].iloc[0]} ({g['team_name'].iloc[0]}, {len(g)} jogos)"
+              for fid, g in d.groupby("fid") if fid != best][:3]
+    d = d[d["fid"] == best]
     top = d.iloc[0]
-    d = d[d["fid"] == top["fid"]] if top["fid"] is not None else d[d["team_name"] == top["team_name"]]
     d = d[[bool(s.get("minutes")) for s in d["st"]]].head(int(n_games))
     if d.empty:
         return {}
@@ -529,7 +552,8 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
     return {"jogos": int(len(d)), "minutos": int(mins), "per90": per90, "jogos_por_numero": games_k,
             "minutos_por_numero": {k: int(v) for k, v in mins_k.items()},
             "nota_fotmob": round(float(rat.mean()), 2) if len(rat) else None,
-            "time": top["team_name"], "ultimo": str(d["match_date"].iloc[0])}
+            "time": top["team_name"], "ultimo": str(d["match_date"].iloc[0]), "nome_fonte": top["player_name"],
+            "homonimos": others, "totais": tot}
 
 
 def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
@@ -548,19 +572,58 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
         return
     n1, n2 = pa["nome"], pb["nome"]
     st.markdown("#### 📊 Pelos números por jogador da FotMob (muito mais jogos)")
-    st.caption(f"{n1}: {A['jogos']} jogos, {A['minutos']} min ({A['time']}, último {A['ultimo']}) · "
-               f"{n2}: {B['jogos']} jogos, {B['minutos']} min ({B['time']}, último {B['ultimo']}) · por 90 minutos.")
+    single = int(n_games) == 1 or (A["jogos"] == 1 and B["jogos"] == 1)
+    unit = "no jogo (total)" if single else "por 90 minutos"
+    st.markdown(f'<div style="color:#98A6BF;font-size:.8rem">{n1}: {A["jogos"]} jogo(s), {A["minutos"]} min '
+                f'({A["time"]}, último {A["ultimo"]}) · {n2}: {B["jogos"]} jogo(s), {B["minutos"]} min '
+                f'({B["time"]}, último {B["ultimo"]}) · {unit}. Minutagem é critério de desempate.</div>',
+                unsafe_allow_html=True)
+    for who, X in ((n1, A), (n2, B)):
+        if X.get("homonimos"):
+            st.caption(f"{who}: usado o atleta com mais jogos no último ano ({X.get('nome_fonte')}). Nome parecido, "
+                       f"outra pessoa: " + "; ".join(X["homonimos"]) + ".")
+    TA, TB = A.get("totais") or {}, B.get("totais") or {}
+    # aba de resumo (totais — gols e assistências não se leem por 90) e aproveitamento (%), depois os blocos por 90
+    def pct(T, ok, tot):
+        return 100 * T[ok] / T[tot] if T.get(tot) else None
+    summary = [("Jogos", A["jogos"], B["jogos"], False, "{:.0f}"), ("Minutos", A["minutos"], B["minutos"], False, "{:.0f}"),
+               ("Gols", TA.get("totalGoals"), TB.get("totalGoals"), False, "{:.0f}"),
+               ("Assistências", TA.get("goalAssists"), TB.get("goalAssists"), False, "{:.0f}"),
+               ("Cartões amarelos", TA.get("yellowCards"), TB.get("yellowCards"), True, "{:.0f}"),
+               ("Nota média (FotMob)", A.get("nota_fotmob"), B.get("nota_fotmob"), False, "{:.2f}")]
+    rates = [("Acerto de passe (%)", pct(TA, "accurate_passes", "accurate_passes_total"), pct(TB, "accurate_passes", "accurate_passes_total")),
+             ("Duelos ganhos (%)", pct({**TA, "_d": TA.get("duel_won", 0) + TA.get("duel_lost", 0)}, "duel_won", "_d"),
+              pct({**TB, "_d": TB.get("duel_won", 0) + TB.get("duel_lost", 0)}, "duel_won", "_d")),
+             ("Aéreos ganhos (%)", pct(TA, "aerials_won", "aerials_won_total"), pct(TB, "aerials_won", "aerials_won_total")),
+             ("Dribles certos (%)", pct(TA, "dribbles_succeeded", "dribbles_succeeded_total"),
+              pct(TB, "dribbles_succeeded", "dribbles_succeeded_total")),
+             ("Bolas longas certas (%)", pct(TA, "long_balls_accurate", "long_balls_accurate_total"),
+              pct(TB, "long_balls_accurate", "long_balls_accurate_total"))]
     wins = {n1: 0, n2: 0}
-    tabs = st.tabs(list(FM_GROUPS))
-    for tab, (g, items) in zip(tabs, FM_GROUPS.items()):
-        rows = [{"label": lab, "a": A["per90"].get(k), "b": B["per90"].get(k), "fmt": "{:.2f}", "lower_is_better": low}
-                for k, lab, low in items if A["per90"].get(k) is not None and B["per90"].get(k) is not None]
+    tabs = st.tabs(["📋 Resumo", "🎯 Aproveitamento (%)"] + list(FM_GROUPS))
+    with tabs[0]:
+        rows0 = [{"label": l, "a": a, "b": b, "fmt": f, "lower_is_better": low} for l, a, b, low, f in summary
+                 if a is not None and b is not None]
+        if rows0:
+            duel_bars(rows0, n1, n2, "Resumo (totais do recorte)")
+    with tabs[1]:
+        rows1 = [{"label": l, "a": a, "b": b, "fmt": "{:.0f}", "lower_is_better": False} for l, a, b in rates
+                 if a is not None and b is not None]
+        if rows1:
+            duel_bars(rows1, n1, n2, "Aproveitamento — o que deu certo do que tentou")
+        else:
+            st.caption("A fonte não publica tentativas e acertos para esses jogos.")
+    for tab, (g, items) in zip(tabs[2:], FM_GROUPS.items()):
+        src_a, src_b = (TA, TB) if single else (A["per90"], B["per90"])
+        rows = [{"label": lab, "a": src_a.get(k), "b": src_b.get(k), "fmt": "{:.0f}" if single else "{:.2f}",
+                 "lower_is_better": low}
+                for k, lab, low in items if src_a.get(k) is not None and src_b.get(k) is not None]
         for r in rows:
             if r["a"] != r["b"]:
                 wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
         with tab:
             if rows:
-                duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+                duel_bars(rows, n1, n2, f"{g} — {unit}")
                 if g.startswith("📡"):
                     ja, jb = A["jogos_por_numero"], B["jogos_por_numero"]
                     st.caption("Por 90 calculado só nos jogos em que a liga mediu: " + " · ".join(
@@ -635,7 +698,7 @@ def _any_players() -> None:
                         wins[n1 if (r["a"] > r["b"]) != r["lower_is_better"] else n2] += 1
                 with tab:
                     if rows:
-                        duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+                        duel_bars(rows, n1, n2, f"{g} — {unit}")
                     else:
                         st.caption("Sem indicadores comparáveis nessa categoria.")
             st.markdown(f"**Placar dos indicadores de eventos:** {n1} {wins[n1]} × {wins[n2]} {n2}")

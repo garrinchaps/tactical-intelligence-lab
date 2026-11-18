@@ -167,6 +167,13 @@ def _baselines_loop(db) -> None:
         from src.data_hub import activity
 
         activity.wait_idle(_base_state, "fase")      # rodada 11: jogo típico e régua só com a tela parada
+        try:                                         # rodada 12: índice de jogadores da busca, 1x por dia
+            from src.ui.pages import players_search as PS
+
+            if not PS.INDEX_PATH.exists() or time.time() - PS.INDEX_PATH.stat().st_mtime > 86400:
+                PS.save_player_index(PS.build_player_index(db))
+        except Exception:
+            pass
         try:                                         # rodada 9: régua da IA do laboratório, refeita 1x por dia
             from src.intelligence.lab_ai import reference as LR
 

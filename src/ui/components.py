@@ -215,6 +215,7 @@ def zebra(df: pd.DataFrame):
         # Ciano mais forte = valor mais alto na coluna; em colunas onde "mais" é ruim (perdas, faltas, sofridos,
         # driblado, erros, cartões, contra), o realce é vermelho. O texto fica sempre claro e legível.
         numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])
+                        and not pd.api.types.is_bool_dtype(df[col])          # verdadeiro/falso não é escala
                         and df[col].notna().sum() > 1 and col not in rating_cols]
         neg_tokens = ("perd", "falta", "sofr", "driblad", "erro", "cart", "amarel", "vermelh", "contra", "cedid",
                       "conceded", "lost", "dispossess", "impedim", "offside", "fouls", "xga")
@@ -225,7 +226,7 @@ def zebra(df: pd.DataFrame):
                 return "#%02x%02x%02x" % tuple(int(b + (c - b) * a) for b, c in zip(base, rgb))
 
             def heat(col):
-                v = pd.to_numeric(col, errors="coerce")
+                v = pd.to_numeric(col, errors="coerce").astype(float)
                 lo, hi = v.min(), v.max()
                 rgb = (239, 68, 68) if any(t in str(col.name).lower() for t in neg_tokens) else (34, 211, 238)
                 out = []

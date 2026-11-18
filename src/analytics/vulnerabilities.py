@@ -258,24 +258,66 @@ def team_vulnerabilities(db, names: Sequence[str], n: int = 12, our_names: Optio
     if heights is not None and not heights.empty and not P.empty and our_names:
         from src.data_lake.ids import player_core
 
-        hmap = dict(zip(heights["nome"].map(player_core), pd.to_numeric(heights["altura_cm"], errors="coerce")))
+        # rodada 12: altura confiável — 1º a lista do clube na FotMob (o próprio clube informa); Transfermarkt só quando
+        # o nome é ÚNICO lá (o homônimo dava 1,95 m ao Gabriel Barbosa, que tem 1,78 m)
+        hh = heights.assign(_c=heights["nome"].map(player_core), _h=pd.to_numeric(heights["altura_cm"], errors="coerce"))
+        uniq = hh.groupby("_c")["_h"].nunique()
+        hh = hh[hh["_c"].isin(uniq[uniq == 1].index)].dropna(subset=["_h"])
+        hmap = dict(zip(hh["_c"], hh["_h"]))
+        hsrc = {k: "Transfermarkt (nome único)" for k in hmap}
+        try:
+            with db.connect() as conn:
+                fr = pd.read_sql_query("SELECT name, height FROM fotmob_rosters WHERE height IS NOT NULL", conn)
+            for nm, h in zip(fr["name"], pd.to_numeric(fr["height"], errors="coerce")):
+                if h == h and h:
+                    hmap[player_core(nm)] = float(h)
+                    hsrc[player_core(nm)] = "lista do clube (FotMob)"
+        except Exception:
+            pass
         cbs = regular(P)
         cbs = cbs[cbs["papel"] == "CB"] if not cbs.empty else cbs
         ours = _player_season(db, _recent_ids(db, our_names, n), our_names)
         ours = regular(ours)
         att = ours[ours["papel"].isin(["ST", "LW", "RW", "AM"])] if not ours.empty else ours
-        att_h = [(r["jogador"], hmap.get(player_core(r["jogador"]))) for r in att.to_dict("records")]
-        att_h = [(a, h) for a, h in att_h if h and h == h]
+        # só conta atacante que GANHA no alto: ≥ 50% dos duelos aéreos com ≥ 6 disputas (altura sem subir não ajuda)
+        def aerial(r):
+            w, t = r.get("aerials_won_tot"), r.get("aerials_won_total_tot")
+            try:
+                w, t = float(w), float(t)
+                return (w / t, int(t)) if t > 0 else (None, 0)
+            except (TypeError, ValueError):
+                return (None, 0)
+        att_h = []
+        for r in att.to_dict("records"):
+            h = hmap.get(player_core(r["jogador"]))
+            rate, n_ = aerial(r)
+            if h and h == h and rate is not None and n_ >= 6 and rate >= .5:
+                att_h.append((r["jogador"], h, rate, n_))
         for r in cbs.to_dict("records"):
             h = hmap.get(player_core(r["jogador"]))
             if not h or h != h:
                 continue
-            tall = [(a, ah) for a, ah in att_h if ah - h >= 5]
+            tall = [t for t in att_h if t[1] - h >= 5]
+            cb_rate, cb_n = aerial(r)
             if h <= 183 and tall:
-                a, ah = max(tall, key=lambda t: t[1])
+                a, ah, ar, an = max(tall, key=lambda t: (t[1] - h) * t[2])
+                cb_txt = (f"; ele ganha {100 * cb_rate:.0f}% dos duelos aéreos ({cb_n})" if cb_rate is not None and cb_n >= 6 else "")
+                grav = 40 + (ah - h) * 2 + (100 * ar - 50) * .5 + ((50 - 100 * cb_rate) * .5 if cb_rate is not None else 0)
                 add(f"Zagueiro baixo: {r['jogador']} ({h:.0f} cm)", "defesa", None, r["jogador"],
-                    f"{r['jogador']} tem {h:.0f} cm; nosso {a} tem {ah:.0f} cm (+{ah - h:.0f} cm)", 50 + (ah - h) * 3,
+                    f"{r['jogador']} tem {h:.0f} cm{cb_txt}; nosso {a} tem {ah:.0f} cm e ganha {100 * ar:.0f}% "
+                    f"dos duelos aéreos ({an})", grav,
                     f"Bolas aéreas e cruzamentos direcionados para {a} disputar com {r['jogador']}; escanteio no setor dele.",
-                    "altura do cadastro do Transfermarkt")
+                    f"altura: {hsrc.get(player_core(a), 'cadastro')}; duelos aéreos dos últimos jogos (FotMob)")
     out.sort(key=lambda d: -d["gravidade"])
-    return {"achados": out, "jogos": len(ids), "jogadores_avaliados": int(len(P)) if not P.empty else 0}
+    # rodada 12: função de cada jogador citado + o XI habitual (para desenhar os jogadores no campinho)
+    xi = []
+    if not P.empty and "papel" in P:
+        roles = dict(zip(P["jogador"], P["papel"]))
+        for f in out:
+            if f.get("jogador"):
+                f["papel"] = roles.get(f["jogador"])
+        reg = P.sort_values("minutos", ascending=False) if "minutos" in P else P
+        gk = reg[reg["papel"] == "GK"].head(1)
+        outfield = reg[reg["papel"].notna() & (reg["papel"] != "GK")].head(10)
+        xi = [{"jogador": r["jogador"], "papel": r["papel"]} for r in pd.concat([gk, outfield]).to_dict("records")]
+    return {"achados": out, "jogos": len(ids), "jogadores_avaliados": int(len(P)) if not P.empty else 0, "xi": xi}
