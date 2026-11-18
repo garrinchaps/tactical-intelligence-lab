@@ -20,9 +20,10 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v3.pkl")    # v3: régua + teto de potencial (rodada 11)
-META_PATH = Path("data/processed/scout_universe_v3.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v2.pkl"), Path("data/processed/scout_universe.pkl")]
+SNAP_PATH = Path("data/processed/scout_universe_v4.pkl")    # v4: pico de valor, força da liga, precocidade, traços
+META_PATH = Path("data/processed/scout_universe_v4.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+             Path("data/processed/scout_universe.pkl")]
 
 
 def max_age_hours() -> float:
@@ -70,6 +71,9 @@ def build_universe(db) -> Dict[str, Any]:
     # rodada 10: a qualidade usa o nível do clube (valor do elenco), então vem DEPOIS de juntar os clubes
     universe = E.add_quality_scores(universe)
     universe = E.merge_external_ratings(universe, D.external_ratings())
+    from src.scout.traits import add_traits
+
+    universe = add_traits(universe)
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
     return {"universe": universe, "clubs": clubs, "status": "carregado",
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
@@ -127,7 +131,14 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
             u = data.get("universe")
             if u is None or u.empty:
                 continue
-            for c in ("qualidade", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
+            if "valor_pico_3a_eur" not in u:
+                try:
+                    from src.squad import data as D
+
+                    u = add_peak(u, D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"]))
+                except Exception:
+                    pass
+            for c in ("caracteristicas", "caracteristicas_top", "precocidade", "qualidade", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
                       "qualidade_estatistica", "nota_externa", "fontes_nota_externa", "fonte_qualidade"):
                 if c in u:
                     u = u.drop(columns=[c])
@@ -137,12 +148,28 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 ext = D.external_ratings()
             except Exception:
                 ext = None
-            data["universe"] = E.merge_external_ratings(E.add_quality_scores(u), ext)
+            from src.scout.traits import add_traits
+
+            data["universe"] = add_traits(E.merge_external_ratings(E.add_quality_scores(u), ext))
             save(data)
             return data
         except Exception:
             continue
     return None
+
+
+def add_peak(u: pd.DataFrame, vals: pd.DataFrame) -> pd.DataFrame:
+    """Maior valor de mercado de cada atleta nos últimos 3 anos (reputação de veteranos de elite)."""
+    if vals is None or vals.empty or "transfermarkt_id" not in u:
+        return u
+    v = vals.copy()
+    v["_d"] = pd.to_datetime(v["data"], errors="coerce")
+    v["valor_mercado_eur"] = pd.to_numeric(v["valor_mercado_eur"], errors="coerce")
+    v = v[v["_d"] >= pd.Timestamp.today().normalize() - pd.Timedelta(days=3 * 365)]
+    peak = v.groupby(v["transfermarkt_id"].astype(str))["valor_mercado_eur"].max().to_dict()
+    u = u.copy()
+    u["valor_pico_3a_eur"] = u["transfermarkt_id"].astype(str).map(peak)
+    return u
 
 
 def version() -> str:

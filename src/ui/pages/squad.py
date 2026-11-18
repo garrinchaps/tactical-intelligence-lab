@@ -99,6 +99,19 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
             trf = D.table("tm_transferencias", None, "transfermarkt_id", ids_all) if ids_all else pd.DataFrame()
             sq = classify_squad(sq, build_tenures(trf, mine), cid, mine)
             unconfirmed = sq[sq["situacao"] == "não confirmado"]
+            # rodada 13: quem tem histórico de jogos mas não entra em campo há mais de 300 dias (aposentado, falecido,
+            # afastado ou fora dos planos — ex.: Diogo Jota, Izquierdoz) sai do elenco quando não há lista oficial
+            if mine is not None and not mine.empty and "transfermarkt_id" in sq:
+                last_seen = pd.to_datetime(mine["data"], errors="coerce").groupby(
+                    mine["transfermarkt_id"].astype(str)).max()
+                lim = pd.Timestamp(date.today()) - pd.Timedelta(days=300)
+                stale = sq["transfermarkt_id"].astype(str).map(last_seen)
+                gone = stale.notna() & (stale < lim)
+                for r in sq[gone].to_dict("records"):
+                    changes.append({"nome": r["nome"], "mudanca": "saiu", "motivo":
+                                    f"sem jogar desde {pd.Timestamp(stale[sq['nome'] == r['nome']].iloc[0]).date()} "
+                                    "(aposentado, afastado ou fora do elenco)"})
+                sq.loc[gone, "situacao"] = "inativo"
             for r in sq[sq["situacao"] == "saiu"].to_dict("records"):
                 changes.append({"nome": r["nome"], "mudanca": "saiu", "motivo": "vínculo ativo com outro clube"})
             sq = sq[sq["situacao"] == "no elenco"].reset_index(drop=True)

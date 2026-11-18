@@ -38,19 +38,19 @@ ROLE_METRICS = {
            ("errors_p90", .10, False)],
     "CB": [("def_actions_p90", .22, True), ("interceptions_p90", .18, True),
            ("clearances_p90", .18, True), ("aerials_won_p90", .17, True),
-           ("pass_accuracy_pct", .15, True), ("errors_p90", .10, False)],
+           ("pass_accuracy_pct", .15, True), ("errors_p90", .10, False), ("rating_media", .15, True)],
     "FB": [("def_actions_p90", .18, True), ("interceptions_p90", .12, True),
            ("chances_created_p90", .20, True), ("xa_p90", .14, True),
            ("assists_p90", .12, True), ("sprints_p90", .12, True),
-           ("pass_accuracy_pct", .12, True)],
+           ("pass_accuracy_pct", .12, True), ("rating_media", .15, True)],
     "DM": [("def_actions_p90", .22, True), ("interceptions_p90", .18, True),
            ("tackles_p90", .14, True), ("pass_accuracy_pct", .16, True),
            ("chances_created_p90", .12, True), ("xa_p90", .08, True),
-           ("errors_p90", .10, False)],
+           ("errors_p90", .10, False), ("rating_media", .15, True)],
     "MID": [("chances_created_p90", .18, True), ("xa_p90", .17, True),
             ("pass_accuracy_pct", .16, True), ("def_actions_p90", .14, True),
             ("interceptions_p90", .10, True), ("goals_p90", .10, True),
-            ("xg_p90", .08, True), ("errors_p90", .07, False)],
+            ("xg_p90", .08, True), ("errors_p90", .07, False), ("rating_media", .15, True)],
     "ATT_MID": [("chances_created_p90", .20, True), ("xa_p90", .18, True),
                 ("xg_p90", .16, True), ("goals_p90", .14, True),
                 ("assists_p90", .12, True), ("shots_p90", .10, True),
@@ -792,6 +792,11 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                     first_value = p["transfermarkt_id"].astype(str).map(first_recent_map)
                     last_value = p["valor_tm_ultima_avaliacao"]
                     p["variacao_tm_12m_pct"] = ((last_value - first_value) / first_value.abs().replace(0, np.nan) * 100).round(1)
+                cut3 = pd.Timestamp.today().normalize() - pd.Timedelta(days=3 * 365)
+                v3 = vals[vals["_data"] >= cut3]
+                if not v3.empty:
+                    p["valor_pico_3a_eur"] = p["transfermarkt_id"].astype(str).map(
+                        v3.groupby(v3["transfermarkt_id"].astype(str))["valor_mercado_eur"].max().to_dict())
             else:
                 p["valor_tm_media_12m"] = np.nan
                 p["valor_tm_ultima_avaliacao"] = np.nan
@@ -874,12 +879,13 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     # nível do clube (0–1): percentil do valor do elenco entre os clubes; reputação: percentil do valor na função
     level: Dict[int, float] = {}
     if "clube_valor_total_eur" in d:
-        cv = pd.to_numeric(d["clube_valor_total_eur"], errors="coerce")
-        clubs_pct = cv.groupby(d["clube"]).first().rank(pct=True) if "clube" in d else None
-        if clubs_pct is not None:
-            lv = d["clube"].map(clubs_pct)
-            level = {i: float(v) for i, v in lv.items() if pd.notna(v)}
+        level = _level_map(d)
     mv = pd.to_numeric(d["valor_mercado_eur"], errors="coerce")
+    # rodada 13: reputação = maior entre o valor atual e 80% do PICO recente (3 anos). Veterano de elite (Messi aos 39)
+    # perde valor de mercado pela idade, não pela bola; o pico recente segura a reputação sem inventar nada.
+    if "valor_pico_3a_eur" in d:
+        peak = pd.to_numeric(d["valor_pico_3a_eur"], errors="coerce") * .8
+        mv = pd.concat([mv, peak], axis=1).max(axis=1, skipna=True).where(mv.notna() | peak.notna())
     rp = np.log1p(mv).groupby(d["papel"]).rank(pct=True) * 100
     rep_pct: Dict[int, float] = {i: float(v) for i, v in rp.items() if pd.notna(v) and pd.notna(mv.get(i)) and mv.get(i) > 0}
     # Cada função tem sua própria régua. Não misturar goleiros, laterais, volantes e atacantes.
@@ -910,7 +916,10 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
                 continue
             total_w = sum(w for _, w in items)
             raw = sum(s * w for s, w in items) / total_w
-            mins = _num(d.at[row_idx, "minutos_12m"]) or _num(d.at[row_idx, "minutos"]) or 0
+            m12, mall = _num(d.at[row_idx, "minutos_12m"]), _num(d.at[row_idx, "minutos"])
+            # rodada 13: 0 minuto no último ano NÃO cai para o histórico antigo inteiro (Adryelson aparecia com 88% de
+            # confiança e 0 min). Minutos antigos contam 1/3.
+            mins = (m12 if m12 is not None else 0) + max((mall or 0) - (m12 or 0), 0) / 3
             coverage = min(1.0, len(items) / max(3.0, len(specs) * .55))
             # rodada 10: encolhimento bayesiano pelos MINUTOS — 21 min não pode virar nota 82; com 900 min a
             # produção vale metade, com 2.700 min (uma temporada de titular) vale 3/4
@@ -921,10 +930,16 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             # clube no Transfermarkt, em percentil entre os clubes)
             lvl = level.get(row_idx)
             if lvl is not None:
-                perf = 50 + (perf - 50) * (.55 + .45 * lvl)
+                # quem DOMINA a própria liga (percentil ≥ 92 com amostra boa) perde menos pelo nível: ele seria bom
+                # em qualquer lugar; números medianos numa liga fraca valem bem menos
+                factor = .5 + .5 * lvl
+                if raw >= 92 and confidence >= .55:
+                    factor = max(factor, .8)
+                perf = 50 + (perf - 50) * factor
             # reputação de mercado na mesma função (o mercado já precifica nível e regularidade) — só quando existe
             rep = rep_pct.get(row_idx)
-            q = .65 * perf + .35 * (rep if rep is not None else (100 * lvl if lvl is not None else 40.0))
+            lvl100 = 100 * lvl if lvl is not None else 45.0
+            q = .6 * perf + .3 * (rep if rep is not None else lvl100) + .1 * lvl100
             d.at[row_idx, "qualidade"] = round(q, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)
     # Potencial de revenda: indicador exploratório, separado da qualidade atual.
@@ -937,7 +952,11 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     conf = pd.to_numeric(d["confianca_pct"], errors="coerce").fillna(0) / 100
     lvl_s = pd.Series({i: v for i, v in level.items()}, dtype=float).reindex(d.index).fillna(.5)
     years = (26 - age.fillna(30)).clip(lower=0, upper=9)
-    growth = years * (1.2 + 1.6 * conf) * (.7 + .5 * lvl_s)
+    # rodada 13: PRECOCIDADE — o que separa promessa de jovem comum: valor de mercado alto para a idade (o mercado vê
+    # seleção de base, capitania, propostas) e minutos de profissional cedo, comparados com quem tem a mesma idade.
+    prec = precocity(d)
+    d["precocidade"] = prec.round(0)
+    growth = years * (.9 + 1.2 * conf + 1.6 * prec.fillna(30) / 100) * (.7 + .5 * lvl_s)
     d["potencial_teto"] = (quality + growth).clip(upper=96).where(quality.notna()).round(1)
     d["potencial_revenda"] = (0.55 * d["potencial_teto"] + 0.25 * ((25 - age) / 8 * 100).clip(0, 100)
                               + 0.20 * (100 - market_pct)).where(age.le(23) & quality.notna()).round(1)
@@ -946,6 +965,49 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     d["potencial_natureza"] = "projeção pela idade, produção e nível; não é previsão de preço"
     return d
 
+
+
+def _level_map(d: pd.DataFrame) -> Dict[int, float]:
+    """Nível 0–1 de cada atleta: 45% clube (valor do elenco entre clubes) + 55% LIGA (mediana do valor dos clubes da
+    competição, entre as competições). Flamengo é forte no Brasil, mas o Brasileirão fica abaixo da Premier League."""
+    cv = pd.to_numeric(d["clube_valor_total_eur"], errors="coerce")
+    if "clube" not in d:
+        return {}
+    clubs = pd.DataFrame({"clube": d["clube"], "v": cv}).dropna().drop_duplicates("clube")
+    if clubs.empty:
+        return {}
+    club_pct = clubs.set_index("clube")["v"].rank(pct=True)
+    out = d["clube"].map(club_pct)
+    comp_col = next((c for c in ("clube_liga", "liga_clube", "ultima_competicao") if c in d and d[c].notna().any()), None)
+    if comp_col:
+        tmp = pd.DataFrame({"clube": d["clube"], "comp": d[comp_col].astype(str), "v": cv}).dropna()
+        tmp = tmp[tmp["comp"].str.strip().ne("")].drop_duplicates("clube")
+        lg = tmp.groupby("comp")["v"].agg(["median", "size"])
+        lg = lg[lg["size"] >= 4]
+        if len(lg) >= 3:
+            lg_pct = lg["median"].rank(pct=True)
+            club_comp = tmp.set_index("clube")["comp"]
+            league = d["clube"].map(club_comp).map(lg_pct)
+            out = (.45 * out + .55 * league).where(league.notna(), out)
+    return {i: float(v) for i, v in out.items() if pd.notna(v)}
+
+
+def precocity(d: pd.DataFrame) -> pd.Series:
+    """0–100 entre atletas da MESMA idade (±1 ano): 60% valor de mercado, 40% minutos de profissional no último ano.
+    Só para quem tem até 23 anos; sem valor nem minutos = desconhecido (NaN), nunca zero."""
+    age = pd.to_numeric(d.get("idade"), errors="coerce")
+    val = pd.to_numeric(d.get("valor_mercado_eur"), errors="coerce")
+    mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce")
+    out = pd.Series(np.nan, index=d.index)
+    young = age.le(23)
+    for a in sorted(age[young].dropna().round().unique()):
+        peers = (age.round() - a).abs().le(1)
+        rows = young & age.round().eq(a)
+        vp = np.log1p(val[peers]).rank(pct=True).reindex(d.index)
+        mp = mins[peers].rank(pct=True).reindex(d.index)
+        score = (.6 * vp.fillna(mp) + .4 * mp.fillna(vp)) * 100
+        out[rows] = score[rows]
+    return out
 
 
 def merge_external_ratings(players: pd.DataFrame, ratings: Optional[pd.DataFrame]) -> pd.DataFrame:
@@ -1783,7 +1845,71 @@ def _feedback_adjust(reason: str, realism: Dict[str, Any], candidate: Dict[str, 
         penalty -= 20
     if "característica" in r:
         penalty -= 5
+    # rodada 13: "não é bom o suficiente / não agrega" e "pior que o titular" sobem a régua de qualidade
+    if ("agrega" in r or "suficiente" in r or "titular" in r) and (_num(candidate.get("qualidade")) or 0) < 72:
+        penalty -= 18
+    if "fase" in r and (_num(candidate.get("rating_12m")) or 7) < 6.9:
+        penalty -= 14
+    if "estilo" in r:
+        penalty -= 6
     return penalty
+
+
+def why_chosen(player: Dict[str, Any], roster: Optional[pd.DataFrame] = None) -> Dict[str, List[str]]:
+    """Porquês da indicação e pontos de atenção, em linguagem de futebol, a partir dos números do próprio dossiê."""
+    pro: List[str] = []
+    con: List[str] = []
+    role = _safe_str(player.get("papel_alvo") or player.get("papel"))
+    label = ROLE_LABELS.get(role, role or "posição")
+    q = _num(player.get("qualidade"))
+    if player.get("motivo_principal"):
+        pro.append(f"Resolve uma carência: {player['motivo_principal']}.")
+    if roster is not None and not roster.empty and q is not None and {"papel", "qualidade"} <= set(roster.columns):
+        same = roster[roster["papel"] == role].copy()
+        same["qualidade"] = pd.to_numeric(same["qualidade"], errors="coerce")
+        same = same.dropna(subset=["qualidade"]).sort_values("qualidade", ascending=False)
+        if not same.empty:
+            top = same.iloc[0]
+            diff = q - float(top["qualidade"])
+            if diff >= 3:
+                pro.append(f"Chega como titular: qualidade {q:.0f} contra {float(top['qualidade']):.0f} de "
+                           f"{top.get('nome')}, hoje o melhor {label.lower()} do elenco.")
+            elif diff >= -3:
+                pro.append(f"Briga direto pela vaga com {top.get('nome')} ({float(top['qualidade']):.0f}) — "
+                           "aumenta a concorrência e a profundidade.")
+            else:
+                con.append(f"Abaixo do titular atual ({top.get('nome')}, {float(top['qualidade']):.0f}): entra como "
+                           "opção de banco/rodízio.")
+        else:
+            pro.append(f"O elenco não tem {label.lower()} de origem com números medidos — preenche um buraco.")
+    for t in (player.get("caracteristicas") or [])[:4]:
+        if isinstance(t, dict):
+            pro.append(f"{t.get('emoji', '')} {t.get('nome')}: {t.get('porque')}.")
+    r = player.get("realismo") or {}
+    sc = _num(r.get("score"))
+    if sc is not None:
+        (pro if sc >= 70 else con).append(f"Viabilidade {sc:.0f}% ({r.get('rotulo', '')}) — "
+                                          + "; ".join((r.get("motivos") or [])[:2]))
+    fit_ = player.get("compatibilidade") or {}
+    fs = _num(fit_.get("score"))
+    if fs is not None:
+        (pro if fs >= 65 else con).append(f"Encaixe no estilo do time: {fs:.0f}% ({fit_.get('label', '')}).")
+    age = _num(player.get("idade"))
+    pot = _num(player.get("potencial_teto"))
+    if age is not None and age <= 23 and pot is not None and q is not None and pot - q >= 5:
+        pro.append(f"Margem de evolução: teto projetado {pot:.0f} (hoje {q:.0f}) aos {age:.0f} anos.")
+    if age is not None and age >= 31:
+        con.append(f"{age:.0f} anos: contrato curto e queda física provável nas próximas temporadas.")
+    conf = _num(player.get("confianca_pct"))
+    if conf is not None and conf < 45:
+        con.append(f"Poucos minutos medidos (confiança {conf:.0f}%): a nota pode mudar bastante com mais jogos.")
+    rt = _num(player.get("rating_12m"))
+    if rt is not None and rt < 6.8:
+        con.append(f"Fase fraca: nota média {rt:.2f} nos últimos 12 meses.")
+    mins = _num(player.get("minutos_12m"))
+    if mins is not None and mins < 900:
+        con.append(f"Jogou pouco no último ano ({mins:.0f} min).")
+    return {"porque": pro, "atencao": con}
 
 
 def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dict[str, Any],
@@ -2050,3 +2176,67 @@ def export_markdown(club: str, financial: Dict[str, Any], roster_decisions: Dict
             lines.append(f"- {d['indicador']}: {d['antes']} → {d['depois']} ({d['variacao']:+})")
         lines.append(f"- Limite: {simulation.get('limite')}")
     return "\n".join(lines)
+
+
+# ------------------------------------------------------------------ rodada 13: números do elenco pelo PRÓPRIO clube
+def club_player_stats(db, team_names: Sequence[str], days: int = 365) -> pd.DataFrame:
+    """Minutos, jogos, nota e números por 90 de cada atleta DESTE clube nos últimos `days` dias.
+
+    O histórico global do Scout é ligado pelo nome; nomes comuns (Matheus Pereira, Lucas Silva, William) têm
+    homônimos e ficavam sem números. Aqui a busca é pelos jogos do próprio clube — sem ambiguidade."""
+    names = [str(n) for n in team_names if n]
+    if not names:
+        return pd.DataFrame()
+    since = (date.today() - timedelta(days=int(days))).isoformat()
+    ph = ",".join("?" * len(names))
+    q = f"""SELECT p.match_id, p.team_name, p.player_name, p.minutes, p.rating, p.stats_json, m.match_date,
+                   m.competition_name
+            FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+            WHERE p.team_name IN ({ph}) AND m.match_date >= ? AND COALESCE(p.minutes, 0) > 0{comp_sql([], "m")}"""
+    try:
+        with db.connect() as conn:
+            raw = pd.read_sql_query(q, conn, params=[*names, since])
+    except Exception:
+        return pd.DataFrame()
+    if raw.empty:
+        return pd.DataFrame()
+    raw["_core"] = raw["player_name"].map(player_core)
+    # mesmo jogo vindo de duas fontes (ESPN e FotMob) conta uma vez: fica a linha com mais minutos
+    raw["_d"] = raw["match_date"].astype(str).str[:10]
+    raw = raw.sort_values("minutes", ascending=False).drop_duplicates(["_core", "_d"])
+    rows = []
+    for core, g in raw.groupby("_core"):
+        t = _player_season_totals(g)
+        t.update({"_core": core, "nome_jogos": g["player_name"].mode().iat[0],
+                  "minutos_12m": t.get("minutos"), "jogos_12m": t.get("jogos"), "rating_12m": t.get("rating_media")})
+        rows.append(t)
+    return pd.DataFrame(rows)
+
+
+def roster_quality(roster: pd.DataFrame, universe: pd.DataFrame, per_role: int = 1200) -> pd.DataFrame:
+    """Qualidade do elenco calculada na MESMA régua do mercado (pares da função no universo), para quem teve os números
+    preenchidos pelos jogos do clube. Amostra até `per_role` pares por função (rápido; percentis estáveis)."""
+    if roster is None or roster.empty or universe is None or universe.empty or "papel" not in roster:
+        return pd.DataFrame()
+    roles = set(roster["papel"].dropna().astype(str))
+    pool = universe[universe["papel"].isin(roles)]
+    m = pd.to_numeric(pool.get("minutos_12m"), errors="coerce").fillna(0)
+    pool = pool[m >= 450]
+    pool = pool.groupby("papel", group_keys=False).apply(lambda g: g.sample(min(len(g), per_role), random_state=1))
+    r = roster.copy()
+    r["_roster_row"] = True
+    pool = pool.copy()
+    pool["_roster_row"] = False
+    both = pd.concat([pool, r], ignore_index=True, sort=False)
+    q = add_quality_scores(both)
+    try:
+        from src.scout.traits import add_traits
+
+        q = add_traits(q)
+    except Exception:
+        pass
+    keep = [c for c in ("qualidade", "confianca_pct", "potencial_teto", "precocidade", "caracteristicas",
+                        "caracteristicas_top") if c in q]
+    out = q.loc[q["_roster_row"] == True, keep]  # noqa: E712
+    out.index = r.index
+    return out

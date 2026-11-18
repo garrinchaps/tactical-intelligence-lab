@@ -85,8 +85,10 @@ def _market_data_legacy(version: str):
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _rank_candidates(version, team, country, competition, season, rejected, feedback_reason,
-                     _pool, _needs, _financial, _roster):
-    """Reaproveita o ranking caro entre interações; a revisão invalida quando o histórico muda."""
+                     _pool, _needs, _financial, _roster, needs_key=None):
+    """Reaproveita o ranking caro entre interações; a revisão invalida quando o histórico muda.
+    rodada 13: `needs_key` (posições pedidas) entra na chave do cache — antes `_needs` não era considerado e a
+    lista "Três melhores por posição" devolvia sempre o ranking da 1ª busca (laterais e outras posições vazias)."""
     return E.recommend(_pool, _needs, _financial, country, competition, roster=_roster,
                        rejected=rejected, feedback_reason=feedback_reason, season=season)
 
@@ -174,7 +176,8 @@ def _window_cards(roster, decisions, loans=None):
     if done:
         for name, (choice, _) in picks.items():
             decisions[name] = choice
-        st.success("Planejamento registrado.")
+        st.session_state["scout_plan_final"] = True
+        st.success("Planejamento registrado — o elenco planejado aparece logo abaixo.")
     for name, choice in decisions.items():
         if name.startswith("out::"):
             if choice != "Renovar empréstimo":
@@ -289,7 +292,10 @@ def _role(role):
     return E.ROLE_LABELS.get(str(role), str(role or "Não identificado"))
 
 
-def _merge_roster(roster, universe, team=None):
+@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+def _merge_roster(roster, _universe, team=None, version=""):
+    """rodada 13: cacheado por elenco + versão (o universo grande não entra no hash) e completado pelos jogos do clube."""
+    universe = _universe
     if roster is None or roster.empty:
         return pd.DataFrame()
     from src.data_lake.ids import player_core, team_core
@@ -319,11 +325,65 @@ def _merge_roster(roster, universe, team=None):
         for col in cols:
             mapped = r["_core"].map(lookup[col])
             r[col] = r[col].combine_first(mapped) if col in r else mapped
+    r = _fill_from_club_games(r, universe, team)
     if "qualidade" not in r:
         r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
     else:
         r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(
             pd.to_numeric(r.get("nota"), errors="coerce"))
+    return r
+
+
+def _fill_from_club_games(r, universe, team):
+    """rodada 13: minutos/jogos/nota/números por 90 de CADA atleta pelos jogos do próprio clube (sem confusão com
+    homônimos), e a qualidade + características recalculadas na régua do mercado para esses atletas."""
+    if not team or r.empty:
+        return r
+    try:
+        from src.data_lake.ids import player_core
+        from src.squad.matchday import canonical_names
+        from src.ui.context import get_service
+        from src.ui.pages.clubs import same_team_names
+
+        cs = E.club_player_stats(get_service().db, same_team_names(team))
+    except Exception:
+        return r
+    if cs is None or cs.empty:
+        return r
+    by_core = cs.set_index("_core")
+    core = r["_core"].copy()
+    miss = ~core.isin(by_core.index)
+    if miss.any():
+        canon = canonical_names(r.loc[miss, "nome"].astype(str).tolist(), cs["nome_jogos"].astype(str).tolist())
+        core.loc[miss] = [player_core(canon.get(n, n)) for n in r.loc[miss, "nome"].astype(str)]
+    hit = core.isin(by_core.index)
+    if not hit.any():
+        return r
+    cols = ["minutos_12m", "jogos_12m", "rating_12m", "ultimo_jogo"] + [c for c in cs.columns if c.endswith("_p90")
+                                                                      or c in ("pass_accuracy_pct", "duels_won_pct")]
+    for c in cols:
+        if c in by_core:
+            vals = core.map(by_core[c])
+            r[c] = vals.where(hit, r[c] if c in r else np.nan)
+    r["rating_media"] = r.get("rating_12m")
+    r["fonte_numeros"] = np.where(hit, "jogos do clube (12 meses)", "sem jogos do clube nos últimos 12 meses")
+    # quem não jogou pelo clube no último ano: 0 minuto medido (não herda números de um homônimo)
+    for c in ("minutos_12m", "jogos_12m"):
+        if c in r:
+            r.loc[~hit, c] = pd.to_numeric(r.loc[~hit, c], errors="coerce").where(
+                r.loc[~hit].get("historico_ambiguo", pd.Series(False, index=r.loc[~hit].index)).ne(True), 0)
+    try:
+        rq = E.roster_quality(r[hit], universe)
+        for c in rq.columns:
+            if c not in r:
+                r[c] = pd.Series([None] * len(r), index=r.index, dtype=object) if c.startswith("caracter") else np.nan
+            if c == "caracteristicas":
+                for i, v in rq[c].items():
+                    r.at[i, c] = v
+            else:
+                r.loc[rq.index, c] = rq[c]
+    except Exception:
+        pass
     return r
 
 
@@ -343,13 +403,13 @@ def _club_squad(team, version, universe):
     try:
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
-        return {**data, "squad": _merge_roster(data.get("squad"), universe, team)}
+        return {**data, "squad": _merge_roster(data.get("squad"), universe, team, version)}
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
         club = E.market_club(D.table("tm_clubes"), team)
         roster = E.current_roster(get_service().db, club, same_team_names(team), D.table("tm_jogadores"), universe)
-        return {"squad": _merge_roster(roster, universe, team), "club": club, "fonte": "Transfermarkt + escalações"}
+        return {"squad": _merge_roster(roster, universe, team, version), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
 def _dossier(player, roster):
@@ -359,6 +419,24 @@ def _dossier(player, roster):
         except Exception:
             return []
     hist, recent = unpack(player.get("historico_temporadas")), unpack(player.get("ultimos_jogos"))
+    # rodada 13: o porquê vem primeiro, em cartões verdes/vermelhos; números detalhados ficam abaixo
+    from src.scout.traits import traits_html
+
+    w = E.why_chosen(player, roster)
+    st.markdown("**Características (só o que se destaca na função)**")
+    st.markdown(traits_html(player.get("caracteristicas") or [], None, why=True), unsafe_allow_html=True)
+    ca, cb = st.columns(2)
+    with ca:
+        st.markdown("**✅ Por que a IA indica**")
+        for x in w["porque"] or ["Encaixe com uma necessidade detectada no elenco."]:
+            st.markdown(f'<div style="border-left:4px solid #22C55E;background:#0B1120;border-radius:10px;'
+                        f'padding:.45rem .7rem;margin-bottom:.35rem">{html.escape(x)}</div>', unsafe_allow_html=True)
+    with cb:
+        st.markdown("**⚠️ Pontos de atenção**")
+        for x in w["atencao"] or ["Nenhum alerta forte nos números disponíveis."]:
+            st.markdown(f'<div style="border-left:4px solid #EF4444;background:#0B1120;border-radius:10px;'
+                        f'padding:.45rem .7rem;margin-bottom:.35rem">{html.escape(x)}</div>', unsafe_allow_html=True)
+    st.markdown("**Números detalhados**")
     metrics = [
         ("Qualidade calculada por função", player.get("qualidade_estatistica", player.get("qualidade"))),
         ("Nota externa 0–100", player.get("nota_externa")),
@@ -413,11 +491,22 @@ def _dossier(player, roster):
     st.caption(syn.get("limite", "A sinergia é uma aproximação por posição e estatísticas; não é tracking."))
 
 
+def _traits_short(player):
+    from src.scout.traits import traits_html
+
+    items = player.get("caracteristicas")
+    return traits_html(items, 3) if isinstance(items, list) and items else ""
+
+
 def _add_player(player, plan_key):
     current = st.session_state.setdefault(plan_key, [])
-    if not any(x.get("_core") == player.get("_core") for x in current):
-        current.append(json.loads(json.dumps(player, default=str)))
-    st.success(f"{player.get('nome')} adicionado ao plano.")
+    clean = json.loads(json.dumps(player, default=str).replace("NaN", "null"))
+    if not any(x.get("_core") == player.get("_core") and x.get("nome") == player.get("nome") for x in current):
+        current.append(clean)
+        st.toast(f"✅ {player.get('nome')} entrou no plano da janela ({len(current)} reforço(s)).")
+    else:
+        st.toast(f"{player.get('nome')} já está no plano.")
+    st.session_state[plan_key] = current
 
 
 def _player_card(player, roster, team, idx, plan_key, rejected_key):
@@ -442,22 +531,25 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
         f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
         f'<span class="scout-tag neutral">Compatibilidade {(player.get("compatibilidade") or {}).get("score","—")}%</span>'
-        f'<span class="scout-tag neutral">Qualidade {quality}</span></div></div>'
+        f'<span class="scout-tag neutral">Qualidade {quality}</span></div>'
+        f'<div style="margin-top:4px">{_traits_short(player)}</div></div>'
         f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>'
     )
     st.markdown(player_html, unsafe_allow_html=True)
     a, b = st.columns([1.1, 1.1])
-    if a.button("＋ Adicionar ao plano", key=f"scout_add_{_slug(name)}_{idx}", type="primary", use_container_width=True):
-        _add_player(player, plan_key)
-        st.rerun()
+    in_plan = any(x.get("nome") == name for x in st.session_state.get(plan_key) or [])
+    a.button("✓ No plano" if in_plan else "＋ Adicionar ao plano", key=f"scout_add_{_slug(name)}_{idx}",
+             type="secondary" if in_plan else "primary", use_container_width=True, disabled=in_plan,
+             on_click=_add_player, args=(player, plan_key))
     if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
         open_view("jogador", name=name, core=player.get("_core"))
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
     with st.expander("Descartar e recalcular"):
-        reason = st.selectbox("Motivo", ["Muito caro","Muito velho","Perfil físico inadequado",
-            "Limite de estrangeiros","Nacionalidade/contexto inviável","Quero outra característica","Não é prioridade",
-            "Outro motivo"],
+        reason = st.selectbox("Motivo", ["Não é bom o suficiente / não agrega", "Pior que o titular atual",
+            "Muito caro","Muito velho","Perfil físico inadequado","Fase ruim (jogando mal)","Não combina com o estilo",
+            "Histórico de lesões","Salário provavelmente alto","Limite de estrangeiros","Nacionalidade/contexto inviável",
+            "Quero outra característica","Não é prioridade","Outro motivo"],
             key=f"scout_reason_{_slug(name)}_{idx}")
         if st.button("Descartar este alvo", key=f"scout_reject_{_slug(name)}_{idx}"):
             from src.ui.context import get_service
@@ -671,9 +763,22 @@ def render(_ctx=None):
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = _rank_candidates(version, team, country, competition, next_season,
                                   tuple(rejected_for_run), feedback_reason,
-                                  pool, needs, financial, roster) if not pool.empty else pd.DataFrame()
+                                  pool, needs, financial, roster,
+                                  needs_key=tuple((n.get("papel"), round(float(n.get("urgencia") or 0))) for n in needs)) \
+        if not pool.empty else pd.DataFrame()
 
-    tabs = st.tabs(["IA · Top 5", "Diagnóstico", "Busca manual", "Joias U23", "Planejamento"])
+    # rodada 13: abas com estado (key) — "Adicionar ao plano" não joga mais o usuário de volta para a 1ª aba, e a
+    # barra do plano mostra na hora quem já entrou, com atalho para o Planejamento
+    tab_names = ["IA · Top 5", "Diagnóstico", "Busca manual", "Joias U23", "Planejamento"]
+    plan_now = st.session_state.get(plan_key) or []
+    if plan_now:
+        pa, pb = st.columns([5, 1.3])
+        pa.markdown('<div class="fm-card" style="border-left:4px solid #22D3EE;border-radius:12px;padding:.5rem .9rem">'
+                    f'🧾 <b>Plano da janela: {len(plan_now)} reforço(s)</b> — '
+                    + html.escape(", ".join(str(p.get("nome")) for p in plan_now)) + '</div>', unsafe_allow_html=True)
+        pb.button("Ver planejamento →", key="scout_go_plan", use_container_width=True,
+                  on_click=lambda: st.session_state.__setitem__("scout_tabs", "Planejamento"))
+    tabs = st.tabs(tab_names, key="scout_tabs", default="IA · Top 5")
     with tabs[0]:
         st.markdown("#### Cinco nomes priorizados")
         if feedback.get("amostra"):
@@ -716,7 +821,7 @@ def render(_ctx=None):
                                                  [{"papel": role, "urgencia": urg,
                                                    "motivo": next((n.get("motivo") for n in needs if n.get("papel") == role),
                                                                   "posição escolhida por você (reforço/concorrência)")}],
-                                                 financial, roster)
+                                                 financial, roster, needs_key=("top3", role))
             filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
             if not filt3.empty:
                 ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
@@ -774,11 +879,16 @@ def render(_ctx=None):
             st.markdown("#### Elenco e notas")
             show = roster.copy()
             show["Posição"] = show["papel"].map(E.ROLE_LABELS).fillna("—")
-            cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","valor_mercado_eur",
-                                "minutos_12m","rating_12m") if x in show]
+            cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","caracteristicas_top",
+                                "potencial_teto","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
             display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
-                "confianca_pct":"Confiança (%)","valor_mercado_eur":"Valor de mercado","minutos_12m":"Minutos (últimos 12 meses)",
+                "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Teto",
+                "valor_mercado_eur":"Valor de mercado","jogos_12m":"Jogos (12m)","minutos_12m":"Minutos (últimos 12 meses)",
                 "rating_12m":"Nota média 12m"})
+            st.caption("Números de cada atleta pelos jogos do PRÓPRIO clube nos últimos 12 meses (nomes comuns não se "
+                       "confundem mais com homônimos). Confiança = quanto a nota se apoia em minutos medidos: com poucos "
+                       "minutos ela é puxada para a média. Características só aparecem quando o atleta está bem acima "
+                       "da média da função (passe o mouse no perfil para ver o porquê).")
             if "Valor de mercado" in display:
                 display["Valor de mercado"] = display["Valor de mercado"].map(_money)
             styled_dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
@@ -962,6 +1072,11 @@ def render(_ctx=None):
         entry=st.selectbox("Testar contratação",["Nenhuma"]+[p.get("nome") for p in plan],key="scout_entry")
         outgoing=st.selectbox("Simular saída / venda",["Nenhum"]+(roster["nome"].astype(str).tolist() if not roster.empty else []),
                               key="scout_outgoing")
+        if st.session_state.get("scout_plan_final") or plan:
+            from src.ui.plan_board import render_board
+
+            with st.container(border=True):
+                render_board(team, roster, plan, decisions, formation)
         if st.button("⚽ Simular antes vs. depois",key="scout_sim",type="primary"):
             player=next((p for p in plan if p.get("nome")==entry),None) if entry!="Nenhuma" else None
             simulation=E.build_simulation(roster,player,outgoing if outgoing!="Nenhum" else None,formation)
