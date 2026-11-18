@@ -197,10 +197,13 @@ def render(ctx=None) -> None:
     st.caption(f"Todos com Adam, até {EXP_EPOCHS} épocas, lote {EXP_BATCH}, parada antecipada com paciência "
                f"{EXP_PATIENCE}, inicialização He e treino do zero. O campeão só é trocado com superioridade estatística.")
     styled_dataframe(__import__("pandas").DataFrame([
-        {"experimento": k, "arquitetura": " → ".join(map(str, [len(FEATURES), *v["hidden"], 1])),
+        {"experimento": k, "arquitetura": " → ".join(map(str, [len(v.get("features") or FEATURES), *v["hidden"], 1])),
+         "variáveis": ", ".join(v["features"]) if v.get("features") else f"todas as {len(FEATURES)}",
          "η": v["learning_rate"], "λ": v["l2"]} for k, v in EXPERIMENTS.items()]), hide_index=True, use_container_width=True)
+    st.caption("E, F e G (novos) usam só as variáveis que realmente separam lance perigoso de lance comum — o teste "
+               "comparativo mostrou que as 9 zonas repetem distância e ângulo e só atrapalham. Comece por eles.")
     x1, x2 = st.columns([2, 1])
-    exp_pick = x1.multiselect("Experimentos a rodar (na ordem)", EXPERIMENT_ORDER, default=["B"])
+    exp_pick = x1.multiselect("Experimentos a rodar (na ordem)", EXPERIMENT_ORDER, default=["E", "F", "G"])
     attempts = x2.number_input("Tentativas por clique", 1, 10, 1,
                                help="Quantas sementes diferentes treinar de uma vez (vale para todos os botões). "
                                     "Cada tentativa é registrada e julgada sozinha.")

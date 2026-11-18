@@ -136,3 +136,19 @@ def test_reference_baseline_ui_only_reads_cache(tmp_path, monkeypatch):
     assert B.load_cached() == {}
     (tmp_path / "ref.json").write_text(_j.dumps({"match_ids": [1, 2], "players": [], "teams": []}), encoding="utf-8")
     assert B.load_cached()["match_ids"] == [1, 2] and B.TARGET_MATCHES >= 1000
+
+
+def test_compact_experiment_saves_feature_names_and_scores(tmp_path):
+    import src.machine_learning.model_registry as R
+
+    data = R.DangerModelRegistry.dataset()
+    data = data[data["match_id"].isin(sorted(data["match_id"].unique())[:20])]
+    reg = R.DangerModelRegistry(root=tmp_path / "reg")
+    reg.train_round(data, [8], 0.003, 2, 1e-4, 256, seed=1, origin="campeão de teste", cv_folds=0)
+    r = reg.train_round(data, [], 0.003, 2, 1e-4, 256, seed=2, cv_folds=0, features=R.COMPACT_FEATURES)
+    assert r["n_features"] == len(R.COMPACT_FEATURES)
+    net = r["net"]
+    assert net.feature_names == R.COMPACT_FEATURES
+    X = R.DangerModelRegistry._model_matrix(net, data)
+    assert X.shape[1] == len(R.COMPACT_FEATURES)
+    assert "E" in R.EXPERIMENTS and R.EXPERIMENT_ORDER[0] == "E"

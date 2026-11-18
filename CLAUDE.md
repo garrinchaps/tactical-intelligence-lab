@@ -241,7 +241,25 @@ Rodada 6 (16/11/2026, 278 testes verdes) — correções pedidas com prints:
   gols, por que venceu, físico só se a liga mede); Comparar jogador × jogador pela FotMob.
 - ✅ Classificação desenhada (escudo, faixas, últimos 5); linha do tempo sem "****" quando a fonte não traz o autor;
   erro `_detalhe` em Fortes e fracos (modo Equipe) corrigido.
-- Pendente: erro do treino da rede nos Bastidores ("parou com erro") — pedir o texto do registro ao usuário.
+
+Rodada 7 (18/11/2026, 370 testes verdes) — velocidade e reclamações com prints:
+- ✅ Velocidade: FotMob, OpenPlay, sync de 3 h/24 h, ao vivo, fotografia do Scout e referência do "jogo típico" rodam num
+  PROCESSO SEPARADO de prioridade baixa (`src/data_hub/worker.py`, status em `data/worker_status.json`, encerra quando o
+  app fecha; `AUTO_SYNC_MODE=thread` volta ao jeito antigo). Gravações das threads `til-*` não derrubam mais o cache da
+  tela (`_touched`). Scout lê uma fotografia pronta (`src/scout/snapshot.py`, refeita a cada 6 h) — abre na hora.
+  Corrigido erro de ordenação do Scout (coluna `realismo` era dict).
+- ✅ Físico por 90 no Comparar e destaques: cada número dividido só pelos minutos dos jogos em que foi medido.
+- ✅ "Duplicate column names" na aba Jogadores (FotMob) corrigido (`player_stats_table`); tabelas com cores sólidas,
+  calor por coluna (vermelho para números ruins), "—" no lugar de "None".
+- ✅ Diagnóstico do rival (`src/analytics/vulnerabilities.py` + `src/ui/vuln_view.py`): campinho com zonas de risco
+  numeradas + cartões (evidência, como explorar, base): muito driblado, desarma pouco, perde aéreo, perde duelos,
+  ponta/meia que não defende, saída de bola frágil sob pressão, contra-ataque cedido, chutes de fora, corredor que mais
+  sofre, cruzamentos cedidos, zagueiro baixo × nosso atacante alto. Substitui as bolinhas F.
+- ✅ Busca: mesma partida de fontes diferentes aparece 1 vez (data ±1 dia + times canônicos), com o nível mais rico.
+- ✅ Jogo típico: referência cresce em segundo plano até 1.500 jogos com lances (`TARGET_MATCHES`).
+- ✅ Rede: "parou com erro" era a validação fixa sem `density_is_360` — corrigido. Experimentos novos E/F/G com variáveis
+  enxutas (sem as 9 zonas). Na amostra de desenvolvimento o G deu ganho +0,002 mas com IC incluindo zero → rejeitado
+  (critério mantido). No PC, com mais jogos, rodar E,F,G.
 
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).

@@ -151,7 +151,7 @@ def test_l2_gradient_matches_loss():
 def test_experiments_follow_the_plan(tmp_path, monkeypatch):
     import src.machine_learning.model_registry as R
 
-    assert R.EXPERIMENT_ORDER[0] == "B" and R.EXPERIMENTS["B"]["hidden"] == [32, 16]
+    assert R.EXPERIMENT_ORDER[-4:] == ["B", "A", "C", "D"] and R.EXPERIMENTS["B"]["hidden"] == [32, 16]
     assert R.EXPERIMENTS["D"] == {"hidden": [64, 32, 16], "learning_rate": 0.0005, "l2": 0.001}
     data = R.DangerModelRegistry.dataset()
     keep = sorted(data["match_id"].unique())[:24]

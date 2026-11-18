@@ -45,7 +45,18 @@ EXPERIMENTS: Dict[str, Dict[str, Any]] = {
     "C": {"hidden": [32, 16, 8], "learning_rate": 0.001, "l2": 0.001},
     "D": {"hidden": [64, 32, 16], "learning_rate": 0.0005, "l2": 0.001},
 }
-EXPERIMENT_ORDER = ["B", "A", "C", "D"]          # começar pelo B
+# Rodada 7: o benchmark mostrou que a regressão logística com distância/ângulo/passes (AUC 0,640) bate a rede com
+# 15 variáveis (0,623) — as 9 zonas (one-hot) repetem distância/ângulo e só adicionam ruído. E/F/G usam conjuntos
+# ENXUTOS de variáveis (mesmo critério de promoção, mesma validação fixa); o modelo salvo guarda os nomes das
+# variáveis, então o Analista monta a entrada certa para qualquer campeão.
+COMPACT_FEATURES = ["dist_to_goal_m", "angle_to_goal_deg", "opp_density_5m", "passes_so_far", "density_is_360"]
+BASELINE_SET = ["dist_to_goal_m", "angle_to_goal_deg", "passes_so_far"]
+EXPERIMENTS.update({
+    "E": {"hidden": [16, 8], "learning_rate": 0.001, "l2": 0.0001, "features": COMPACT_FEATURES},
+    "F": {"hidden": [], "learning_rate": 0.003, "l2": 0.0001, "features": COMPACT_FEATURES},
+    "G": {"hidden": [8], "learning_rate": 0.002, "l2": 0.0001, "features": BASELINE_SET},
+})
+EXPERIMENT_ORDER = ["E", "F", "G", "B", "A", "C", "D"]          # rodada 7: enxutos primeiro
 EXP_EPOCHS, EXP_BATCH, EXP_PATIENCE = 100, 256, 10
 
 
@@ -175,6 +186,11 @@ class DangerModelRegistry:
         train = data[~data["match_id"].isin(val_ids)]
         if self.val_path.exists():
             val = pd.read_csv(self.val_path)
+            # rodada 7: a validação fixa foi gravada antes da variável density_is_360 — sem ela TODO treino quebrava
+            # ("parou com erro") e nenhuma versão conseguia disputar com a v002. Mesma regra dos dados de treino.
+            if "density_is_360" not in val:
+                val["density_is_360"] = (val["density_source"].eq("statsbomb_360").astype(float)
+                                         if "density_source" in val else 0.0)
         else:
             val = data[data["match_id"].isin(val_ids)]
             val.to_csv(self.val_path, index=False, compression="gzip")
@@ -229,7 +245,7 @@ class DangerModelRegistry:
     @staticmethod
     def group_cv(train: pd.DataFrame, hidden: List[int], learning_rate: float, epochs: int, l2: float,
                  batch_size: int, folds: int = 5, seeds=(11, 23), optimizer: str = "sgd",
-                 patience: int = 0) -> Dict[str, Any]:
+                 patience: int = 0, features: Optional[List[str]] = None) -> Dict[str, Any]:
         """
         GroupKFold por match_id (nenhuma partida aparece no treino e na validação da mesma dobra) × sementes.
         A padronização é ajustada só com o treino de cada dobra (fit dentro de `NeuralNetwork.fit`).
@@ -241,13 +257,14 @@ class DangerModelRegistry:
         k = int(min(folds, len(np.unique(groups))))
         if k < 2:
             return {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
-        X, y = train[FEATURES].to_numpy(float), train["target"].to_numpy(int)
+        feats = list(features or FEATURES)
+        X, y = train[feats].to_numpy(float), train["target"].to_numpy(int)
         ll, auc = [], []
         for sd in seeds:
             for tr, va in GroupKFold(n_splits=k).split(X, y, groups):
                 if len(np.unique(y[va])) < 2:
                     continue
-                net = NeuralNetwork([len(FEATURES), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=int(sd))
+                net = NeuralNetwork([len(feats), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=int(sd))
                 fit_i, stop_i = tr, None
                 if patience:
                     gids = np.unique(groups[tr])
@@ -289,7 +306,7 @@ class DangerModelRegistry:
                     l2: float = 1e-3, batch_size: int = 256, seed: Optional[int] = None,
                     origin: str = "treino", cv_folds: int = 3, cv_seeds=(11,), optimizer: str = "adam",
                     warm_start: Optional[bool] = None, patience: int = 4, cv_epochs: Optional[int] = None,
-                    class_weight_balanced: bool = False,
+                    class_weight_balanced: bool = False, features: Optional[List[str]] = None,
                     progress: Optional[Callable[[str], None]] = None) -> Dict[str, Any]:
         """
         Treina um desafiante e decide a promoção:
@@ -309,15 +326,17 @@ class DangerModelRegistry:
         train, val = self.split(data)
         seed = int(seed if seed is not None else time.time()) % 100_000
         say(f"validação cruzada agrupada ({cv_folds} dobras por partida)…")
+        feats = list(features or FEATURES)
         cv = self.group_cv(train, hidden, learning_rate, cv_epochs or max(4, min(epochs, 12)), l2, batch_size, cv_folds,
-                           cv_seeds, optimizer=optimizer, patience=patience if cv_epochs else 0) \
+                           cv_seeds, optimizer=optimizer, patience=patience if cv_epochs else 0, features=feats) \
             if cv_folds else {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
         cv_mean = round(float(np.mean(cv["logloss"])), 5) if cv["logloss"] else None
         cv_std = round(float(np.std(cv["logloss"], ddof=1)), 5) if len(cv["logloss"]) > 1 else None
         cv_auc_std = round(float(np.std(cv["auc"], ddof=1)), 4) if len(cv["auc"]) > 1 else None
         champ = self.champion_info()
         champ_net = self.champion() if champ else None
-        same_architecture = champ_net is not None and list(champ_net.layer_sizes) == [len(FEATURES), *hidden, 1]
+        same_architecture = champ_net is not None and list(champ_net.layer_sizes) == [len(feats), *hidden, 1] \
+            and list(getattr(champ_net, 'feature_names', []) or []) == feats
         warm = bool(same_architecture and (warm_start is None or warm_start))
         if warm_start and champ_net is not None and not same_architecture:
             say("ajuste fino ignorado: a arquitetura de entrada mudou; o desafiante começará do zero.")
@@ -327,14 +346,14 @@ class DangerModelRegistry:
         stop_ids = set(rng.choice(ids, size=max(1, int(round(len(ids) * 0.1))), replace=False)) if len(ids) > 9 else set()
         fit_part = train[~train["match_id"].isin(stop_ids)] if stop_ids else train
         stop_part = train[train["match_id"].isin(stop_ids)] if stop_ids else None
-        net = NeuralNetwork([len(FEATURES), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=seed, feature_names=FEATURES)
+        net = NeuralNetwork([len(feats), *hidden, 1], learning_rate=learning_rate, l2=l2, seed=seed, feature_names=feats)
         if warm:
             net.warm_start_from(champ_net)
         say("treino final" + (" (ajuste fino a partir do campeão)" if warm else "") + "…")
-        net.fit(fit_part[FEATURES].to_numpy(float), fit_part["target"].to_numpy(int), epochs=epochs,
-                batch_size=batch_size, X_val=val[FEATURES].to_numpy(float), y_val=val["target"].to_numpy(int),
+        net.fit(fit_part[feats].to_numpy(float), fit_part["target"].to_numpy(int), epochs=epochs,
+                batch_size=batch_size, X_val=val[feats].to_numpy(float), y_val=val["target"].to_numpy(int),
                 optimizer=optimizer, refit_scaler=not warm, class_weight_balanced=class_weight_balanced,
-                X_stop=stop_part[FEATURES].to_numpy(float) if stop_part is not None else None,
+                X_stop=stop_part[feats].to_numpy(float) if stop_part is not None else None,
                 y_stop=stop_part["target"].to_numpy(int) if stop_part is not None else None,
                 patience=patience if stop_part is not None else 0)
         m = self._evaluate(net, val)
@@ -373,7 +392,7 @@ class DangerModelRegistry:
                       round(pg["ci_high"], 6) if pg else None, round(pg["p_positive"], 4) if pg else None,
                       cv_auc_std, optimizer, bool(warm), len(net.history.get("train_loss", [])),
                       density_360_share=round(share_360, 4) if share_360 is not None else None,
-                      density_proxy_matches=proxy_matches, n_features=len(FEATURES))
+                      density_proxy_matches=proxy_matches, n_features=len(feats))
         self.meta["versions"].append(asdict(rec))
         if promoted:
             self.meta["champion"] = v
@@ -431,7 +450,7 @@ class DangerModelRegistry:
                 r = self.train_round(data, cfg["hidden"], cfg["learning_rate"], EXP_EPOCHS, cfg["l2"], EXP_BATCH,
                                      seed=base + 97 * k + ord(name), origin=f"experimento {name}", cv_folds=3,
                                      cv_seeds=(11,), optimizer="adam", warm_start=False, patience=EXP_PATIENCE,
-                                     cv_epochs=30, progress=progress)
+                                     cv_epochs=30, features=cfg.get("features"), progress=progress)
                 r["experimento"] = name
                 out.append(r)
                 say(f"  {name}: v{r['version']:03d} → {'PROMOVIDA' if r['promoted'] else 'rejeitada'} "
