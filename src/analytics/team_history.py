@@ -15,6 +15,7 @@ são marcadas; nada aqui é tracking (altura da linha, compactação) — isso n
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 from typing import Any, Dict, List, Optional, Sequence
 
 import numpy as np
@@ -38,7 +39,7 @@ def _matches(db, names: Sequence[str], n: int = 20, before: Optional[str] = None
     ph = ",".join("?" * len(names))
     q = (f"SELECT m.match_id, m.match_date, m.home_team_name, m.away_team_name, m.home_score, m.away_score, m.competition_name, "
          f"COUNT(DISTINCT s.stat_key) AS nkeys FROM matches m JOIN match_team_stats s ON s.match_id = m.match_id "
-         f"WHERE (m.home_team_name IN ({ph}) OR m.away_team_name IN ({ph})) " + ("AND m.match_date < ? " if before else "") +
+         f"WHERE (m.home_team_name IN ({ph}) OR m.away_team_name IN ({ph})){comp_sql(names, 'm')} " + ("AND m.match_date < ? " if before else "") +
          f"GROUP BY m.match_id HAVING nkeys >= 5 ORDER BY m.match_date DESC LIMIT {int(n) * 3}")
     params = list(names) * 2 + ([before] if before else [])
     with db.connect() as conn:

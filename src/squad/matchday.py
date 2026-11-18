@@ -13,6 +13,7 @@ Regras honestas:
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 import json
 from collections import Counter
 from datetime import date, timedelta
@@ -91,7 +92,7 @@ def recent_lineups(db, team_names: Sequence[str], n: int = 10) -> pd.DataFrame:
          f"m.competition_name, l.team_name, l.player_name AS jogador, l.position AS pos, l.is_starter AS titular, l.formation "
          f"FROM match_lineups l JOIN matches m ON m.match_id = l.match_id WHERE l.team_name IN ({ph}) AND m.match_id IN ("
          f"SELECT DISTINCT l2.match_id FROM match_lineups l2 JOIN matches m2 ON m2.match_id = l2.match_id "
-         f"WHERE l2.team_name IN ({ph}) ORDER BY m2.match_date DESC LIMIT {int(n) * 2})")
+         f"WHERE l2.team_name IN ({ph}){comp_sql(team_names, 'm2')} ORDER BY m2.match_date DESC LIMIT {int(n) * 2})")
     try:
         with db.connect() as conn:
             lu = pd.read_sql_query(q, conn, params=ps * 2)
@@ -591,7 +592,8 @@ def next_fixtures(db, team_names: Sequence[str], limit: int = 5) -> pd.DataFrame
     ph, ps = _names_sql(team_names)
     try:
         with db.connect() as conn:
-            fx = pd.read_sql_query(f"SELECT * FROM fixtures WHERE (home IN ({ph}) OR away IN ({ph})) "
+            gender = comp_sql(team_names, "").replace("competition_name", "competition")   # masculino × feminino
+            fx = pd.read_sql_query(f"SELECT * FROM fixtures WHERE (home IN ({ph}) OR away IN ({ph})){gender} "
                                    f"AND kickoff >= ? ORDER BY kickoff LIMIT {int(limit) * 3}", conn,
                                    params=ps * 2 + [(date.today() - timedelta(days=1)).isoformat()])
     except Exception:

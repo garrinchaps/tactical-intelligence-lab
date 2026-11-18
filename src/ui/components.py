@@ -259,9 +259,34 @@ def zebra(df: pd.DataFrame):
         return df
 
 
+_INT_TOKENS = ("idade", "age", "minutos", "minutes", "jogos", "games", "gols", "assist", "nº", "camisa", "ano",
+               "temporada", "chegou primeiro", "titular")
+
+
+def tidy_numbers(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Rodada 10: números como gente lê — idade, minutos e contagens inteiros (23, não 23.8); o resto com no máximo
+    2 casas (12.35, não 12.3456). Nada é inventado: vazio continua vazio.
+    """
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return df
+    out = df.copy()
+    for c in out.columns:
+        col = out[c]
+        if not pd.api.types.is_float_dtype(col):
+            continue
+        low = str(c).strip().lower()
+        if any(t in low for t in _INT_TOKENS) and "%" not in low and "/90" not in low and "por 90" not in low:
+            out[c] = np.floor(col).astype("Int64") if low.startswith(("idade", "age")) else col.round(0).astype("Int64")
+        else:
+            out[c] = col.round(2)
+    return out
+
+
 def styled_dataframe(data, *args, **kwargs):
     """Renderiza DataFrames no padrão visual do laboratório, sem perder ordenação ou seleção."""
     if isinstance(data, pd.DataFrame):
+        data = tidy_numbers(data)
         # ProgressColumn é nativo do Streamlit 1.36 e desenha barras reais dentro da tabela.
         config = dict(kwargs.get("column_config") or {})
         for col_name in data.columns:

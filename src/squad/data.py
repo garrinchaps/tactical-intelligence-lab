@@ -6,6 +6,7 @@ data do arquivo, então a segunda abertura é instantânea.
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 import json
 from datetime import date, datetime
 from pathlib import Path
@@ -166,7 +167,7 @@ def db_lineups(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFrame
                    l.position AS posicao, l.formation AS formacao
             FROM match_lineups l JOIN matches m ON m.match_id = l.match_id
             WHERE l.team_name IN ({ph}) AND m.match_id IN (
-                SELECT match_id FROM matches WHERE home_team_name IN ({ph}) OR away_team_name IN ({ph})
+                SELECT match_id FROM matches WHERE (home_team_name IN ({ph}) OR away_team_name IN ({ph})){comp_sql(team_names, "")}
                 ORDER BY match_date DESC LIMIT {int(n_games) * 3})"""
     try:
         with db.connect() as conn:
@@ -233,7 +234,7 @@ def squad_from_db(db, team_names: Sequence[str], n_games: int = 20) -> pd.DataFr
 def recent_matches(db, team_names: Sequence[str], n: int = 20, before: Optional[str] = None) -> pd.DataFrame:
     ph = ",".join("?" * len(team_names))
     where = f"(home_team_name IN ({ph}) OR away_team_name IN ({ph})) AND data_level IN ('EVENTS','BOXSCORE') " \
-            "AND home_score IS NOT NULL"
+            "AND home_score IS NOT NULL" + comp_sql(team_names, "")
     params: List[Any] = list(team_names) * 2
     if before:
         where += " AND match_date < ?"

@@ -5,6 +5,7 @@ Usa dados observados do lake/SQLite; estimativas financeiras e projeções táti
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 import hashlib
 import json
 import math
@@ -223,7 +224,15 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
     out["rating_media"] = round(float(np.average(ratings[valid], weights=mins[valid])), 2) if valid.any() else None
     out["ultimo_jogo"] = _safe_str(rows["match_date"].max()) if "match_date" in rows else ""
     date_values = rows["match_date"].dropna().astype(str) if "match_date" in rows else pd.Series(dtype=str)
-    latest = rows.loc[date_values.idxmax()] if not date_values.empty else (rows.iloc[-1] if len(rows) else {})
+    from src.squad.planner import national_team_key
+
+    club_only = rows[~rows["team_name"].map(lambda t: bool(national_team_key(str(t or ""))))] if "team_name" in rows else rows
+    if not club_only.empty:                              # seleção não é clube
+        rows_c = club_only
+        date_values = rows_c["match_date"].dropna().astype(str) if "match_date" in rows_c else pd.Series(dtype=str)
+    else:
+        rows_c = rows
+    latest = rows_c.loc[date_values.idxmax()] if not date_values.empty else (rows_c.iloc[-1] if len(rows_c) else {})
     out["ultimo_time"] = _safe_str(latest.get("team_name", "")) if isinstance(latest, pd.Series) else ""
     out["ultima_competicao"] = _safe_str(latest.get("competition_name", "")) if isinstance(latest, pd.Series) else ""
 
@@ -350,8 +359,12 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
         if isinstance(values, list) else []
     )
 
+    # rodada 10: clube atual = último jogo por CLUBE (jogo de seleção não muda o clube: Yamal não é "do Spain")
+    from src.squad.planner import national_team_key
+
+    club_rows = chronological[~chronological["team_name"].map(lambda t: bool(national_team_key(str(t or ""))))]
     latest = (
-        chronological.drop_duplicates(group_keys, keep="last")
+        (club_rows if not club_rows.empty else chronological).drop_duplicates(group_keys, keep="last")
         .set_index(group_keys)
     )
     out["ultimo_time"] = latest["team_name"].reindex(out.index).fillna("")
@@ -370,12 +383,13 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     """
     report = progress if callable(progress) else (lambda _message: None)
     since = (date.today() - timedelta(days=int(days))).isoformat()
-    query = """
+    # rodada 10: só competições masculinas (o mercado do Transfermarkt é masculino; nomes iguais não se misturam)
+    query = f"""
         SELECT p.match_id, p.team_name, p.player_name, p.position, p.minutes, p.rating, p.stats_json,
                m.match_date, m.season_name, m.competition_name, m.home_team_name, m.away_team_name
         FROM match_player_stats p
         JOIN matches m ON m.match_id = p.match_id
-        WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0
+        WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0{comp_sql([], "m")}
           AND COALESCE(m.data_source, '') NOT IN ('simulated', 'upload')
     """
     try:
@@ -857,6 +871,17 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     d["qualidade"] = np.nan
     d["confianca_pct"] = 0.0
     d["nota_media_temporada"] = pd.to_numeric(d["rating_12m"].combine_first(d["rating_media"]), errors="coerce")
+    # nível do clube (0–1): percentil do valor do elenco entre os clubes; reputação: percentil do valor na função
+    level: Dict[int, float] = {}
+    if "clube_valor_total_eur" in d:
+        cv = pd.to_numeric(d["clube_valor_total_eur"], errors="coerce")
+        clubs_pct = cv.groupby(d["clube"]).first().rank(pct=True) if "clube" in d else None
+        if clubs_pct is not None:
+            lv = d["clube"].map(clubs_pct)
+            level = {i: float(v) for i, v in lv.items() if pd.notna(v)}
+    mv = pd.to_numeric(d["valor_mercado_eur"], errors="coerce")
+    rp = np.log1p(mv).groupby(d["papel"]).rank(pct=True) * 100
+    rep_pct: Dict[int, float] = {i: float(v) for i, v in rp.items() if pd.notna(v) and pd.notna(mv.get(i)) and mv.get(i) > 0}
     # Cada função tem sua própria régua. Não misturar goleiros, laterais, volantes e atacantes.
     for role, idx in d.groupby("papel", dropna=False).groups.items():
         family = _role_family(str(role))
@@ -887,10 +912,20 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             raw = sum(s * w for s, w in items) / total_w
             mins = _num(d.at[row_idx, "minutos_12m"]) or _num(d.at[row_idx, "minutos"]) or 0
             coverage = min(1.0, len(items) / max(3.0, len(specs) * .55))
-            exposure = min(1.0, mins / max(float(min_minutes) * 2.0, 1.0))
-            confidence = .55 * exposure + .45 * coverage
-            shrink = .38 + .62 * confidence
-            d.at[row_idx, "qualidade"] = round(50 + (raw - 50) * shrink, 1)
+            # rodada 10: encolhimento bayesiano pelos MINUTOS — 21 min não pode virar nota 82; com 900 min a
+            # produção vale metade, com 2.700 min (uma temporada de titular) vale 3/4
+            exposure = mins / (mins + 900.0)
+            confidence = exposure * (.6 + .4 * coverage)
+            perf = 50 + (raw - 50) * confidence
+            # nível da competição: os mesmos números contra adversários fracos valem menos (proxy = valor do elenco do
+            # clube no Transfermarkt, em percentil entre os clubes)
+            lvl = level.get(row_idx)
+            if lvl is not None:
+                perf = 50 + (perf - 50) * (.55 + .45 * lvl)
+            # reputação de mercado na mesma função (o mercado já precifica nível e regularidade) — só quando existe
+            rep = rep_pct.get(row_idx)
+            q = .65 * perf + .35 * (rep if rep is not None else (100 * lvl if lvl is not None else 40.0))
+            d.at[row_idx, "qualidade"] = round(q, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)
     # Potencial de revenda: indicador exploratório, separado da qualidade atual.
     age = pd.to_numeric(d["idade"], errors="coerce")
@@ -1000,7 +1035,7 @@ def _team_matches(db, aliases: Sequence[str], n: int = 50) -> pd.DataFrame:
                    home_team_name, away_team_name, home_score, away_score
             FROM matches WHERE (home_team_name IN ({ph}) OR away_team_name IN ({ph}))
               AND home_score IS NOT NULL AND away_score IS NOT NULL
-              AND COALESCE(data_level,'') IN ('EVENTS','BOXSCORE')
+              AND COALESCE(data_level,'') IN ('EVENTS','BOXSCORE'){comp_sql(names, "")}
             ORDER BY match_date DESC LIMIT ?"""
     try:
         with db.connect() as conn:
@@ -1022,7 +1057,7 @@ def _coach_profile(db, names: Sequence[str], matches: pd.DataFrame) -> Dict[str,
     ph = ",".join("?" for _ in aliases)
     q = f"""SELECT DISTINCT m.match_id, m.match_date, l.coach, l.team_name
             FROM match_lineups l JOIN matches m ON m.match_id=l.match_id
-            WHERE l.team_name IN ({ph}) AND TRIM(COALESCE(l.coach,''))<> ''
+            WHERE l.team_name IN ({ph}) AND TRIM(COALESCE(l.coach,''))<> ''{comp_sql(aliases, "m")}
             ORDER BY m.match_date DESC"""
     try:
         with db.connect() as conn:
@@ -1297,7 +1332,7 @@ def current_roster(db, club: Optional[Dict[str, Any]], aliases: Sequence[str],
         q = f"""SELECT l.player_name AS nome,l.position AS posicao,l.team_name AS clube,
                        COUNT(DISTINCT l.match_id) AS jogos_recentes,MAX(m.match_date) AS ultima_aparicao
                 FROM match_lineups l JOIN matches m ON m.match_id=l.match_id
-                WHERE l.team_name IN ({ph}) AND m.match_date>=date('now','-180 days')
+                WHERE l.team_name IN ({ph}) AND m.match_date>=date('now','-180 days'){comp_sql(names, "m")}
                 GROUP BY l.player_name,l.position,l.team_name"""
         try:
             with db.connect() as conn:

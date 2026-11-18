@@ -5,6 +5,7 @@ ao adversário, plano de jogo pelos últimos 1/3/5/10/20 jogos e cadastro de atl
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -27,11 +28,18 @@ N_OPTIONS = [1, 3, 5, 10, 20]
 
 # ------------------------------------------------------------------------------------------------ seleção de time
 def _team_options(q: str, limit: int = 25) -> List[str]:
-    from src.data_hub.search import fast_scores
     from src.ui.context import get_service
+
+    return _team_options_cached((q or "").strip().lower(), int(limit), get_service().db.stable_version())
+
+
+@st.cache_data(show_spinner=False, max_entries=256)
+def _team_options_cached(q: str, limit: int, version: str) -> List[str]:
+    """Rodada 10: o mesmo texto não é recalculado (antes cada atualização da tela comparava milhares de nomes)."""
+    from src.data_hub.search import fast_scores
     from src.ui.pages.search_all import team_table
 
-    t = team_table(get_service().db.stable_version(), False)
+    t = team_table(version, False)
     names = set(t["nome"].tolist()) if not t.empty else set()
     cl = D.clubs()
     if not cl.empty:
@@ -44,9 +52,12 @@ def _team_options(q: str, limit: int = 25) -> List[str]:
 
 
 def _picker(label: str, key: str, default: str = "") -> Optional[str]:
+    """Busca só ao apertar Enter/Buscar (rodada 10); antes de digitar, sugere os times com mais jogos na base."""
     c1, c2 = st.columns([1, 1.4])
-    q = c1.text_input(label, value=st.session_state.get(f"{key}_q", default), key=f"{key}_q",
-                      placeholder="digite o nome do time")
+    with c1.form(f"{key}_form", border=False):
+        q = st.text_input(label, value=st.session_state.get(f"{key}_q", default), key=f"{key}_q",
+                          placeholder="digite o nome e aperte Enter")
+        st.form_submit_button("🔎 Buscar", use_container_width=True)
     opts = _team_options(q)
     if not opts:
         c2.caption("Nenhum time com esse nome na base.")
@@ -158,7 +169,7 @@ def _attributes(team: str, version: str) -> pd.DataFrame:
     ph = ",".join("?" * len(names))
     q = (f"SELECT p.player_name, p.minutes, p.stats_json FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id "
          f"WHERE p.team_name IN ({ph}) AND p.match_id IN (SELECT DISTINCT p2.match_id FROM match_player_stats p2 JOIN matches m2 "
-         f"ON m2.match_id = p2.match_id WHERE p2.team_name IN ({ph}) ORDER BY m2.match_date DESC LIMIT 15)")
+         f"ON m2.match_id = p2.match_id WHERE p2.team_name IN ({ph}){comp_sql(names, 'm2')} ORDER BY m2.match_date DESC LIMIT 15)")
     try:
         with get_service().db.connect() as conn:
             d = pd.read_sql_query(q, conn, params=names * 2)
@@ -392,7 +403,7 @@ def _matchday(team: str, version: str, n: int, target_competition: Optional[str]
         ph = ",".join("?" * len(names))
         with db.connect() as conn:
             recent = conn.execute(f"SELECT COUNT(DISTINCT l.match_id) FROM match_lineups l JOIN matches m ON m.match_id = "
-                                  f"l.match_id WHERE l.team_name IN ({ph}) AND m.match_date >= date('now', '-45 days')",
+                                  f"l.match_id WHERE l.team_name IN ({ph}) AND m.match_date >= date('now', '-45 days'){comp_sql(names, 'm')}",
                                   list(names)).fetchone()[0]
         if recent < 4 and get_service().fotmob.enabled:
             get_service().fotmob.ensure_teams(list(names), n=12)
@@ -460,16 +471,16 @@ def _teams_with_lineups(days: int = 400) -> List[str]:
     return [r[0] for r in rows if r[0]]
 
 
-def _next_match_tab(team: str, version: str, n: int) -> None:
+def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None:
+    """Rodada 10: 'prox' = próximo jogo do calendário (sem perguntar o adversário); 'hyp' = jogo hipotético."""
     from src.squad import matchday as M
     from src.ui.context import get_service
 
     me = _matchday(team, version, n)
-    fx = M.next_fixtures(get_service().db, me["names"])
-    kind = st.radio("Jogo", ["📅 Próximo jogo do calendário", "🧪 Jogo hipotético (qualquer adversário)"], horizontal=True,
-                    key=f"nx_kind_{team}", index=0 if not fx.empty else 1)
+    fx = M.next_fixtures(get_service().db, me["names"]) if kind == "prox" else pd.DataFrame()
     pv: Dict[str, Any] = {}
-    if kind.startswith("📅"):
+    w = "nx" if kind == "prox" else "hy"
+    if kind == "prox":
         if fx.empty:
             empty_state("Sem próximos jogos no calendário", "O calendário vem da ESPN (temporada atual). Use o jogo "
                         "hipotético para montar contra qualquer adversário.", "📅",
@@ -479,15 +490,25 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         lab = st.selectbox("Próximo jogo", labels, key=f"nx_pick_{team}")
         f = fx.iloc[labels.index(lab)]
         rival = f["away"] if f["home"] in me["names"] else f["home"]
+        if st.button(f"🔎 Analisar este jogo (plano de jogo e escalação contra {rival})", type="primary",
+                     key=f"nx_analyse_{team}"):
+            st.session_state["sq_rival_choice"], st.session_state["sq_rival_src"] = rival, "próximo jogo"
+            st.rerun()
     else:
         opts = [t for t in _teams_with_lineups() if t not in me["names"]]
         if not opts:
             empty_state("Sem adversários com escalação na base", "Baixe resumos de jogos recentes.", "🧪",
                         "python -m src.data_hub.sync --only espn_resumos")
             return
-        q = st.text_input("Adversário hipotético (digite para filtrar)", key=f"nx_hq_{team}")
+        with st.form(f"hy_form_{team}", border=False):
+            q = st.text_input("Adversário hipotético (digite e aperte Enter)", key=f"nx_hq_{team}")
+            st.form_submit_button("🔎 Buscar adversário")
         flt = [t for t in opts if q.strip().lower() in t.lower()] if q.strip() else opts
         rival = st.selectbox("Adversário", flt or opts, key=f"nx_hyp_{team}")
+        if st.button(f"🔎 Analisar este jogo (plano de jogo e escalação contra {rival})", type="primary",
+                     key=f"hy_analyse_{team}"):
+            st.session_state["sq_rival_choice"], st.session_state["sq_rival_src"] = rival, "jogo hipotético"
+            st.rerun()
         st.caption("Jogo hipotético: mesma leitura do próximo jogo (provável, desfalques, fragilidades e plano), sem "
                    "escalação oficial nem notícias, que só existem para jogos marcados.")
         f = None
@@ -527,7 +548,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
     with c2:
         st.markdown(f"#### 🔴 {rival} provável ({fr})")
         render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
-                        use_container_width=True, key="nx_pitch_r")
+                        use_container_width=True, key=f"{w}_pitch_r")
         st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
         if len(out):
@@ -538,7 +559,7 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         with st.expander("Por que cada jogador do rival deve começar"):
             _xi_cards(xr, "#EF4444")
     form_me = st.session_state.get("nx_form") or None
-    mode = c1.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key="nx_mode")
+    mode = c1.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key=f"{w}_mode")
     if off_me and mode == "Provável":
         xm, fm = M.official_xi(a, off_me)
     else:
@@ -548,8 +569,20 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
         tips = M.weakness_tips(weak, b)
         from src.ui.drag_pitch import pitch_tips  # noqa: F401  (mesmo estilo de marcas do campinho principal)
 
-        fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})", vertical=True)
-        render_chart(fig, use_container_width=True, key="nx_pitch_m")
+        if st.toggle("✏️ Editar o campinho (arrastar, trocar com o banco, mudar formação)", key=f"{w}_edit"):
+            import streamlit.components.v1 as components
+
+            from src.ui import drag_pitch
+
+            used = {x.get("jogador") for x in xm}
+            pl = a["jogadores"] if a["jogadores"] is not None else pd.DataFrame()
+            bench = [{"nome": r["nome"], "nota": r.get("qualidade"), "papel_pt": str(r.get("papel") or "")}
+                     for r in pl.to_dict("records") if r.get("nome") not in used and not r.get("indisponivel")][:14]
+            components.html(drag_pitch.html(team, fm, xm, bench, M.weakness_tips(weak, b) if weak else []), height=760)
+            st.caption("As mudanças ficam neste navegador (não alteram a base).")
+        else:
+            fig = _pitch(xm, None, {}, f"{team} — {mode.lower()} ({fm})", vertical=True)
+            render_chart(fig, use_container_width=True, key=f"{w}_pitch_m")
         st.caption("As fragilidades do rival estão no mapa logo abaixo (zonas pintadas + como explorar).")
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
@@ -565,9 +598,9 @@ def _next_match_tab(team: str, version: str, n: int) -> None:
                 st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
     from src.ui import vuln_view
 
-    vuln_view.render(rival, rv["names"], me["names"], version)          # rodada 7: mapa de onde atacar
+    vuln_view.render(rival, rv["names"], me["names"], version, where=w)   # rodada 7: mapa de onde atacar
     with st.expander(f"🛡️ E onde {team} sofre (pontos a corrigir antes do jogo)"):
-        vuln_view.render(team, me["names"], rv["names"], version, mine=True)
+        vuln_view.render(team, me["names"], rv["names"], version, mine=True, where=w)
     st.markdown(f"### 🔍 Leitura de {rival}")
     k1, k2 = st.columns(2)
     with k1:
@@ -617,11 +650,27 @@ def render(_ctx=None) -> None:
          "Elenco atual (Transfermarkt + atletas que você cadastrar), nota do laboratório, escalação provável, a melhor "
          "possível e a ajustada ao adversário — com o plano de jogo tirado dos últimos jogos do rival.")
     version = get_service().db.stable_version()
-    a, b = st.columns(2)
-    with a:
-        team = _picker("Meu time", "sq_team")
-    with b:
-        rival = _picker("Adversário", "sq_rival")
+    team = _picker("Meu time", "sq_team")
+    if team and st.session_state.get("sq_rival_team") != team:   # outro time: o adversário escolhido não vale mais
+        st.session_state["sq_rival_team"] = team
+        st.session_state.pop("sq_rival_choice", None)
+    rival = st.session_state.get("sq_rival_choice")
+    if not rival and team:                                         # padrão: o próximo jogo do calendário
+        try:
+            from src.squad import matchday as _M
+
+            _fx = _M.next_fixtures(get_service().db, _matchday(team, version, 10)["names"], limit=1)
+            if not _fx.empty:
+                from src.ui.pages.clubs import same_team_names as _stn0
+
+                rival = _fx.iloc[0]["away"] if _fx.iloc[0]["home"] in _stn0(team) else _fx.iloc[0]["home"]
+                st.session_state["sq_rival_src"] = "próximo jogo"
+        except Exception:
+            rival = None
+    if rival:
+        st.caption(f"Adversário em análise no Plano de jogo e na escalação 'Contra o adversário': **{rival}** "
+                   f"({st.session_state.get('sq_rival_src', 'escolhido')}). Para trocar, use as abas 🔭 Próximo jogo "
+                   "ou 🧪 Jogo hipotético e clique em 'Analisar este jogo'.")
     c1, c2, c3 = st.columns([1.2, 1.2, 2])
     formation = c1.selectbox("Formação", list(FORMATIONS), key="sq_form")
     n = c2.select_slider("Últimos jogos", N_OPTIONS, value=5, key="sq_n")
@@ -645,15 +694,16 @@ def render(_ctx=None) -> None:
     squad = sq["squad"]
     plan = matchup_plan(mine, theirs, team, rival) if theirs else None
 
-    t0, t1, t2, t3, t4, t5 = st.tabs(["🔭 Próximo jogo", "🧩 Campinho", "🎯 Plano de jogo", "👥 Elenco e notas",
-                                      "➕ Adicionar atleta", "💾 Escalações salvas"])
-    with t0:
-        try:
-            _next_match_tab(team, version, max(n, 10))
-        except Exception as exc:
-            from src.ui.components import error_state
+    t0, th, t1, t2, t3, t4, t5 = st.tabs(["🔭 Próximo jogo", "🧪 Jogo hipotético", "🧩 Campinho", "🎯 Plano de jogo",
+                                          "👥 Elenco e notas", "➕ Adicionar atleta", "💾 Escalações salvas"])
+    for tab_, kind_ in ((t0, "prox"), (th, "hyp")):
+        with tab_:
+            try:
+                _next_match_tab(team, version, max(n, 10), kind_)
+            except Exception as exc:
+                from src.ui.components import error_state
 
-            error_state("Próximo jogo indisponível", exc)
+                error_state("Próximo jogo indisponível" if kind_ == "prox" else "Jogo hipotético indisponível", exc)
     with t1:
         if squad.empty:
             empty_state("Sem elenco para este time", f"Fonte procurada: Transfermarkt e escalações da base.", "👥",
@@ -773,7 +823,7 @@ def render(_ctx=None) -> None:
             from src.ui import vuln_view
             from src.ui.pages.clubs import same_team_names as _stn
 
-            vuln_view.render(rival, _stn(rival), _stn(team), version)   # rodada 7: fragilidades reais por setor/jogador
+            vuln_view.render(rival, _stn(rival), _stn(team), version, where="plano")   # rodada 7: fragilidades reais por setor/jogador
             _ga_section(team, rival, squad, formation, version)          # rodada 9: algoritmo genético
             st.markdown(f"##### 🔍 Diagnóstico de {rival} pelas estatísticas do time")
             if not dg["suficiente"]:

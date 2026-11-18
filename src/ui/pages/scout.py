@@ -14,7 +14,7 @@ import streamlit as st
 
 from src.scout import engine as E
 from src.squad import data as D
-from src.ui.components import comparison_table, empty_state, page_header
+from src.ui.components import styled_dataframe, comparison_table, empty_state, page_header
 from src.ui.nav import back_button, open_view, param
 
 
@@ -89,6 +89,57 @@ def _rank_candidates(version, team, country, competition, season, rejected, feed
     """Reaproveita o ranking caro entre interações; a revisão invalida quando o histórico muda."""
     return E.recommend(_pool, _needs, _financial, country, competition, roster=_roster,
                        rejected=rejected, feedback_reason=feedback_reason, season=season)
+
+
+SECTORS = [("🧤 Goleiros", {"GK"}), ("🛡️ Defesa", {"CB", "LB", "RB", "LWB", "RWB"}),
+           ("⚙️ Meio-campo", {"DM", "CM", "AM", "LM", "RM"}), ("⚡ Ataque", {"LW", "RW", "ST"})]
+
+
+def _window_cards(roster, decisions):
+    """Rodada 10: janela de transferências em cartões por setor (antes: uma caixa de seleção por atleta, em lista)."""
+    rows = []
+    r = roster.copy()
+    r["_q"] = pd.to_numeric(r.get("qualidade"), errors="coerce")
+    known = set().union(*[s_ for _, s_ in SECTORS])
+    groups = SECTORS + [("❔ Posição não identificada", None)]
+    tabs_ = st.tabs([f"{label} ({int((r['papel'].isin(roles) if roles else ~r['papel'].isin(known)).sum())})"
+                     for label, roles in groups])
+    opts = ["Fica", "Vender", "Emprestar"]
+    color = {"Fica": "#22C55E", "Vender": "#EF4444", "Emprestar": "#FBBF24"}
+    for tab, (label, roles) in zip(tabs_, groups):
+        with tab:
+            part = r[r["papel"].isin(roles)] if roles else r[~r["papel"].isin(known)]
+            part = part.sort_values("_q", ascending=False, na_position="last")
+            if part.empty:
+                st.caption("Ninguém neste setor.")
+                continue
+            cols = st.columns(3)
+            for i, p in enumerate(part.to_dict("records")):
+                name = str(p["nome"])
+                cur = decisions.get(name, "Fica")
+                q = p.get("_q")
+                age = pd.to_numeric(pd.Series([p.get("idade")]), errors="coerce").iloc[0]
+                with cols[i % 3]:
+                    st.markdown(
+                        f'<div style="background:#0B1120;border:1px solid #1E2A44;border-left:4px solid {color[cur]};'
+                        f'border-radius:14px;padding:10px 12px;margin-bottom:6px">'
+                        f'<div style="font-weight:700;color:#F5F7FB">{html.escape(name)}</div>'
+                        f'<div style="color:#98A6BF;font-size:.82rem">{html.escape(_role(p.get("papel")))}'
+                        f'{f" · {int(age)} anos" if pd.notna(age) else ""}</div>'
+                        f'<div style="display:flex;gap:14px;margin-top:4px;font-size:.85rem;color:#DCE6F4">'
+                        f'<span>⭐ {f"{q:.0f}" if pd.notna(q) else "—"}</span><span>💶 {_money(p.get("valor_mercado_eur"))}</span>'
+                        f'</div></div>', unsafe_allow_html=True)
+                    key = f"scout_dec_{_slug(name)}"
+                    if hasattr(st, "segmented_control"):
+                        choice = st.segmented_control("Decisão", opts, default=cur, key=key,
+                                                      label_visibility="collapsed") or "Fica"
+                    else:
+                        choice = st.radio("Decisão", opts, index=opts.index(cur), key=key, horizontal=True,
+                                          label_visibility="collapsed")
+                decisions[name] = choice
+                if choice != "Fica":
+                    rows.append({"Jogador": name, "Decisão": choice, "Valor referência": _money(p.get("valor_mercado_eur"))})
+    return rows
 
 
 def _slug(value):
@@ -251,7 +302,7 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'<div class="scout-player"><div class="scout-avatar">{html.escape(_initials(name))}</div>'
         f'<div class="scout-main"><div class="scout-name">{html.escape(name)}</div>'
         f'<div class="scout-sub">{html.escape(str(position))} · {club_crest} {html.escape(club)} · '
-        f'{html.escape(str(player.get("idade") if pd.notna(player.get("idade")) else "idade n/d"))} anos · '
+        f'{html.escape(str(int(float(player.get("idade")))) if pd.notna(player.get("idade")) else "idade n/d")} anos · '
         f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
         f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
         f'<span class="scout-tag neutral">Compatibilidade {(player.get("compatibilidade") or {}).get("score","—")}%</span>'
@@ -391,7 +442,11 @@ def render(_ctx=None):
         st.error(f"Erro ao carregar os dados de mercado: {exc}")
         return
     universe, clubs = data["universe"], data["clubs"]
-    q = st.text_input("Pesquisar clube", value=prefill, placeholder="Ex.: Cruzeiro, Flamengo, Como 1907")
+    with st.form("scout_club_form", border=False):           # rodada 10: só busca ao apertar Enter/Buscar
+        fq, fb = st.columns([5, 1])
+        q = fq.text_input("Pesquisar clube", value=prefill, placeholder="Ex.: Cruzeiro, Flamengo, Como 1907 — Enter para buscar")
+        fb.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
+        fb.form_submit_button("🔎 Buscar", use_container_width=True)
     options = _team_options(q, 30) if q.strip() else _team_options("", 30)
     if not options and not clubs.empty:
         options = clubs["nome"].astype(str).tolist()[:30]
@@ -492,20 +547,38 @@ def render(_ctx=None):
             for idx, row in ranked.head(5).iterrows():
                 _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
             st.markdown("#### Três melhores por posição")
-            roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
-            role = st.selectbox("Posição", roles, format_func=_role, key="scout_top3_role")
+            # rodada 10: TODAS as posições (não só as carentes) — a IA ranqueia sob demanda a posição escolhida
+            need_roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
+            roles = need_roles + [r for r in E.ROLE_LABELS if r not in need_roles]
+            role = st.selectbox("Posição", roles, key="scout_top3_role",
+                                format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
             fa, fb, fc = st.columns(3)
             age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
             quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
             maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
-            filt3 = ranked[ranked["papel_alvo"] == role].copy()
-            filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
-            filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
-            filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
-            nations = ["Todas"] + sorted(filt3["nacionalidade"].dropna().astype(str).unique().tolist())
-            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation")
+            if role in need_roles:
+                base_rank = ranked
+            else:
+                with st.spinner(f"A IA está garimpando {_role(role).lower()}s…"):
+                    base_rank = _rank_candidates(version, team, country, competition, next_season,
+                                                 tuple(rejected_for_run), feedback_reason, pool,
+                                                 [{"papel": role, "urgencia": 40,
+                                                   "motivo": "posição escolhida por você (reforço/concorrência)"}],
+                                                 financial, roster)
+            filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
+            if not filt3.empty:
+                filt3 = filt3[pd.to_numeric(filt3["idade"], errors="coerce").between(*age_band)]
+                filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
+                filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
+            # rodada 10: TODAS as nações do mercado, cada uma com a leitura de adaptação ao país do clube
+            all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
+            aff = {n: E._affinity(n, country) for n in all_nat}
+            nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
+            nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
+                                  format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
             if nation != "Todas":
-                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation]
+                st.caption(f"Contexto: {aff[nation][1]}. Exceções existem, mas a IA pesa a adaptação no índice de realismo.")
+                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation] if not filt3.empty else filt3
             for idx, row in filt3.head(3).iterrows():
                 _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
             if filt3.empty:
@@ -563,7 +636,7 @@ def render(_ctx=None):
                 "rating_12m":"Nota média 12m"})
             if "Valor de mercado" in display:
                 display["Valor de mercado"] = display["Valor de mercado"].map(_money)
-            st.dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
+            styled_dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
                          use_container_width=True, hide_index=True)
             selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
                                     key="scout_roster_select")
@@ -620,7 +693,7 @@ def render(_ctx=None):
                 "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
                 "confianca_pct":"Confiança (%)","minutos_12m":"Minutos 12m","rating_12m":"Nota 12m"}).head(100)
             if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)
-            st.dataframe(display,use_container_width=True,hide_index=True)
+            styled_dataframe(display,use_container_width=True,hide_index=True)
             if not filt.empty:
                 chosen=st.selectbox("Selecionar jogador",filt["nome"].astype(str).tolist(),key="scout_manual_pick")
                 p=filt[filt["nome"].astype(str)==chosen].iloc[0].to_dict()
@@ -697,7 +770,7 @@ def render(_ctx=None):
             table=table[keep].copy()
             if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])
             if "Valor (€)" in table: table["Valor (€)"]=table["Valor (€)"].map(_money)
-            st.dataframe(table,use_container_width=True,hide_index=True)
+            styled_dataframe(table,use_container_width=True,hide_index=True)
             name=st.selectbox("Escolher joia",gems["nome"].astype(str).tolist(),key="scout_gem_pick")
             if st.button("Adicionar joia ao plano",key="scout_gem_add"):
                 p=gems[gems["nome"].astype(str)==name].iloc[0].to_dict()
@@ -709,16 +782,8 @@ def render(_ctx=None):
     with tabs[4]:
         st.markdown("#### Janela de transferências")
         if not roster.empty:
-            st.caption("Marque quem fica, sai ou deve ser emprestado. Vendas usam deságio estimado.")
-            rows=[]
-            for p in roster.sort_values("qualidade",ascending=False,na_position="last").to_dict("records"):
-                name=str(p["nome"])
-                choice=st.selectbox(f"{name} · {_role(p.get('papel'))}",["Fica","Vender","Emprestar"],
-                    index=["Fica","Vender","Emprestar"].index(decisions.get(name,"Fica")),
-                    key=f"scout_dec_{_slug(name)}")
-                decisions[name]=choice
-                if choice!="Fica":
-                    rows.append({"Jogador":name,"Decisão":choice,"Valor referência":_money(p.get("valor_mercado_eur"))})
+            st.caption("Marque quem fica, sai ou deve ser emprestado — por setor. Vendas usam deságio estimado.")
+            rows=_window_cards(roster, decisions)
             if rows: comparison_table(pd.DataFrame(rows))
         plan=st.session_state[plan_key]
         if plan:
@@ -756,7 +821,7 @@ def render(_ctx=None):
                 comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                for p in simulation["xi_depois"]]))
             if simulation.get("deltas"):
-                st.dataframe(pd.DataFrame(simulation["deltas"]),use_container_width=True,hide_index=True)
+                styled_dataframe(pd.DataFrame(simulation["deltas"]),use_container_width=True,hide_index=True)
                 chart=pd.DataFrame(simulation["deltas"]).set_index("indicador")[["antes","depois"]]
                 st.bar_chart(chart)
             st.caption(simulation.get("limite",""))

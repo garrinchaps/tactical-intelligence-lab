@@ -20,8 +20,8 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe.pkl")
-META_PATH = Path("data/processed/scout_universe.json")
+SNAP_PATH = Path("data/processed/scout_universe_v2.pkl")    # v2: nova régua de qualidade (rodada 10)
+META_PATH = Path("data/processed/scout_universe_v2.json")
 
 
 def max_age_hours() -> float:
@@ -46,8 +46,7 @@ def build_universe(db) -> Dict[str, Any]:
                           players.get("clube_id", pd.Series("", index=players.index)).astype(str).str.strip().ne("")]
     history = E.load_player_history(db, days=1825, player_names=history_players.get("nome", pd.Series(dtype=str)))
     valuations = D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"])
-    universe = E.add_quality_scores(E.build_market_universe(players, history, valuations))
-    universe = E.merge_external_ratings(universe, D.external_ratings())
+    universe = E.build_market_universe(players, history, valuations)
     if not clubs.empty:
         from src.data_lake.ids import team_core
 
@@ -67,6 +66,9 @@ def build_universe(db) -> Dict[str, Any]:
                 if source in club_rows:
                     mapping = club_rows.drop_duplicates("_club_core").set_index("_club_core")[source].to_dict()
                     universe[target] = universe["clube"].map(team_core).map(mapping)
+    # rodada 10: a qualidade usa o nível do clube (valor do elenco), então vem DEPOIS de juntar os clubes
+    universe = E.add_quality_scores(universe)
+    universe = E.merge_external_ratings(universe, D.external_ratings())
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
     return {"universe": universe, "clubs": clubs, "status": "carregado",
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}

@@ -83,7 +83,8 @@ def cards_html(found: List[Dict[str, Any]], color: str = "#EF4444") -> str:
     return "".join(out)
 
 
-def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], version: str, mine: bool = False) -> None:
+def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], version: str, mine: bool = False,
+           where: str = "") -> None:
     with st.spinner(f"Procurando fragilidades de {rival} nos últimos jogos..."):
         r = _findings(tuple(rival_names), tuple(our_names or ()), version)
     found = r.get("achados") or []
@@ -98,6 +99,6 @@ def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], ver
     a, b = st.columns([1, 1.25])
     with a:
         st.plotly_chart(pitch_figure(found, f"Zonas frágeis de {rival}"), use_container_width=True,
-                        key=f"vuln_pitch_{rival}_{mine}")
+                        key=f"vuln_pitch_{where}_{rival}_{mine}")   # a mesma tela aparece em 2 abas
     with b:
         st.markdown(cards_html(found, "#F59E0B" if mine else "#EF4444"), unsafe_allow_html=True)

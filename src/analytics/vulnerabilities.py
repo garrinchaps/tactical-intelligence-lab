@@ -20,6 +20,7 @@ referência (percentil da mesma função ou média das competições). Sem track
 
 from __future__ import annotations
 
+from src.data_hub.gender import comp_sql
 import json
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -41,7 +42,7 @@ def _recent_ids(db, names: Sequence[str], n: int) -> List[int]:
     with db.connect() as conn:
         rows = conn.execute(
             f"SELECT DISTINCT s.match_id, m.match_date FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
-            f"WHERE s.team_name IN ({ph}) AND (m.data_source = 'fotmob' OR s.minutes IS NOT NULL) "
+            f"WHERE s.team_name IN ({ph}) AND (m.data_source = 'fotmob' OR s.minutes IS NOT NULL){comp_sql(names, 'm')} "
             f"ORDER BY m.match_date DESC LIMIT ?", list(names) + [int(n)]).fetchall()
     return [int(r[0]) for r in rows]
 
