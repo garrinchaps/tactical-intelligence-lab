@@ -18,8 +18,24 @@ from src.ui.components import comparison_table, empty_state, page_header
 from src.ui.nav import back_button, open_view, param
 
 
-@st.cache_data(show_spinner=False, persist="disk", max_entries=3)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _market_data(version: str):
+    """Rodada 7: lê a fotografia pronta do universo (instantâneo); só monta na hora se ainda não existir nenhuma."""
+    from src.scout import snapshot as S
+    from src.ui.context import get_service
+
+    data = S.load()
+    if data is not None:
+        return data
+    data = S.build_universe(get_service().db)
+    try:
+        S.save(data)
+    except Exception:
+        pass
+    return data
+
+
+def _market_data_legacy(version: str):
     from src.ui.context import get_service
 
     players, clubs = D.table("tm_jogadores"), D.table("tm_clubes")
@@ -353,12 +369,24 @@ def render(_ctx=None):
     # Mantém a renovação periódica do catálogo externo e também invalida o cache
     # imediatamente quando o SQLite principal/WAL/journal realmente muda.
     # A assinatura usa apenas metadados de arquivo: não percorre centenas de milhares de linhas.
-    import time
-    version = f"{E.history_cache_revision(service.db)}:{int(time.time() // 1200)}"
+    from src.scout import snapshot as S
+
+    # rodada 7: versão ESTÁVEL (só muda quando a fotografia do universo é refeita, a cada ~6 h pelo processo de
+    # fundo). Antes mudava a cada jogo gravado pela FotMob e a aba recalculava tudo sem nunca terminar.
+    version = S.version()
     prefill = str(param("club", "") or st.session_state.get("scout_selected_club", ""))
     try:
-        with st.spinner("Carregando mercado e histórico estatístico disponível..."):
+        first = S.load() is None
+        msg = ("Montando o mercado pela primeira vez (só desta vez — depois fica pronto e é atualizado em segundo plano)..."
+               if first else "Abrindo o mercado...")
+        with st.spinner(msg):
             data = _market_data(version)
+        if first:
+            version = S.version()
+        age = S.age_hours()
+        if age is not None:
+            st.caption(f"Mercado e histórico: fotografia de {age:.1f} h atrás (refeita em segundo plano a cada "
+                       f"{S.max_age_hours():g} h).")
     except Exception as exc:
         st.error(f"Erro ao carregar os dados de mercado: {exc}")
         return

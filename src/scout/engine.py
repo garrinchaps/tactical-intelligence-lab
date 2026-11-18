@@ -1692,7 +1692,11 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
             })
     if not rows:
         return pd.DataFrame()
-    out = pd.DataFrame(rows).sort_values(["score_scout", "realismo"], ascending=False)
+    out = pd.DataFrame(rows)
+    # "realismo" é um dicionário por linha: empate na nota fazia o pandas comparar dicionários e quebrar a aba.
+    # Desempate pela pontuação numérica do realismo (mesmo critério de antes, sem o erro).
+    out["_realismo_score"] = [float((r or {}).get("score") or 0) if isinstance(r, dict) else 0.0 for r in out["realismo"]]
+    out = out.sort_values(["score_scout", "_realismo_score"], ascending=False).drop(columns=["_realismo_score"])
     return out.drop_duplicates("_core", keep="first").reset_index(drop=True)
 
 

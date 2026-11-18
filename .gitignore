@@ -55,3 +55,10 @@ apps/web/dist/
 apps/web/*audit*.json
 data/processed/rating_ref_v3*.parquet
 data/learning/
+
+# rodada 7: processo de fundo e fotografia do Scout (locais)
+data/worker_status.json
+data/worker_status.tmp
+data/worker.pid
+data/worker.log
+data/processed/scout_universe.*

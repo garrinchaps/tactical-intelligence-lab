@@ -419,7 +419,10 @@ class DataHubDB:
         automática (thread til-autosync) e as sincronizações em outro terminal seguem o ritmo de stable_version."""
         import threading
 
-        if threading.current_thread().name != "til-autosync":
+        # rodada 7: QUALQUER trabalho de fundo (til-fotmob, til-openplay-prefetch, til-ao-vivo…) e o processo de
+        # fundo seguem o ritmo de stable_version — antes só til-autosync, e cada jogo da FotMob fazia a tela reler
+        # o catálogo inteiro no clique seguinte
+        if not threading.current_thread().name.startswith("til-") and os.environ.get("TIL_IN_WORKER") != "1":
             DataHubDB._ver_memo.pop(str(self.db_path), None)
 
     def has_pending_update(self) -> bool:

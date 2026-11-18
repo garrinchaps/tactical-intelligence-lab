@@ -158,9 +158,22 @@ def _openplay_prefetch_loop(db=None) -> None:
         _OPENPLAY["running"] = False
 
 
+def _view(name: str, local: Dict[str, Any]) -> Dict[str, Any]:
+    """Na tela (modo processo), o estado vem do arquivo do processo de fundo; no processo de fundo, da memória."""
+    if process_mode():
+        w = _worker_view()
+        return dict((w or {}).get(name) or {})
+    return local
+
+
 def openplay_status() -> str:
-    if not openplay_prefetch_enabled() or not _OPENPLAY.get("running"):
+    _OPENPLAY_V = _view("openplay", _OPENPLAY)
+    if not openplay_prefetch_enabled() or not _OPENPLAY_V.get("running"):
         return ""
+    return _openplay_text(_OPENPLAY_V)
+
+
+def _openplay_text(_OPENPLAY: Dict[str, Any]) -> str:
     if _OPENPLAY.get("error"):
         return f" · OpenPlay: { _OPENPLAY['error'][:70] }"
     pending = _OPENPLAY.get("pending")
@@ -238,6 +251,7 @@ def _fotmob_loop(db=None) -> None:
 def fotmob_status() -> str:
     if not fotmob_enabled():
         return ""
+    _fm = _view("fotmob", globals()["_fm"])
     if _fm.get("erro"):
         return f"FotMob: tentando de novo em instantes ({_fm['erro'][:60]})"
     if not _fm.get("running"):
@@ -290,10 +304,51 @@ def _live_loop(db=None) -> None:
         _live["running"] = False
 
 
+def process_mode() -> bool:
+    """Padrão: o trabalho pesado roda num PROCESSO separado (src/data_hub/worker.py). AUTO_SYNC_MODE=thread volta ao antigo."""
+    return os.getenv("AUTO_SYNC_MODE", "process").strip().lower() != "thread" and os.getenv("TIL_IN_WORKER") != "1"
+
+
+def start_threads(db) -> None:
+    """Liga ao vivo, FotMob e OpenPlay (usado pelo processo de fundo, ou pela tela no modo antigo)."""
+    with _lock:
+        if not _live["running"] and os.getenv("AUTO_SYNC_LIVE", "1").strip() not in ("0", "false"):
+            _live["running"] = True
+            threading.Thread(target=_live_loop, args=(db,), daemon=True, name="til-ao-vivo").start()
+        if not _fm["running"] and fotmob_enabled():
+            _fm["running"] = True
+            threading.Thread(target=_fotmob_loop, args=(db,), daemon=True, name="til-fotmob").start()
+        if not _OPENPLAY["running"] and openplay_prefetch_enabled():
+            _OPENPLAY["running"] = True
+            threading.Thread(target=_openplay_prefetch_loop, args=(db,), daemon=True, name="til-openplay-prefetch").start()
+
+
+def _worker_view() -> Optional[Dict[str, Any]]:
+    from src.data_hub.worker import read_status
+
+    return read_status()
+
+
 def ensure_started(db) -> Dict[str, Any]:
     """Dispara a atualização em segundo plano se algo estiver vencido. Seguro chamar a cada recarga da página."""
     if not enabled():
         return {**_state, "enabled": False, "due": []}
+    if process_mode():
+        # rodada 7: a tela não roda mais nada pesado — só garante o processo de fundo e lê o andamento dele
+        try:
+            from src.data_hub.worker import ensure_worker
+
+            ensure_worker()
+        except Exception as exc:
+            return {**_state, "enabled": True, "worker_error": f"{type(exc).__name__}: {exc}"}
+        w = _worker_view() or {}
+        s = dict(w.get("sync") or {})
+        nq = s.get("next_quick")
+        try:
+            s["next_quick"] = datetime.fromisoformat(nq) if nq else None
+        except ValueError:
+            s["next_quick"] = None
+        return {**s, "enabled": True, "worker": bool(w)}
     with _lock:
         if not _live["running"] and os.getenv("AUTO_SYNC_LIVE", "1").strip() not in ("0", "false"):
             _live["running"] = True
