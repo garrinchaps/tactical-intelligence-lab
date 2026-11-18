@@ -245,6 +245,30 @@ class ReferenceBaselineBuilder:
             cache_path.write_text(json.dumps(baselines, ensure_ascii=False), encoding="utf-8")
         return baselines
 
+    TARGET_MATCHES = 1500        # rodada 7: o "jogo típico" usa pelo menos mil jogos (cresce em segundo plano)
+
+    @classmethod
+    def load_cached(cls, cache_path: Optional[Path] = None) -> Dict[str, Any]:
+        """Só LÊ a referência pronta (a tela nunca monta jogos novos; quem cresce a base é o processo de fundo)."""
+        cache_path = cache_path or cls.DEFAULT_CACHE
+        if not cache_path.exists():
+            return {}
+        try:
+            return json.loads(cache_path.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+
+    @classmethod
+    def grow(cls, load_events_fn, db_path: str = "database/tactical_lab.db", batch: int = 100,
+             target: Optional[int] = None) -> Dict[str, Any]:
+        """Acrescenta até `batch` jogos novos à referência, do mais recente ao mais antigo, até `target` jogos usados."""
+        target = target or cls.TARGET_MATCHES
+        cached = cls.load_cached()
+        if len(cached.get("match_ids", [])) >= target:
+            return cached
+        wanted = sorted(cls.available_real_match_ids(db_path), reverse=True)     # mais novos primeiro
+        return cls.build(load_events_fn, wanted, cache_path=cls.DEFAULT_CACHE, previous=cached, max_new=batch)
+
     @classmethod
     def load_or_build(
         cls,

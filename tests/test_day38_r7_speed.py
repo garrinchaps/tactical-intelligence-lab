@@ -113,3 +113,26 @@ def test_vulnerabilities_find_dribbled_fullback_and_counterattacks(tmp_path, mon
     assert any("Lateral Fraco é muito driblado" in t for t in titles)
     assert any("contra-ataque" in t for t in titles)
     assert all(0 <= a["gravidade"] <= 100 and a["evidencia"] and a["explorar"] for a in r["achados"])
+
+
+def test_one_per_game_merges_sources_with_one_day_and_name_differences():
+    from src.ui.pages.search_all import one_per_game
+
+    df = pd.DataFrame([
+        {"match_id": 1, "match_date": "2026-11-15", "home_team_name": "Singapore", "away_team_name": "Brasil", "data_level": "RESULT"},
+        {"match_id": 2, "match_date": "2026-11-14", "home_team_name": "Singapore", "away_team_name": "Brazil", "data_level": "BOXSCORE"},
+        {"match_id": 3, "match_date": "2026-10-23", "home_team_name": "Cruzeiro", "away_team_name": "Remo", "data_level": "RESULT"},
+        {"match_id": 4, "match_date": "2026-10-24", "home_team_name": "Cruzeiro", "away_team_name": "Santos", "data_level": "RESULT"}])
+    out = one_per_game(df)
+    assert sorted(out["match_id"]) == [2, 3, 4]          # o jogo duplicado fica só na versão com estatísticas
+
+
+def test_reference_baseline_ui_only_reads_cache(tmp_path, monkeypatch):
+    import json as _j
+
+    from src.metrics.strengths_weaknesses import ReferenceBaselineBuilder as B
+
+    monkeypatch.setattr(B, "DEFAULT_CACHE", tmp_path / "ref.json")
+    assert B.load_cached() == {}
+    (tmp_path / "ref.json").write_text(_j.dumps({"match_ids": [1, 2], "players": [], "teams": []}), encoding="utf-8")
+    assert B.load_cached()["match_ids"] == [1, 2] and B.TARGET_MATCHES >= 1000

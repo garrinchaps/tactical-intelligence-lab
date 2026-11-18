@@ -151,6 +151,26 @@ def _scout_snapshot_loop(db) -> None:
         time.sleep(900)
 
 
+_base_state: Dict[str, Any] = {"jogos": None, "erro": None}
+
+
+def _baselines_loop(db) -> None:
+    """Cresce a referência do 'jogo típico' (Fortes e fracos) em lotes de 100 jogos com lances, até 1.500."""
+    from src.metrics.strengths_weaknesses import ReferenceBaselineBuilder as B
+
+    time.sleep(120)
+    while True:
+        try:
+            before = len(B.load_cached().get("match_ids", []))
+            r = B.grow(db.load_events, db_path=str(db.db_path), batch=100)
+            after = len(r.get("match_ids", []))
+            _base_state.update(jogos=after, erro=None)
+            time.sleep(30 if after > before and after < B.TARGET_MATCHES else 3600)
+        except Exception as exc:
+            _base_state["erro"] = f"{type(exc).__name__}: {exc}"
+            time.sleep(1800)
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="Processo de fundo: FotMob, OpenPlay, sincronização e ao vivo.")
     ap.add_argument("--pai", type=int, default=0, help="PID do app; o processo encerra quando o app fecha")
@@ -172,9 +192,10 @@ def main(argv=None) -> int:
     A.start_threads(db)
     threading.Thread(target=_scheduled_sync_loop, args=(db,), daemon=True, name="til-autosync").start()
     threading.Thread(target=_scout_snapshot_loop, args=(db,), daemon=True, name="til-scout").start()
+    threading.Thread(target=_baselines_loop, args=(db,), daemon=True, name="til-referencia").start()
     try:
         while True:
-            write_status({"scout": _jsonable(_scout_state)})
+            write_status({"scout": _jsonable(_scout_state), "referencia": _jsonable(_base_state)})
             if a.pai and not pid_alive(a.pai):
                 break                                    # o app fechou: encerra junto
             time.sleep(HEARTBEAT_S)

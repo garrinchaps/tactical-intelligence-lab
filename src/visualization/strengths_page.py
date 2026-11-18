@@ -24,9 +24,22 @@ from src.ui.theme import PALETTE, PLOTLY_LAYOUT
 TIER_ORDER = ["elite", "forte", "normal", "fraco", "alerta", "amostra insuficiente"]
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=2)
 def _cached_baselines(_load_events_fn: Callable, cache_key: str) -> Dict[str, Any]:
-    return ReferenceBaselineBuilder.load_or_build(_load_events_fn)
+    """Rodada 7: a tela só LÊ a referência pronta (o processo de fundo vai crescendo até 1.500 jogos).
+    Só na primeira vez de todas, sem nenhum arquivo, monta um começo pequeno (30 jogos) para não ficar vazia."""
+    cached = ReferenceBaselineBuilder.load_cached()
+    if cached.get("match_ids"):
+        return cached
+    return ReferenceBaselineBuilder.grow(_load_events_fn, batch=30)
+
+
+def _baseline_key() -> str:
+    p = ReferenceBaselineBuilder.DEFAULT_CACHE
+    try:
+        return f"{p.stat().st_mtime_ns}"                  # muda só quando o arquivo da referência é regravado
+    except OSError:
+        return "vazio"
 
 
 def _items_df(items: List[Dict[str, Any]], technical: bool = False) -> pd.DataFrame:
@@ -96,8 +109,11 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
         return
     try:
         with st.spinner("Montando a base de referência..."):
-            ids = ReferenceBaselineBuilder.available_real_match_ids()
-            baselines = _cached_baselines(load_events_fn, ",".join(map(str, ids)))
+            baselines = _cached_baselines(load_events_fn, _baseline_key())
+            n_used = len(baselines.get("match_ids", []))
+            if n_used < ReferenceBaselineBuilder.TARGET_MATCHES:
+                st.caption(f"📚 Referência do jogo típico: {n_used} jogos com lances até agora — crescendo em segundo plano "
+                           f"até {ReferenceBaselineBuilder.TARGET_MATCHES} (sem travar a tela).")
     except Exception as exc:
         error_state("Não foi possível montar a base de referência", exc)
         return

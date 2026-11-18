@@ -27,9 +27,50 @@ def one_per_game(out: pd.DataFrame) -> pd.DataFrame:
     if out is None or out.empty:
         return out
     out = out.drop_duplicates("match_id").assign(_lv=out["data_level"].map(LEVEL_ORDER).fillna(9))
-    pair = [" x ".join(sorted((team_core(h), team_core(a)))) for h, a in zip(out["home_team_name"], out["away_team_name"])]
-    out = out.assign(_k=[f"{str(d)[:10]}|{p}" for d, p in zip(out["match_date"], pair)])
-    return out.sort_values("_lv").drop_duplicates("_k").drop(columns="_k")
+    # rodada 7: o mesmo jogo aparecia 2–3 vezes ("só placar", "estatísticas", "lances") quando as fontes gravam a data
+    # com 1 dia de diferença (UTC × horário local) ou escrevem o time diferente (Brazil × Brasil, Atlético-MG ×
+    # Atlético Mineiro). Agora: data ±1 dia + nome traduzido/núcleo + nomes parecidos; fica a versão mais rica.
+    canon = _team_canon()
+    keys = [tuple(sorted((canon(h), canon(a)))) for h, a in zip(out["home_team_name"], out["away_team_name"])]
+    days = pd.to_datetime(out["match_date"].astype(str).str[:10], errors="coerce")
+    out = out.assign(_t1=[k[0] for k in keys], _t2=[k[1] for k in keys], _day=days).sort_values(["_day", "_lv"])
+    from src.data_hub.service import _same
+
+    rows = out.to_dict("records")
+    group = [-1] * len(rows)
+    gid = 0
+    for i, r in enumerate(rows):
+        if group[i] >= 0:
+            continue
+        group[i] = gid
+        for j in range(i + 1, len(rows)):
+            s = rows[j]
+            if pd.isna(r["_day"]) or pd.isna(s["_day"]) or (s["_day"] - r["_day"]).days > 1:
+                break                                      # ordenado por data: depois disso não há mais candidatos
+            if group[j] >= 0:
+                continue
+            same = (r["_t1"] == s["_t1"] and r["_t2"] == s["_t2"]) or (
+                _same(r["_t1"], s["_t1"]) and _same(r["_t2"], s["_t2"])) or (
+                _same(r["_t1"], s["_t2"]) and _same(r["_t2"], s["_t1"]))
+            if same:
+                group[j] = gid
+        gid += 1
+    out = out.assign(_g=group).sort_values(["_g", "_lv"])
+    return out.drop_duplicates("_g").drop(columns=["_t1", "_t2", "_day", "_g"])
+
+
+def _team_canon():
+    """Núcleo do nome + seleções em português traduzidas (Brasil → brazil), para casar as fontes."""
+    from src.data_hub.search import TEAM_ALIASES, norm
+    from src.data_lake.ids import team_core
+
+    tr = {}
+    for pt, ens in TEAM_ALIASES.items():
+        target = team_core(ens[0])
+        tr[team_core(pt)] = target
+        for e in ens:
+            tr[team_core(e)] = target
+    return lambda name: (lambda c: tr.get(c, c))(team_core(name))
 
 
 @st.cache_data(show_spinner=False, max_entries=8)

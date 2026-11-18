@@ -89,7 +89,7 @@ def _vectors(db, m: pd.DataFrame, names: Sequence[str]) -> pd.DataFrame:
         .merge(v, on="match_id", how="inner")
 
 
-def _reference(db, competitions: Sequence[str], limit: int = 600) -> pd.DataFrame:
+def _reference(db, competitions: Sequence[str], limit: int = 1500) -> pd.DataFrame:
     """Média por time-jogo nas mesmas competições (a régua do 'acima/abaixo do normal')."""
     if not competitions:
         return pd.DataFrame()
