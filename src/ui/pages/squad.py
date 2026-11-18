@@ -146,6 +146,92 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
             if not unconfirmed.empty else unconfirmed}
 
 
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=16)
+def _attributes(team: str, version: str) -> pd.DataFrame:
+    """Perfil de cada atleta nos últimos 15 jogos com números por jogador (FotMob), em 0–1 RELATIVO AO PRÓPRIO ELENCO."""
+    import json
+
+    from src.ui.context import get_service
+    from src.ui.pages.clubs import same_team_names
+
+    names = same_team_names(team)
+    ph = ",".join("?" * len(names))
+    q = (f"SELECT p.player_name, p.minutes, p.stats_json FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id "
+         f"WHERE p.team_name IN ({ph}) AND p.match_id IN (SELECT DISTINCT p2.match_id FROM match_player_stats p2 JOIN matches m2 "
+         f"ON m2.match_id = p2.match_id WHERE p2.team_name IN ({ph}) ORDER BY m2.match_date DESC LIMIT 15)")
+    try:
+        with get_service().db.connect() as conn:
+            d = pd.read_sql_query(q, conn, params=names * 2)
+    except Exception:
+        return pd.DataFrame()
+    if d.empty:
+        return d
+    keys = {"drible": ["dribbles_succeeded"], "cruzamento": ["accurate_crosses"], "aereo": ["aerials_won"],
+            "finalizacao": ["totalShots", "xg"], "pressao": ["recoveries", "matchstats.headers.tackles"]}
+    rows = []
+    for r in d.itertuples():
+        try:
+            st_ = json.loads(r.stats_json or "{}")
+        except Exception:
+            st_ = {}
+        row = {"nome": r.player_name, "min": float(r.minutes or st_.get("minutes") or 0)}
+        for a, ks in keys.items():
+            vals = [st_.get(k) for k in ks if st_.get(k) is not None]
+            row[a] = float(sum(float(v) for v in vals)) if vals else None
+        rows.append(row)
+    t = pd.DataFrame(rows)
+    g = t.groupby("nome").agg({"min": "sum", **{a: lambda s: s.sum(min_count=1) for a in keys}})
+    g = g[g["min"] >= 90]
+    for a in keys:
+        per90 = g[a] * 90 / g["min"]
+        g[a] = per90.rank(pct=True)                       # 0–1 dentro do elenco; sem número → vazio (vale 0,5 no GA)
+    return g.drop(columns=["min"]).reset_index()
+
+
+def _ga_section(team: str, rival: str, squad: pd.DataFrame, formation: str, version: str) -> None:
+    """Rodada 9: algoritmo genético — escalação que soma qualidade × encaixe com o ataque às fraquezas do rival."""
+    from src.squad.genetic import LineupGA
+    from src.ui import vuln_view
+    from src.ui.pages.clubs import same_team_names as _stn
+
+    st.markdown(f"##### 🧬 Escalação para machucar {rival} (algoritmo genético)")
+    if squad is None or squad.empty or len(squad) < 11:
+        st.caption("Elenco com menos de 11 atletas: não dá para montar a escalação.")
+        return
+    try:
+        found = vuln_view._findings(tuple(_stn(rival)), tuple(_stn(team)), version).get("achados", [])
+    except Exception:
+        found = []
+    sq = squad.copy()
+    at = _attributes(team, version)
+    if not at.empty:
+        from src.squad.matchday import canonical_names
+
+        cmap = canonical_names(at["nome"].tolist(), sq["nome"].tolist())
+        at["nome"] = at["nome"].map(lambda x: cmap.get(x, x))
+        sq = sq.merge(at.drop_duplicates("nome"), on="nome", how="left", suffixes=("", "_perf"))
+    with st.spinner("Evoluindo 150 gerações de escalações…"):
+        try:
+            r = LineupGA(sq, formation, found, seed=42).run()
+        except Exception as exc:
+            st.caption(f"Não foi possível rodar o algoritmo genético: {exc}")
+            return
+    c = st.columns(3)
+    c[0].metric("Aptidão do genético", r["aptidao"], f"{r['ganho']:+.1f} vs melhor XI")
+    c[1].metric("Melhor XI (húngaro) com o rival", r["aptidao_base"])
+    c[2].metric("Fraquezas consideradas", len(found))
+    if r["ganho"] <= 0.05:
+        st.caption("O genético chegou à mesma escalação do melhor XI: para este rival, quem já é o melhor em cada vaga "
+                   "também é quem mais explora as fraquezas encontradas.")
+    for papel, de, para in r["mudancas"]:
+        st.markdown(f"- **{papel}**: sai {de}, entra **{para}**")
+    tab = pd.DataFrame([{"vaga": x["papel_pt"], "jogador": x["jogador"], "encaixe": x["encaixe"],
+                         "bônus contra o rival": x["bonus"], "por quê": "; ".join(x["porque"]) or "—"} for x in r["xi"]])
+    comparison_table(tab, "Aptidão = Σ nota × encaixe + bônus por explorar cada fraqueza (gravidade × perfil do atleta, "
+                          "relativo ao próprio elenco, nos últimos 15 jogos com números individuais). Sem número do atleta, "
+                          "o perfil vale neutro.")
+
+
 def _left_after(apps: pd.DataFrame, club_id) -> List[Any]:
     """Atletas cujo último jogo foi por outro clube (para não 'trazer de volta' quem já saiu)."""
     from src.squad.planner import _tid
@@ -688,6 +774,7 @@ def render(_ctx=None) -> None:
             from src.ui.pages.clubs import same_team_names as _stn
 
             vuln_view.render(rival, _stn(rival), _stn(team), version)   # rodada 7: fragilidades reais por setor/jogador
+            _ga_section(team, rival, squad, formation, version)          # rodada 9: algoritmo genético
             st.markdown(f"##### 🔍 Diagnóstico de {rival} pelas estatísticas do time")
             if not dg["suficiente"]:
                 st.caption("Pelas médias do time, não há 2 pontos fortes e 2 fracos claros — veja acima as fragilidades por "

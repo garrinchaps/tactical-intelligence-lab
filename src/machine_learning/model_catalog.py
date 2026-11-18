@@ -32,6 +32,26 @@ class ModelCard:
 def model_cards() -> list[dict[str, Any]]:
     cards = [
         ModelCard(
+            "lab-ai-analyst", "IA do laboratório — analista dados→texto", "NLP / ML supervisionado",
+            "seleção de conteúdo + geração de texto", "implementado-treinável",
+            "src/intelligence/lab_ai/",
+            ("estatísticas do time", "números por jogador", "lances com coordenadas", "régua de milhares de jogos"),
+            ("resposta em texto", "relatório completo", "plano para explorar/corrigir"),
+            ("log-loss no teste por resposta avaliada", "promoção só com melhora"),
+            ("só aprende com respostas avaliadas (👍/👎)", "não vê vídeo: sem postura corporal nem posicionamento sem bola"),
+            "selector-v000+",
+        ),
+        ModelCard(
+            "lineup-genetic", "Escalação por algoritmo genético", "Computação evolucionária",
+            "otimização combinatória", "implementado",
+            "src/squad/genetic.py",
+            ("elenco com nota e posição", "formação", "fraquezas do rival", "perfil relativo do atleta"),
+            ("XI com aptidão", "mudanças contra o melhor XI húngaro", "porquê de cada bônus"),
+            ("aptidão completa vs baseline húngaro", "curva de convergência", "semente reprodutível"),
+            ("bônus depende de fraquezas medidas nos últimos jogos", "perfil relativo ao próprio elenco"),
+            "ga-v1",
+        ),
+        ModelCard(
             "possession-danger-xgb", "Perigo da posse — XGBoost", "ML supervisionado",
             "classificação binária", "implementado-experimental",
             "src/machine_learning/supervised.py",

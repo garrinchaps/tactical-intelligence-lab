@@ -38,11 +38,17 @@ def _index(version: str, levels="EVENTS|BOXSCORE", only_real: bool = True):
 def _meta_line(res) -> str:
     n = res.get("number_tags") or {}
     tot = n.get("exato", 0) + n.get("derivado", 0)
-    eng = "Gemini" if str(res.get("engine_used", "")).upper().startswith("GEMINI") else "analista local"
+    e = str(res.get("engine_used", ""))
+    eng = "Gemini" if e.upper().startswith("GEMINI") else (
+        e.replace("IA DO LABORATÓRIO", "pela IA do laboratório").replace(" + analista clássico", " + analista clássico")
+        if e.startswith("IA DO LABORATÓRIO") else "analista local")
+    if "lab_ai" in res:
+        eng += f" ({res['lab_ai'].get('n_facts', 0)} fatos lidos)"
     hidden = f" · {n['ocultadas']} trecho(s) cortado(s) por falta de origem" if n.get("ocultadas") else ""
     lat = res.get("latency_s")
     speed = f" · respondido em {lat:.1f} s" if isinstance(lat, (int, float)) else ""
-    return f"✔ {tot} números conferidos com os dados da partida · redigido pelo {eng}{hidden}{speed}"
+    who = eng if eng.startswith("pela") else f"pelo {eng}"
+    return f"✔ {tot} números conferidos com os dados da partida · redigido {who}{hidden}{speed}"
 
 
 def _audit_panel(h) -> None:
@@ -107,6 +113,23 @@ def _answer(question: str, current_context, use_llm: bool):
     from src.guard.present import present
 
     present(res)                                        # confere os números; trechos sem origem saem do texto
+    if st.session_state.get("lab_ai_on", True):          # rodada 9: a IA do laboratório (nossa, treinável) responde junto
+        try:
+            from src.intelligence.lab_ai import engine as LAB
+            from src.ui.context import get_service
+
+            lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team, db=get_service().db,
+                             interaction_id=res.get("interaction_id"))
+            specific = bool((res.get("scope") or {}).get("ask")) and not str(res.get("engine_used", "")).startswith("LOCAL_SCOPE")
+            if specific:
+                res["report_markdown"] = (res["report_markdown"] + "\n\n---\n\n#### 🧠 Leitura da IA do laboratório\n\n"
+                                          + lab["markdown"])
+            else:
+                res["report_markdown"] = lab["markdown"]
+            res["engine_used"] = lab["engine"] + (" + analista clássico" if specific else "")
+            res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
+        except Exception as exc:
+            res["lab_ai_error"] = f"{type(exc).__name__}: {exc}"
     res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
     return res, loc, switched
 
@@ -125,7 +148,7 @@ def _mentioned(res) -> dict:
 WELCOME = [
     ("🎯", "Cite o jogo na pergunta", "“Flamengo x Palmeiras 2025: quem finalizou mais?” — o jogo é localizado sozinho."),
     ("📊", "Só números conferidos", "Cada número é checado contra os dados do jogo; frase com número sem origem é cortada."),
-    ("🧠", "Modelo campeão", "As respostas de perigo usam sempre a melhor versão treinada da rede neural."),
+    ("🧠", "IA do laboratório", "Nossa IA escolhe os números que importam e escreve a análise — e aprende com o seu 👍/👎."),
 ]
 
 
@@ -163,7 +186,10 @@ def render(current_context, match_bar) -> None:
     match_bar()
     analyst = DynamicTacticalAnalyst()
     with st.expander("Opções do assistente"):
-        use_llm = st.toggle("Redigir com Gemini (precisa de GEMINI_API_KEY no .env)", value=analyst.api_key is not None)
+        st.toggle("🧠 IA do laboratório (nossa, aprende com o seu 👍/👎)", value=True, key="lab_ai_on",
+                  help="Escolhe os números que importam para a pergunta com uma rede treinada pelas suas avaliações e "
+                       "escreve a análise. Desligada, responde só o analista clássico.")
+        use_llm = st.toggle("Redigir com Gemini (precisa de GEMINI_API_KEY no .env)", value=False)
         if st.button("Limpar conversa"):
             st.session_state["chat_history"] = []
     history = st.session_state.setdefault("chat_history", [])
@@ -199,7 +225,7 @@ def render(current_context, match_bar) -> None:
             learning_id = h.get("learning_id")
             if learning_id:
                 if learning_id not in reviewed:
-                    st.caption("Sua avaliação entra na fila de revisão; ela não muda os pesos automaticamente.")
+                    st.caption("Avalie: o 👍/👎 vira exemplo de treino da IA do laboratório (Bastidores → 🧠 Treinar).")
                     vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
                     if vote is not None:
                         record_feedback(learning_id, vote)

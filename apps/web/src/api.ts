@@ -88,3 +88,52 @@ export async function evaluateFuzzyPressure(
   if (!response.ok) throw new Error("Não foi possível calcular a pressão fuzzy.");
   return (await response.json()) as FuzzyPressureResult;
 }
+
+export type LabAnswer = {
+  markdown: string;
+  engine: string;
+  n_facts: number;
+  facts: Array<{ key: string; team: string; player: string | null; score: number }>;
+};
+
+export type LabReport = {
+  foco: string;
+  rival: string;
+  nivel: string;
+  n_fatos: number;
+  versao: number;
+  plano: string[];
+  secoes: Array<{ titulo: string; linhas: string[]; leitura: string }>;
+  jogadores: Record<string, string[]>;
+  inversoes: Record<string, { total: number; sem_reacao: number; lado_mais_fragil?: string | null; tabela: Array<Record<string, string | number>> }>;
+  limites: string[];
+};
+
+export type GeneticSlot = { vaga: number; papel_pt: string; jogador: string; encaixe: number; bonus: number; porque: string[] };
+export type GeneticResult = {
+  aptidao: number; aptidao_base: number; ganho: number; formacao: string;
+  xi: GeneticSlot[]; mudancas: Array<[string, string, string]>; historico: number[];
+};
+
+export async function askLab(matchId: number, question: string): Promise<LabAnswer> {
+  const response = await fetch(`${API_URL}/api/v1/ai/lab/ask`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ match_id: matchId, question }),
+  });
+  if (!response.ok) throw new Error("A IA do laboratório não conseguiu responder.");
+  return (await response.json()) as LabAnswer;
+}
+
+export async function fetchReport(matchId: number): Promise<LabReport> {
+  const response = await fetch(`${API_URL}/api/v1/matches/${matchId}/report`);
+  if (!response.ok) throw new Error("Não foi possível montar o relatório.");
+  return (await response.json()) as LabReport;
+}
+
+export async function runGenetic(body: unknown): Promise<GeneticResult> {
+  const response = await fetch(`${API_URL}/api/v1/ai/genetic/lineup`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new Error("O algoritmo genético não rodou.");
+  return (await response.json()) as GeneticResult;
+}

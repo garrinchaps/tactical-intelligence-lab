@@ -9,6 +9,7 @@ import {
   type Match,
   type ModelCard,
 } from "./api";
+import { GeneticPanel, LabAssistant } from "./LabPanels";
 
 const levels = [
   { value: "", label: "Todas as partidas" },
@@ -78,6 +79,8 @@ export function App() {
           {levels.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       </section>
+      <LabAssistant matches={matches} />
+      <GeneticPanel />
       <section className="panel">
         <div className="panel-heading"><div><span className="eyebrow">RECENTES</span><h3>Partidas disponíveis</h3></div><span className="count">{matches.length} carregadas</span></div>
         {loading && <p className="muted">Carregando catálogo…</p>}

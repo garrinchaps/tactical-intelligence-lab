@@ -126,12 +126,55 @@ def _simulator() -> None:
                   "para dizer quem criou mais perigo.")
 
 
+def _lab_ai_panel() -> None:
+    """Rodada 9: a IA do laboratório (o assistente) — versão, o que ela olha, treino com as avaliações."""
+    import pandas as pd
+
+    from src.intelligence.lab_ai import reference as LR
+    from src.intelligence.lab_ai.selector import MIN_RATED, Selector
+    from src.ui.components import comparison_table
+
+    st.markdown("## 🧠 IA do laboratório — o assistente")
+    st.caption("Ela transforma qualquer jogo (lances ou estatísticas) em fatos com régua da base, escolhe os que importam "
+               "para a pergunta com uma rede treinada pelas suas avaliações 👍/👎 e escreve a análise. Os números vêm "
+               "direto dos dados; o treino só promove uma versão nova se ela errar menos em respostas de teste.")
+    sel = Selector()
+    X, y, g, _ = Selector.dataset()
+    n_rated = len(set(g.tolist())) if len(g) else 0
+    c = st.columns(4)
+    c[0].metric("Versão em uso", f"v{sel.version:03d}")
+    c[1].metric("Respostas avaliadas", n_rated)
+    c[2].metric("👍 / 👎 (fatos)", f"{int(y.sum())} / {int(len(y) - y.sum())}" if len(y) else "0 / 0")
+    ref = LR.load()
+    c[3].metric("Régua da base", f"{len(ref)} números")
+    b1, b2 = st.columns(2)
+    if b1.button("🧠 Treinar com as avaliações", type="primary", use_container_width=True):
+        r = sel.train()
+        (st.success if r.get("promoted") else st.info)(r["reason"])
+        sel = Selector()
+    if b2.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True):
+        from src.ui.context import get_service
+
+        with st.spinner("Lendo as estatísticas dos jogos mais recentes…"):
+            ref = LR.build(get_service().db)
+        st.success(f"Régua refeita: {len(ref)} números.")
+    if n_rated < MIN_RATED:
+        st.caption(f"Faltam {MIN_RATED - n_rated} respostas avaliadas para o primeiro treino dos pesos "
+                   f"(as frases já aprendem desde a 1ª avaliação).")
+    with st.expander("O que a IA olha para escolher os números (pesos da versão em uso)"):
+        comparison_table(pd.DataFrame(sel.weight_table()), "Peso positivo = aumenta a chance de o fato entrar na resposta.")
+        hist = pd.DataFrame([{k: v for k, v in x.items() if k != "weights"} for x in sel.meta["versions"]])
+        comparison_table(hist, "Histórico de versões.")
+
+
 def render(ctx=None) -> None:
     from src.ui.components import hero, steps_html
 
     hero("Bastidores · como a IA aprende", "Uma rede neural que aprende a ler o perigo de uma jogada",
          "Explicação para quem não é da área: o que a rede faz, como aprende, como sabemos que melhorou e onde ela "
          "aparece nas respostas do Assistente. Abaixo, a parte técnica para quem quiser ver por dentro.")
+    _lab_ai_panel()
+    st.markdown("---")
     _didactic()
     _simulator()
     st.markdown("---")

@@ -62,3 +62,4 @@ data/worker_status.tmp
 data/worker.pid
 data/worker.log
 data/processed/scout_universe.*
+data/processed/lab_ai_reference.json

@@ -275,6 +275,27 @@ Rodada 8 (18/11/2026, 372 testes verdes):
   2ª opinião), página do jogo e Bastidores. Ela só avalia jogos com lances (coordenadas); FotMob/ESPN não têm ações.
 - ✅ Comparar jogo × jogo sem duplicar a mesma partida de duas fontes.
 
+Rodada 9 (18/11/2026, 382 testes verdes):
+- Diagnóstico do PC: o branch local `claude/gifted-knuth-q93cbz` do usuário NÃO tinha upstream (`git pull` falhou) e
+  ficou parado numa versão antiga (o `requirements.txt` dele nem tinha FastAPI) — por isso "nada aparecia". Correção:
+  `git branch --set-upstream-to=origin/claude/gifted-knuth-q93cbz` + `git merge --ff-only origin/claude/gifted-knuth-q93cbz`.
+- ✅ IA do laboratório (`src/intelligence/lab_ai/`): analista PRÓPRIO dados→texto e treinável — `facts.py` (fatos de
+  qualquer jogo: estatísticas FotMob/ESPN ou lances, por time e por jogador, régua da base `reference.py` com milhares
+  de jogos, empates no zero tratados), `switches.py` (reação de cada defensor às inversões: quem chega primeiro, tempo,
+  avanço do ataque, lado frágil), `selector.py` (regressão logística NumPy treinada com 👍/👎 — v000 = pesos de
+  analista; promove só se errar menos no teste; frases aprendem por Thompson), `writer.py` (resposta direta → números →
+  leitura tática → como explorar/corrigir → resumo; concordância "1 cartão"), `engine.py` (foco = time citado; "como
+  explorar a França" → foco é o outro; "não tenho X medido" quando o jogo não traz). É o motor PADRÃO do Assistente
+  (resposta específica do analista clássico + "Leitura da IA do laboratório"; pergunta genérica → só a IA). Gemini
+  agora desligado por padrão. Registro do que mostrou: `data/learning/lab_ai_shown.jsonl`. Treino: Bastidores → 🧠.
+- ✅ Página do jogo: seção "📑 Relatório da IA" (`src/ui/pages/lab_report.py`) — plano, fases, destaques, inversões.
+- ✅ Algoritmo genético de escalação (`src/squad/genetic.py`): torneio, cruzamento com reparo, mutação, elitismo,
+  semente; aptidão = Σ nota × encaixe + bônus por fraqueza do rival (vulnerabilities) × perfil relativo do atleta
+  (últimos 15 jogos FotMob); comparado com o melhor XI húngaro; nunca escala lesionado. Escalação → Plano de jogo.
+- ✅ Site: API `POST /api/v1/ai/lab/ask`, `GET /api/v1/matches/{id}/report`, `POST /api/v1/ai/genetic/lineup` (banco
+  só leitura) + painéis no React (`apps/web/src/LabPanels.tsx`: assistente, relatório, genético com elenco de exemplo);
+  cartões de modelo `lab-ai-analyst` e `lineup-genetic`. Deploy público ainda NÃO feito (Netlify + hospedagem da API).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

@@ -11,3 +11,17 @@ body { margin: 0; min-width: 320px; background: radial-gradient(circle at 80% 0%
 .error { color: #ff9d9d; padding: 24px 0; } footer { padding-top: 28px; color: #71869e; font-size: .72rem; } @media (max-width: 640px) { .shell { padding: 20px 16px 30px; } .topbar { align-items: flex-start; } .hero { min-height: 350px; padding-top: 80px; } .hero-mark { display: none; } .panel { padding: 18px; } }
 .model-panel { margin-top: 24px; } .model-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 20px; } .model-card { border: 1px solid #26364a; border-radius: 9px; padding: 16px; background: #102137; } .model-card h4 { margin: 8px 0; font-size: .98rem; } .model-card p, .model-card small { display: block; color: #9caabd; font-size: .72rem; line-height: 1.5; } .model-card small { margin-top: 10px; color: #71869e; }
 .fuzzy-panel { margin-top: 24px; } .fuzzy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-top: 20px; } .fuzzy-card { border-left: 3px solid #31d6e8; border-radius: 8px; padding: 16px; background: linear-gradient(135deg, #102a40, #102137); } .fuzzy-card strong { display: block; margin: 12px 0 8px; color: #eafcff; font-size: 1.8rem; } .fuzzy-card p, .fuzzy-card small { display: block; color: #9caabd; font-size: .72rem; line-height: 1.5; } .fuzzy-card small { color: #71869e; margin-top: 10px; }
+
+/* rodada 9 — IA do laboratório e algoritmo genético */
+.lab-row { display: flex; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+.lab-row select, .lab-row input { flex: 1; min-width: 220px; background: #0B1120; color: #F5F7FB; border: 1px solid #1E2A44; border-radius: 12px; padding: 10px 12px; }
+.lab-panel button, .panel > button { background: linear-gradient(90deg, #3B82F6, #22D3EE); color: #04111f; border: 0; border-radius: 12px; padding: 10px 16px; font-weight: 700; cursor: pointer; }
+.lab-panel button.ghost { background: #111A2E; color: #F5F7FB; border: 1px solid #1E2A44; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; }
+.chips .chip { background: #111A2E; color: #98A6BF; border: 1px solid #1E2A44; font-weight: 500; padding: 6px 12px; border-radius: 999px; }
+.lab-answer { margin-top: 14px; background: #0B1120; border: 1px solid #1E2A44; border-radius: 16px; padding: 16px; }
+.lab-answer small { color: #98A6BF; display: block; margin-bottom: 6px; }
+.md p { margin: 6px 0; line-height: 1.5; } .md-li { margin: 4px 0 4px 6px; }
+.report-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 10px; }
+.ga-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.ga-slot { background: #111A2E; border: 1px solid #1E2A44; border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; gap: 2px; }

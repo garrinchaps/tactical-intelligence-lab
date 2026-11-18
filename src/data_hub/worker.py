@@ -160,6 +160,13 @@ def _baselines_loop(db) -> None:
 
     time.sleep(120)
     while True:
+        try:                                         # rodada 9: régua da IA do laboratório, refeita 1x por dia
+            from src.intelligence.lab_ai import reference as LR
+
+            if not LR.REF_PATH.exists() or time.time() - LR.REF_PATH.stat().st_mtime > 86400:
+                LR.build(db)
+        except Exception:
+            pass
         try:
             before = len(B.load_cached().get("match_ids", []))
             r = B.grow(db.load_events, db_path=str(db.db_path), batch=100)
