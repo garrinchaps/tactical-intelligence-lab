@@ -366,7 +366,8 @@ Rodada 12 (18/11/2026, 411 testes verdes):
 Rodada 13 (18/11/2026, 422 testes verdes):
 - ✅ Velocidade: índices novos no SQLite (visitante+data, mandante+data, competição+data, números por jogador por time,
   escalações por jogo, estatísticas por time) + `PRAGMA optimize` — antes "jogos do time" varria a tabela inteira pelo
-  visitante. 1ª abertura após o pull cria os índices (pode levar 1–2 min uma vez). Seções pesadas da IA abrem sob demanda.
+  visitante. Os índices NÃO são criados ao abrir o banco (travava app e pytest): `python -m src.tools.criar_indices`
+  (app fechado, uma vez) ou o processo de fundo com a tela parada. Seções pesadas da IA abrem sob demanda.
 - ✅ Scout: régua nova (`add_quality_scores`): pico de valor de 3 anos (`valor_pico_3a_eur`, veterano de elite), nível =
   45% clube + 55% liga (`_level_map`, `clube_liga`), quem domina a liga perde menos pelo nível, 0 min no ano não herda
   histórico antigo (só 1/3), nota FotMob em todas as funções; `precocity` (valor e minutos contra a mesma idade) no teto

@@ -174,6 +174,11 @@ def _baselines_loop(db) -> None:
                 PS.save_player_index(PS.build_player_index(db))
         except Exception:
             pass
+        try:                                         # rodada 13: índices de velocidade (só se faltarem; tela parada)
+            if db.missing_speed_indexes():
+                db.ensure_speed_indexes()
+        except Exception:
+            pass
         try:                                         # rodada 13: régua dos confrontos do pré-jogo, 1x por dia
             from src.squad import matchups as MU
 

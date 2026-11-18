@@ -147,3 +147,13 @@ def test_course_has_simple_text_for_every_question():
 
     assert set(C.SIMPLE) == {f"Q{i}" for i in range(1, 13)}
     assert all(len(a) > 60 and b for a, b in C.SIMPLE.values())
+
+
+def test_opening_the_database_does_not_build_heavy_indexes(tmp_path):
+    """Abrir o banco não pode criar os índices pesados (travava app e testes numa base de 300 mil jogos)."""
+    from src.data_hub.db import SPEED_INDEXES, DataHubDB
+
+    db = DataHubDB(db_path=tmp_path / "x.db", schema_path="database/schema.sql")
+    assert set(db.missing_speed_indexes()) == {n for n, _ in SPEED_INDEXES}
+    assert set(db.ensure_speed_indexes()) == {n for n, _ in SPEED_INDEXES}
+    assert db.missing_speed_indexes() == []
