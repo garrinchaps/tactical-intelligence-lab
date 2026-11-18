@@ -30,6 +30,11 @@ def render(ctx, focus: str | None = None) -> None:
     st.markdown(f"### 📑 Relatório da IA do laboratório — {rep['foco']} x {rep['rival']}")
     st.caption(f"Base: {rep['nivel']} · {rep['n_fatos']} fatos lidos · seletor v{rep['versao']:03d}. Cada número vem "
                f"direto dos dados; a régua compara com milhares de jogos da base.")
+    dm = rep.get("mapa") or {}
+    if dm:
+        with st.expander(f"🗺️ O que este jogo tem de dado — {dm.get('rotulo')}"):
+            st.markdown(" ".join(f"{'✅' if r['disponivel'] else '⛔'} {r['analise']}<br>" for r in dm["linhas"]),
+                        unsafe_allow_html=True)
     if not rep["secoes"]:
         st.info("Este jogo só tem o placar — não há números para analisar.")
         return
@@ -50,6 +55,17 @@ def render(ctx, focus: str | None = None) -> None:
         col.markdown(f"**{t}**")
         for ln in lines or ["sem números por jogador nesta fonte"]:
             col.markdown(f"- {ln}")
+    if rep.get("inteligencia"):
+        from src.ui.pages.player_intel_view import statements_html
+
+        st.markdown("#### 🔬 O que se destaca em cada jogador (padrão, interpretação e hipótese)")
+        cols = st.columns(max(1, len(rep["inteligencia"])))
+        for col, (t, players) in zip(cols, rep["inteligencia"].items()):
+            with col:
+                st.markdown(f"**{t}**")
+                for pl in players:
+                    st.markdown(f"_{pl['jogador']}_")
+                    st.markdown(statements_html(pl["afirmacoes"]), unsafe_allow_html=True)
     if rep["inversoes"]:
         st.markdown("#### 🔁 Como cada time reage às inversões de jogo")
         st.caption("Inversão = passe certo que troca o corredor. Para cada uma, quem do time que defende chegou primeiro "

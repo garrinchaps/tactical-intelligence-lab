@@ -10,7 +10,7 @@ from src.ui.components import source_gap
 from src.ui.names import pt
 
 SECTIONS = ["📊 Resumo", "🕸️ Redes & xT", "👤 Jogadores", "⚖️ Fortes e fracos", "⚔️ Duas equipes", "🧩 Padrões e histórico",
-            "🧠 Perigo (IA)", "📑 Relatório da IA"]
+            "🧠 Perigo (IA)", "📑 Relatório da IA", "🔬 Jogador (IA)"]
 
 
 def render(current_context, match_bar=None) -> None:
@@ -95,6 +95,10 @@ def render(current_context, match_bar=None) -> None:
 
     if sec == SECTIONS[0]:
         match_center.render(ctx)
+    elif sec == SECTIONS[8]:
+        from src.ui.pages import player_intel_view
+
+        player_intel_view.render(ctx, st.session_state.get("game_focus") or ctx.target_team)
     elif sec == SECTIONS[7]:
         from src.ui.pages import lab_report
 

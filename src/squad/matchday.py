@@ -299,7 +299,7 @@ def player_table(db, team_names: Sequence[str], n: int = 10, tm_values: Optional
             keep.append(bool(recent_cut is not None and pd.notna(lp) and lp >= recent_cut))
         df = df[keep].copy()
         miss = df["no_elenco_atual"] == False  # noqa: E712
-        df.loc[miss, "duvida"] = "não aparece na lista de elenco da ESPN (pode estar lesionado ou a lista desatualizada)"
+        df.loc[miss, "duvida"] = "fora da lista do elenco atual (lesão, empréstimo, saída ou lista desatualizada)"
     if not lu.empty:                                    # sumiu dos últimos jogos sem lesão informada → dúvida
         recent_ids = games[:3]
         for i, r in df.iterrows():

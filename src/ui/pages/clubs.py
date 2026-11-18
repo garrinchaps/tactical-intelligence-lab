@@ -119,6 +119,18 @@ def filter_team_matches(matches: pd.DataFrame, level: str = "Todos os jogos") ->
     return matches[matches["data_level"].astype(str).isin(allowed)].copy()
 
 
+def _open_next_match(team: str, rival: str) -> None:
+    """Rodada 10: abre a Escalação já com o time e o adversário do próximo jogo (plano, provável e fragilidades)."""
+    from src.ui import nav
+
+    st.session_state["sq_team_q"] = team
+    st.session_state["sq_rival_team"] = team
+    st.session_state["sq_rival_choice"], st.session_state["sq_rival_src"] = rival, "próximo jogo"
+    st.session_state.pop("sq_team_pick", None)
+    nav.open_view("escalacao")
+    st.rerun()
+
+
 def upcoming(names) -> pd.DataFrame:
     """Próximos jogos do time (lake 'agenda', alimentado pelo open-matchday)."""
     try:
@@ -372,3 +384,7 @@ def _style_tab(name: str, names: List[str]) -> None:
         st.markdown("#### 📅 Próximos jogos (ESPN/FotMob)")
         comparison_table(fx[["kickoff", "home", "away", "competition"]].rename(columns={
             "kickoff": "Início (UTC)", "home": "Mandante", "away": "Visitante", "competition": "Competição"}))
+        f0 = fx.iloc[0]
+        rival = f0["away"] if f0["home"] in names else f0["home"]
+        if st.button(f"🔎 Analisar o próximo jogo ({f0['home']} x {f0['away']})", type="primary", key=f"club_next_{name}"):
+            _open_next_match(name, rival)

@@ -471,6 +471,16 @@ def _teams_with_lineups(days: int = 400) -> List[str]:
     return [r[0] for r in rows if r[0]]
 
 
+def _grouped(rows, field: str) -> str:
+    """Rodada 10: 'Motivo: nome1, nome2…' em vez de repetir a mesma frase para cada atleta."""
+    from collections import OrderedDict
+
+    g: "OrderedDict[str, list]" = OrderedDict()
+    for r in rows:
+        g.setdefault(str(getattr(r, field)), []).append(str(r.nome))
+    return " · ".join(f"**{k}**: {', '.join(v)}" for k, v in g.items())
+
+
 def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None:
     """Rodada 10: 'prox' = próximo jogo do calendário (sem perguntar o adversário); 'hyp' = jogo hipotético."""
     from src.squad import matchday as M
@@ -552,10 +562,10 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
         out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
         if len(out):
-            st.markdown("**Desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+            st.markdown(f"**Desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
         dv = b["jogadores"][b["jogadores"].get("duvida", "").astype(bool)] if "duvida" in b["jogadores"] else b["jogadores"].iloc[0:0]
         if len(dv):
-            st.markdown("**Dúvidas:** " + "; ".join(f"{r.nome} ({r.duvida})" for r in dv.itertuples()))
+            st.markdown(f"**Dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
         with st.expander("Por que cada jogador do rival deve começar"):
             _xi_cards(xr, "#EF4444")
     form_me = st.session_state.get("nx_form") or None
@@ -586,10 +596,10 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         st.caption("As fragilidades do rival estão no mapa logo abaixo (zonas pintadas + como explorar).")
         out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
         if len(out):
-            st.markdown("**Nossos desfalques:** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+            st.markdown(f"**Nossos desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
         dv = a["jogadores"][a["jogadores"]["duvida"].astype(bool)] if "duvida" in a["jogadores"] else a["jogadores"].iloc[0:0]
         if len(dv):
-            st.markdown("**Nossas dúvidas:** " + "; ".join(f"{r.nome} ({r.duvida})" for r in dv.itertuples()))
+            st.markdown(f"**Nossas dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
         with st.expander("Por que cada jogador nosso foi escolhido", expanded=True):
             _xi_cards(xm, "#22D3EE")
     if pv.get("noticias"):
@@ -651,7 +661,9 @@ def render(_ctx=None) -> None:
          "possível e a ajustada ao adversário — com o plano de jogo tirado dos últimos jogos do rival.")
     version = get_service().db.stable_version()
     team = _picker("Meu time", "sq_team")
-    if team and st.session_state.get("sq_rival_team") != team:   # outro time: o adversário escolhido não vale mais
+    from src.data_lake.ids import team_core as _tc
+
+    if team and _tc(str(st.session_state.get("sq_rival_team") or "")) != _tc(team):   # outro time: adversário não vale mais
         st.session_state["sq_rival_team"] = team
         st.session_state.pop("sq_rival_choice", None)
     rival = st.session_state.get("sq_rival_choice")

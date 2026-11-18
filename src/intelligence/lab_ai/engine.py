@@ -27,6 +27,15 @@ def _fold(s: str) -> str:
     return unicodedata.normalize("NFKD", (s or "").lower()).encode("ascii", "ignore").decode()
 
 
+def _pt_name(x: str) -> str:
+    try:
+        from src.ui.names import pt
+
+        return pt(x)
+    except Exception:
+        return x
+
+
 def _teams_focus(meta: Dict[str, Any], focus: Optional[str], question: str):
     """Times em português; o foco é o time CITADO na pergunta, senão o escolhido na tela."""
     try:
@@ -105,6 +114,19 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
     wants_plan = any(w in _fold(question) for w in PLAN_WORDS)
     md, templates = W.compose(question, [c[0] for c in chosen], facts, focus or "", rival, sel, rng, wants_plan)
     md = gap + md
+    # rodada 10: jogador citado na pergunta (e o jogo tem lances) → leitura dele com fato/padrão/interpretação/hipótese
+    who = asked_player(question, df)
+    if who:
+        from src.intelligence.lab_ai import player_intel as P
+
+        allx = [x for x in P.match_intel(df, who)["afirmacoes"] if x.get("area") != "limite"]
+        order = {"interpretação": 0, "padrão": 1, "fato": 2, "hipótese": 3}
+        items = sorted(allx, key=lambda x: order.get(x["tipo"], 9))[:10]
+        md = (gap + f"**Leitura de {who} neste jogo**\n\n" + P.to_markdown(items) +
+              "\n\n---\n\n**Contexto do jogo (números do time)**\n\n" + md[len(gap):])
+    from src.intelligence.lab_ai.availability import data_map, summary_line
+
+    md += "\n\n_" + summary_line(data_map(meta, df, box)) + "_"
     shown = [{"fid": f.fid, "key": f.key, "team": f.team, "player": f.player, "score": round(s, 4),
               "features": [round(float(x), 4) for x in X]} for f, s, X in chosen]
     if interaction_id:
@@ -113,7 +135,25 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
         except Exception:
             pass
     return {"markdown": md, "facts": shown, "templates": templates, "version": sel.version, "n_facts": len(facts),
-            "engine": f"IA DO LABORATÓRIO v{sel.version:03d}"}
+            "engine": f"IA DO LABORATÓRIO v{sel.version:03d}", "player": who,
+            "matched": bool(any(x[2][4] for x in chosen) or wants_plan or who)}
+
+
+def asked_player(question: str, df: Optional[pd.DataFrame]) -> Optional[str]:
+    """Jogador do jogo citado pela pergunta (nome completo, sobrenome ou apelido com ≥ 4 letras); None se ambíguo."""
+    if df is None or getattr(df, "empty", True) or "player_name" not in df:
+        return None
+    q = " " + " ".join(_tokens(question)) + " "            # sem pontuação: "Mbappé?" → "mbappe"
+    hits = []
+    for name in df["player_name"].dropna().unique():
+        nf = " ".join(_tokens(name))
+        parts = [w for w in nf.split() if len(w) >= 4]
+        if f" {nf} " in q or any(f" {w} " in q for w in parts):
+            hits.append(name)
+    if len(hits) == 1:
+        return hits[0]
+    full = [h for h in hits if f" {' '.join(_tokens(h))} " in q]
+    return full[0] if len(full) == 1 else None
 
 
 def report(meta: Dict[str, Any], df: Optional[pd.DataFrame], box: Optional[Dict[str, Any]], focus: Optional[str],
@@ -150,9 +190,28 @@ def report(meta: Dict[str, Any], df: Optional[pd.DataFrame], box: Optional[Dict[
     sw = {f.team: f.extra for f in facts if f.key == "sw:reacao"}
     plan = W.explore_lines(sorted(facts, key=lambda f: -abs((f.pct or 50) - 50)), focus, rival, k=8)
     level = "lances com coordenadas" if df is not None and not getattr(df, "empty", True) else "estatísticas da partida"
+    from src.intelligence.lab_ai.availability import data_map
+
+    dmap = data_map(meta, df, box)
+    intel = {}
+    if df is not None and not getattr(df, "empty", True):
+        from src.intelligence.lab_ai import player_intel as P
+
+        roster = P.players_with_events(df)
+        for t in teams:
+            raw_t = next((r for r in roster["team_name"].unique() if _fold(r) == _fold(t) or _pt_name(r) == t), None)
+            if raw_t is None:
+                continue
+            for pl in roster[roster["team_name"] == raw_t]["player_name"].head(4):
+                res = P.match_intel(df, pl)
+                keep = [x for x in res["afirmacoes"] if x["tipo"] in ("padrão", "interpretação", "hipótese")
+                        and x.get("area") != "limite"]
+                if keep:
+                    intel.setdefault(t, []).append({"jogador": pl, "afirmacoes": keep[:4]})
     limits = ["Postura corporal, orientação do corpo e posicionamento sem a bola exigem vídeo ou tracking — as fontes "
               "abertas não trazem; aqui só entra o que os dados medem."]
     if level != "lances com coordenadas":
         limits.append("Sem lances com coordenadas: inversões, redes de passe e mapas não podem ser calculados neste jogo.")
-    return {"foco": focus, "rival": rival, "nivel": level, "secoes": sections, "jogadores": players,
+    return {"foco": focus, "rival": rival, "nivel": level, "mapa": dmap, "inteligencia": intel,
+            "secoes": sections, "jogadores": players,
             "inversoes": sw, "plano": plan, "limites": limits, "versao": sel.version, "n_fatos": len(facts)}

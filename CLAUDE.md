@@ -296,6 +296,29 @@ Rodada 9 (18/11/2026, 382 testes verdes):
   só leitura) + painéis no React (`apps/web/src/LabPanels.tsx`: assistente, relatório, genético com elenco de exemplo);
   cartões de modelo `lab-ai-analyst` e `lineup-genetic`. Deploy público ainda NÃO feito (Netlify + hospedagem da API).
 
+Rodada 10 (18/11/2026, 390 testes verdes):
+- ✅ Erro "StreamlitDuplicateElementKey vuln_pitch_…" (a leitura do rival aparece em 2 abas) — chave por aba (`where`).
+- ✅ Masculino × feminino: as fontes dão o mesmo nome ao time masculino e ao feminino (Bayern com Kane e Klara Bühl).
+  `src/data_hub/gender.py` ganhou `comp_sql`/`is_women_competition`/`keep_same_gender` e o filtro entrou em TODAS as
+  consultas por time (escalações, números por jogador, fragilidades, próximos jogos, Scout, histórico).
+- ✅ Qualidade do Scout refeita (`add_quality_scores`): encolhimento bayesiano pelos minutos (mins/(mins+900)),
+  nível do clube (percentil do valor do elenco) e reputação de mercado na função (35%); fotografia nova
+  `scout_universe_v2.pkl`. Clube atual nunca é a seleção (último jogo por CLUBE). Histórico do Scout só masculino.
+- ✅ Tabelas: `tidy_numbers` (idade/minutos/jogos inteiros, demais com até 2 casas) em todas as tabelas.
+- ✅ Buscas só ao apertar Enter/Buscar (`st.form`) + cache das opções de times (`_team_options_cached`).
+- ✅ Scout: TODAS as posições no "Três melhores por posição" (ranqueia sob demanda) e TODAS as nações do mercado com
+  % de adaptação cultural (`_affinity`); janela de transferências em cartões por setor (Fica/Vender/Emprestar).
+- ✅ Escalação: abas "🔭 Próximo jogo" e "🧪 Jogo hipotético" separadas; só "Meu time" no topo; adversário vem do
+  próximo jogo ou do botão "🔎 Analisar este jogo"; campinho editável (arrastar) nas duas; desfalques/dúvidas agrupados.
+  Página do time: botão "Analisar o próximo jogo" (abre a Escalação com o rival).
+- ✅ IA: `lab_ai/availability.py` (mapa de dados do jogo: o que a fonte mede e o que não mede, no rodapé das respostas e
+  nos relatórios); `lab_ai/player_intel.py` — nível 1 (um lance), nível 2 (partida: técnica, pé, pressão, cruzamentos,
+  finalização, conduções, defesa por terço/corredor, perdas e consequência em 15 s, blocos de 15 min, placar,
+  eficiência) e nível 3 (vários jogos: regularidade, tendência, "em X de Y jogos"); afirmações tipadas FATO / PADRÃO /
+  INTERPRETAÇÃO / HIPÓTESE com n. Seção "🔬 Jogador (IA)" na página do jogo; relatório da IA com destaques por jogador;
+  Assistente: jogador citado → leitura dele primeiro; a IA só substitui a resposta clássica quando achou números da
+  pergunta. Leitura do rival ("Onde atacar") com Fato/Padrão/Interpretação/Como explorar/Hipótese.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

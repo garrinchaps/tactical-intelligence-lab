@@ -121,12 +121,13 @@ def _answer(question: str, current_context, use_llm: bool):
             lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team, db=get_service().db,
                              interaction_id=res.get("interaction_id"))
             specific = bool((res.get("scope") or {}).get("ask")) and not str(res.get("engine_used", "")).startswith("LOCAL_SCOPE")
-            if specific:
+            # rodada 10: a IA só SUBSTITUI a resposta quando achou números que respondem à pergunta; senão complementa
+            if specific or not lab.get("matched"):
                 res["report_markdown"] = (res["report_markdown"] + "\n\n---\n\n#### 🧠 Leitura da IA do laboratório\n\n"
                                           + lab["markdown"])
             else:
                 res["report_markdown"] = lab["markdown"]
-            res["engine_used"] = lab["engine"] + (" + analista clássico" if specific else "")
+            res["engine_used"] = lab["engine"] + (" + analista clássico" if (specific or not lab.get("matched")) else "")
             res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
         except Exception as exc:
             res["lab_ai_error"] = f"{type(exc).__name__}: {exc}"

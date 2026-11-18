@@ -66,10 +66,43 @@ def pitch_figure(found: List[Dict[str, Any]], title: str) -> go.Figure:
     return fig
 
 
+# rodada 10: cada fragilidade lida como analista — o que significa (interpretação) e o que só vídeo confirma (hipótese)
+READING = [
+    ("driblado", "o 1x1 contra ele tende a sair a favor de quem ataca; o lado dele vira corredor de ataque",
+     "se o problema é velocidade, abordagem ou cobertura do companheiro só o vídeo mostra (tracking não é aberto)"),
+    ("desarma pouco", "deixa a bola chegar e não interrompe a jogada: conduzir para cima dele rende",
+     "pode ser escolha da função (contenção) e não deficiência — confirmar com o papel tático no vídeo"),
+    ("aéreo", "bola alta na área dele é disputa vantajosa para nós",
+     "posicionamento e impulsão não são medidos; os números dizem só o resultado das disputas"),
+    ("duelos", "perde no corpo a corpo: aproximar dois jogadores no setor dele",
+     "duelos misturam chão e alto; a direção da jogada não é registrada nesta fonte"),
+    ("não defende", "o lado dele fica exposto na transição: o nosso lateral daquele corredor pode subir",
+     "pode ser instrução do técnico (guardar posição para o contra-ataque) — ver no vídeo"),
+    ("saída de bola", "pressão alta nele tende a forçar erro ou chutão",
+     "a pressão sofrida é inferida pelos números de passe/perda, sem tracking"),
+    ("contra-ataque", "a linha fica alta e sem cobertura depois da perda",
+     "a altura da linha é inferida pelos chutes cedidos em contra-ataque, não por posições medidas"),
+    ("chutar de fora", "o volante não encurta a entrada da área",
+     "chute de fora também depende do nosso time querer arriscar"),
+    ("lado", "o corredor concentra o perigo cedido: carregar o ataque por ali",
+     "pode refletir o estilo dos adversários enfrentados, não só a defesa deles"),
+    ("cruzamentos", "cede o cruzamento com facilidade: atacar pelos lados e o segundo pau",
+     "a qualidade de quem cruzou contra eles muda o peso do número"),
+    ("zagueiro baixo", "desvantagem física na bola alta contra o nosso atacante",
+     "altura do cadastro; impulsão e tempo de bola não são medidos"),
+]
+
+
+def _reading(title: str):
+    t = (title or "").lower()
+    return next(((i, h) for k, i, h in READING if k in t), (None, None))
+
+
 def cards_html(found: List[Dict[str, Any]], color: str = "#EF4444") -> str:
     out = []
     for i, f in enumerate(found[:8], 1):
         g = f["gravidade"]
+        interp, hyp = _reading(f.get("titulo"))
         bar = f'<div style="height:6px;background:#1E2A44;border-radius:4px;margin:6px 0"><div style="width:{g}%;height:6px;' \
               f'border-radius:4px;background:linear-gradient(90deg,#F59E0B,{color})"></div></div>'
         out.append(
@@ -77,9 +110,13 @@ def cards_html(found: List[Dict[str, Any]], color: str = "#EF4444") -> str:
             f'padding:10px 14px;margin-bottom:8px"><div style="display:flex;justify-content:space-between;gap:10px">'
             f'<b style="font-size:1rem;color:#F5F7FB"><span style="background:{color};color:#fff;border-radius:999px;padding:0 8px;'
             f'margin-right:8px">{i}</span>{f["titulo"]}</b><span style="color:#94A3B8;font-size:.8rem">gravidade {g}</span></div>'
-            f'{bar}<div style="color:#E2E8F0;font-size:.9rem">📊 {f["evidencia"]}</div>'
-            f'<div style="color:#A7F3D0;font-size:.88rem;margin-top:4px">🎯 {f["explorar"]}</div>'
-            f'<div style="color:#64748B;font-size:.75rem;margin-top:3px">{f["base"]}</div></div>')
+            f'{bar}<div style="color:#E2E8F0;font-size:.9rem">📌 <b>Fato:</b> {f["evidencia"]}</div>'
+            f'<div style="color:#BAE6FD;font-size:.86rem;margin-top:3px">🔁 <b>Padrão:</b> visto nos {f["base"]}</div>'
+            + (f'<div style="color:#FDE68A;font-size:.86rem;margin-top:3px">💡 <b>Interpretação:</b> {interp}</div>'
+               if interp else "")
+            + f'<div style="color:#A7F3D0;font-size:.88rem;margin-top:4px">🎯 <b>Como explorar:</b> {f["explorar"]}</div>'
+            + (f'<div style="color:#C4B5FD;font-size:.8rem;margin-top:3px">🔍 <b>Hipótese a confirmar:</b> {hyp}</div>'
+               if hyp else "") + '</div>')
     return "".join(out)
 
 
