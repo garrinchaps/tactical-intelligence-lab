@@ -174,6 +174,12 @@ def _baselines_loop(db) -> None:
                 PS.save_player_index(PS.build_player_index(db))
         except Exception:
             pass
+        try:                                         # rodada 13: régua dos confrontos do pré-jogo, 1x por dia
+            from src.squad import matchups as MU
+
+            MU.reference(db)                         # só recalcula se o arquivo tiver mais de 24 h
+        except Exception:
+            pass
         try:                                         # rodada 9: régua da IA do laboratório, refeita 1x por dia
             from src.intelligence.lab_ai import reference as LR
 

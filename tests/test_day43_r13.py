@@ -119,3 +119,31 @@ def test_double_pitch_and_cards_render():
     assert "A" in h and "B" in h and "#F59E0B" in h
     c = MV.finding_card(1, {"titulo": "Drible", "nivel": "claro", "evidencia": "x", "acao": "FORÇAR: y", "base": "z"})
     assert "FORÇAR" in c
+
+
+def test_brain_feedback_moves_weight(tmp_path, monkeypatch):
+    from src.intelligence import lab_brain as LB
+
+    monkeypatch.setattr(LB, "ROOT", tmp_path)
+    monkeypatch.setattr(LB, "STATE", tmp_path / "brain.json")
+    monkeypatch.setattr(LB, "LOG", tmp_path / "log.jsonl")
+    assert LB.weight("confrontos", "drible") == 1.0
+    for _ in range(4):
+        LB.feedback("confrontos", "drible", True)
+    LB.feedback("confrontos", "aereo", False)
+    assert LB.weight("confrontos", "drible") > 1.15 and LB.weight("confrontos", "aereo") < 1.0
+    assert {r["tipo de análise"] for r in LB.table()} == {"drible", "aereo"}
+
+
+def test_fuzzy_exploit_monotonic():
+    from src.squad.matchups import fuzzy_exploit
+
+    assert fuzzy_exploit(95, 95) > fuzzy_exploit(80, 70) > fuzzy_exploit(65, 65)
+    assert 0 <= fuzzy_exploit(30, 30) <= 100
+
+
+def test_course_has_simple_text_for_every_question():
+    from src.intelligence import course as C
+
+    assert set(C.SIMPLE) == {f"Q{i}" for i in range(1, 13)}
+    assert all(len(a) > 60 and b for a, b in C.SIMPLE.values())

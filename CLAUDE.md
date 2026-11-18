@@ -363,6 +363,35 @@ Rodada 12 (18/11/2026, 411 testes verdes):
 - ✅ Padrões e histórico em jogo só com estatísticas: "🧠 Leitura da IA" (forte, atenção, explorar, trocas, melhor, fases).
 - Site idêntico ao app: ainda não (pedido para depois).
 
+Rodada 13 (18/11/2026, 422 testes verdes):
+- ✅ Velocidade: índices novos no SQLite (visitante+data, mandante+data, competição+data, números por jogador por time,
+  escalações por jogo, estatísticas por time) + `PRAGMA optimize` — antes "jogos do time" varria a tabela inteira pelo
+  visitante. 1ª abertura após o pull cria os índices (pode levar 1–2 min uma vez). Seções pesadas da IA abrem sob demanda.
+- ✅ Scout: régua nova (`add_quality_scores`): pico de valor de 3 anos (`valor_pico_3a_eur`, veterano de elite), nível =
+  45% clube + 55% liga (`_level_map`, `clube_liga`), quem domina a liga perde menos pelo nível, 0 min no ano não herda
+  histórico antigo (só 1/3), nota FotMob em todas as funções; `precocity` (valor e minutos contra a mesma idade) no teto
+  de potencial; fotografia `scout_universe_v4.pkl`. Características (`src/scout/traits.py`: artilheiro, maestro,
+  motorzinho, driblador, xerife, paredão, grande promessa… só ≥ P85–90 da função, com porquê). "Três melhores por
+  posição" corrigido (o cache ignorava a posição). "Adicionar ao plano" com callback + barra do plano + abas com estado.
+  Elenco e notas pelos jogos do PRÓPRIO clube (`club_player_stats`, `roster_quality`: homônimos não zeram mais).
+  Dossiê com porquês/atenção (`why_chosen`) e mais motivos de recusa (não agrega, pior que o titular, fase, estilo,
+  lesões, salário). "Finalizar planejamento" mostra o elenco planejado no app (`src/ui/plan_board.py`: campinho +
+  profundidade por posição). Sem lista oficial, quem não joga há 300+ dias sai do elenco (Diogo Jota, Izquierdoz).
+- ✅ Jogo: abas Perigo/Relatório/Jogador (IA) viraram partes de Redes & xT, Padrões e Jogadores (abrem sob demanda);
+  "⚖️ Os dois times"; xT/jogadas/importância seguem o período escolhido; corredores defensivos desenhados no campo;
+  bola aérea contada honestamente (vitória = "Aerial Lost" do rival; nada de passes altos como "disputas ganhas" —
+  era o "12 de 12 (100%)"); sem o interruptor "Só partidas reais"; jogo sem estatística diz que nenhuma base achou.
+  Clube: formações com padrões de ataque e defesa (`team_history.formation_patterns`).
+- ✅ Pré-jogo (`src/squad/matchups.py` + `src/ui/matchday_view.py`): cartão do confronto, campo único com os dois XIs,
+  confrontos meu time × rival (FORÇAR/PROTEGER/EVITAR; duelos por desenho em 5 fundamentos + estilo × problema
+  sistêmico; "escancarado" só topo×fundo da base), índice fuzzy Mamdani de exploração, 👍/👎 por confronto; conteúdo
+  antigo nas abas Onde atacar / Escalações e porquês / Leitura do rival / Onde sofremos / Editar o campinho / Notícias.
+- ✅ IA única (`src/intelligence/lab_brain.py`): um lugar para o 👍/👎 de qualquer tela (pesos Beta por tipo, 0,6–1,4),
+  "🧠 Treinar tudo" (seletor do Assistente, rede de perigo com os parâmetros sugeridos pela Q7, réguas, índice de busca).
+  Bastidores: "IA única" + matéria com "Em palavras simples" e "Onde está no app" em cada questão (`course.SIMPLE`).
+- Site idêntico: NÃO feito. Caminho honesto para ficar idêntico: publicar o próprio app Streamlit (não reescrever em
+  React) com uma cópia só-leitura do banco — exige hospedar o banco (vários GB) e decidir onde.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

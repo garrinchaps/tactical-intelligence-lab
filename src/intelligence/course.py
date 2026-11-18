@@ -34,6 +34,12 @@ DECISIONS: List[Dict[str, str]] = [
     {"parte do app": "Nota 0–10 do jogador", "componente": "rating_v2.py / rating_box.py (percentil contra a mesma função)",
      "tipo de problema": "Regressão / ordenação", "paradigma": "Estatístico (régua da base)",
      "questão": "Q1", "aprende?": "A régua cresce com a base"},
+    {"parte do app": "Pré-jogo — quão explorável é cada duelo", "componente": "squad/matchups.py (Mamdani com centroide)",
+     "tipo de problema": "Avaliação com termos vagos (\"driblador forte\" × \"lateral fraco\")", "paradigma": "Lógica fuzzy",
+     "questão": "Q2 · Q3", "aprende?": "As regras são fixas; a ordem dos cartões aprende com 👍/👎"},
+    {"parte do app": "Que análise aparece primeiro (todas as telas)", "componente": "lab_brain.py (contagem Beta por tipo)",
+     "tipo de problema": "Decisão sequencial com recompensa (seu voto)", "paradigma": "Aprendizado por reforço",
+     "questão": "Q1", "aprende?": "Sim: a cada 👍/👎, em qualquer tela"},
     {"parte do app": "Contribuição tática (índice fuzzy)", "componente": "fuzzy.py (Mamdani com centroide)",
      "tipo de problema": "Avaliação com termos vagos (\"marca muito\", \"passa bem\")", "paradigma": "Lógica fuzzy",
      "questão": "Q2 · Q3", "aprende?": "Não: regras escritas por especialista (auditáveis)"},
@@ -48,7 +54,7 @@ DECISIONS: List[Dict[str, str]] = [
      "questão": "Q1 · Q12 (comparação)", "aprende?": "Não"},
     {"parte do app": "Diagnóstico do rival", "componente": "analytics/vulnerabilities.py",
      "tipo de problema": "Detecção de padrões fora da curva", "paradigma": "Estatístico + regras", "questão": "Q1",
-     "aprende?": "A régua cresce com a base"},
+     "aprende?": "A régua cresce com a base; 'Treinar tudo' refaz a régua"},
     {"parte do app": "Scout — viabilidade da contratação", "componente": "scout/engine.py (pesos por critério)",
      "tipo de problema": "Ranqueamento multicritério", "paradigma": "Sistema especialista ponderado", "questão": "Q1",
      "aprende?": "Não"},
@@ -444,3 +450,51 @@ def run_example_ga(formation: str = "4-3-3", seed: int = 7, generations: int = 6
     out["convergencia"] = ga_convergence(out["historico"])
     out["R"] = float(ga.penalty.max()) if len(ga.penalty) else 0.0
     return out
+
+
+# ============================================================== explicações simples (para a aula)
+SIMPLE = {
+    "Q1": ("Antes de escolher a ferramenta, a gente pergunta: que tipo de problema é este? Adivinhar se um lance vira "
+           "chute é CLASSIFICAR (sim/não). Dar nota de 0 a 10 é REGRESSÃO (um número). Montar o melhor time é OTIMIZAR "
+           "(achar a melhor combinação). Cada tipo pede uma técnica diferente.",
+           "Tabela acima: cada linha é uma decisão real do app e a técnica que a toma."),
+    "Q2": ("Probabilidade fala de algo que ainda vai acontecer (o próximo passe vai sair certo?). Fuzzy fala de "
+           "palavras vagas que não têm sim/não (\"ele passa bem?\"): 82% de acerto é \"passa bem\" em grau 0,64 — "
+           "não é chance, é o quanto o número combina com a palavra.",
+           "Pré-jogo → cartões dos confrontos: \"driblador forte\" e \"lateral fraco\" são termos fuzzy."),
+    "Q3": ("Mamdani é um jeito de raciocinar com regras de técnico: SE o atacante é forte E o defensor é fraco ENTÃO "
+           "o duelo é muito explorável. Cada regra acende um pouco (a mais fraca das condições manda), as respostas se "
+           "somam num desenho e o CENTROIDE (o ponto de equilíbrio do desenho) vira a nota final.",
+           "Pré-jogo → cada confronto mostra o \"Índice fuzzy de exploração 0–100\" calculado assim."),
+    "Q4": ("Takagi-Sugeno usa as mesmas regras, mas cada regra já devolve um número; o resultado é uma média ponderada. "
+           "É mais rápido e bom para coisas ao vivo; o Mamdani é mais fácil de explicar.",
+           "Índice de pressão territorial (fuzzy.py) e a comparação lado a lado nesta aba."),
+    "Q5": ("Uma rede neural é um monte de \"somas com pesos\" em camadas. Sem uma função não linear entre as camadas, "
+           "ela só sabe traçar retas — e não resolve nem o XOR. Com ela (ReLU/sigmoide), consegue \"dobrar\" o espaço.",
+           "Página do jogo → Redes & xT → \"Perigo de cada ação pela rede neural\"; Assistente → ranking de perigo."),
+    "Q6": ("Aprender = errar menos. A rede compara o palpite com o que aconteceu, calcula para que lado cada peso "
+           "deve andar para o erro cair (o gradiente) e dá um passinho (a taxa de aprendizado). Repete milhares de vezes.",
+           "É o treino da rede de perigo (Bastidores → Rede de perigo, ou o botão Treinar tudo)."),
+    "Q7": ("Se o erro no treino cai mas o erro em jogos que a rede nunca viu sobe, ela está DECORANDO (sobreajuste). "
+           "A parada antecipada guarda a melhor época; a regularização L2 segura os pesos. A IA lê essa curva e "
+           "SUGERE os parâmetros do próximo treino.",
+           "Curva e sugestão nesta aba; o botão \"Treinar tudo\" já usa a sugestão."),
+    "Q8": ("Acurácia engana quando quase tudo é \"não\": só 12% das posses viram chute, então dizer sempre \"não\" "
+           "acerta 88% e não serve para nada. Por isso olhamos precisão (quando diz sim, acerta?), revocação (pega os "
+           "lances perigosos?) e F1 (o equilíbrio das duas).",
+           "Matriz de confusão desta aba, com a rede de perigo de verdade e os jogos da validação."),
+    "Q9": ("Cada arquitetura serve a um tipo de dado: tabela → MLP (a nossa); imagem → CNN; sequência → RNN/LSTM; "
+           "texto longo → Transformer; achar o \"normal\" → Autoencoder.",
+           "A tabela explica por que usamos MLP e onde as outras entrariam."),
+    "Q10": ("O algoritmo genético imita a evolução: cada escalação é um indivíduo; as melhores têm mais chance de "
+            "\"ter filhos\" (seleção por roleta ou torneio); filhos misturam os pais (cruzamento) e às vezes mudam um "
+            "jogador ao acaso (mutação) para não ficar preso sempre no mesmo time.",
+            "Escalação → Plano de jogo → \"Escalação pelo algoritmo genético\"."),
+    "Q11": ("Regra que não pode ser quebrada (lesionado não joga) vira um castigo enorme na nota: f′ = f − R × "
+            "violações. Com R grande, a evolução descarta sozinha quem quebra a regra.",
+            "No genético da Escalação, R = 1000 para lesionado."),
+    "Q12": ("Elitismo = o melhor time de cada geração passa direto (nunca piora). Explorar = tentar coisas novas "
+            "(mutação); intensificar = apertar em torno do que já é bom (torneio maior). Para quando chega ao número "
+            "de gerações.",
+            "Gráfico de convergência desta aba e o genético da Escalação."),
+}

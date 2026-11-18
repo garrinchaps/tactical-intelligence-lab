@@ -147,6 +147,27 @@ def _pct(ref: pd.DataFrame, col: str, value) -> Optional[float]:
     return float((s < value).mean() * 100)
 
 
+# ------------------------------------------------------------------ fuzzy (Mamdani): quão explorável é o duelo
+def fuzzy_exploit(att_pct: float, def_bad_pct: float) -> float:
+    """Mamdani com centroide (matéria, Q3): entradas = força do nosso jogador e fraqueza do defensor (0–100);
+    regras: forte E muito fraco → muito explorável; forte E fraco → explorável; médio E muito fraco → explorável;
+    médio E fraco → pouco. Saída 0–100 (índice, não probabilidade)."""
+    from src.intelligence.course import _tri
+
+    u = np.arange(0, 101, 1.0)
+    alto = lambda x: float(_tri(np.array([x]), 60, 100, 100)[0])
+    medio = lambda x: float(_tri(np.array([x]), 40, 65, 85)[0])
+    rules = [(min(alto(att_pct), alto(def_bad_pct)), (70, 100, 100)),
+             (min(alto(att_pct), medio(def_bad_pct)), (45, 70, 90)),
+             (min(medio(att_pct), alto(def_bad_pct)), (45, 70, 90)),
+             (min(medio(att_pct), medio(def_bad_pct)), (10, 35, 60))]
+    agg = np.zeros_like(u)
+    for w, tri in rules:
+        if w > 0:
+            agg = np.maximum(agg, np.minimum(w, _tri(u, *tri)))
+    return round(float((u * agg).sum() / agg.sum()), 1) if agg.sum() > 0 else 0.0
+
+
 # ------------------------------------------------------------------ duelos individuais
 def _find(xi: List[Dict[str, Any]], roles: Sequence[str]) -> List[Dict[str, Any]]:
     out = []
@@ -205,7 +226,15 @@ def duel_findings(my_xi, rv_xi, my_stats, rv_stats, ref, me: str, rival: str, at
                     else:
                         continue
                     an, dn = att["jogador"], dfd["jogador"]
+                    fz = fuzzy_exploit(pa, 100 - d_good)
+                    try:
+                        from src.intelligence.lab_brain import weight
+
+                        wt = weight("confrontos", did)
+                    except Exception:
+                        wt = 1.0
                     out.append({
+                        "fuzzy": fz, "peso_aprendido": wt, "score": round(fz * wt, 1),
                         "tipo": "duelo", "dimensao": did, "titulo": title, "nivel": level,
                         "atacante": an, "defensor": dn, "papel_atacante": role, "papel_defensor": dfd.get("papel"),
                         "lado_x": dfd.get("x"), "lado_y": dfd.get("y"), "gap": round(pa - d_good, 1),
@@ -217,7 +246,7 @@ def duel_findings(my_xi, rv_xi, my_stats, rv_stats, ref, me: str, rival: str, at
                                   f"no {title.lower()}")),
                         "base": f"{int(ra.get('jogos') or 0)} e {int(rd.get('jogos') or 0)} jogos recentes com números por jogador",
                     })
-    out.sort(key=lambda x: (x["nivel"] != "escancarado", -x["gap"]))
+    out.sort(key=lambda x: (x["nivel"] != "escancarado", -x["score"]))
     return out
 
 

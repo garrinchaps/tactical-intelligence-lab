@@ -115,6 +115,14 @@ CREATE INDEX IF NOT EXISTS idx_pstats_match ON match_player_stats(match_id, team
 CREATE INDEX IF NOT EXISTS idx_pstats_player ON match_player_stats(player_name, match_id);
 CREATE INDEX IF NOT EXISTS idx_lineups_coach ON match_lineups(coach, match_id);
 CREATE INDEX IF NOT EXISTS idx_matches_source_date ON matches(data_source, match_date);
+-- rodada 13 (velocidade): "jogos do time" filtra mandante OU visitante — sem índice pelo visitante, cada consulta
+-- varria a tabela inteira; números por jogador por time e réguas por competição também ganham índice próprio
+CREATE INDEX IF NOT EXISTS idx_matches_home_date ON matches(home_team_name, match_date);
+CREATE INDEX IF NOT EXISTS idx_matches_away_date ON matches(away_team_name, match_date);
+CREATE INDEX IF NOT EXISTS idx_matches_comp_date ON matches(competition_name, match_date);
+CREATE INDEX IF NOT EXISTS idx_pstats_team ON match_player_stats(team_name, match_id);
+CREATE INDEX IF NOT EXISTS idx_lineups_match ON match_lineups(match_id);
+CREATE INDEX IF NOT EXISTS idx_team_stats_team ON match_team_stats(team_name, match_id);
 -- Revisão leve do catálogo: triggers também capturam gravações feitas por outros processos.
 CREATE TRIGGER IF NOT EXISTS trg_matches_catalog_insert AFTER INSERT ON matches BEGIN
     UPDATE source_state SET state_value = CAST(COALESCE(state_value, '0') AS INTEGER) + 1,
@@ -183,6 +191,10 @@ class DataHubDB:
                 if col not in cols:
                     conn.execute(f"ALTER TABLE matches ADD COLUMN {col} {typ}")
             conn.executescript(DATA_HUB_DDL)
+            try:                       # rodada 13: estatísticas do planejador de consultas (usa os índices certos)
+                conn.execute("PRAGMA optimize;")
+            except sqlite3.Error:
+                pass
             now = utc_now()
             conn.executemany(
                 """INSERT OR IGNORE INTO source_state (source,state_key,state_value,updated_at)

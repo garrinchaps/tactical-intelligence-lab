@@ -95,4 +95,7 @@ def finding_card(i: int, f: Dict[str, Any], kind: str = "forcar") -> str:
             f'padding:2px 7px">{tag}</span></div>{who}'
             f'<div style="font-size:.82rem;color:#CBD5E1;margin-top:4px">{html.escape(f["evidencia"])}</div>'
             f'<div style="font-size:.88rem;color:#F5F7FB;margin-top:6px;font-weight:700">{html.escape(f["acao"])}</div>'
-            f'<div style="font-size:.72rem;color:#7C8BA5;margin-top:3px">Base: {html.escape(f.get("base", ""))}</div></div>')
+            + (f'<div style="font-size:.72rem;color:#A7F3D0;margin-top:3px">Índice fuzzy de exploração {f["fuzzy"]:.0f}/100'
+               f'{" · peso aprendido com seus 👍/👎: " + format(f["peso_aprendido"], ".2f") if f.get("peso_aprendido", 1) != 1 else ""}'
+               f'</div>' if f.get("fuzzy") is not None else "")
+            + f'<div style="font-size:.72rem;color:#7C8BA5;margin-top:3px">Base: {html.escape(f.get("base", ""))}</div></div>')

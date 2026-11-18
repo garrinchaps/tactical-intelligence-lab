@@ -126,6 +126,48 @@ def _simulator() -> None:
                   "para dizer quem criou mais perigo.")
 
 
+def _brain_panel() -> None:
+    """Rodada 13: uma IA só, com módulos; um botão treina tudo; o 👍/👎 de qualquer tela entra aqui."""
+    import pandas as pd
+
+    from src.intelligence import lab_brain as LB
+
+    st.markdown("## 🧠 A IA do laboratório é uma só")
+    st.markdown("Ela tem **módulos** (como um time tem setores), mas é **um sistema único**: os mesmos dados, a mesma "
+                "régua da base e o mesmo lugar para aprender com você. Cada 👍/👎 que você dá — no Assistente, nos "
+                "confrontos do pré-jogo — muda o peso daquele tipo de análise na próxima vez. O botão abaixo treina "
+                "**todos** os módulos de uma vez, cada um com o seu método.")
+    mods = pd.DataFrame([
+        {"módulo": "Entender a pergunta e escolher os fatos (Assistente)", "como aprende": "regressão logística com seus 👍/👎",
+         "o que o treino faz": "promove nova versão só se errar menos no teste"},
+        {"módulo": "Perigo de cada ação (rede neural)", "como aprende": "descida do gradiente (Adam) nos lances",
+         "o que o treino faz": "usa os parâmetros que a própria IA sugere a partir do último treino"},
+        {"módulo": "Que análise mostrar primeiro (todas as telas)", "como aprende": "reforço: contagem de aprovações por tipo",
+         "o que o treino faz": "a cada voto, na hora (não precisa de botão)"},
+        {"módulo": "Confrontos do pré-jogo", "como aprende": "régua da base + lógica fuzzy + seus votos",
+         "o que o treino faz": "refaz a régua dos jogadores"},
+        {"módulo": "Escalação contra o rival", "como aprende": "algoritmo genético (busca, não treino)",
+         "o que o treino faz": "usa a régua nova automaticamente"},
+    ])
+    styled_dataframe(mods, hide_index=True, use_container_width=True)
+    if st.button("🧠 Treinar tudo agora", type="primary", use_container_width=True, key="brain_train_all"):
+        from src.ui.context import get_service
+
+        box = st.empty()
+        res = LB.train_all(get_service().db, progress=lambda m: box.info(f"Treinando: {m}"))
+        box.empty()
+        styled_dataframe(pd.DataFrame(res), hide_index=True, use_container_width=True)
+        st.success("Treino geral concluído. Cada módulo mostra o resultado acima (rejeitar uma versão também é resultado: "
+                   "o app só troca o que ficou melhor).")
+    rows = LB.table()
+    with st.expander(f"O que a IA já aprendeu com seus votos ({len(rows)} tipos de análise)"):
+        if rows:
+            styled_dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            st.caption("Peso 1,00 = neutro. Acima de 1 sobe na lista; abaixo de 1 desce. Começa neutro e muda devagar.")
+        else:
+            st.caption("Ainda sem votos. Dê 👍/👎 nas respostas do Assistente e nos confrontos do pré-jogo.")
+
+
 def _lab_ai_panel() -> None:
     """Rodada 9: a IA do laboratório (o assistente) — versão, o que ela olha, treino com as avaliações."""
     import pandas as pd
@@ -173,9 +215,11 @@ def render(ctx=None) -> None:
     hero("Bastidores · como a IA aprende", "A matéria de Introdução à IA aplicada ao futebol",
          "Lógica fuzzy, redes neurais e algoritmo genético — cada questão da matéria calculada com os modelos que "
          "realmente decidem o que o programa mostra. Nada aqui é ilustração solta: os números vêm do app.")
-    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA do Assistente", "🎯 Rede de perigo (treino)"],
+    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA única (treinar tudo)", "🎯 Rede de perigo (treino)"],
                                 default="📚 A matéria aplicada", key="bastidores_view", label_visibility="collapsed")
-    if view == "🧠 IA do Assistente":
+    if view == "🧠 IA única (treinar tudo)":
+        _brain_panel()
+        st.markdown("---")
         _lab_ai_panel()
         _assistant_misses()
         _learning_activity_panel()

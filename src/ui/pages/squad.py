@@ -609,6 +609,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
                     "fragilidades gerais do rival.")
         for i, x in enumerate(mu["forcar"][:6], 1):
             st.markdown(MV.finding_card(i, x, "forcar"), unsafe_allow_html=True)
+            _brain_buttons("confrontos", x.get("dimensao", "duelo"), f"{w}_mu_{i}", x)
         for x in mu["estilo"][:3]:
             st.markdown(MV.finding_card("★", x, "estilo"), unsafe_allow_html=True)
     if mu["proteger"] or mu["evitar"]:
@@ -712,6 +713,20 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
             st.caption("Notícia, não dado confirmado.")
             for nw in pv["noticias"]:
                 st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
+
+
+def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -> None:
+    """👍/👎 que treinam a IA do laboratório (o tipo aprovado sobe nas próximas análises)."""
+    from src.intelligence import lab_brain as LB
+
+    a, b, _ = st.columns([.6, .6, 6])
+    info = {k: ctx_info.get(k) for k in ("titulo", "atacante", "defensor", "nivel")}
+    if a.button("👍", key=f"{key}_up", help="Análise útil — a IA passa a valorizar este tipo"):
+        LB.feedback(module, kind, True, info)
+        st.toast("Obrigado! A IA do laboratório aprendeu com isso.")
+    if b.button("👎", key=f"{key}_dn", help="Não ajudou — a IA passa a mostrar menos este tipo"):
+        LB.feedback(module, kind, False, info)
+        st.toast("Anotado. Este tipo de análise perde peso.")
 
 
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=24)

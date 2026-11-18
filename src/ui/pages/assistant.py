@@ -257,6 +257,13 @@ def render(current_context, match_bar) -> None:
                     vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
                     if vote is not None:
                         record_feedback(learning_id, vote)
+                        try:                           # rodada 13: o mesmo voto treina o cérebro único do laboratório
+                            from src.intelligence import lab_brain as LB
+
+                            LB.feedback("assistente", str(h.get("engine") or h.get("intent") or "resposta")[:60],
+                                        bool(vote), {"pergunta": str(h.get("question") or "")[:200]})
+                        except Exception:
+                            pass
                         st.rerun()
                 else:
                     st.caption("Feedback registrado para revisão.")

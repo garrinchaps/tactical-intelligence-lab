@@ -26,6 +26,15 @@ def _fig(h: int = 300) -> go.Figure:
     return f
 
 
+def simple(q: str) -> None:
+    """Explicação para a aula: em palavras simples + onde isso aparece no app."""
+    plain, where = C.SIMPLE[q]
+    st.markdown(f'<div style="background:#0B1120;border:1px solid #1E2A44;border-left:4px solid #A78BFA;border-radius:12px;'
+                f'padding:.6rem .9rem;margin:.3rem 0 .7rem"><div style="font-size:.95rem">💬 <b>Em palavras simples:</b> '
+                f'{plain}</div><div style="font-size:.85rem;color:#A7F3D0;margin-top:5px">📍 <b>Onde está no app:</b> '
+                f'{where}</div></div>', unsafe_allow_html=True)
+
+
 def _table(rows, caption: str = "") -> None:
     styled_dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
     if caption:
@@ -35,10 +44,13 @@ def _table(rows, caption: str = "") -> None:
 # ------------------------------------------------------------------ mapa
 def decisions_tab() -> None:
     st.markdown("### 🗺️ Quem decide cada coisa no programa")
-    st.caption("Nenhuma tela do laboratório é decidida por um modelo de linguagem externo: o Gemini vem desligado. Cada "
-               "decisão abaixo é tomada por um componente nosso, com a questão da matéria que ele aplica.")
+    st.markdown("A IA do laboratório é **uma só**, com módulos — como um time tem goleiro, defesa, meio e ataque. Nenhuma "
+                "tela depende de um modelo de linguagem de fora (o Gemini vem desligado). Cada decisão abaixo é tomada "
+                "por um módulo nosso, e a última coluna diz se ele aprende e como. O botão **Treinar tudo** (aba ao "
+                "lado, \"IA única\") treina todos de uma vez.")
     _table(C.decision_map())
     st.markdown("#### Q1 · Taxonomia: que tipo de problema é cada um")
+    simple("Q1")
     _table(C.TAXONOMY, "Classificar o problema antes de escolher a técnica: é o primeiro passo da matéria e foi como o "
                        "laboratório foi montado.")
 
@@ -47,6 +59,7 @@ def decisions_tab() -> None:
 def fuzzy_tab() -> None:
     st.markdown("### Eixo 1 · Lógica fuzzy")
     st.markdown("#### Q2 · Fuzzy × probabilidade")
+    simple("Q2")
     pp = st.slider("Passes certos do jogador (%)", 0, 100, 82, key="c_q2")
     q2 = C.fuzzy_vs_probability(pp)
     a, b = st.columns(2)
@@ -63,6 +76,7 @@ def fuzzy_tab() -> None:
     st.plotly_chart(f, use_container_width=True)
 
     st.markdown("#### Q3 · Mamdani passo a passo, com centroide numérico")
+    simple("Q3")
     c1, c2 = st.columns(2)
     di = c1.slider("Intensidade defensiva (0–100)", 0, 100, 70, key="c_q3a")
     pa = c2.slider("Precisão de passe (0–100)", 0, 100, 85, key="c_q3b")
@@ -81,6 +95,7 @@ def fuzzy_tab() -> None:
     st.caption(f"{m['formula']}. Resultado: **{m['centroide']}** — um ÍNDICE fuzzy, não uma probabilidade.")
 
     st.markdown("#### Q4 · Mamdani × Takagi-Sugeno (as mesmas regras)")
+    simple("Q4")
     s = C.sugeno_same_rules(di, pa)
     k = st.columns(2)
     k[0].metric("Mamdani (centroide)", m["centroide"])
@@ -116,6 +131,7 @@ def _val_scores(version: int):
 def neural_tab() -> None:
     st.markdown("### Eixo 2 · Redes neurais")
     st.markdown("#### Q5 · Forward pass e o problema do XOR")
+    simple("Q5")
     a, b = st.columns(2)
     with a:
         st.markdown("**XOR com uma camada escondida** (pesos didáticos: h1 ≈ OU, h2 ≈ E)")
@@ -136,6 +152,7 @@ def neural_tab() -> None:
             st.caption(f"Não consegui montar a jogada de exemplo ({e}).")
 
     st.markdown("#### Q6 · Um passo da descida do gradiente num neurônio sigmoide")
+    simple("Q6")
     c = st.columns(5)
     x1 = c[0].number_input("x₁", value=1.0, step=0.5, key="g_x1")
     x2 = c[1].number_input("x₂", value=2.0, step=0.5, key="g_x2")
@@ -151,6 +168,7 @@ def neural_tab() -> None:
     st.caption("É exatamente esta conta que neural_net.py faz em cada peso, camada por camada (backpropagation), com Adam.")
 
     st.markdown("#### Q7 · Curvas de treino × validação, parada antecipada e o próximo experimento")
+    simple("Q7")
     versions = reg.meta.get("versions") or []
     if not versions:
         st.caption("Nenhum treino registrado ainda.")
@@ -183,6 +201,7 @@ def neural_tab() -> None:
                    "por partida (escolhe o campeão) · TESTE isolado no GroupKFold. Nenhuma partida aparece em dois lugares.")
 
     st.markdown("#### Q8 · Matriz de confusão e o paradoxo da acurácia")
+    simple("Q8")
     ci = reg.champion_info() or {}
     sc = _val_scores(int(ci.get("version") or 0)) if net is not None else None
     if not sc:
@@ -211,6 +230,7 @@ def neural_tab() -> None:
         note("Paradoxo da acurácia", cm["paradoxo"], "warn")
 
     st.markdown("#### Q9 · Arquiteturas: qual usamos e por quê")
+    simple("Q9")
     _table(C.ARCHITECTURES)
 
 
@@ -218,6 +238,7 @@ def neural_tab() -> None:
 def genetic_tab() -> None:
     st.markdown("### Eixo 3 · Algoritmo genético (a escalação)")
     st.markdown("#### Q10 · Codificação binária, seleção e mutação")
+    simple("Q10")
     squad = C.example_ga_squad()
     chosen = squad["nome"].tolist()[:11]
     enc = C.binary_encoding(squad["nome"].tolist(), chosen)
@@ -236,11 +257,13 @@ def genetic_tab() -> None:
     _table([C.expected_mutations(18, pm)])
 
     st.markdown("#### Q11 · Restrições com penalidade R")
+    simple("Q11")
     st.markdown("Lesionado não pode jogar: em vez de proibir, a aptidão é **f′(x) = f(x) − R·(lesionados no XI)** com "
                 "R = 1000 (maior que qualquer XI possível) — a evolução descarta sozinha essas soluções.")
     _table([C.penalized_fitness(776.4, 0, 1000), C.penalized_fitness(790.0, 1, 1000)])
 
     st.markdown("#### Q12 · O AG com elitismo, critério de parada e exploração × intensificação")
+    simple("Q12")
     st.code(C.GA_PSEUDOCODE, language="text")
     c = st.columns(3)
     gens = c[0].slider("Gerações (parada)", 10, 300, 80, 10, key="c_ga_g")
