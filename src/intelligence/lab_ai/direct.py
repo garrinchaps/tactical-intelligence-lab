@@ -18,6 +18,10 @@ import pandas as pd
 
 # métrica → (rótulo, palavras que a pergunta usa; TODAS as de um grupo precisam aparecer)
 METRICS: Dict[str, Tuple[str, List[Tuple[str, ...]]]] = {
+    "passes_failed": ("passes errados", [("err", "passe"), ("passe", "errad"), ("perdeu", "passe")]),
+    "long_balls": ("bolas longas certas", [("bola", "longa"), ("bolas", "longas"), ("lancament",), ("ligacao direta",)]),
+    "errors_goal": ("erros que viraram gol", [("erro", "gol"), ("falha", "gol")]),
+    "saves": ("defesas do goleiro", [("defesas",), ("defendeu", "goleiro"), ("goleiro", "defes")]),
     "off_target": ("finalizações para fora", [("chut", "fora"), ("finaliz", "fora"), ("errou", "chute"), ("errou", "gol")]),
     "on_target": ("finalizações no alvo", [("chut", "alvo"), ("chut", "gol", "certo"), ("no alvo",), ("melhor", "chut"),
                                             ("chut", "melhor"), ("finaliz", "certa")]),
@@ -31,8 +35,8 @@ METRICS: Dict[str, Tuple[str, List[Tuple[str, ...]]]] = {
     "crosses": ("cruzamentos", [("cruzam",), ("cruzou",)]),
     "passes_ok": ("passes certos", [("passe", "cert"), ("acert", "passe")]),
     "passes": ("passes", [("passe",), ("tocou", "bola")]),
+    "dribbled_past": ("vezes driblado", [("driblado",), ("foi driblado",), ("sofr", "drible")]),
     "dribbles": ("dribles tentados", [("drible",), ("driblou",)]),
-    "dribbled_past": ("vezes driblado", [("driblado",), ("foi driblado",)]),
     "tackles": ("desarmes", [("desarm",)]),
     "interceptions": ("interceptações", [("intercept",)]),
     "recoveries": ("recuperações de bola", [("recuper",), ("roubou", "bola"), ("roubadas",)]),
@@ -45,7 +49,8 @@ METRICS: Dict[str, Tuple[str, List[Tuple[str, ...]]]] = {
     "chances_created": ("chances criadas", [("chance", "criad"), ("criou", "chance"), ("assistencia",), ("assistiu",)]),
 }
 TEAM_ONLY = {"possession_pct": ("posse de bola (%)", [("posse",)]), "corners": ("escanteios", [("escanteio",)])}
-FOTMOB_KEYS = {"shots": "totalShots", "on_target": "shotsOnTarget", "xg": "xg", "goals": "totalGoals", "passes_ok":
+FOTMOB_KEYS = {"off_target": "ShotsOffTarget", "long_balls": "long_balls_accurate", "errors_goal": "errors_led_to_goal",
+               "saves": "saves", "shots": "totalShots", "on_target": "shotsOnTarget", "xg": "xg", "goals": "totalGoals", "passes_ok":
                "accurate_passes", "passes": "accurate_passes_total", "final_third": "passes_into_final_third",
                "dribbles": "dribbles_succeeded_total", "dribbled_past": "dribbled_past", "tackles": "matchstats.headers.tackles",
                "interceptions": "interceptions", "recoveries": "recoveries", "losses": "dispossessed", "fouls": "foulsCommitted",
@@ -54,7 +59,8 @@ FOTMOB_KEYS = {"shots": "totalShots", "on_target": "shotsOnTarget", "xg": "xg", 
 FACT_KEY = {"shots": "shots_total", "on_target": "shots_on_target", "off_target": "shots_off_target", "xg": "xg",
             "passes": "passes_total", "passes_ok": "passes_accurate", "crosses": "crosses_total", "tackles": "tackles_won",
             "interceptions": "interceptions", "fouls": "fouls", "aerials_won": "aerials_won", "blocked": "shots_blocked",
-            "possession_pct": "possession_pct", "corners": "corners", "dribbles": "dribbles_completed"}
+            "possession_pct": "possession_pct", "corners": "corners", "dribbles": "dribbles_completed",
+            "long_balls": "long_balls_accurate"}
 
 
 def _fold(s: str) -> str:
@@ -91,7 +97,9 @@ def player_table_events(df: pd.DataFrame) -> pd.DataFrame:
                      "off_target": int(out.isin(["Off T", "Wayward", "Post", "Saved Off T"]).sum()),
                      "blocked": int((out == "Blocked").sum()), "goals": int((out == "Goal").sum()),
                      "xg": round(float(pd.to_numeric(sh["shot_statsbomb_xg"], errors="coerce").fillna(0).sum()), 2),
-                     "passes": len(p), "passes_ok": int(ok.sum()),
+                     "passes": len(p), "passes_ok": int(ok.sum()), "passes_failed": int((~ok).sum()),
+                     "long_balls": int((ok & (pd.to_numeric(p["pass_length"], errors="coerce") >= 32)).sum())
+                     if "pass_length" in p else None,
                      "final_third": int((ok & (x0 < 80) & (x1 >= 80)).sum()),
                      "box_passes": int((ok & (x1 >= 102) & pd.to_numeric(p["end_y"], errors="coerce").between(18, 62)).sum()),
                      "progressive": int((ok & ((d0 - d1) >= np.maximum(10, 0.25 * d0)) & (x1 >= 60)).sum()),
@@ -116,15 +124,20 @@ def player_table_box(box: Dict[str, Any]) -> pd.DataFrame:
     rows = []
     for r in ps.itertuples():
         s = r.stats if isinstance(r.stats, dict) else {}
-        row = {"team": r.team_name, "player": r.player_name}
+        row = {"team": r.team_name, "player": r.player_name,
+               "minutes": getattr(r, "minutes", None) if getattr(r, "minutes", None) == getattr(r, "minutes", None)
+               else s.get("minutes")}
         for k, fk in FOTMOB_KEYS.items():
             v = s.get(fk)
             try:
                 row[k] = float(v) if v is not None else None
             except (TypeError, ValueError):
                 row[k] = None
-        if row.get("shots") is not None and row.get("on_target") is not None and s.get("blockedShots") is not None:
-            row["off_target"] = max(0.0, row["shots"] - row["on_target"] - float(s.get("blockedShots") or 0))
+        try:
+            if s.get("accurate_passes_total") is not None:
+                row["passes_failed"] = float(s.get("accurate_passes_total") or 0) - float(s.get("accurate_passes") or 0)
+        except (TypeError, ValueError):
+            pass
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -137,7 +150,7 @@ def _n(v) -> str:
 
 
 def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box: Optional[Dict[str, Any]],
-           team_facts: Optional[list] = None, pt=lambda x: x) -> Optional[Dict[str, Any]]:
+           team_facts: Optional[list] = None, pt=lambda x: x, team_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
     key = detect(question)
     if key is None:
         return None
@@ -149,7 +162,10 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
         if table.empty or key not in table or table[key].dropna().empty:
             return {"markdown": f"Não tenho **{label}** por jogador neste jogo — a fonte não traz esse número. "
                                 f"Nada a responder sem inventar.", "key": key, "kind": "sem_dado"}
-        t = table.dropna(subset=[key]).sort_values(key, ascending=False)
+        t = table.dropna(subset=[key])
+        t = t.assign(mins_sort=pd.to_numeric(t.get("minutes", pd.Series(np.nan, index=t.index)), errors="coerce"))
+        # desempate pela minutagem: o mesmo número em menos minutos vale mais
+        t = t.sort_values([key, "mins_sort"], ascending=[False, True])
         t = t[t[key] > 0]
         if t.empty:
             return {"markdown": f"Ninguém registrou **{label}** neste jogo (zero para todos os jogadores com números).",
@@ -158,7 +174,8 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
         tie = t[t[key] == top[key]]
         lead = (f"**{top['player']}** ({pt(top['team'])}), com {_n(top[key])}" if len(tie) == 1 else
                 "empate entre " + ", ".join(f"**{r.player}** ({pt(r.team)})" for r in tie.itertuples()) + f", com {_n(top[key])}")
-        rank = "\n".join(f"{i}. {r.player} ({pt(r.team)}) — {_n(getattr(r, key))}" for i, r in
+        rank = "\n".join(f"{i}. {r.player} ({pt(r.team)}) — {_n(getattr(r, key))}"
+                         + (f" <sub>em {int(r.mins_sort)} min</sub>" if r.mins_sort == r.mins_sort else "") for i, r in
                          enumerate(t.head(5).itertuples(), 1))
         by_team = t.groupby("team")[key].sum()
         md = (f"Quem teve mais {label}: {lead}.\n\n**Os números que embasam** (top 5):\n\n{rank}\n\n"
@@ -167,6 +184,13 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
     # pergunta do time
     teams = [t for t in (meta.get("home_team_name"), meta.get("away_team_name")) if t]
     vals: Dict[str, float] = {}
+    if key == "long_balls" and team_facts is None:
+        try:
+            from src.intelligence.lab_ai.facts import match_facts
+
+            team_facts = match_facts(meta, df, box)
+        except Exception:
+            team_facts = []
     if key in METRICS and not table.empty and key in table and table[key].notna().any():
         vals = table.groupby("team")[key].sum().to_dict()
     else:
@@ -184,12 +208,27 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
     if not vals:
         return {"markdown": f"Não tenho **{label}** neste jogo — a fonte não mede esse número.", "key": key, "kind": "sem_dado"}
     items = sorted(vals.items(), key=lambda kv: -kv[1])
+    if team_hint:                                       # "quantas bolas longas o Botafogo fez?" → responde o Botafogo
+        hit = [kv for kv in items if _fold(kv[0]) in (_fold(team_hint), _fold(pt(team_hint)))]
+        if hit:
+            items = hit + [kv for kv in items if kv not in hit]
     lead = items[0]
+    if key == "long_balls" and team_facts is not None:
+        tot = {f.team: f.value for f in team_facts if getattr(f, "key", None) in ("long_balls_total", "long_balls_accurate_total", "long_balls_tot") and not f.player}
+        acc = {k: (v, tot.get(k) or tot.get(pt(k))) for k, v in items}
+        if any(t for _, t in acc.values()):
+            extra_txt = " · ".join(f"{pt(k)} {_n(v)} certas de {_n(t)} ({100 * v / t:.0f}%)" for k, (v, t) in acc.items() if t)
+        else:
+            extra_txt = ""
+    else:
+        extra_txt = ""
     pct = "%" if key == "possession_pct" else ""
     label_t = label.replace(" (%)", "")
     note = (" Com lances, a posse é estimada pela fatia de passes de cada time." if key == "possession_pct" and has_events
             else "")
-    md = (f"**{pt(lead[0])}** teve mais {label_t}: {_n(lead[1])}{pct}" +
+    verb = "teve mais" if lead == max(items, key=lambda kv: kv[1]) else "teve"
+    md = (f"**{pt(lead[0])}** {verb} {label_t}: {_n(lead[1])}{pct}" +
           (f" contra {_n(items[1][1])}{pct} de {pt(items[1][0])}." if len(items) > 1 else ".") + note +
+          (f"\n\n**Aproveitamento:** {extra_txt}." if extra_txt else "") +
           f"\n\n_Fonte: {source if key not in TEAM_ONLY else 'estatísticas do jogo'}._")
     return {"markdown": md, "key": key, "kind": "time"}

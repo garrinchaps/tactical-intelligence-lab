@@ -165,9 +165,9 @@ class LineupGA:
         ids = self.rng.choice(len(P), k, replace=False)
         return P[ids[np.argmax(fit_v[ids])]]
 
-    def run(self) -> Dict[str, Any]:
+    def run(self, seed_with_baseline: bool = True) -> Dict[str, Any]:
         base = self.baseline()
-        P = [base.copy()] + [self._random() for _ in range(self.pop - 1)]
+        P = ([base.copy()] if seed_with_baseline else []) + [self._random() for _ in range(self.pop - (1 if seed_with_baseline else 0))]
         P = np.array(P)
         for _ in range(self.generations):
             fv = np.array([self.fitness(c) for c in P])

@@ -344,6 +344,25 @@ Rodada 11 (18/11/2026, 399 testes verdes):
   "Finalizar planejamento". Gráfico de médias × competição; radar antes × depois; dossiê PDF com campinho
   (`src/scout/dossier_pdf.py`). Fotografia `scout_universe_v3.pkl` (aproveita a v2 recalculando só as notas).
 
+Rodada 12 (18/11/2026, 411 testes verdes):
+- ✅ Assistente 100% pela nossa IA: `lab_ai/router.py` responde por intenção (próximo jogo, desfalques, quem jogou melhor
+  pela nota, substituição com nota + momentum + trocas do técnico, profundidade com proxies honestos, chances claras
+  perdidas, ponto forte/atenção/o que fazer melhor/como explorar — sem destacar impedimentos/cartões) e cai no
+  `direct.py` (passes errados, bolas longas com aproveitamento, erros que viraram gol, defesas; ranking com minutos e
+  desempate pelos minutos). Duas perguntas na mesma frase; "…? em qual momento?" fica uma pergunta só. Presença, gols,
+  escalação e erros continuam no analista clássico.
+- ✅ Bastidores pela matéria (`src/intelligence/course.py` + `src/ui/pages/course_view.py`): mapa de quem decide cada
+  coisa (Q1), fuzzy × probabilidade (Q2), Mamdani com centroide numérico (Q3), Mamdani × Sugeno (Q4), XOR e forward
+  pass do modelo em uso (Q5), passo de gradiente (Q6), diagnóstico da curva e SUGESTÃO DO PRÓXIMO TREINO (Q7), matriz
+  de confusão/paradoxo da acurácia na validação real (Q8), arquiteturas (Q9), codificação/roleta×torneio/mutação (Q10),
+  penalidade R (Q11), pseudocódigo e convergência do AG (Q12). Erro "numpy boolean subtract" da tabela corrigido.
+- ✅ Busca mais rápida (cache por consulta; índice de jogadores em `data/processed/player_index.parquet`, refeito 1×/dia
+  pelo worker). Alturas: FotMob manda (Gabriel Barbosa 1,78 m), "zagueiro baixo" exige ≥ 6 duelos aéreos e ≥ 50% ganhos.
+  Leitura do rival com campinho dos jogadores nas posições + nomes clicáveis. Comparar: homônimos separados pelo id,
+  aba Resumo (gols, assistências) e Aproveitamento (%); 1 jogo = totais com minutos.
+- ✅ Padrões e histórico em jogo só com estatísticas: "🧠 Leitura da IA" (forte, atenção, explorar, trocas, melhor, fases).
+- Site idêntico ao app: ainda não (pedido para depois).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

@@ -125,33 +125,22 @@ def _answer(question: str, current_context, use_llm: bool):
             ask = (res.get("scope") or {}).get("ask")
             generic = (not ask) or ask in ("overview", "panorama")
             foot = "\n\n_" + summary_line(data_map(meta, ctx.df, ctx.bundle.boxscore)) + "_"
-            if off_topic:
-                pass                                      # fora do futebol/jogo: nada a acrescentar
-            elif not generic:
-                # o analista respondeu; mas se a NOSSA IA reconhece um número MAIS específico que ele não citou
-                # ("chutes PARA FORA" × finalizações totais), a resposta direta dela é a certa
-                d = DIRECT.answer(question, meta, ctx.df, ctx.bundle.boxscore, pt=_pt)
-                spec = {"off_target": "para fora", "on_target": "no alvo", "blocked": "bloquead", "final_third": "terço final",
-                        "box_passes": "área", "progressive": "progressiv", "dribbled_past": "driblado",
-                        "aerials_won": "aére", "aerials_lost": "aére", "fouled": "sofrid", "losses": "perd"}
-                if d is not None and d["key"] in spec and spec[d["key"]] not in (res.get("report_markdown") or "").lower():
-                    res["report_markdown"] = d["markdown"] + foot
-                    res["engine_used"] = "IA DO LABORATÓRIO (resposta direta)"
-                    res["lab_ai"] = {"direct": d["key"], "kind": d["kind"], "n_facts": 0}
+            # rodada 12: a NOSSA IA decide primeiro (roteador de intenções). O analista clássico só fica com o que ele faz
+            # melhor (presença, autores dos gols, linha do tempo) ou quando a nossa IA não reconhece a pergunta.
+            from src.intelligence.lab_ai import router as ROUTER
+
+            keep_classic = ask in ("presence", "goals", "lineup_role", "errors", "unavailable", "result", "profile")
+            routed = None if (off_topic or keep_classic) else ROUTER.route(question, meta, ctx.df, ctx.bundle.boxscore,
+                                                                            ctx.target_team, get_service().db, pt=_pt)
+            if routed is not None:
+                res["report_markdown"] = routed["markdown"] + foot
+                res["engine_used"] = f"IA DO LABORATÓRIO ({routed['intent']})"
+                res["lab_ai"] = {"direct": routed["intent"], "n_facts": 0}
+            elif off_topic or keep_classic:
+                pass
             else:
-                d = DIRECT.answer(question, meta, ctx.df, ctx.bundle.boxscore, pt=_pt)
                 who = LAB.asked_player(question, ctx.df)
-                if d is not None:
-                    res["report_markdown"] = d["markdown"] + foot
-                    res["engine_used"] = "IA DO LABORATÓRIO (resposta direta)"
-                    res["lab_ai"] = {"direct": d["key"], "kind": d["kind"], "n_facts": 0}
-                elif who:
-                    lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
-                                     db=get_service().db, interaction_id=res.get("interaction_id"))
-                    res["report_markdown"] = lab["markdown"]
-                    res["engine_used"] = lab["engine"]
-                    res["lab_ai"] = {k: lab[k] for k in ("facts", "templates", "version", "n_facts")}
-                elif any(w in question.lower() for w in LAB.PLAN_WORDS):
+                if who:
                     lab = LAB.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
                                      db=get_service().db, interaction_id=res.get("interaction_id"))
                     res["report_markdown"] = lab["markdown"]

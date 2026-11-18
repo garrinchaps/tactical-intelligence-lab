@@ -170,11 +170,21 @@ def _lab_ai_panel() -> None:
 def render(ctx=None) -> None:
     from src.ui.components import hero, steps_html
 
-    hero("Bastidores · como a IA aprende", "Uma rede neural que aprende a ler o perigo de uma jogada",
-         "Explicação para quem não é da área: o que a rede faz, como aprende, como sabemos que melhorou e onde ela "
-         "aparece nas respostas do Assistente. Abaixo, a parte técnica para quem quiser ver por dentro.")
-    _lab_ai_panel()
-    st.markdown("---")
+    hero("Bastidores · como a IA aprende", "A matéria de Introdução à IA aplicada ao futebol",
+         "Lógica fuzzy, redes neurais e algoritmo genético — cada questão da matéria calculada com os modelos que "
+         "realmente decidem o que o programa mostra. Nada aqui é ilustração solta: os números vêm do app.")
+    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA do Assistente", "🎯 Rede de perigo (treino)"],
+                                default="📚 A matéria aplicada", key="bastidores_view", label_visibility="collapsed")
+    if view == "🧠 IA do Assistente":
+        _lab_ai_panel()
+        _assistant_misses()
+        _learning_activity_panel()
+        return
+    if view != "🎯 Rede de perigo (treino)":
+        from src.ui.pages.course_view import render_course
+
+        render_course()
+        return
     _didactic()
     _simulator()
     st.markdown("---")
@@ -359,8 +369,6 @@ def render(ctx=None) -> None:
         else:
             st.caption("Neurônio de saída: não tem filhos.")
     _versions_and_usage(ctx, reg, live)
-    _assistant_misses()
-    _learning_activity_panel()
     if ctx is not None:
         provenance_panel(ctx.registry)
 

@@ -39,6 +39,41 @@ def _card(txt: str, color: str = "#22D3EE") -> None:
                 f'margin-bottom:.45rem">{txt}</div>', unsafe_allow_html=True)
 
 
+@st.cache_data(show_spinner=False, ttl=1800, max_entries=24)
+def _reading(match_id: int, team: str, version: str, _meta, _box):
+    from src.intelligence.lab_ai.router import match_reading
+    from src.ui.context import get_service
+
+    return match_reading(_meta, None, _box, team, get_service().db)
+
+
+def _ai_reading(ctx, team: str) -> None:
+    """Jogo só com estatísticas: a IA do laboratório lê o jogo por inteiro (forte, atenção, explorar, trocas, fases)."""
+    from src.ui.context import get_service
+
+    meta = {**(ctx.bundle.meta or {}), "match_id": ctx.match_id, "data_source": ctx.bundle.source}
+    try:
+        with st.spinner("A IA do laboratório está lendo o jogo…"):
+            r = _reading(int(ctx.match_id), team, get_service().db.stable_version(), meta, ctx.bundle.boxscore)
+    except Exception as exc:
+        st.caption(f"A leitura da IA não pôde ser montada ({exc}).")
+        return
+    if not r.get("blocos") and not r.get("fases"):
+        return
+    st.markdown("---")
+    st.markdown(f"### 🧠 Leitura da IA do laboratório — {team} neste jogo")
+    st.caption("Feita só com as estatísticas do jogo e a régua de milhares de jogos da base; cada número vem da fonte.")
+    if r.get("fases"):
+        st.markdown("**Fases do jogo (momentum da FotMob, média por 15 min):** " + " · ".join(
+            f"{f['bloco']} {f['leitura']} ({f['media']:+.0f})" for f in r["fases"]))
+    cols = st.columns(2)
+    for i, b in enumerate(r.get("blocos") or []):
+        with cols[i % 2]:
+            with st.container(border=True):
+                st.markdown(f"#### {b['titulo']}")
+                st.markdown(b["markdown"], unsafe_allow_html=True)
+
+
 def render(ctx, team: str) -> None:
     from src.ui.context import get_service
 
@@ -87,8 +122,9 @@ def render(ctx, team: str) -> None:
                   "#A78BFA")
         st.caption(ps.get("criterio", "") + f" · base: {ps.get('base', '')}.")
     if not ctx.has_events:
-        note("Bola parada, substituições e placar", "Estas três leituras precisam dos lances do jogo (nível 🟢). "
-             "Este jogo tem só estatísticas.", "info")
+        _ai_reading(ctx, team)
+        note("Bola parada, substituições e placar lance a lance", "Estas três leituras precisam dos lances do jogo "
+             "(nível 🟢). Este jogo tem só estatísticas — acima está tudo o que a nossa IA tira delas.", "info")
         return
     from src.analytics import match_patterns as MP
 
