@@ -246,9 +246,12 @@ def render(ctx: MatchContext) -> None:
         if ps is not None and not ps.empty:
             ctx.prov("ps", "Estatísticas individuais", len(ps), "lidas da fonte", raw=True)
             st.markdown("Estatísticas individuais da fonte (sem coordenadas):")
-            flat = ps.drop(columns=["stats_json", "match_id"], errors="ignore").copy()
-            extra = pd.json_normalize(flat.pop("stats")) if "stats" in flat else pd.DataFrame()
-            comparison_table(pd.concat([flat.reset_index(drop=True), extra], axis=1))
+            from src.ui.pages.fotmob_depth import player_stats_table
+
+            teams = [t for t in ps["team_name"].dropna().unique()] if "team_name" in ps else []
+            only = st.radio("Mostrar", [ctx.target_team, "Ambas as equipes"] if ctx.target_team in teams else ["Ambas as equipes"],
+                            horizontal=True, key=f"ps_team_{ctx.match_id}")
+            comparison_table(player_stats_table(ps, None if only == "Ambas as equipes" else only))
             provenance_panel(ctx.registry)
         else:
             source_gap("estatísticas individuais de atletas", ctx.bundle.source,

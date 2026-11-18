@@ -509,14 +509,23 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
     if d.empty:
         return {}
     tot: Dict[str, float] = {}
+    mins_k: Dict[str, float] = {}                    # minutos SÓ dos jogos em que aquele número foi medido
+    games_k: Dict[str, int] = {}
     for s in d["st"]:
+        m = float(s.get("minutes") or 0)
         for k, v in s.items():
-            if isinstance(v, (int, float)) and not isinstance(v, bool) and k != "fotmob_id":
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and k not in ("fotmob_id", "minutes"):
                 tot[k] = tot.get(k, 0.0) + float(v)
-    mins = tot.get("minutes", 0) or 1
-    per90 = {k: v * 90 / mins for k, v in tot.items() if k != "minutes"}
+                mins_k[k] = mins_k.get(k, 0.0) + m
+                games_k[k] = games_k.get(k, 0) + 1
+    mins = float(sum(float(s.get("minutes") or 0) for s in d["st"])) or 1
+    # rodada 7: antes tudo era dividido pelos minutos de TODOS os jogos — distância/sprints (medidos só em algumas
+    # ligas/jogos) saíam irreais (ex.: 2.744 m por 90). Agora cada número usa os minutos dos jogos em que existe.
+    per90 = {k: v * 90 / mins_k[k] for k, v in tot.items() if mins_k.get(k)}
     rat = pd.to_numeric(d["rating"], errors="coerce").dropna()
-    return {"jogos": int(len(d)), "minutos": int(mins), "per90": per90, "nota_fotmob": round(float(rat.mean()), 2) if len(rat) else None,
+    return {"jogos": int(len(d)), "minutos": int(mins), "per90": per90, "jogos_por_numero": games_k,
+            "minutos_por_numero": {k: int(v) for k, v in mins_k.items()},
+            "nota_fotmob": round(float(rat.mean()), 2) if len(rat) else None,
             "time": top["team_name"], "ultimo": str(d["match_date"].iloc[0])}
 
 
@@ -549,6 +558,11 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
         with tab:
             if rows:
                 duel_bars(rows, n1, n2, f"{g} — por 90 minutos")
+                if g.startswith("📡"):
+                    ja, jb = A["jogos_por_numero"], B["jogos_por_numero"]
+                    st.caption("Por 90 calculado só nos jogos em que a liga mediu: " + " · ".join(
+                        f"{lab}: {n1} {ja.get(k, 0)} jogo(s) / {n2} {jb.get(k, 0)} jogo(s)" for k, lab, _ in items
+                        if k in ja or k in jb) + ".")
             else:
                 st.caption("A fonte não publica esses números para os jogos deles (não é zero).")
     na_, nb_ = A.get("nota_fotmob"), B.get("nota_fotmob")

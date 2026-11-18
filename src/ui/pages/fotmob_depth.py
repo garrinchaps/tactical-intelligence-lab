@@ -60,6 +60,57 @@ PLAYER_VIEW = [  # (chave da fonte, rótulo, maior é melhor)
 ]
 
 
+STAT_PT = {  # chave da fonte → rótulo em português (o que não estiver aqui não aparece na tabela principal)
+    "minutes": "Min", "totalGoals": "Gols", "goalAssists": "Assist.", "xg": "xG", "xa": "xA", "totalShots": "Finalizações",
+    "shotsOnTarget": "No alvo", "chances_created": "Chances criadas", "passes_into_final_third": "Passes no terço final",
+    "line_breaking_passes": "Quebram linhas", "accurate_passes": "Passes certos", "accurate_passes_total": "Passes tentados",
+    "long_balls_accurate": "Bolas longas certas", "accurate_crosses": "Cruzamentos certos", "touches": "Toques",
+    "touches_opp_box": "Toques na área rival", "dribbles_succeeded": "Dribles certos", "dribbles_succeeded_total": "Dribles tentados",
+    "dispossessed": "Perdeu a posse", "matchstats.headers.tackles": "Desarmes", "interceptions": "Interceptações",
+    "recoveries": "Recuperações", "clearances": "Cortes", "shot_blocks": "Chutes bloqueados", "duel_won": "Duelos ganhos",
+    "duel_lost": "Duelos perdidos", "aerials_won": "Aéreos ganhos", "aerials_won_total": "Aéreos disputados",
+    "ground_duels_won": "Duelos no chão ganhos", "dribbled_past": "Vezes driblado", "foulsCommitted": "Faltas cometidas",
+    "was_fouled": "Faltas sofridas", "saves": "Defesas", "goals_conceded": "Gols sofridos", "saves_inside_box": "Defesas na área",
+    "keeper_high_claim": "Saídas pelo alto", "punches": "Socos", "keeper_sweeper": "Saídas como líbero",
+    "errors_led_to_goal": "Erros que viraram gol", "distance_m": "Distância (m)", "sprints": "Sprints",
+    "top_speed_kmh": "Velocidade máx. (km/h)",
+}
+
+
+def player_stats_table(ps: pd.DataFrame, team: str | None = None) -> pd.DataFrame:
+    """
+    Números por jogador da fonte numa tabela legível: um nome por coluna (sem colunas repetidas), rótulos em
+    português, só as colunas que têm algum dado, ordenada pela nota. Colunas fixas e JSON não se duplicam mais
+    (antes 'minutes' vinha das duas e o Streamlit quebrava com "Duplicate column names").
+    """
+    rows = []
+    for r in ps.to_dict("records"):
+        if team and r.get("team_name") != team:
+            continue
+        s = r.get("stats")
+        if not isinstance(s, dict):
+            try:
+                s = json.loads(r.get("stats_json") or "{}")
+            except Exception:
+                s = {}
+        row = {"Jogador": r.get("player_name"), "Time": r.get("team_name"),
+               "Nota da fonte": r.get("rating") if r.get("rating") is not None else s.get("rating_title")}
+        for k, lab in STAT_PT.items():
+            if k == "minutes":
+                row[lab] = s.get("minutes", r.get("minutes"))
+            else:
+                row[lab] = s.get(k)
+        rows.append(row)
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+    df = df.loc[:, ~df.columns.duplicated()].dropna(axis=1, how="all")
+    for c in df.columns[2:]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+    sort = "Nota da fonte" if "Nota da fonte" in df else ("Min" if "Min" in df else None)
+    return df.sort_values(sort, ascending=False, na_position="last").reset_index(drop=True) if sort else df
+
+
 def render(ctx) -> None:
     meta = ctx.bundle.meta or {}
     home, away = meta.get("home_team_name", ""), meta.get("away_team_name", "")
@@ -159,7 +210,7 @@ def render(ctx) -> None:
                          f'<div style="color:#64748B;font-size:.75rem">{top["Time"]}</div></div>')
         st.markdown("".join(cards[:10]), unsafe_allow_html=True)
         with st.expander("Tabela completa por jogador (fonte: FotMob)"):
-            comparison_table(df.sort_values("Nota FotMob", ascending=False, na_position="last"))
+            comparison_table(player_stats_table(ps))
         if not any(c in df for c in ("Distância (m)", "Sprints")):
             st.caption("Distância e sprints: esta liga não publica dados físicos na FotMob — por isso não aparecem (não é zero).")
     dz = ex.get("desfalques") or {}

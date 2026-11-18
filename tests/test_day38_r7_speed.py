@@ -54,3 +54,24 @@ def test_scout_recommend_tie_does_not_compare_dicts():
                         {"score_scout": 70.0, "realismo": {"score": 80}, "_core": "b"}])
     out["_r"] = [r["score"] for r in out["realismo"]]
     assert out.sort_values(["score_scout", "_r"], ascending=False)["_core"].tolist() == ["b", "a"]
+
+
+def test_player_stats_table_has_no_duplicate_columns():
+    from src.ui.pages.fotmob_depth import player_stats_table
+
+    ps = pd.DataFrame([{"team_name": "Brazil", "player_name": "Vini", "position": "", "minutes": 60, "rating": 9.8,
+                        "stats": {"minutes": 60, "totalShots": 7, "matchstats.headers.tackles": 1}},
+                       {"team_name": "Singapore", "player_name": "Song", "position": "", "minutes": 90, "rating": 6.1,
+                        "stats": {"minutes": 90, "totalShots": 0}}])
+    t = player_stats_table(ps)
+    assert not t.columns.duplicated().any() and "Desarmes" in t and "Finalizações" in t and "minutes" not in t
+    assert t.iloc[0]["Jogador"] == "Vini"
+    assert player_stats_table(ps, "Singapore")["Jogador"].tolist() == ["Song"]
+
+
+def test_zebra_has_no_light_gradient_and_marks_missing():
+    from src.ui.components import zebra
+
+    df = pd.DataFrame({"Jogador": ["A", "B", None], "Finalizações": [1.0, 5.0, 3.0], "Perdeu a posse": [2.0, 0.0, 1.0]})
+    html = zebra(df).to_html()
+    assert "background-color: #" in html and "None" not in html

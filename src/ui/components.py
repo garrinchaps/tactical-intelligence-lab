@@ -157,10 +157,12 @@ def zebra(df: pd.DataFrame):
     if not isinstance(df, pd.DataFrame):
         return df
     try:
+        # cores SÓLIDAS (o st.dataframe mistura transparência com o fundo branco da grade e tudo fica pálido) e texto
+        # claro em todas as células — inclusive nas colunas de texto, que antes ficavam ilegíveis
         sty = df.style.apply(
             lambda row: [
-                "background-color: #0D1424" if isinstance(row.name, (int, np.integer)) and row.name % 2 == 0
-                else ("background-color: #111C30" if isinstance(row.name, (int, np.integer)) else "")
+                "background-color: #0D1424; color: #DCE6F4" if not isinstance(row.name, (int, np.integer)) or row.name % 2 == 0
+                else "background-color: #111C30; color: #DCE6F4"
             ] * len(row),
             axis=1,
         )
@@ -204,15 +206,41 @@ def zebra(df: pd.DataFrame):
             low = str(col_name).strip().lower()
             if any(token in low for token in ("nota", "rating", "avaliação", "avaliacao")):
                 rating_cols.append(col_name)
+        # célula vazia aparece como "—" em TODAS as colunas (antes, colunas de texto mostravam "None" em fundo preto)
+        sty = sty.format(na_rep="—")
         if fmt:
             sty = sty.format(fmt, na_rep="—")
 
-        # Realce cromático sutil para leitura comparativa: gradiente azul por coluna numérica,
-        # sem declarar automaticamente que o maior valor é "melhor" (ex.: perdas, faltas, xGA).
+        # Rodada 7: realce do PRÓPRIO tema escuro (o degradê claro "PuBu" deixava células brancas com texto apagado).
+        # Ciano mais forte = valor mais alto na coluna; em colunas onde "mais" é ruim (perdas, faltas, sofridos,
+        # driblado, erros, cartões, contra), o realce é vermelho. O texto fica sempre claro e legível.
         numeric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])
-                        and df[col].notna().sum() > 1]
-        if numeric_cols and len(numeric_cols) <= 32:
-            sty = sty.background_gradient(cmap="PuBu", subset=numeric_cols, axis=0, low=0.08, high=0.18)
+                        and df[col].notna().sum() > 1 and col not in rating_cols]
+        neg_tokens = ("perd", "falta", "sofr", "driblad", "erro", "cart", "amarel", "vermelh", "contra", "cedid",
+                      "conceded", "lost", "dispossess", "impedim", "offside", "fouls", "xga")
+        if numeric_cols and len(numeric_cols) <= 40:
+            base = (13, 20, 36)                               # #0D1424, o fundo das linhas
+
+            def mix(rgb, a):
+                return "#%02x%02x%02x" % tuple(int(b + (c - b) * a) for b, c in zip(base, rgb))
+
+            def heat(col):
+                v = pd.to_numeric(col, errors="coerce")
+                lo, hi = v.min(), v.max()
+                rgb = (239, 68, 68) if any(t in str(col.name).lower() for t in neg_tokens) else (34, 211, 238)
+                out = []
+                for x in v:
+                    if pd.isna(x):
+                        out.append("color:#0D1424")            # vazio aparece vazio (o st.dataframe escreve "None")
+                        continue
+                    if hi == lo:
+                        out.append("")
+                        continue
+                    n = (x - lo) / (hi - lo)
+                    out.append(f"background-color: {mix(rgb, 0.06 + 0.50 * n)}; color:#F5F7FB;"
+                               + ("font-weight:800" if n >= 0.85 else ""))
+                return out
+            sty = sty.apply(heat, subset=numeric_cols, axis=0)
 
         if rating_cols:
             def rating_color(value):

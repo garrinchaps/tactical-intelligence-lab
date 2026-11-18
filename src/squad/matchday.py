@@ -418,6 +418,7 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
     out: Dict[str, Dict[str, Any]] = {}
     for name, g in d.groupby("player_name"):
         agg: Dict[str, float] = {}
+        mins_k: Dict[str, float] = {}
         n_games = 0
         for js in g["stats_json"]:
             try:
@@ -427,11 +428,19 @@ def player_highlights(db, games: Sequence[int], team_names: Sequence[str], roles
             if not s.get("minutes"):
                 continue
             n_games += 1
+            m = float(s["minutes"])
             for k, v in s.items():
                 if isinstance(v, (int, float)) and not isinstance(v, bool) and k not in ("fotmob_id",):
                     agg[k] = agg.get(k, 0.0) + float(v)
+                    mins_k[k] = mins_k.get(k, 0.0) + m
         if n_games < 2 or agg.get("minutes", 0) < 120:
             continue
+        # rodada 7: número medido só em parte dos jogos é escalado para os minutos totais — o "por 90" final usa
+        # apenas os jogos em que ele existe (antes, um dado ausente em alguns jogos puxava a média para baixo)
+        tot_m = agg["minutes"]
+        for k in list(agg):
+            if k != "minutes" and mins_k.get(k) and mins_k[k] < tot_m:
+                agg[k] = agg[k] * tot_m / mins_k[k]
         role = roles.get(name)
         row = pd.DataFrame([{"team_name": g["team_name"].iloc[0], "player_name": name, "position": g["position"].iloc[0],
                              "minutes": agg["minutes"], "stats_json": json.dumps(agg)}])
