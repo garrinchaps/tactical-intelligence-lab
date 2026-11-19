@@ -415,6 +415,20 @@ Rodada 14 (18/11/2026, 427 testes verdes):
   automático das perguntas que pedem um número, separação por pergunta, curva treino × validação, parada antecipada,
   promoção só se errar menos, sugestão dos próximos parâmetros; "Treinar tudo" usa isso.
 
+Rodada 15 (19/11/2026, 429 testes verdes):
+- ✅ Ligas sul-americanas: a fila de detalhes da FotMob era "Brasil/Europa inteiros (5 temporadas) antes de tudo" — o
+  Paraguai nunca chegava (Mauro Coronel: 1 jogo com números). Agora a fila vai do MAIS RECENTE de todas as ligas (faixas
+  de 120 dias) e as sul-americanas estão na prioridade (`PRIORITY`); atalho `--ligas sulamericanas` (`REGIONS`).
+- ✅ Velocidade: (1) conexão do SQLite reaproveitada por thread no banco principal (`_thread_conn`; no Windows cada
+  abertura custa 10–30 ms e uma tela abria dezenas; `TIL_REUSE_CONN=0` desliga); (2) versão de cache POR TIME
+  (`team_version`: só muda com jogo/estatística nova do time ou na virada do dia) — a versão geral mudava a cada 10 min
+  nas atualizações e apagava o cache de todas as telas; (3) caches pesados em disco (`persist="disk"`: estilo do clube,
+  formações, histórico/padrões, fragilidades do rival, próximo jogo, confrontos, elenco, perfil) — reabrir o app é
+  instantâneo; (4) pré-aquecimento: depois de uma busca, a página dos 2 primeiros times é calculada em segundo plano.
+- ✅ IA do Assistente: avaliação detalhada (`trainer.evaluate`: acerto do 1º fato, AUC, precisão/revocação/F1, perda),
+  promoção exige perder menos E não acertar menos o 1º fato, validação cruzada em 5 dobras por pergunta
+  (`cross_validate`) e busca automática η × λ (`auto_search`) na tela de treino.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

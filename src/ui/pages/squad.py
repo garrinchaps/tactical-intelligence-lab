@@ -66,7 +66,7 @@ def _picker(label: str, key: str, default: str = "") -> Optional[str]:
 
 
 # ------------------------------------------------------------------------------------------------ dados do time
-@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _squad(team: str, version: str) -> Dict[str, Any]:
     from src.ui.context import get_service
     from src.ui.pages.clubs import same_team_names
@@ -170,7 +170,7 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
             if not unconfirmed.empty else unconfirmed}
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=16)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _attributes(team: str, version: str) -> pd.DataFrame:
     """Perfil de cada atleta nos últimos 15 jogos com números por jogador (FotMob), em 0–1 RELATIVO AO PRÓPRIO ELENCO."""
     import json
@@ -266,7 +266,7 @@ def _left_after(apps: pd.DataFrame, club_id) -> List[Any]:
     return a.loc[a["clube_id"].map(_tid) != _tid(club_id), "transfermarkt_id"].tolist()
 
 
-@st.cache_data(show_spinner=False, ttl=900, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _profile(team: str, n: int, version: str) -> Dict[str, Any]:
     from src.ui.context import get_service
     from src.ui.pages.clubs import same_team_names
@@ -401,7 +401,7 @@ def _traits_table(items: List[Dict[str, Any]], better_word: str) -> pd.DataFrame
 
 
 # ------------------------------------------------------------------------------------------------ próximo jogo
-@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _matchday(team: str, version: str, n: int, target_competition: Optional[str] = None) -> Dict[str, Any]:
     from src.squad import matchday as M
     from src.ui.context import get_service
@@ -539,6 +539,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         st.caption("Jogo hipotético: mesma leitura do próximo jogo (provável, desfalques, fragilidades e plano), sem "
                    "escalação oficial nem notícias, que só existem para jogos marcados.")
         f = None
+    version = _tv(team, rival)                           # rodada 14: muda quando QUALQUER um dos dois ganha dado novo
     rv = _matchday(rival, version, n)
     # Recalcula a disponibilidade com o torneio do próximo jogo; amarelos/vermelhos de outra competição não contaminam o XI.
     target_comp = str(f["competition"]) if f is not None and f.get("competition") else None
@@ -721,6 +722,14 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
                 st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
 
 
+def _tv(*teams) -> str:
+    """Versão dos caches pelos times envolvidos (muda só quando eles ganham dado novo, ou no dia seguinte)."""
+    from src.ui.context import get_service
+
+    db = get_service().db
+    return "|".join(db.team_version([t]) for t in teams if t) or db.stable_version()
+
+
 def _pl(word):
     from src.analytics.vulnerabilities import _pl as plural
 
@@ -741,7 +750,7 @@ def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -
         st.toast("Anotado. Este tipo de análise perde peso.")
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=24)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _matchups(team, rival, my_names, rv_names, version, my_xi, rv_xi):
     from src.squad import matchups as MU
     from src.ui.context import get_service
@@ -757,8 +766,8 @@ def render(_ctx=None) -> None:
     hero("Escalação", "Monte o time para o próximo jogo",
          "Elenco atual (Transfermarkt + atletas que você cadastrar), nota do laboratório, escalação provável, a melhor "
          "possível e a ajustada ao adversário — com o plano de jogo tirado dos últimos jogos do rival.")
-    version = get_service().db.stable_version()
     team = _picker("Meu time", "sq_team")
+    version = _tv(team)                                  # rodada 14: versão por time (cache não cai a cada 10 min)
     from src.data_lake.ids import team_core as _tc
 
     if team and _tc(str(st.session_state.get("sq_rival_team") or "")) != _tc(team):   # outro time: adversário não vale mais

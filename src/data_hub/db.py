@@ -158,6 +158,30 @@ SPEED_INDEXES = [
 ]
 
 
+_TLS = __import__("threading").local()
+
+
+def _reuse_enabled(path: Path) -> bool:
+    if os.getenv("TIL_REUSE_CONN", "1") == "0":
+        return False
+    main = Path(os.getenv("TACTICAL_DB_PATH") or os.getenv("DATABASE_PATH") or str(DEFAULT_DB))
+    try:
+        return Path(path).resolve() == main.resolve()
+    except OSError:
+        return False
+
+
+def _thread_conn(db: "DataHubDB") -> sqlite3.Connection:
+    key = str(Path(db.db_path).resolve())
+    pool = getattr(_TLS, "pool", None)
+    if pool is None:
+        pool = _TLS.pool = {}
+    conn = pool.get(key)
+    if conn is None:
+        conn = pool[key] = db._open()
+    return conn
+
+
 class DataHubDB:
     """Wrapper fino sobre o SQLite com migração idempotente."""
 
@@ -173,6 +197,29 @@ class DataHubDB:
     # ------------------------------------------------------------------ infra
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
+        # rodada 14 (velocidade): no Windows abrir/fechar o arquivo do banco custa 10–30 ms (antivírus + WAL) e uma tela
+        # fazia dezenas de consultas, cada uma com conexão nova. No banco PRINCIPAL a conexão fica aberta por thread e
+        # é reaproveitada (mesmo comportamento: commit no fim, rollback em erro). Bancos temporários (testes) não.
+        if _reuse_enabled(self.db_path):
+            conn = _thread_conn(self)
+            try:
+                yield conn
+                conn.commit()
+            except Exception:
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
+            return
+        conn = self._open()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _open(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.db_path), timeout=30)
         conn.execute("PRAGMA foreign_keys = ON;")
         # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
@@ -181,11 +228,7 @@ class DataHubDB:
         conn.execute("PRAGMA temp_store = MEMORY;")
         conn.execute("PRAGMA mmap_size = 268435456;")      # 256 MB mapeados: leituras grandes sem copiar
         conn.execute("PRAGMA journal_size_limit = 67108864;")   # rodada 11: o arquivo de escrita volta a ≤ 64 MB
-        try:
-            yield conn
-            conn.commit()
-        finally:
-            conn.close()
+        return conn
 
     def missing_speed_indexes(self) -> list:
         try:
@@ -457,6 +500,34 @@ class DataHubDB:
         if force or m["adopted"] is None or (m["latest"] != m["adopted"] and now - m["at"] >= settle_s):
             m["adopted"], m["at"] = m["latest"], now
         return m["adopted"]
+
+    _team_memo: Dict[str, Any] = {}
+
+    def team_version(self, names: Iterable[str], ttl_s: float = 60.0) -> str:
+        """rodada 14: versão POR TIME para os caches das telas pesadas — muda só quando chega jogo/estatística nova
+        desse time (ou na virada do dia). A versão geral mudava a cada 10 min durante as atualizações e jogava fora o
+        cache de TODAS as telas, mesmo de times que não ganharam nenhum dado novo."""
+        import time as _t
+
+        ns = sorted({str(n) for n in names if n})
+        if not ns:
+            return f"t:none:{datetime.now().date()}"
+        key = f"{self.db_path}|{'|'.join(ns)}"
+        hit = DataHubDB._team_memo.get(key)
+        now = _t.time()
+        if hit and now - hit[1] < ttl_s:
+            return hit[0]
+        ph = ",".join("?" * len(ns))
+        try:
+            with self.connect() as conn:
+                r = conn.execute(f"SELECT COUNT(*), MAX(match_date), SUM(CASE WHEN data_level IN ('EVENTS','BOXSCORE') "
+                                 f"THEN 1 ELSE 0 END) FROM matches WHERE home_team_name IN ({ph}) OR away_team_name IN ({ph})",
+                                 ns + ns).fetchone()
+            v = f"t:{r[0]}:{r[1]}:{r[2]}:{datetime.now().date()}"
+        except Exception:
+            v = f"t:err:{datetime.now().date()}"
+        DataHubDB._team_memo[key] = (v, now)
+        return v
 
     def _touched(self) -> None:
         """Gravação feita pela própria tela (busca remota, upload, botão): a interface vê na hora. A atualização

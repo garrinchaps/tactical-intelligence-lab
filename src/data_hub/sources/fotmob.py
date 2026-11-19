@@ -69,8 +69,14 @@ LEAGUES: Dict[int, str] = {
     130: "MLS", 230: "Liga MX",
 }
 # ordem de prioridade para baixar detalhes: Brasil e Europa principal primeiro
-PRIORITY = [268, 8814, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 8971, 9464, 73, 10216, 112, 48, 140, 146, 86,
-            110, 71, 40, 64, 114, 9429, 10244, 10272, 10273, 10274]
+PRIORITY = [268, 8814, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 8971, 9464, 73, 10216, 112,
+            # rodada 14: ligas sul-americanas logo depois do Brasil/Argentina/Europa principal (mercado do Scout)
+            199, 161, 273, 274, 246, 131, 144, 339,
+            48, 140, 146, 86, 110, 71, 40, 64, 114, 9429, 10244, 10272, 10273, 10274]
+REGIONS = {  # atalhos para `--ligas` (sync) e para o Scout pedir uma região inteira
+    "sulamericanas": [112, 199, 161, 273, 274, 246, 131, 144, 339, 9305],
+    "brasil": [268, 8814, 9067],
+}
 
 STAT_MAP = {  # chave da FotMob → chave interna
     "BallPossesion": "possession_pct", "expected_goals": "xg", "expected_goals_open_play": "xg_open_play",
@@ -457,7 +463,19 @@ class FotmobProvider:
         rank = {lg: i for i, lg in enumerate(order)}
         tried = self._recently_tried()
         todo = [r for r in todo if r[1] in rank and int(r[0]) not in tried]
-        todo.sort(key=lambda r: (rank.get(r[1], 999), -int(str(r[2] or "0").replace("-", "")[:8] or 0)))
+        # rodada 14: o mais RECENTE de todas as ligas primeiro (faixas de 120 dias), prioridade dentro da faixa — antes a
+        # fila inteira de Brasil/Europa (5 temporadas) vinha antes de qualquer jogo do Paraguai/Uruguai/Chile
+        today_n = int(date.today().strftime("%Y%m%d"))
+
+        def _key(r):
+            d = int(str(r[2] or "0").replace("-", "")[:8] or 0)
+            try:
+                age = (date.today() - date(d // 10000, d // 100 % 100, d % 100)).days if d else 9999
+            except ValueError:
+                age = 9999
+            return (age // 120, rank.get(r[1], 999), today_n - d)
+
+        todo.sort(key=_key)
         tot = {"detalhes": 0, "errors": 0, "pendentes": max(len(todo) - limit, 0)}
         for i, (mid, _lg, _d) in enumerate(todo[:limit], 1):
             if stop is not None and stop():

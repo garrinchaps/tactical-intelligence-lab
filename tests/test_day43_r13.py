@@ -213,3 +213,37 @@ def test_pagerank_rewards_beating_strong_teams():
                      columns=["home_team_name", "away_team_name", "home_score", "away_score"])
     t = team_strength(m).set_index("time")
     assert t["forca_pagerank"].idxmax() == "A" and t.loc["D", "forca_pagerank"] == 0
+
+
+def test_trainer_metrics_and_auto_search(tmp_path):
+    import json
+
+    from src.intelligence.lab_ai import trainer as TR
+    from src.intelligence.lab_ai.facts import N_FEATURES
+
+    rng = np.random.default_rng(3)
+    shown = tmp_path / "shown.jsonl"
+    with shown.open("w", encoding="utf-8") as f:
+        for i in range(30):
+            facts = []
+            for key in ("passes_total", "long_balls_accurate", "corners"):
+                feats = list(rng.uniform(0, 1, N_FEATURES))
+                feats[1] = 0.95 if key == "long_balls_accurate" else 0.05
+                facts.append({"key": key, "features": feats})
+            f.write(json.dumps({"interaction_id": str(i), "question": "quantas bolas longas?", "facts": facts}) + "\n")
+    X, y, w, g, _ = TR.build_dataset(shown, tmp_path / "x.jsonl")
+    good = np.zeros(N_FEATURES)
+    good[1] = 10.0
+    ev = TR.evaluate(good, X, y, g)
+    assert ev["acerto_1o_fato"] == 1.0 and ev["auc"] > 0.9
+    grid = TR.auto_search(epochs=20, shown_path=shown, feedback_path=tmp_path / "x.jsonl")
+    assert len(grid) == 9 and grid[0]["acerto_medio"] is not None
+
+
+def test_team_version_changes_only_with_team_data(tmp_path):
+    from src.data_hub.db import DataHubDB
+
+    db = DataHubDB(db_path=tmp_path / "v.db", schema_path="database/schema.sql")
+    v1 = db.team_version(["Time A"], ttl_s=0)
+    assert v1 == db.team_version(["Time A"], ttl_s=0)
+    assert v1.startswith("t:")

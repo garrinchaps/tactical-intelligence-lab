@@ -299,8 +299,12 @@ def _fotmob_all(svc, say) -> Dict[str, int]:
 
 def _fotmob_ids(leagues: Optional[List[str]]) -> Optional[List[int]]:
     """--ligas com números = ids da FotMob (ex.: 268 9464); sem números, todas as acompanhadas."""
+    from src.data_hub.sources.fotmob import REGIONS
+
     ids = [int(x) for x in (leagues or []) if str(x).isdigit()]
-    return ids or None
+    for x in leagues or []:                       # rodada 14: --ligas sulamericanas / brasil
+        ids += REGIONS.get(str(x).lower(), [])
+    return list(dict.fromkeys(ids)) or None
 
 
 def main() -> None:

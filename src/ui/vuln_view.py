@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _findings(names: tuple, our: tuple, version: str) -> Dict[str, Any]:
     from src.analytics.vulnerabilities import team_vulnerabilities
     from src.squad import data as D

@@ -106,7 +106,10 @@ def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patie
             if bad >= patience:
                 break
     champ = _loss(X[va], y[va], w[va], w0)
-    promoted = best < champ - 1e-4
+    ev_new, ev_old = evaluate(best_w, X[va], y[va], g[va], w[va]), evaluate(w0, X[va], y[va], g[va], w[va])
+    a_new, a_old = ev_new.get("acerto_1o_fato"), ev_old.get("acerto_1o_fato")
+    # promoção: perde menos E não acerta menos o 1º fato (a resposta não pode piorar para ganhar em perda)
+    promoted = best < champ - 1e-4 and (a_new is None or a_old is None or a_new >= a_old - 1e-9)
     v = max(x["version"] for x in sel.meta["versions"]) + 1
     rec = {"version": v, "created": time.strftime("%Y-%m-%d %H:%M"), "weights": best_w.tolist(),
            "origin": "treino (avaliações + rótulo automático)" if use_weak else "treino (só avaliações)",
@@ -114,13 +117,15 @@ def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patie
            "n_perguntas": int(len(ug)), "n_exemplos": int(len(y)),
            "n_avaliados": int(len(np.unique(g[src == "avaliação"]))) if len(src) else 0,
            "val_logloss": round(best, 5), "champion_logloss": round(champ, 5), "promoted": bool(promoted),
-           "history": hist, "hidden": [], "test_logloss": round(best, 5)}
+           "history": hist, "hidden": [], "test_logloss": round(best, 5),
+           "metricas": ev_new, "metricas_campea": ev_old}
     sel.meta["versions"].append(rec)
     if promoted:
         sel.meta["champion"] = v
     sel._write()
     return {**{k: rec[k] for k in ("version", "promoted", "val_logloss", "champion_logloss", "n_perguntas",
                                      "n_exemplos", "n_avaliados", "epochs_run")}, "history": hist,
+            "metricas": ev_new, "metricas_campea": ev_old,
             "reason": ("PROMOVIDA: errou menos que a versão atual nas perguntas de validação" if promoted else
                        "rejeitada: não errou menos que a versão atual nas perguntas de validação (a atual continua)")}
 
@@ -148,3 +153,75 @@ def suggest(version: Dict[str, Any]) -> Dict[str, Any]:
     else:
         why.append("rode um treino para registrar a curva")
     return {"diagnostico": d, "sugerido": new, "porque": why}
+
+
+# ------------------------------------------------------------------ rodada 14: avaliação detalhada e busca automática
+def evaluate(weights: np.ndarray, X: np.ndarray, y: np.ndarray, g: np.ndarray, w: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    """Métricas que dizem se a RESPOSTA acertou, não só a perda:
+    * acerto do 1º fato: em cada pergunta com o fato certo marcado, o fato que a IA põe em 1º é o certo?
+    * AUC (separa fato útil de fato irrelevante), precisão/revocação/F1 com limiar 0,5, log-loss."""
+    from src.intelligence.course import confusion
+
+    w = np.ones(len(y)) if w is None else w
+    p = 1 / (1 + np.exp(-np.clip(X @ weights, -30, 30)))
+    hits, total = 0, 0
+    for q in np.unique(g):
+        m = g == q
+        if y[m].sum() >= 1 and (1 - y[m]).sum() >= 1:
+            total += 1
+            hits += int(y[m][int(np.argmax(p[m]))] == 1)
+    try:
+        from sklearn.metrics import roc_auc_score
+
+        auc = float(roc_auc_score(y, p)) if len(np.unique(y)) == 2 else None
+    except Exception:
+        auc = None
+    c = confusion(y.astype(int), p, 0.5)
+    return {"acerto_1o_fato": round(hits / total, 4) if total else None, "perguntas_avaliadas": total,
+            "auc": None if auc is None else round(auc, 4), "precisao": c["precisao"], "revocacao": c["revocacao"],
+            "f1": c["f1"], "logloss": round(_loss(X, y, w, weights), 5)}
+
+
+def cross_validate(learning_rate: float, l2: float, epochs: int, folds: int = 5, use_weak: bool = True,
+                   shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None, seed: int = 11,
+                   base: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    """K dobras agrupadas por pergunta: média e desvio do acerto do 1º fato e da perda (estimativa estável)."""
+    X, y, w, g, _ = build_dataset(shown_path, feedback_path, use_weak=use_weak)
+    ug = np.unique(g)
+    if len(ug) < folds * 2:
+        return {"dobras": 0}
+    rng = np.random.default_rng(seed)
+    perm = rng.permutation(ug)
+    base = Selector().weights if base is None else base
+    acc, ll = [], []
+    for k in range(folds):
+        te_g = set(perm[k::folds])
+        te = np.isin(g, list(te_g))
+        wt = base.copy()
+        idx = np.where(~te)[0]
+        for _ in range(int(epochs)):
+            rng.shuffle(idx)
+            for s in range(0, len(idx), 256):
+                b = idx[s:s + 256]
+                pr = 1 / (1 + np.exp(-np.clip(X[b] @ wt, -30, 30)))
+                wt -= learning_rate * (X[b].T @ (w[b] * (pr - y[b])) / max(w[b].sum(), 1e-9) + l2 * (wt - base))
+        ev = evaluate(wt, X[te], y[te], g[te], w[te])
+        if ev["acerto_1o_fato"] is not None:
+            acc.append(ev["acerto_1o_fato"])
+        ll.append(ev["logloss"])
+    return {"dobras": folds, "acerto_medio": round(float(np.mean(acc)), 4) if acc else None,
+            "acerto_desvio": round(float(np.std(acc)), 4) if acc else None,
+            "perda_media": round(float(np.mean(ll)), 5), "perda_desvio": round(float(np.std(ll)), 5)}
+
+
+def auto_search(epochs: int = 150, use_weak: bool = True, shown_path: Optional[Path] = None,
+                feedback_path: Optional[Path] = None) -> List[Dict[str, Any]]:
+    """Busca em grade pequena (η × λ) por validação cruzada; devolve a tabela ordenada pelo acerto do 1º fato."""
+    rows = []
+    for lr in (0.03, 0.1, 0.3):
+        for l2 in (0.001, 0.01, 0.1):
+            cv = cross_validate(lr, l2, epochs, use_weak=use_weak, shown_path=shown_path, feedback_path=feedback_path)
+            if cv.get("dobras"):
+                rows.append({"η": lr, "λ": l2, **cv})
+    rows.sort(key=lambda r: (-(r.get("acerto_medio") or 0), r.get("perda_media") or 9))
+    return rows

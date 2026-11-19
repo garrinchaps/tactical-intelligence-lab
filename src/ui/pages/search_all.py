@@ -67,6 +67,36 @@ def one_per_game(out: pd.DataFrame) -> pd.DataFrame:
     return out.drop_duplicates("_g").drop(columns=["_t1", "_t2", "_day", "_g", "_h", "_a"])
 
 
+_WARMED: set = set()
+
+
+def _prewarm_teams(names: tuple) -> None:
+    """Calcula em segundo plano (thread) o estilo/histórico dos times encontrados, para a página do time abrir na hora
+    quando o usuário clicar. Usa os mesmos caches da página (em disco); se algo falhar, a página calcula normalmente."""
+    import threading
+
+    todo = [n for n in names if n not in _WARMED]
+    if not todo:
+        return
+    _WARMED.update(todo)
+
+    def run():
+        try:
+            from src.ui.context import get_service
+            from src.ui.pages import clubs as C
+
+            db = get_service().db
+            for n in todo:
+                ns = C.same_team_names(n)
+                C.team_matches(ns)
+                C._style_data(tuple(ns), db.team_version(ns))
+                C._formation_data(tuple(ns), db.team_version(ns))
+        except Exception:
+            pass
+
+    threading.Thread(target=run, name="til-prewarm", daemon=True).start()
+
+
 def _score(r):
     try:
         return (int(r["home_score"]), int(r["away_score"]))
@@ -225,6 +255,8 @@ def render(_ctx=None) -> None:
 
     with st.spinner("Procurando..."):                    # rodada 12: resultado guardado por busca (cliques não refazem)
         matches, teams, players, comps = _search_all(q.strip().lower(), version, only, only_real())
+    if not teams.empty:                                  # rodada 14: pré-aquece a página dos 2 primeiros times
+        _prewarm_teams(tuple(teams["nome"].head(2).astype(str)))
     st.markdown(f"#### Resultados para “{q}”")
     if matches.empty and teams.empty and players.empty and comps.empty:
         empty_state("Nada encontrado com dados para analisar", "Confira a grafia, tente só o nome do time ou do jogador.",

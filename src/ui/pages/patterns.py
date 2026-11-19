@@ -16,7 +16,7 @@ import streamlit as st
 from src.ui.components import comparison_table, empty_state, note
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _history(team: str, match_id: int, version: str) -> Dict[str, Any]:
     from src.analytics import team_history as TH
     from src.ui.context import get_service
@@ -54,7 +54,7 @@ def _ai_reading(ctx, team: str) -> None:
     meta = {**(ctx.bundle.meta or {}), "match_id": ctx.match_id, "data_source": ctx.bundle.source}
     try:
         with st.spinner("A IA do laboratório está lendo o jogo…"):
-            r = _reading(int(ctx.match_id), team, get_service().db.stable_version(), meta, ctx.bundle.boxscore)
+            r = _reading(int(ctx.match_id), team, get_service().db.team_version([team]), meta, ctx.bundle.boxscore)
     except Exception as exc:
         st.caption(f"A leitura da IA não pôde ser montada ({exc}).")
         return
@@ -80,7 +80,9 @@ def render(ctx, team: str, kp: str = "") -> None:
     meta = ctx.bundle.meta or {}
     other = next((t for t in (meta.get("home_team_name"), meta.get("away_team_name")) if t and t != team), "")
     st.markdown(f"### 🧩 {team}: padrões deste jogo e do histórico")
-    h = _history(team, int(ctx.match_id), get_service().db.stable_version())
+    from src.ui.pages.clubs import same_team_names
+
+    h = _history(team, int(ctx.match_id), get_service().db.team_version(same_team_names(team)))
     a, b = st.columns(2)
     with a:
         st.markdown("#### 🧬 Identidade habitual")

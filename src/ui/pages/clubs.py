@@ -386,7 +386,7 @@ def render(_ctx=None) -> None:
                                 use_container_width=True)
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _style_data(names: tuple, version: str) -> dict:
     from src.analytics import team_history as TH
     from src.ui.context import get_service
@@ -403,7 +403,7 @@ def _style_data(names: tuple, version: str) -> dict:
     return out
 
 
-@st.cache_data(show_spinner=False, ttl=1800, max_entries=32)
+@st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _formation_data(names, version):
     from src.analytics.team_history import formation_patterns
     from src.ui.context import get_service
@@ -419,12 +419,12 @@ def _style_tab(name: str, names: List[str]) -> None:
     from src.ui.context import get_service
     from src.ui.names import pt
 
-    d = _style_data(tuple(names), get_service().db.stable_version())
+    d = _style_data(tuple(names), get_service().db.team_version(names))
     idn, vu, ser = d["identidade"], d["vulneraveis"], d["serie"]
     card = lambda txt, c: st.markdown(f'<div class="fm-card" style="border-left:4px solid {c};border-radius:14px;padding:.6rem .9rem;'
                                       f'margin-bottom:.45rem">{txt}</div>', unsafe_allow_html=True)
     try:                                                 # rodada 13: o que cada desenho muda no ataque e na defesa
-        fp = _formation_data(tuple(names), get_service().db.stable_version())
+        fp = _formation_data(tuple(names), get_service().db.team_version(names))
         if fp.get("formacoes"):
             st.markdown("#### 🧩 Formações usadas: o que muda no ataque e na defesa")
             cols = st.columns(min(3, len(fp["formacoes"])))

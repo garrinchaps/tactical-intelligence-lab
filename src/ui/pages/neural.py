@@ -211,7 +211,31 @@ def _lab_ai_panel() -> None:
         (st.success if r.get("promoted") else st.info)(
             f"{r['reason']}" + (f" · {r['n_perguntas']} perguntas, {r['n_exemplos']} exemplos, "
                                 f"{r.get('epochs_run', 0)} épocas" if r.get("n_exemplos") else ""))
+        if r.get("metricas"):
+            mn, mo = r["metricas"], r.get("metricas_campea") or {}
+            fmt = lambda v: "—" if v is None else f"{100 * v:.1f}%"
+            k = st.columns(4)
+            k[0].metric("Acerto do 1º fato", fmt(mn.get("acerto_1o_fato")),
+                        None if mo.get("acerto_1o_fato") is None or mn.get("acerto_1o_fato") is None else
+                        f"{100 * (mn['acerto_1o_fato'] - mo['acerto_1o_fato']):+.1f} pts vs atual")
+            k[1].metric("AUC", "—" if mn.get("auc") is None else f"{mn['auc']:.3f}")
+            k[2].metric("F1", fmt(mn.get("f1")))
+            k[3].metric("Perda (validação)", f"{mn['logloss']:.4f}", f"{mn['logloss'] - mo.get('logloss', mn['logloss']):+.4f}",
+                        delta_color="inverse")
+            st.caption("Acerto do 1º fato = nas perguntas de validação, o número que a IA põe em primeiro é o que a pergunta "
+                       "pedia? É a métrica que mais se parece com 'a resposta veio certa'.")
         sel = Selector()
+    if b2.button("🎲 Busca automática de parâmetros (validação cruzada, 5 dobras)", use_container_width=True, key="as_auto"):
+        with st.spinner("Testando 9 combinações de η e λ, cada uma em 5 dobras por pergunta…"):
+            grid = TR.auto_search(use_weak=weak)
+        if grid:
+            styled_dataframe(pd.DataFrame(grid).rename(columns={"acerto_medio": "acerto do 1º fato (média)",
+                             "acerto_desvio": "desvio", "perda_media": "perda (média)", "perda_desvio": "desvio da perda"}),
+                             hide_index=True, use_container_width=True)
+            st.success(f"Melhor combinação: η {grid[0]['η']} · λ {grid[0]['λ']} — use nos controles acima e clique em Treinar.")
+        else:
+            st.info("Poucas perguntas com rótulo para 5 dobras (são precisas pelo menos 10). Faça perguntas que pedem um "
+                    "número ou avalie respostas.")
     hist_v = [v for v in sel.meta.get("versions", []) if v.get("history")]
     if hist_v:
         import plotly.graph_objects as go
@@ -224,7 +248,7 @@ def _lab_ai_panel() -> None:
                           title=f"Curva do último treino (v{hv['version']:03d})", margin=dict(l=40, r=10, t=40, b=30))
         st.plotly_chart(fig, use_container_width=True, key="as_curve")
         st.caption(f"Diagnóstico: {TR.suggest(hv)['diagnostico']['texto']}")
-    if b2.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True):
+    if st.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True):
         from src.ui.context import get_service
 
         with st.spinner("Lendo as estatísticas dos jogos mais recentes…"):
