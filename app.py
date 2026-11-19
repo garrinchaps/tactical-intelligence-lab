@@ -43,7 +43,10 @@ DEFAULT_MATCH_ID = 3869685  # final da Copa do Mundo 2022 (StatsBomb) — dispon
 def current_context(with_sim_ci: bool = True):
     """Abre a partida da sessão e monta o contexto (None + estado de erro desenhado se falhar)."""
     from src.ui.context import build_context, load_bundle, teams_of
-    from src.ui.components import error_state
+    from src.ui.components import empty_state, error_state
+    if not st.session_state.get("match_id"):
+        empty_state("Nenhum jogo aberto", "Cite o jogo na pergunta (times e ano) ou abra um pelo 🔎 Buscar.", "🏟️")
+        return None
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception as exc:
@@ -65,6 +68,8 @@ def match_bar() -> None:
     """Faixa da partida aberta + equipe em foco + atalho para analisar o jogo ou trocar (pela busca)."""
     from src.ui.context import load_bundle, teams_of
     from src.ui.components import match_strip
+    if not st.session_state.get("match_id"):
+        return                                           # rodada 20: sem jogo aberto, sem faixa (nada é carregado)
     try:
         bundle = load_bundle(int(st.session_state["match_id"]))
     except Exception:
@@ -104,7 +109,8 @@ def needs_match(render: Callable, needs_events: bool = False) -> Callable[[], No
 
 def standalone(render: Callable, pass_ctx: bool = False) -> Callable[[], None]:
     def page() -> None:
-        render(current_context(with_sim_ci=False) if pass_ctx else None)
+        # rodada 20: sem jogo aberto, a tela abre sem o aviso "Nenhum jogo aberto" (o jogo é opcional nela)
+        render(current_context(with_sim_ci=False) if pass_ctx and st.session_state.get("match_id") else None)
     page.__name__ = f"page_{render.__module__.rsplit('.', 1)[-1]}"
     return page
 
@@ -193,66 +199,24 @@ def top_bar(focused: bool = False) -> None:
         st.caption(t("Como tudo foi feito — separado do programa."))
         for page in BACKSTAGE:
             st.page_link(page, label=t(page.title), icon=page.icon)
-    q1, q4, q5, q2 = st.columns([5.6, 3, 1.3, 1])
-    st.session_state.setdefault("w_lang", st.session_state.get("_lang", "pt"))
-    q5.selectbox(t("Idioma"), list(LANGS), format_func=LANGS.get, key="w_lang", label_visibility="collapsed",
-                 on_change=lambda: st.session_state.__setitem__("_lang", st.session_state["w_lang"]),
-                 help="Idioma da interface (as respostas do Assistente continuam em português).")
-    from src.ui.context import DEFAULT_LEVELS, LEVEL_CHOICES
+        # rodada 20: idioma e situação da base saíram do topo de todas as telas (ficam aqui, sem ocupar espaço)
+        st.session_state.setdefault("w_lang", st.session_state.get("_lang", "pt"))
+        st.selectbox(t("Idioma"), list(LANGS), format_func=LANGS.get, key="w_lang",
+                     on_change=lambda: st.session_state.__setitem__("_lang", st.session_state["w_lang"]),
+                     help="Idioma da interface (as respostas do Assistente continuam em português).")
+        try:
+            from src.data_hub import autosync
+            from src.ui.context import get_service
 
-    inv = {v: k for k, v in LEVEL_CHOICES.items()}
-    st.session_state.setdefault("w_levels", [inv[l] for l in (st.session_state.get("_levels") or DEFAULT_LEVELS)])
-
-    def _set_levels():
-        picked = [LEVEL_CHOICES[k] for k in st.session_state.get("w_levels") or []]
-        st.session_state["_levels"] = tuple(picked) or DEFAULT_LEVELS
-
-    q4.multiselect(t("Nível de dado"), list(LEVEL_CHOICES), key="w_levels", on_change=_set_levels, format_func=t,
-                   label_visibility="collapsed", placeholder=t("Nível de dado"),
-                   help="Que jogos aparecem na busca, no Assistente e nas listas: 🟢 com lances e coordenadas, "
-                        "📊 com estatísticas da partida, 📄 só com o placar. Marque os três para ver tudo.")
-    # rodada 13: "Só partidas reais" saiu — simulações e uploads nunca aparecem nas buscas; jogo sem estatística em
-    # nenhuma fonte mostra o placar e avisa que nenhuma base achou números.
-    if "global_q" not in st.session_state:               # a caixa some nas telas de foco; ao voltar, a busca reaparece
-        st.session_state["global_q"] = st.session_state.get("_last_q", "")
-    q = q1.text_input("Busca", placeholder=t("🔎  Jogo, time, jogador ou competição — ex.: Brasil x Croácia, Leverkusen, "
-                      "Messi, Premier League"), label_visibility="collapsed", key="global_q", on_change=_go_search)
-    if (q2.button(t("Buscar"), type="primary", use_container_width=True) or st.session_state.pop("_do_search", False)) \
-            and q.strip():
-        st.session_state["_last_q"] = q.strip()
-        nav.open_view("buscar", q=q.strip())
+            last = st.session_state.get("_perf_last")
+            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)) + "  ·  " + _app_version()
+                       + (f"  ·  ⚡ última tela {last[1]:.1f} s" if last else ""))
+            fm = autosync.fotmob_status()
+            if fm:
+                st.caption(fm)
+        except Exception:
+            pass
     st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
-    recent_ids = st.session_state.get("recent_match_ids", [])
-    if recent_ids:
-        from src.ui.context import load_bundle
-        recent_labels = {}
-        for mid in recent_ids[:5]:
-            try:
-                meta = load_bundle(int(mid)).meta or {}
-                recent_labels[f"{str(meta.get('match_date') or '')[:10]} · {meta.get('home_team_name', '?')} x "
-                              f"{meta.get('away_team_name', '?')}"] = int(mid)
-            except Exception:
-                continue
-        if recent_labels:
-            ra, rb = st.columns([5, 1])
-            label = ra.selectbox("Partidas recentes", list(recent_labels),
-                                 key="til_recent_match_" + "_".join(str(x) for x in recent_ids[:5]),
-                                 label_visibility="collapsed", help="Últimas cinco partidas abertas nesta sessão.")
-            if rb.button("Reabrir", key="til_recent_open", use_container_width=True):
-                nav.open_view("jogo", match_id=recent_labels[label])
-    favorites = st.session_state.get("til_favorite_players", [])
-    if favorites:
-        favorite_labels = {f"{x.get('nome')} · {x.get('clube') or 'clube não informado'}": x for x in favorites}
-        fa, fb = st.columns([5, 1])
-        selected_favorite = fa.selectbox("Alvos de análise", list(favorite_labels),
-                                         key="til_favorite_choice_" + "_".join(str(x.get("core")) for x in favorites),
-                                         label_visibility="collapsed", help="Jogadores fixados nos seus alvos de análise.")
-        if fb.button("Abrir perfil", key="til_favorite_open", use_container_width=True):
-            item = favorite_labels[selected_favorite]
-            nav.open_view("jogador", name=item["nome"], core=item["core"])
-    if st.button("⛶ Foco tático", key="til_focus_enter", help="Oculta navegação e busca para ampliar a área de análise."):
-        st.session_state["til_focus_mode"] = True
-        st.rerun()
 
 
 @st.cache_data(show_spinner=False)
@@ -283,11 +247,12 @@ def main() -> None:
         activity.touch()
     except Exception:
         pass
-    st.session_state.setdefault("match_id", DEFAULT_MATCH_ID)
+    # rodada 20: nenhum jogo pré-carregado (antes abria a final da Copa 2022 em toda sessão, sem ninguém pedir)
     recent = st.session_state.setdefault("recent_match_ids", [])
-    current_mid = int(st.session_state["match_id"])
-    recent = [current_mid] + [int(x) for x in recent if int(x) != current_mid]
-    st.session_state["recent_match_ids"] = recent[:5]
+    if st.session_state.get("match_id"):
+        current_mid = int(st.session_state["match_id"])
+        recent = [current_mid] + [int(x) for x in recent if int(x) != current_mid]
+        st.session_state["recent_match_ids"] = recent[:5]
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
     from src.ui import gate                              # rodada 18: link público pede senha; no PC entra direto
@@ -300,10 +265,10 @@ def main() -> None:
     _cover = st.empty()                                  # cobertura de carregamento (só aparece se passar de 0,35 s)
     _cover.markdown(loading.overlay_html(), unsafe_allow_html=True)
     nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3],
-                   "scout": MAIN[4], "rankings": MAIN[5], **VIEWS})
+                   "scout": MAIN[4], "rankings": MAIN[5], "treino": BACKSTAGE[0], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo
     if goto:
-        if goto == "jogos":
+        if goto == "jogos" and st.session_state.get("match_id"):
             nav.open_view("jogo", match_id=int(st.session_state["match_id"]))
         else:
             st.switch_page({"assistente": MAIN[0], "comparar": MAIN[2], "buscar": MAIN[1]}.get(goto, MAIN[0]))
@@ -314,18 +279,12 @@ def main() -> None:
         if key and nav.current().get("kind") != key:
             st.session_state[nav.VIEW] = {"kind": key, **({"q": st.session_state.get("_last_q", "")} if key == "buscar" else {})}
     top_bar(focused)
-    if not focused:
+    if not focused:                                      # a atualização automática continua sendo ligada (sem texto)
         try:
             from src.data_hub import autosync
             from src.ui.context import get_service
 
-            last = st.session_state.get("_perf_last")
-            speed = (f"  ·  ⚡ última tela {last[1]:.1f} s" + (" (lenta — ver Bastidores › Velocidade)" if last[1] > 2.0 else "")
-                     if last else "")
-            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)) + "  ·  " + _app_version() + speed)
-            fm = autosync.fotmob_status()
-            if fm:
-                st.caption(fm)
+            autosync.ensure_started(get_service().db)
         except Exception:
             pass
     import time as _time

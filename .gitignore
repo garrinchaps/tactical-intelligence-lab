@@ -69,3 +69,6 @@ data/processed/evaluations.*
 data/recent_views.json
 data/warmup_status.json
 data/tunel.log
+data/learning/answers.jsonl
+data/learning/feedback_reasons.jsonl
+data/processed/overall_calibration.json

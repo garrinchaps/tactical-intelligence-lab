@@ -179,6 +179,16 @@ def _baselines_loop(db) -> None:
                 db.ensure_speed_indexes()
         except Exception:
             pass
+        try:                                         # rodada 20: apelidos de times entre fontes, 1x por dia
+            from src.data_hub import team_alias as TA
+
+            with db.connect() as _c:
+                _row = _c.execute("SELECT MAX(built_at) FROM team_aliases").fetchone() \
+                    if _c.execute("SELECT 1 FROM sqlite_master WHERE name='team_aliases'").fetchone() else None
+            if not _row or not _row[0] or _row[0][:10] != time.strftime("%Y-%m-%d"):
+                TA.build(db)
+        except Exception:
+            pass
         try:                                         # rodada 16: avaliações de jogadores (rankings), 1x por dia
             from src.scout import evaluation as EV
 

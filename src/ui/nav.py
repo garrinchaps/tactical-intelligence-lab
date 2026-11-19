@@ -48,7 +48,7 @@ def open_view(kind: str, **params) -> None:
     except Exception:
         pass
     if kind == "jogo" and params.get("match_id"):
-        if int(st.session_state.get("match_id", 0)) != int(params["match_id"]):
+        if int(st.session_state.get("match_id") or 0) != int(params["match_id"]):
             st.session_state["team_focus"] = None
             st.session_state["chat_history"] = []
         st.session_state["match_id"] = int(params["match_id"])

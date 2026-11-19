@@ -121,6 +121,9 @@ viram média. Coordenadas no padrão StatsBomb 120×80, ataque para a direita.
 - Bloqueiam robôs (403, não contornar): FBref, Sofascore, zerozero/ogol, worldfootball. Pagas/sob contrato (não
   integradas, exigem chave/plano): Sportmonks, Sportradar, Opta/Stats Perform (Opta Vision), Wyscout (só o dataset
   aberto 17/18 que já temos), StatsBomb comercial. football-data.org precisa de chave (conector já existe).
+- Rodada 20: novas ligas na FotMob (Rússia 63, Arábia 536, Japão 223, Coreia 9080, Catar 535, Emirados 538, Romênia 189,
+  Israel 127, Hungria 212, Bulgária 270, China 120, Austrália 113, México 2ª 8976) e seleções de base (296, 306, 9848, 288,
+  301, 287) + Libertadores Sub-20 (11022) — AINDA NÃO baixadas no PC (comandos na resposta da rodada 20).
 - Nenhuma fonte aberta tem lances com coordenadas do Brasileirão nem dados físicos (velocidade, distância, mapa de
   calor de tracking).
 
@@ -491,6 +494,37 @@ Rodada 19 (19/11/2026, 454 testes verdes):
   históricas 1×/semana (antes relidas todo dia), API-Football e estatisticas_brasil só manual. Understat continua fora do ar.
 - Pergunta "24 h sem o PC, grátis": com a base inteira não existe opção grátis sem cartão; proposta = versão vitrine no
   Streamlit Community Cloud (base reduzida publicada pelo PC) — ainda NÃO implementada (decisão do usuário).
+
+Rodada 20 (19/11/2026, 467 testes verdes) — pedidos com prints do celular:
+- ✅ Interface: a barra de busca/nível/idioma/jogo recente/"Foco tático"/status saiu do topo de TODAS as telas — busca e
+  nível ficam só no 🔎 Buscar (`search_all.search_box`, formulário), idioma e status no popover ⚙️ Bastidores. Nenhum jogo
+  pré-carregado (antes a final da Copa 2022 abria sozinha) e nenhum clube escolhido de fábrica (Scout/Escalação começam
+  vazios). Gráficos sem barra de ferramentas/zoom (`src/ui/plot_config.py` envolve o plotly_chart uma vez + CSS do botão
+  de tela cheia). Busca manual do Scout num formulário com "🔎 Buscar com estes filtros" (+ filtro por nome).
+- ✅ Próximo jogo do Bayern ("FC Cologne" = "1. FC Köln"): `src/data_hub/team_alias.py` aprende apelidos pelos jogos em
+  comum entre fontes (data ±1 + mesmo placar + um time igual, ≥ 2 jogos, nunca masculino×feminino/base); `same_team_names`
+  usa; worker refaz 1×/dia; CLI `python -m src.data_hub.team_alias`. Versão dos caches da Escalação com "r20".
+- ✅ Scout: 👍/👎 em cada sugestão (`scout_player_votes`, ±3 por voto líquido na ordem, não adiciona nem descarta; recusas
+  continuam por clube); nunca sugere quem o próprio clube emprestou (`_not_ours`); joias com controle "Valor máximo"
+  (padrão 75% da capacidade = maior compra 5 anos/faixa) e opção de incluir quem não tem valor; feminino fora
+  (`fotmob_teams_v2` resolve o código do clube só com jogos do mesmo gênero — a antiga podia guardar o time feminino de
+  "Cruzeiro"; `gender.drop_women_players` no universo/elenco); um nome por clube (`canonical_clubs`); homônimos com
+  minutos/nota dos jogos do próprio clube (`fill_homonyms_from_club`); elenco usa a nota do mercado (régua do clube só
+  completa quem falta).
+- ✅ Overall 0–100 (`src/scout/overall.py`): reputação ajustada pela idade + desempenho na função × nível + nível da liga,
+  curva tipo FC por família (mediana ≈ 63) + elite pela colocação (1º = teto da posição: ST 94, ponta 93, meia/volante/
+  zagueiro 92, GK 91, lateral 90), pesos calibrados numa grade pelos ~42 craques de referência do usuário com trava de
+  correlação ≥ 0,55 com o desempenho; relatório em data/processed/overall_calibration.json e no Scout ("ℹ️ Como a nota é
+  feita"). Fotografia v8. Potencial recalculado na escala nova (+ seleção de base).
+- ✅ Cobertura: FotMob com seleções de base (Mundial Sub-20/17, Sul-Americano Sub-20, Euros de base, Libertadores Sub-20 —
+  `YOUTH_LEAGUES`, atalho `--ligas base`) usadas só como PROMESSA (traço "🏅 Seleção de base", "🌱 Grande promessa" com ≥ 3
+  jogos; fora dos números de clube); Série C na prioridade e em `--ligas brasil`; 13 ligas novas (Rússia, Arábia, Japão,
+  Coreia, Catar, Emirados, Romênia, Israel, Hungria, Bulgária, China, Austrália, México 2ª); `--only fotmob_elencos`
+  (elenco atual de todos os clubes das ligas: idade, valor, posição — completa o "Sem referência" da Série B/C).
+- ✅ Treino da IA pelo link (`src/ui/pages/ai_trainer.py`, Bastidores › "🎓 Treinar a IA (guiado)", botão no Assistente):
+  1 Pergunte (perguntas sugeridas abrem no Assistente) · 2 Avalie (👍/👎 + motivo + comentário; respostas gravadas em
+  data/learning/answers.jsonl) · 3 Treine (1 botão, parâmetros sugeridos pela IA, liberado para visitante) · 4 Onde
+  melhorar (motivos, tipos com mais 👎, comentários, dicas). Treinos pesados continuam só no PC.
 
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).

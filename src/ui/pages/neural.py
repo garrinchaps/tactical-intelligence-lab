@@ -331,9 +331,14 @@ def render(ctx=None) -> None:
     hero("Bastidores · como a IA aprende", "A matéria de Introdução à IA aplicada ao futebol",
          "Lógica fuzzy, redes neurais e algoritmo genético — cada questão da matéria calculada com os modelos que "
          "realmente decidem o que o programa mostra. Nada aqui é ilustração solta: os números vêm do app.")
-    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA única (treinar tudo)", "🎯 Rede de perigo (treino)",
-                                          "⏱️ Velocidade do app"],
+    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🎓 Treinar a IA (guiado)", "🧠 IA única (treinar tudo)",
+                                          "🎯 Rede de perigo (treino)", "⏱️ Velocidade do app"],
                                 default="📚 A matéria aplicada", key="bastidores_view", label_visibility="collapsed")
+    if view == "🎓 Treinar a IA (guiado)":            # rodada 20: liberado também para quem entra pelo link
+        from src.ui.pages.ai_trainer import render_trainer
+
+        render_trainer()
+        return
     if view == "⏱️ Velocidade do app":
         _speed_panel()
         return

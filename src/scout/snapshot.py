@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v7.pkl")    # v7: posições da escalação (FotMob), Rankings na qualidade, origem
-META_PATH = Path("data/processed/scout_universe_v7.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+SNAP_PATH = Path("data/processed/scout_universe_v8.pkl")    # v8: overall 0–100 calibrado, feminino fora, clube com 1 nome
+META_PATH = Path("data/processed/scout_universe_v8.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -68,13 +68,23 @@ def build_universe(db) -> Dict[str, Any]:
                 if source in club_rows:
                     mapping = club_rows.drop_duplicates("_club_core").set_index("_club_core")[source].to_dict()
                     universe[target] = universe["clube"].map(team_core).map(mapping)
+    universe = E.fill_homonyms_from_club(db, universe)   # rodada 20: homônimos pelos jogos do próprio clube
     # rodada 10: a qualidade usa o nível do clube (valor do elenco), então vem DEPOIS de juntar os clubes
     universe = E.add_quality_scores(universe)
     universe = E.merge_external_ratings(universe, D.external_ratings())
     universe = E.merge_rankings(universe, _evaluations())
+    universe = E.canonical_clubs(universe)               # rodada 20: um nome por clube ("Cruzeiro" × "Cruzeiro EC")
+    universe = E.merge_youth(universe, E.youth_caps(db))  # rodada 20: seleções de base → potencial e característica
+    try:                                                 # rodada 20: o mercado é masculino (jogadoras de mesmo clube fora)
+        from src.data_hub.gender import drop_women_players
+
+        universe = drop_women_players(universe, db)
+    except Exception:
+        pass
+    from src.scout.overall import finalize_overall
     from src.scout.traits import add_traits
 
-    universe = add_traits(universe)
+    universe = add_traits(finalize_overall(universe))   # rodada 20: overall 0–100 calibrado com craques de referência
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
     return {"universe": universe, "clubs": clubs, "status": "carregado",
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
@@ -151,7 +161,7 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                     u = add_peak(u, D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"]))
                 except Exception:
                     pass
-            for c in ("caracteristicas", "caracteristicas_top", "precocidade", "qualidade", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
+            for c in ("caracteristicas", "caracteristicas_top", "precocidade", "qualidade", "qualidade_base", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
                       "qualidade_estatistica", "nota_externa", "fontes_nota_externa", "fonte_qualidade"):
                 if c in u:
                     u = u.drop(columns=[c])
@@ -161,10 +171,19 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 ext = D.external_ratings()
             except Exception:
                 ext = None
+            from src.scout.overall import finalize_overall
             from src.scout.traits import add_traits
 
-            data["universe"] = add_traits(E.merge_rankings(E.merge_external_ratings(E.add_quality_scores(u), ext),
-                                                           _evaluations()))
+            u2 = E.merge_rankings(E.merge_external_ratings(E.add_quality_scores(u), ext), _evaluations())
+            u2 = E.canonical_clubs(u2)
+            try:
+                from src.data_hub.gender import drop_women_players
+                from src.data_hub.db import DataHubDB
+
+                u2 = drop_women_players(u2, DataHubDB())
+            except Exception:
+                pass
+            data["universe"] = add_traits(finalize_overall(u2))
             data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
             save(data)
             return data

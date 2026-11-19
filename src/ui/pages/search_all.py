@@ -241,14 +241,67 @@ def match_cards(df: pd.DataFrame, key: str, limit: int = 25) -> None:
             nav.open_view("jogo", match_id=int(m["match_id"]))
 
 
+def search_box() -> str:
+    """Rodada 20: a busca e o nível de dado ficam SÓ aqui (saíram do topo de todas as telas). Só busca no Enter/Buscar."""
+    from src.ui.context import DEFAULT_LEVELS, LEVEL_CHOICES
+    from src.ui.i18n import t
+
+    inv = {v: k for k, v in LEVEL_CHOICES.items()}
+    st.session_state.setdefault("w_levels", [inv[l] for l in (st.session_state.get("_levels") or DEFAULT_LEVELS)])
+    pq = str(nav.param("q") or "").strip()
+    if pq and pq != st.session_state.get("_q_seen"):     # busca pedida por outra tela (ex.: clique num nome)
+        st.session_state["_q_seen"] = pq
+        st.session_state["_last_q"] = pq
+        st.session_state["global_q"] = pq
+    if "global_q" not in st.session_state:
+        st.session_state["global_q"] = st.session_state.get("_last_q", "")
+    with st.form("til_search_form", border=False):
+        a, b, c = st.columns([5.6, 3, 1.1])
+        q = a.text_input("Busca", placeholder=t("🔎  Jogo, time, jogador ou competição — ex.: Brasil x Croácia, "
+                         "Leverkusen, Messi, Premier League"), label_visibility="collapsed", key="global_q")
+        b.multiselect(t("Nível de dado"), list(LEVEL_CHOICES), key="w_levels", format_func=t,
+                      label_visibility="collapsed", placeholder=t("Nível de dado"),
+                      help="Que jogos aparecem: 🟢 com lances e coordenadas, 📊 com estatísticas, 📄 só com o placar.")
+        go = c.form_submit_button(t("Buscar"), type="primary", use_container_width=True)
+    if go:
+        picked = [LEVEL_CHOICES[k] for k in st.session_state.get("w_levels") or []]
+        st.session_state["_levels"] = tuple(picked) or DEFAULT_LEVELS
+        st.session_state["_last_q"] = (q or "").strip()
+    _recent_matches()
+    return (st.session_state.get("_last_q") or "").strip()
+
+
+def _recent_matches() -> None:
+    """Partidas abertas nesta sessão (só aparece se houver — nada é carregado de antemão)."""
+    ids = st.session_state.get("recent_match_ids") or []
+    if not ids:
+        return
+    from src.ui.context import load_bundle
+
+    labels = {}
+    for mid in ids[:5]:
+        try:
+            meta = load_bundle(int(mid)).meta or {}
+            labels[f"{str(meta.get('match_date') or '')[:10]} · {meta.get('home_team_name', '?')} x "
+                   f"{meta.get('away_team_name', '?')}"] = int(mid)
+        except Exception:
+            continue
+    if labels:
+        ra, rb = st.columns([5, 1])
+        label = ra.selectbox("Partidas recentes", list(labels), key="til_recent_match", label_visibility="collapsed",
+                             help="Últimas partidas abertas nesta sessão.")
+        if rb.button("Reabrir", key="til_recent_open", use_container_width=True):
+            nav.open_view("jogo", match_id=labels[label])
+
+
 def render(_ctx=None) -> None:
     from src.ui.context import analyzable_only, get_service
 
-    q = (st.session_state.get("global_q") or nav.param("q") or st.session_state.get("_last_q") or "").strip()
+    q = search_box()
     if not q:
         hero("Buscar", "Um jogo, um time, um jogador ou uma competição",
-             "Digite na caixa do topo. Clique no resultado para abrir a análise. Escolha ao lado da busca que "
-             "jogos aparecem: 🟢 com todos os lances, 📊 com estatísticas, 📄 só placar — ou os três.")
+             "Digite acima e aperte Enter ou Buscar. Clique no resultado para abrir a análise. Ao lado da busca, escolha "
+             "que jogos aparecem: 🟢 com todos os lances, 📊 com estatísticas, 📄 só placar — ou os três.")
         _showcase()
         return
     from src.ui.context import chosen_levels

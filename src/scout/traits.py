@@ -163,6 +163,20 @@ def add_traits(universe: pd.DataFrame) -> pd.DataFrame:
             res.at[i, "caracteristicas"] = [{"nome": "Grande promessa", "emoji": "🌱", "percentil": round(prec[i]),
                                              "porque": f"valor de mercado e minutos acima de {prec[i]:.0f}% de quem tem "
                                                        f"a mesma idade ({age[i]:.0f} anos)"}]
+    # rodada 20: seleção de BASE (Mundial/Sul-Americano Sub-20, Mundial Sub-17, Euros de base) — sinal de promessa
+    if "selecao_base_jogos" in res:
+        caps = pd.to_numeric(res["selecao_base_jogos"], errors="coerce")
+        comps = res.get("selecao_base_comp", pd.Series("", index=res.index)).fillna("").astype(str)
+        for i in res.index[caps.fillna(0) >= 1]:
+            n = int(caps[i])
+            item = {"nome": "Seleção de base", "emoji": "🏅", "percentil": min(99, 88 + n),
+                    "porque": f"{n} jogo{'s' if n > 1 else ''} por seleção de base ({comps[i] or 'competições de base'})"}
+            cur = [x for x in (res.at[i, "caracteristicas"] or []) if x.get("nome") != "Seleção de base"]
+            age_i = pd.to_numeric(res.at[i, "idade"], errors="coerce") if "idade" in res else np.nan
+            if n >= 3 and (pd.isna(age_i) or age_i <= 21) and not any(x.get("nome") == "Grande promessa" for x in cur):
+                cur.append({"nome": "Grande promessa", "emoji": "🌱", "percentil": min(99, 85 + n),
+                            "porque": f"titular frequente da seleção de base ({n} jogos)"})
+            res.at[i, "caracteristicas"] = sorted(cur + [item], key=lambda x: -x["percentil"])
     res["caracteristicas_top"] = res["caracteristicas"].map(
         lambda xs: " · ".join(f"{x['emoji']} {x['nome']}" for x in (xs or [])[:3]))
     return res

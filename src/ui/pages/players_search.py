@@ -209,7 +209,7 @@ def render(_ctx=None) -> None:
     nav.back_button(key="player_back")
     core, given = nav.param("core"), nav.param("name")
     if not (core or given):
-        empty_state("Nenhum jogador escolhido", "Use a busca no topo e clique no jogador.", "👤")
+        empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
     idx = player_index(get_service().db.stable_version())
     core = core or _norm(given)

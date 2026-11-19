@@ -736,7 +736,7 @@ def render_page(current_context, match_bar) -> None:
         if ctx is None:
             return
         if not ctx.has_events:
-            empty_state("Este modo usa os eventos da partida aberta", "", "🆚", "Troque para uma partida ✅ no topo.")
+            empty_state("Este modo usa os eventos da partida aberta", "", "🆚", "Abra uma partida ✅ pelo 🔎 Buscar.")
             return
         {modes[0]: _players, modes[3]: _team_over_time, modes[4]: _two_teams}[pick](ctx)
         provenance_panel(ctx.registry)

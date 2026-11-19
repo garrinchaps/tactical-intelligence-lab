@@ -538,6 +538,14 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         report("Nenhum registro de histórico encontrado para os jogadores selecionados.")
         return raw
 
+    try:                                                 # rodada 20: seleção de base conta como PROMESSA, não como clube
+        from src.data_hub.sources.fotmob import YOUTH_NAMES
+
+        raw = raw[~raw["competition_name"].isin(YOUTH_NAMES)]
+    except Exception:
+        pass
+    if raw.empty:
+        return raw
     raw = fill_positions_from_lineups(db, raw)
     report("Normalizando nomes e partidas do histórico...")
     # Normaliza cada nome/clube uma única vez, não uma vez por aparição do jogador.
@@ -939,6 +947,7 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             d[col] = np.nan
     d["qualidade"] = np.nan
     d["confianca_pct"] = 0.0
+    d["_perf_raw"], d["_conf"], d["_lvl"] = np.nan, np.nan, np.nan
     d["nota_media_temporada"] = pd.to_numeric(d["rating_12m"].combine_first(d["rating_media"]), errors="coerce")
     # nível do clube (0–1): percentil do valor do elenco entre os clubes; reputação: percentil do valor na função
     level: Dict[int, float] = {}
@@ -1020,6 +1029,11 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             q = (.9 - w_rep) * perf + w_rep * (rep if rep is not None else lvl100) + .1 * lvl100
             d.at[row_idx, "qualidade"] = round(q, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)
+            # rodada 20: componentes guardados para o overall 0–100 (finalize_overall)
+            d.at[row_idx, "_perf_raw"] = round(raw, 2)
+            d.at[row_idx, "_conf"] = round(confidence, 3)
+            if lvl is not None:
+                d.at[row_idx, "_lvl"] = round(lvl, 3)
     # Potencial de revenda: indicador exploratório, separado da qualidade atual.
     age = pd.to_numeric(d["idade"], errors="coerce")
     market = pd.to_numeric(d["valor_mercado_eur"], errors="coerce")
@@ -2182,6 +2196,43 @@ def ensure_scout_tables(db) -> None:
         );
         """)
         
+VOTES_DDL = ("CREATE TABLE IF NOT EXISTS scout_player_votes (id INTEGER PRIMARY KEY AUTOINCREMENT, "
+             "criado_em TEXT DEFAULT CURRENT_TIMESTAMP, clube TEXT, jogador TEXT NOT NULL, core TEXT NOT NULL, voto INTEGER)")
+
+
+def record_vote(db, club: str, player: str, vote: bool) -> None:
+    """Rodada 20: 👍/👎 numa sugestão — opinião sobre o JOGADOR (é bom / não é), sem precisar adicionar nem descartar."""
+    with db.connect() as conn:
+        conn.execute(VOTES_DDL)
+        conn.execute("INSERT INTO scout_player_votes (clube, jogador, core, voto) VALUES (?,?,?,?)",
+                     (club, player, player_core(player), 1 if vote else 0))
+
+
+def player_votes(db) -> Dict[str, Tuple[int, int]]:
+    """core → (👍, 👎) somando todos os clubes (a opinião é sobre a qualidade do atleta, não sobre o encaixe)."""
+    try:
+        with db.connect() as conn:
+            conn.execute(VOTES_DDL)
+            rows = conn.execute("SELECT core, SUM(voto), SUM(1 - voto) FROM scout_player_votes GROUP BY core").fetchall()
+    except Exception:
+        return {}
+    return {r[0]: (int(r[1] or 0), int(r[2] or 0)) for r in rows}
+
+
+def apply_votes(ranked: pd.DataFrame, votes: Dict[str, Tuple[int, int]], col: str = "score_scout") -> pd.DataFrame:
+    """Cada 👍 líquido vale +3 no índice da sugestão (teto ±9) — ajusta a ordem sem apagar ninguém."""
+    if ranked is None or ranked.empty or not votes:
+        return ranked
+    r = ranked.copy()
+    core = r["_core"].astype(str) if "_core" in r else r["nome"].map(player_core)
+    net = core.map(lambda c: votes.get(c, (0, 0))[0] - votes.get(c, (0, 0))[1]).astype(float)
+    r["votos_scout"] = core.map(lambda c: votes.get(c, (0, 0)))
+    if col in r:
+        r[col] = pd.to_numeric(r[col], errors="coerce").fillna(0) + (3 * net).clip(-9, 9)
+        r = r.sort_values(col, ascending=False)
+    return r
+
+
 def record_rejection(db, club: str, player: str, role: str, reason: str, score: Optional[float] = None) -> None:
     ensure_scout_tables(db)
     with db.connect() as conn:
@@ -2307,6 +2358,13 @@ def roster_quality(roster: pd.DataFrame, universe: pd.DataFrame, per_role: int =
     pool["_roster_row"] = False
     both = pd.concat([pool, r], ignore_index=True, sort=False)
     q = add_quality_scores(both)
+    try:                                                 # rodada 20: mesma escala do mercado (overall contra o universo)
+        from src.scout.overall import finalize_overall
+
+        if "_ovr_z" in universe:
+            q = finalize_overall(q.drop(columns=["qualidade_base"], errors="ignore"), reference=universe)
+    except Exception:
+        pass
     try:
         from src.scout.traits import add_traits
 
@@ -2343,7 +2401,7 @@ def origin_group(comp: Any) -> str:
         return "Brasil · Série A e copas"
     if any(w in s for w in SA_COUNTRY_WORDS):
         return "América do Sul"
-    if any(w in s for w in ("mls", "liga mx", "usl")):
+    if any(w in s for w in ("mls", "liga mx", "usl", "méxico", "mexico")):
         return "América do Norte"
     return "Europa e outras"
 
@@ -2403,4 +2461,122 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     main_comp = u["competicao_principal"].fillna("").astype(str)
     u["clube_liga"] = liga.where(liga.str.strip() != "", main_comp.where(main_comp != "", last_comp))
     u["origem"] = u["clube_liga"].map(origin_group)
+    return u
+
+
+# ------------------------------------------------------------------ rodada 20: clube com um nome só e homônimos pelo clube
+def canonical_clubs(universe: pd.DataFrame) -> pd.DataFrame:
+    """O mesmo clube aparecia com dois nomes ("Cruzeiro" pela FotMob, "Cruzeiro Esporte Clube" pelo Transfermarkt) e o
+    elenco ficava partido em dois no filtro "Clube atual". Escolhe UM nome por clube (o mais usado nos jogos recentes)."""
+    if universe is None or universe.empty or "clube" not in universe:
+        return universe
+    u = universe.copy()
+    club = u["clube"].fillna("").astype(str)
+    core = club.map(lambda c: team_core(c) if c else "")
+    observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
+    pref = pd.DataFrame({"core": core, "club": club, "obs": observed.astype(int)})
+    pref = pref[pref["core"] != ""]
+    if pref.empty:
+        return u
+    best = (pref.groupby(["core", "club"]).agg(obs=("obs", "sum"), n=("obs", "size")).reset_index()
+            .sort_values(["core", "obs", "n"], ascending=[True, False, False]).drop_duplicates("core"))
+    name_of = dict(zip(best["core"], best["club"]))
+    new = core.map(name_of)
+    change = new.notna() & (new != club) & (club != "")
+    if "clube_tm" in u:
+        u.loc[change & u["clube_tm"].isna(), "clube_tm"] = club[change & u["clube_tm"].isna()]
+    u.loc[change, "clube"] = new[change]
+    return u
+
+
+def fill_homonyms_from_club(db, universe: pd.DataFrame, days: int = 365) -> pd.DataFrame:
+    """Homônimos (dois "Matheus Pereira") não recebem o histórico somado pelo nome — que mistura os dois. Aqui cada um
+    recebe minutos, jogos e nota dos jogos do PRÓPRIO clube no último ano (nome + clube), só se ainda estiver sem."""
+    if universe is None or universe.empty:
+        return universe
+    u = universe.copy()
+    mins = pd.to_numeric(u.get("minutos_12m"), errors="coerce")
+    dup = u["_core"].duplicated(keep=False) if "_core" in u else pd.Series(False, index=u.index)
+    amb = u.get("historico_ambiguo", pd.Series(False, index=u.index)).fillna(False).astype(bool)
+    need = (dup | amb) & (mins.isna() | (mins <= 0))
+    if not need.any():
+        return u
+    since = (date.today() - timedelta(days=days)).isoformat()
+    try:
+        with db.connect() as conn:
+            g = pd.read_sql_query(
+                f"""SELECT p.player_name, p.team_name, SUM(COALESCE(p.minutes,0)) AS mins, COUNT(DISTINCT p.match_id) AS games,
+                           SUM(p.rating * COALESCE(p.minutes,0)) / NULLIF(SUM(CASE WHEN p.rating IS NOT NULL THEN p.minutes END),0) AS rating
+                    FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+                    WHERE m.match_date >= ? AND COALESCE(p.minutes,0) > 0{comp_sql([], "m")}
+                    GROUP BY p.player_name, p.team_name""", conn, params=[since])
+    except Exception:
+        return u
+    if g.empty:
+        return u
+    g["core"] = g["player_name"].map(player_core)
+    g["club_core"] = g["team_name"].map(team_core)
+    g = g.groupby(["core", "club_core"], as_index=False).agg(mins=("mins", "sum"), games=("games", "sum"),
+                                                            rating=("rating", "mean"))
+    key = dict(zip(zip(g["core"], g["club_core"]), g[["mins", "games", "rating"]].itertuples(index=False, name=None)))
+    for i in u.index[need]:
+        for club_col in ("clube", "clube_tm"):
+            c = _safe_str(u.at[i, club_col]) if club_col in u else ""
+            hit = key.get((str(u.at[i, "_core"]), team_core(c))) if c else None
+            if hit:
+                m_, g_, r_ = hit
+                u.at[i, "minutos_12m"] = m_
+                u.at[i, "jogos_12m"] = g_
+                if pd.notna(r_):
+                    u.at[i, "rating_12m"] = round(float(r_), 2)
+                if pd.isna(pd.to_numeric(u.at[i, "minutos"], errors="coerce")) if "minutos" in u else True:
+                    u.at[i, "minutos"] = m_
+                    u.at[i, "jogos"] = g_
+                u.at[i, "fonte_clube_observado"] = "jogos do próprio clube (homônimo separado pelo clube)"
+                break
+    return u
+
+
+def youth_caps(db) -> pd.DataFrame:
+    """Rodada 20: jogos por SELEÇÃO DE BASE (Mundial Sub-20/Sub-17, Sul-Americano Sub-20, Euros de base) por atleta —
+    entra no POTENCIAL e vira característica; não mistura com os números de clube."""
+    try:
+        from src.data_hub.sources.fotmob import YOUTH_NAMES
+    except Exception:
+        return pd.DataFrame()
+    names = sorted(YOUTH_NAMES)
+    ph = ",".join("?" * len(names))
+    try:
+        with db.connect() as conn:
+            r = pd.read_sql_query(
+                f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos FROM (
+                        SELECT p.player_name, m.competition_name, m.match_id FROM match_player_stats p
+                        JOIN matches m ON m.match_id = p.match_id
+                        WHERE m.competition_name IN ({ph}) AND COALESCE(p.minutes, 0) > 0
+                        UNION
+                        SELECT l.player_name, m.competition_name, m.match_id FROM match_lineups l
+                        JOIN matches m ON m.match_id = l.match_id
+                        WHERE m.competition_name IN ({ph}) AND l.is_starter = 1)
+                    GROUP BY player_name, competition_name""", conn, params=[*names, *names])
+    except Exception:
+        return pd.DataFrame()
+    if r.empty:
+        return r
+    r["core"] = r["player_name"].map(player_core)
+    out = r.groupby("core").agg(selecao_base_jogos=("jogos", "sum"),
+                                selecao_base_comp=("competition_name", lambda x: " · ".join(sorted(set(x)))))
+    return out.reset_index()
+
+
+def merge_youth(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
+    """Liga os jogos de base ao atleta (só núcleo de nome ÚNICO no universo e idade ≤ 24 ou desconhecida)."""
+    if universe is None or universe.empty or caps is None or caps.empty:
+        return universe
+    u = universe.copy()
+    core = u["_core"].astype(str) if "_core" in u else u["nome"].map(player_core)
+    age = pd.to_numeric(u.get("idade"), errors="coerce") if "idade" in u else pd.Series(np.nan, index=u.index)
+    ok = ~core.duplicated(keep=False) & (age.isna() | age.le(24))
+    c = caps.set_index("core")
+    u["selecao_base_jogos"] = core.where(ok).map(c["selecao_base_jogos"])
+    u["selecao_base_comp"] = core.where(ok).map(c["selecao_base_comp"])
     return u

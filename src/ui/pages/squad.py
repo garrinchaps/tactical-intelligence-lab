@@ -64,7 +64,11 @@ def _picker(label: str, key: str, default: str = "") -> Optional[str]:
     if not opts:
         c2.caption("Nenhum time com esse nome na base.")
         return None
-    return c2.selectbox("Escolha", opts, key=f"{key}_pick", label_visibility="hidden")
+    if st.session_state.get(f"{key}_pick") not in opts:
+        st.session_state.pop(f"{key}_pick", None)
+    # rodada 20: nada escolhido de fábrica — só calcula depois que o time é escolhido
+    return c2.selectbox("Escolha", opts, key=f"{key}_pick", label_visibility="hidden", index=None,
+                        placeholder="Escolha o time")
 
 
 # ------------------------------------------------------------------------------------------------ dados do time
@@ -732,7 +736,8 @@ def _tv(*teams) -> str:
     from src.ui.context import get_service
 
     db = get_service().db
-    return "|".join(db.team_version([t]) for t in teams if t) or db.stable_version()
+    # "r20": apelidos aprendidos entre fontes — análises guardadas antes (rival com "0 jogos") são refeitas
+    return "r20|" + ("|".join(db.team_version([t]) for t in teams if t) or db.stable_version())
 
 
 def _pl(word):

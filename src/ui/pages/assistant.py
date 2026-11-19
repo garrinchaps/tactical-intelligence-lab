@@ -77,7 +77,7 @@ def _answer(question: str, current_context, use_llm: bool):
         loc = locate(question, cached_catalog(), _index(get_service().db.stable_version(), "|".join(chosen_levels()), only_real()))
     except Exception:
         loc = None
-    previous = int(st.session_state.get("match_id", 0))
+    previous = int(st.session_state.get("match_id") or 0)
     switched = bool(loc and loc.match_id != previous)
     if switched:
         from src.ui.context import load_bundle
@@ -208,11 +208,19 @@ def _db_status() -> None:
 
 def render(current_context, match_bar) -> None:
     hero("Assistente tático", "Pergunte qualquer coisa sobre futebol",
-         "Cite o jogo na própria pergunta (times e ano) ou use a partida aberta no topo. Cada número da resposta é "
+         "Cite o jogo na própria pergunta (times e ano) ou abra o jogo pelo 🔎 Buscar. Cada número da resposta é "
          "conferido contra os dados antes de aparecer.")
     _db_status()
     match_bar()
     analyst = DynamicTacticalAnalyst()
+    def _go_train():
+        st.session_state["bastidores_view"] = "🎓 Treinar a IA (guiado)"
+        from src.ui import nav as _nav
+
+        _nav.open_view("treino")
+
+    if st.button("🎓 Ajudar a treinar a IA (avaliar respostas, dizer o que faltou)", key="as_go_train"):
+        _go_train()
     with st.expander("Opções do assistente"):
         st.toggle("🧠 IA do laboratório (nossa, aprende com o seu 👍/👎)", value=True, key="lab_ai_on",
                   help="Escolhe os números que importam para a pergunta com uma rede treinada pelas suas avaliações e "
@@ -268,7 +276,7 @@ def render(current_context, match_bar) -> None:
                 else:
                     st.caption("Feedback registrado para revisão.")
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
-                             "quem mais criou perigo?”") or clicked
+                             "quem mais criou perigo?”") or clicked or st.session_state.pop("_ask_from_trainer", None)
     if not question:
         if history:
             note("Dica", "Para mudar de jogo, é só citar os times (e o ano) na próxima pergunta.")
@@ -280,14 +288,24 @@ def render(current_context, match_bar) -> None:
             res, loc, switched = None, None, False
             st.error(f"Não consegui responder: {exc}")
     if res is None:
+        if not st.session_state.get("match_id"):
+            st.info("Não identifiquei o jogo na pergunta. Cite os dois times (e o ano), por exemplo: "
+                    "“Flamengo x Palmeiras 2025: quem mais criou perigo?”, ou abra o jogo pelo 🔎 Buscar.")
         return
     nt = ""
     if loc is not None:
         nt = (f"📌 Jogo identificado na pergunta: {loc.label}" if switched else f"📌 Jogo da pergunta: {loc.label}")
         if len(loc.candidates) > 1:
             nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
+    try:                                                 # rodada 20: guarda a resposta para o treino guiado
+        from src.intelligence.learning_hub import record_answer
+
+        record_answer(res.get("interaction_id"), question, res.get("report_markdown"), loc.label if loc else "",
+                      str(res.get("engine_used") or ""), (res.get("scope") or {}).get("ask"))
+    except Exception:
+        pass
     history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
-                    "note": nt, "match_id": int(st.session_state["match_id"]), "llm_error": res.get("llm_error"),
+                    "note": nt, "match_id": int(st.session_state.get("match_id") or 0), "llm_error": res.get("llm_error"),
                     "audit": (res.get("number_tags") or {}).get("linhas", []), "learning_id": res.get("interaction_id"),
                     **_mentioned(res), "players_q": list((res.get("scope") or {}).get("players") or [])})
     st.rerun()

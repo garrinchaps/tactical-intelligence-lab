@@ -110,6 +110,19 @@ def same_team_names(name: str) -> List[str]:
         missing = (base_toks - ct) - SUFFIXES
         return team_core(n) == core or not (extra and missing) and not (extra and len(base_toks) == 1)
     same = {n for n in same if compatible(n)}
+    # rodada 20: apelidos APRENDIDOS pelos jogos em comum entre fontes ("FC Cologne" na ESPN = "1. FC Köln" na FotMob)
+    try:
+        from src.data_hub.team_alias import aliases_of
+
+        db = get_service().db
+        learned = set()
+        for n in list(same):
+            learned |= set(aliases_of(db, n))
+        for n in learned - same:                        # e as grafias que a normalização já liga a cada apelido
+            learned |= set(t.loc[t["core"] == team_core(n), "nome"])
+        same |= learned
+    except Exception:
+        pass
     # time feminino, sub-20, reservas etc. não são "o mesmo time" (Barcelona × Barcelona WFC)
     import re as _re
 
@@ -267,7 +280,7 @@ def render(_ctx=None) -> None:
     nav.back_button(key="team_back")
     name = nav.param("name")
     if not name:
-        empty_state("Nenhum time escolhido", "Use a busca no topo e clique no time.", "🛡️")
+        empty_state("Nenhum time escolhido", "Use o 🔎 Buscar e clique no time.", "🛡️")
         return
     names = same_team_names(name)
     # O perfil sempre carrega o catálogo completo uma única vez. O filtro local abaixo

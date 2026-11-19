@@ -68,15 +68,27 @@ LEAGUES: Dict[int, str] = {
     10178: "Serie A Femminile",
     # outras Américas
     130: "MLS", 230: "Liga MX",
+    # rodada 20: mercados que faltavam (Zenit/Rússia, Arábia, Japão, Coreia, Catar, Emirados, Romênia, Israel, Hungria,
+    # Bulgária, China, Austrália, 2ª do México) — ids conferidos em /api/data/allLeagues (19/11/2026)
+    63: "Rússia — Premier Liga", 536: "Arábia Saudita — Saudi Pro League", 223: "Japão — J1 League",
+    9080: "Coreia do Sul — K League 1", 535: "Catar — Stars League", 538: "Emirados — Pro League",
+    189: "Romênia — Liga I", 127: "Israel — Ligat ha'Al", 212: "Hungria — NB I", 270: "Bulgária — First League",
+    120: "China — Super League", 113: "Austrália — A-League", 8976: "México — Liga de Expansión",
+    # rodada 20: seleções de base (critério de PROMESSA no Scout) — ids conferidos em /api/data/allLeagues (19/11/2026)
+    296: "Copa do Mundo Sub-20", 306: "Copa do Mundo Sub-17", 9848: "Sul-Americano Sub-20", 288: "Eurocopa Sub-21",
+    301: "Eurocopa Sub-17", 287: "Eurocopa Sub-19", 11022: "Libertadores Sub-20",
 }
+YOUTH_LEAGUES = [296, 306, 9848, 288, 301, 287]          # seleções (a Libertadores Sub-20 é de clubes)
+YOUTH_NAMES = {LEAGUES[i] for i in YOUTH_LEAGUES}
 # ordem de prioridade para baixar detalhes: Brasil e Europa principal primeiro
-PRIORITY = [268, 8814, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 8971, 9464, 73, 10216, 112,
+PRIORITY = [268, 8814, 8971, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 9464, 73, 10216, 112,
             # rodada 14: ligas sul-americanas logo depois do Brasil/Argentina/Europa principal (mercado do Scout)
             199, 161, 273, 274, 246, 131, 144, 339,
             48, 140, 146, 86, 110, 71, 40, 64, 114, 9429, 10244, 10272, 10273, 10274]
 REGIONS = {  # atalhos para `--ligas` (sync) e para o Scout pedir uma região inteira
     "sulamericanas": [112, 199, 161, 273, 274, 246, 131, 144, 339, 9305],
-    "brasil": [268, 8814, 9067],
+    "brasil": [268, 8814, 8971, 9067],
+    "base": [296, 306, 9848, 288, 301, 287, 11022],        # rodada 20: seleções de base + Libertadores Sub-20
 }
 
 STAT_MAP = {  # chave da FotMob → chave interna
@@ -581,8 +593,12 @@ class FotmobProvider:
                   "position TEXT, role TEXT, jersey TEXT, birth TEXT, height INTEGER, country TEXT, injury TEXT, "
                   "market_value REAL, fetched_at TEXT, PRIMARY KEY (team_id, player_id))")
 
+    # rodada 20: tabela nova — a antiga (fotmob_teams) podia guardar o código do time FEMININO para "Cruzeiro"
+    # (mesmo nome), e o "elenco atual" vinha com as jogadoras. A nova só aceita jogos do mesmo gênero.
+    TEAMS_TABLE = "fotmob_teams_v2"
+
     def _team_ids_table(self, conn) -> None:
-        conn.execute("CREATE TABLE IF NOT EXISTS fotmob_teams (name TEXT PRIMARY KEY, team_id INTEGER)")
+        conn.execute(f"CREATE TABLE IF NOT EXISTS {self.TEAMS_TABLE} (name TEXT PRIMARY KEY, team_id INTEGER)")
         conn.execute(self.ROSTER_DDL)
 
     def team_id(self, team_names: List[str]) -> Optional[int]:
@@ -593,12 +609,15 @@ class FotmobProvider:
         ph = ",".join("?" * len(names))
         with self.db.connect() as conn:
             self._team_ids_table(conn)
-            r = conn.execute(f"SELECT team_id FROM fotmob_teams WHERE name IN ({ph}) AND team_id IS NOT NULL LIMIT 1",
+            r = conn.execute(f"SELECT team_id FROM {self.TEAMS_TABLE} WHERE name IN ({ph}) AND team_id IS NOT NULL LIMIT 1",
                              names).fetchone()
             if r:
                 return int(r[0])
-            rows = conn.execute(f"SELECT match_id FROM matches WHERE match_id >= ? AND (home_team_name IN ({ph}) OR "
-                                f"away_team_name IN ({ph})) AND match_date <= date('now') ORDER BY match_date DESC LIMIT 2",
+            from src.data_hub.gender import comp_sql
+
+            rows = conn.execute(f"SELECT match_id FROM matches m WHERE match_id >= ? AND (home_team_name IN ({ph}) OR "
+                                f"away_team_name IN ({ph})) AND match_date <= date('now'){comp_sql(names, 'm')} "
+                                f"ORDER BY match_date DESC LIMIT 2",
                                 [to_internal_id("fotmob", 0), *names, *names]).fetchall()
         from src.data_lake.ids import team_core
 
@@ -614,7 +633,7 @@ class FotmobProvider:
                 if t.get("id") and (t.get("name") in names or team_core(t.get("name", "")) in cores):
                     with self.db.connect() as conn:
                         for n in set(names) | {t.get("name")}:
-                            conn.execute("INSERT OR REPLACE INTO fotmob_teams VALUES (?, ?)", (n, int(t["id"])))
+                            conn.execute(f"INSERT OR REPLACE INTO {self.TEAMS_TABLE} VALUES (?, ?)", (n, int(t["id"])))
                     return int(t["id"])
         return None
 
@@ -686,7 +705,7 @@ class FotmobProvider:
         if tid is None:
             with self.db.connect() as conn:
                 ph = ",".join("?" * len(names))
-                r = conn.execute(f"SELECT team_id FROM fotmob_teams WHERE name IN ({ph}) LIMIT 1", names).fetchone()
+                r = conn.execute(f"SELECT team_id FROM {self.TEAMS_TABLE} WHERE name IN ({ph}) LIMIT 1", names).fetchone()
             tid = int(r[0]) if r and r[0] is not None else None
         if tid is None:
             return []
@@ -727,6 +746,37 @@ class FotmobProvider:
             conn.executemany(f"INSERT INTO fotmob_rosters ({', '.join(cols)}) VALUES ({', '.join('?' * len(cols))})",
                              [tuple(r[k] for k in cols) for r in new])
         return new
+
+    def sync_rosters(self, leagues: Optional[List[int]] = None, days: int = 365, progress=None,
+                     limit: Optional[int] = None) -> Dict[str, int]:
+        """Rodada 20: elenco ATUAL (nascimento, valor de mercado, posição, lesão) de TODOS os clubes das ligas escolhidas
+        — Série B/C e sul-americanas não estão no Transfermarkt aberto ("Sem referência" no Scout). ~2 pedidos por clube
+        na 1ª vez, 1 depois; elenco com menos de 24 h não é pedido de novo."""
+        say = progress or (lambda msg: None)
+        lids = leagues or REGIONS["brasil"] + REGIONS["sulamericanas"]
+        comps = [LEAGUES[l] for l in lids if l in LEAGUES]
+        if not comps:
+            return {"clubes": 0, "jogadores": 0}
+        since = (date.today() - __import__("datetime").timedelta(days=days)).isoformat()
+        ph = ",".join("?" * len(comps))
+        with self.db.connect() as conn:
+            rows = conn.execute(f"SELECT team, COUNT(*) AS n FROM (SELECT home_team_name AS team FROM matches WHERE "
+                                f"data_source='fotmob' AND competition_name IN ({ph}) AND match_date >= ? UNION ALL "
+                                f"SELECT away_team_name FROM matches WHERE data_source='fotmob' AND competition_name IN "
+                                f"({ph}) AND match_date >= ?) GROUP BY team ORDER BY n DESC",
+                                [*comps, since, *comps, since]).fetchall()
+        teams = [r[0] for r in rows if r[0]][: limit or None]
+        tot = {"clubes": 0, "jogadores": 0, "erros": 0}
+        for i, t in enumerate(teams, 1):
+            try:
+                got = self.roster([t])
+                tot["clubes"] += 1 if got else 0
+                tot["jogadores"] += len(got or [])
+            except Exception:
+                tot["erros"] += 1
+            if i % 10 == 0 or i == len(teams):
+                say(f"  elencos FotMob: {i}/{len(teams)} clubes · {tot['jogadores']} jogadores")
+        return tot
 
     def _has_frozen(self) -> bool:
         try:

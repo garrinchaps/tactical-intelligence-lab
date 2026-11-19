@@ -53,7 +53,9 @@ def fotmob_roster(db, team_names: Sequence[str], fetch: bool = True) -> pd.DataF
     r["position"] = r["position"].fillna("").astype(str).str.split(",").str[0].str.strip()
     r["lesao"] = r["injury"].fillna("").astype(str)
     r["fonte"] = "FotMob"
-    return r
+    from src.data_hub.gender import drop_women_players     # rodada 20: elenco feminino de mesmo nome não entra
+
+    return drop_women_players(r, db, team_names, col="name")
 
 
 def roster(db, team_names: Sequence[str]) -> pd.DataFrame:

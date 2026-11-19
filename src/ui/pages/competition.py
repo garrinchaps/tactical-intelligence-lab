@@ -82,7 +82,7 @@ def render(_ctx=None) -> None:
     nav.back_button(key="comp_back")
     name = nav.param("name")
     if not name:
-        empty_state("Nenhuma competição escolhida", "Use a busca no topo e clique na competição.", "🏆")
+        empty_state("Nenhuma competição escolhida", "Use o 🔎 Buscar e clique na competição.", "🏆")
         return
     allm = cached_catalog("competition_name = ?", (name,), include_score_only=True)
     if allm.empty:

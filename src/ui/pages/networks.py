@@ -30,7 +30,7 @@ def render(ctx: MatchContext) -> None:
                 "mais aproximaram a bola do gol.", ctx)
     if not ctx.has_events:
         source_gap("eventos com coordenadas", ctx.bundle.source,
-                   "Escolha uma partida ✅ (StatsBomb ou Wyscout) no topo.", "🕸️", ctx.bundle.level)
+                   "Abra uma partida ✅ (StatsBomb ou Wyscout) pelo 🔎 Buscar.", "🕸️", ctx.bundle.level)
         return
     team, df = ctx.target_team, ctx.df
     starters, came_in = lineup_split(df, team)

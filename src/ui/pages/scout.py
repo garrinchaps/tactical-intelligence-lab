@@ -225,6 +225,22 @@ def _loans(team, version):
     return out + [x for x in _manual_loans(team) if (x["name"], x["direction"]) not in known]
 
 
+def _not_ours(df, team, version, roster=None):
+    """Rodada 20: nunca sugere ao clube quem ele mesmo emprestou (nem quem já é do elenco)."""
+    if df is None or df.empty:
+        return df
+    from src.data_lake.ids import player_core as _pc
+
+    own = {_pc(x.get("name")) for x in _loans(team, version) if x.get("direction") == "out"}
+    if roster is not None and not roster.empty and "nome" in roster:
+        own |= set(roster["nome"].astype(str).map(_pc))
+    own.discard("")
+    if not own:
+        return df
+    core = df["_core"].astype(str) if "_core" in df else df["nome"].astype(str).map(_pc)
+    return df[~core.isin(own)]
+
+
 MANUAL_LOANS_DDL = ("CREATE TABLE IF NOT EXISTS scout_manual_loans (club TEXT, name TEXT, direction TEXT, other_club TEXT, "
                     "to_date TEXT, created TEXT DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (club, name, direction))")
 
@@ -339,6 +355,35 @@ def _sim_radar(deltas, team):
         st.caption("Variação do XI: " + " · ".join(ups) + ". Projeção pela composição do time, não resultado de jogo.")
 
 
+def _overall_explainer():
+    """Rodada 20: como a nota 0–100 é feita + conferência com os craques de referência."""
+    from src.scout import overall as O
+
+    rep = O.load_report()
+    with st.expander("ℹ️ Como a nota (overall 0–100) é feita" + (f" — {rep['resumo']}" if rep else ""), expanded=False):
+        w = (rep or {}).get("pesos") or O.DEFAULT_WEIGHTS
+        st.markdown("\n".join([
+            f"- **Reputação ajustada pela idade ({w['wR']:.0%})** — valor de mercado (ou 80% do pico de 3 anos), corrigido "
+            "pela idade: o veterano perde valor pela idade, não pela bola; o prêmio de projeção do jovem vai para o "
+            "**teto**, não para a nota de hoje. Pesa metade para quem jogou pouco no ano.",
+            f"- **Desempenho na função ({w['wP']:.0%})** — números por 90 da posição (encolhidos pelos minutos) levados ao "
+            "nível da liga, + nota dos Rankings + nota externa (quando há).",
+            f"- **Nível da liga e do clube ({w['wL']:.0%})**.",
+            "- **Escala tipo FC por posição**: mediana ≈ 63, top 1% ≈ 86+, os melhores de cada posição 89–94 "
+            "(teto: atacante 94 · ponta 93 · meia/volante/zagueiro 92 · goleiro 91 · lateral 90).",
+            "- **Calibração**: os pesos são escolhidos para colocar os craques de referência no topo da posição, sem "
+            "perder a ligação com o desempenho de quem joga muito (correlação mínima 0,55) — para não ser injusto com quem "
+            "rende e vale pouco no mercado."]))
+        if rep and rep.get("craques"):
+            t = pd.DataFrame(rep["craques"]).rename(columns={"craque": "Craque", "posicao": "Posição", "overall": "Overall",
+                                                              "percentil_na_posicao": "Percentil na posição"})
+            styled_dataframe(t[["Craque", "Posição", "Overall", "Percentil na posição"]], hide_index=True,
+                             use_container_width=True)
+            if rep.get("nao_encontrados"):
+                st.caption("Fora do universo agora (sem cadastro ou sem jogos recentes na base): "
+                           + ", ".join(rep["nao_encontrados"]))
+
+
 def _slug(value):
     return re.sub(r"[^a-z0-9]+", "_", str(value).casefold()).strip("_")[:50] or "item"
 
@@ -443,7 +488,14 @@ def _fill_from_club_games(r, universe, team):
             r.loc[~hit, c] = pd.to_numeric(r.loc[~hit, c], errors="coerce").where(
                 r.loc[~hit].get("historico_ambiguo", pd.Series(False, index=r.loc[~hit].index)).ne(True), 0)
     try:
-        rq = E.roster_quality(r[hit], universe)
+        # rodada 20: UMA nota por jogador — a do mercado (mesma régua em todo o app). A régua pelos jogos do clube só
+        # completa quem não tem nota no mercado ou é homônimo sem números (antes sobrescrevia: 89 aqui × 66 no mercado)
+        q_market = pd.to_numeric(r.get("qualidade"), errors="coerce")
+        amb = r.get("historico_ambiguo", pd.Series(False, index=r.index)).fillna(False).astype(bool)
+        redo = hit & (q_market.isna() | amb)
+        if not redo.any():
+            return r
+        rq = E.roster_quality(r[redo], universe)
         for c in rq.columns:
             if c not in r:
                 r[c] = pd.Series([None] * len(r), index=r.index, dtype=object) if c.startswith("caracter") else np.nan
@@ -471,10 +523,15 @@ def _diagnosis(team, version, roster_records):
 
 
 def _club_squad(team, version, universe):
+    from src.data_hub.gender import drop_women_players
+    from src.ui.context import get_service as _gs
+    from src.ui.pages.clubs import same_team_names as _stn
+
     try:
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
-        return {**data, "squad": _merge_roster(data.get("squad"), universe, team, version)}
+        sq = _merge_roster(data.get("squad"), universe, team, version)
+        return {**data, "squad": drop_women_players(sq, _gs().db, _stn(team))}     # rodada 20
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
@@ -614,6 +671,25 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
              on_click=_add_player, args=(player, plan_key))
     if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
         open_view("jogador", name=name, core=player.get("_core"))
+    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões
+    up, down = player.get("votos_scout") or (0, 0)
+    v1, v2 = st.columns([1, 3])
+    with v1:
+        vote = st.feedback("thumbs", key=f"scout_vote_{_slug(team)}_{_slug(name)}_{idx}")
+    v2.caption(f"Boa sugestão? Seu voto ajusta a ordem das próximas listas (não adiciona nem descarta)."
+               + (f" Votos até aqui: 👍 {up} · 👎 {down}." if (up or down) else ""))
+    if vote is not None and not st.session_state.get(f"_voted_{team}_{name}_{idx}"):
+        st.session_state[f"_voted_{team}_{name}_{idx}"] = True
+        from src.ui.context import get_service
+
+        E.record_vote(get_service().db, team, name, bool(vote))
+        try:
+            from src.intelligence import lab_brain as LB
+
+            LB.feedback("scout", str(player.get("papel_alvo") or player.get("papel") or "sugestao"), bool(vote),
+                        {"jogador": name, "clube": team})
+        except Exception:
+            pass
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
     with st.expander("Descartar e recalcular"):
@@ -738,6 +814,7 @@ def render(_ctx=None):
             st.warning("Esta fotografia do mercado é uma versão antiga reaproveitada: faltam os jogadores das ligas "
                        "baixadas depois (Série B/C, sul-americanas). Com o app fechado, rode "
                        "`python -m src.scout.snapshot` (ou espere o processo de fundo refazer).")
+        _overall_explainer()
         age = S.age_hours()
         if age is not None:
             st.caption(f"Mercado e histórico: fotografia de {age:.1f} h atrás (refeita em segundo plano a cada "
@@ -763,12 +840,18 @@ def render(_ctx=None):
         return
     from src.data_lake.ids import team_core
     default = prefill if prefill in options else next(
-        (name for name in options if prefill and team_core(name) == team_core(prefill)), options[0])
+        (name for name in options if prefill and team_core(name) == team_core(prefill)), None)
     # Ao chegar pelo botão "Planejar elenco" do perfil, sincroniza a seleção com o clube clicado.
-    if prefill and st.session_state.get("scout_club_choice") != default:
+    if default and st.session_state.get("scout_club_choice") != default:
         st.session_state["scout_club_choice"] = default
-    st.session_state.setdefault("scout_club_choice", default)
-    team = st.selectbox("Clube a planejar", options, key="scout_club_choice")
+    if st.session_state.get("scout_club_choice") not in options:
+        st.session_state.pop("scout_club_choice", None)
+    # rodada 20: nenhum clube escolhido de fábrica (antes abria o 1º da lista e já calculava tudo)
+    team = st.selectbox("Clube a planejar", options, key="scout_club_choice", index=None,
+                        placeholder="Escolha o clube a planejar")
+    if not team:
+        empty_state("Escolha o clube", "Pesquise o nome acima e selecione o clube para abrir o planejamento.", "🛡️")
+        return
     st.session_state["scout_selected_club"] = team
     aliases = same_team_names(team)
     club = E.market_club(clubs, team)
@@ -841,6 +924,8 @@ def render(_ctx=None):
                                   pool, needs, financial, roster,
                                   needs_key=tuple((n.get("papel"), round(float(n.get("urgencia") or 0))) for n in needs)) \
         if not pool.empty else pd.DataFrame()
+    votes = E.player_votes(service.db)
+    ranked = E.apply_votes(_not_ours(ranked, team, version, roster), votes)
 
     # rodada 13: abas com estado (key) — "Adicionar ao plano" não joga mais o usuário de volta para a 1ª aba, e a
     # barra do plano mostra na hora quem já entrou, com atalho para o Planejamento
@@ -897,6 +982,7 @@ def render(_ctx=None):
                                                    "motivo": next((n.get("motivo") for n in needs if n.get("papel") == role),
                                                                   "posição escolhida por você (reforço/concorrência)")}],
                                                  financial, roster, needs_key=("top3", role))
+            base_rank = E.apply_votes(_not_ours(base_rank, team, version, roster), votes)
             filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
             if not filt3.empty:
                 ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
@@ -987,29 +1073,42 @@ def render(_ctx=None):
         if pool.empty:
             empty_state("Universo de jogadores indisponível", "Sincronize o catálogo Transfermarkt.", "👥")
         else:
-            c1,c2,c3,c4 = st.columns(4)
-            roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
-            rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
-            amin = c2.number_input("Idade mínima", 15, 40, 18)
-            amax = c3.number_input("Idade máxima", 16, 50, 35)
-            qmin = c4.slider("Qualidade mínima", 0, 100, 0)
             if "origem" not in pool and "clube_liga" in pool:
                 pool = pool.assign(origem=pool["clube_liga"].map(E.origin_group))
-            origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
-            origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
-            d1,d2,d3 = st.columns(3)
-            nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
-            nat = d1.selectbox("Nacionalidade", nats)
-            leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
-            league_filter = d2.selectbox("Liga atual", leagues)
-            clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
-            seller = d3.selectbox("Clube atual", clubs_list)
-            e1,e2 = st.columns(2)
-            max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
-            upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
-            vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
-            vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
-            filt = pool.copy()
+            # rodada 20: filtros num formulário — nada é pesquisado até apertar "Buscar" (antes cada mudança refazia tudo)
+            with st.form("scout_manual_filters", border=False):
+                n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador")
+                c1,c2,c3,c4 = st.columns(4)
+                roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
+                rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
+                amin = c2.number_input("Idade mínima", 15, 40, 18)
+                amax = c3.number_input("Idade máxima", 16, 50, 35)
+                qmin = c4.slider("Qualidade mínima", 0, 100, 0)
+                origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
+                origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
+                d1,d2,d3 = st.columns(3)
+                nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
+                nat = d1.selectbox("Nacionalidade", nats)
+                leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+                league_filter = d2.selectbox("Liga atual", leagues)
+                clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
+                seller = d3.selectbox("Clube atual", clubs_list)
+                e1,e2 = st.columns(2)
+                max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
+                upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
+                vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
+                vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
+                go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", use_container_width=True)
+            if go_search:
+                st.session_state["scout_mf_on"] = True
+            if not st.session_state.get("scout_mf_on"):
+                st.info("Escolha os filtros e aperte **🔎 Buscar com estes filtros**.")
+            filt = pool.copy() if st.session_state.get("scout_mf_on") else pool.iloc[0:0].copy()
+            if n0.strip():
+                from src.data_lake.ids import player_core as _pc
+
+                _k = _pc(n0)
+                filt = filt[filt["nome"].astype(str).map(_pc).str.contains(_k, regex=False, na=False)]
             if origin != "Todas" and "origem" in filt:
                 filt = filt[filt["origem"].astype(str) == origin]
             if rf!="Todas": filt=filt[filt["papel"]==rf]
@@ -1094,18 +1193,30 @@ def render(_ctx=None):
         # de origem de porte igual ou menor). Craques de elite (Yamal, Karl…) não são "joia subvalorizada" para o Cruzeiro.
         budget = float(financial.get("orcamento_proxy_eur") or 0) or None
         own_value = float(financial.get("valor_elenco_eur") or 0) or None
-        cap = max(budget * 1.5, 2e6) if budget else 8e6
-        st.caption(f"Até 23 anos, com produção observada, valor de mercado até {_money(cap)} (alcance estimado do clube), "
-                   "nacionalidade comum na liga e clube de origem de porte igual ou menor. Teto = qualidade atual + "
-                   "crescimento esperado pela idade e nível — projeção, não certeza.")
-        gems=pool.copy()
+        # rodada 20: capacidade = maior compra dos últimos 5 anos ou topo da faixa estimada; padrão = 75% dela
+        fx = financial.get("faixa_proxy_eur") or [None, None]
+        capacity = max([x for x in (financial.get("maior_taxa_5_anos_eur"), fx[1], (budget or 0) * 1.5) if x] or [8e6])
+        default_cap = round(max(capacity * .75, 2e6) / 1e6, 1)
+        g1, g2 = st.columns([2, 1])
+        cap_m = g1.slider("Valor máximo das joias (€ mi)", 0.5, float(max(60.0, round(capacity / 1e6 * 2, 0))),
+                          float(default_cap), 0.5, key=f"scout_gem_cap_{_slug(team)}",
+                          help=f"Capacidade estimada do clube: {_money(capacity)} (maior compra recente / faixa de "
+                               "investimento). O padrão fica em 75% dela; aumente para incluir nomes mais conhecidos.")
+        keep_unknown = g2.toggle("Incluir quem não tem valor publicado", value=True, key="scout_gem_unknown",
+                                 help="Série B/C e ligas sem valor no Transfermarkt — muitas vezes são as melhores pechinchas.")
+        cap = cap_m * 1e6
+        st.caption(f"Até 23 anos, com produção observada, valor de mercado até {_money(cap)} (capacidade estimada do "
+                   f"clube: {_money(capacity)}), nacionalidade comum na liga e clube de origem de porte igual ou menor. "
+                   "Teto = qualidade atual + crescimento esperado pela idade e nível — projeção, não certeza.")
+        gems=_not_ours(pool.copy(), team, version, roster)
         if not gems.empty and "potencial_teto" in gems:
             ages=np.floor(pd.to_numeric(gems["idade"],errors="coerce"))
             mv=pd.to_numeric(gems["valor_mercado_eur"],errors="coerce")
             nm=financial.get("nat_market") or {}
             affs=gems["nacionalidade"].map(lambda n: (nm.get(E._first_nat(n)) or (50,""))[0])
             cv=pd.to_numeric(gems.get("clube_valor_total_eur",pd.Series(np.nan,index=gems.index)),errors="coerce")
-            ok=(ages.le(23) & pd.to_numeric(gems["potencial_teto"],errors="coerce").notna() & (mv.isna() | mv.le(cap))
+            ok=(ages.le(23) & pd.to_numeric(gems["potencial_teto"],errors="coerce").notna()
+                & ((mv.isna() & keep_unknown) | mv.le(cap))
                 & (affs >= 45) & (cv.isna() | (own_value is None) | (cv <= (own_value or 0) * 1.5)))
             gems=gems[ok].assign(_aff=affs[ok])
             gems=gems.assign(_rank=pd.to_numeric(gems["potencial_teto"],errors="coerce")*.6

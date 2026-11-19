@@ -36,7 +36,7 @@ ALL_SOURCES = ["statsbomb", "wyscout", "fdcouk", "openfootball", "brasileirao", 
                "open_sources", "lake"]
 # cargas pesadas, só quando pedidas com --only (não entram na sincronização padrão nem na automática)
 HEAVY_SOURCES = ["espn_historico", "openplay", "cbf", "estatisticas_brasil", "espn_temporada", "espn_resumos",
-                 "espn_elencos", "fotmob_temporada", "fotmob_jogos", "fotmob_recentes", "fotmob_tudo"]
+                 "espn_elencos", "fotmob_temporada", "fotmob_jogos", "fotmob_recentes", "fotmob_tudo", "fotmob_elencos"]
 # --tudo: a base completa, em ordem (catálogos → estatísticas → eventos → histórico ESPN → APIs com chave →
 # bases do lake → ligação entre fontes). Fontes sem chave/flag no .env são puladas e avisadas.
 EVERYTHING = ["statsbomb", "wyscout", "fdcouk", "openfootball", "open_sources", "brasileirao", "open_matchday",
@@ -104,6 +104,9 @@ def run_sync(
         "fotmob_recentes": lambda: svc.fotmob.fetch_details(None, limit=150,
                                                             since=(date.today() - timedelta(days=10)).isoformat(),
                                                             progress=say),
+        # rodada 20: elencos atuais (idade, valor, posição) dos clubes das ligas escolhidas (padrão: Brasil A/B/C +
+        # sul-americanas) — completa quem não está no Transfermarkt aberto
+        "fotmob_elencos": lambda: svc.fotmob.sync_rosters(_fotmob_ids(espn_leagues), progress=say),
         "fotmob_jogos": lambda: svc.fotmob.fetch_details(_fotmob_ids(espn_leagues), limit=summaries_limit,
                                                          since=f"{date.today().year - max(fotmob_seasons, 1)}-01-01",
                                                          progress=say),
@@ -134,6 +137,7 @@ def run_sync(
                "espn_resumos": svc.espn.enabled, "espn_elencos": svc.espn.enabled,
                "fotmob_temporada": svc.fotmob.enabled, "fotmob_jogos": svc.fotmob.enabled,
                "fotmob_recentes": svc.fotmob.enabled, "fotmob_tudo": svc.fotmob.enabled,
+               "fotmob_elencos": svc.fotmob.enabled,
                "estatisticas_brasil": svc.api_football.enabled, "api_futebol": ApiFutebolProvider().enabled,
                "basedosdados": BaseDosDadosProvider().enabled}
 

@@ -143,3 +143,67 @@ def learning_summary(
         "questions_that_changed_weights": 0,
         "feedback_that_changed_weights": 0,
     }
+
+
+# ------------------------------------------------------------------ rodada 20: treino guiado (também pelo link)
+ANSWERS_PATH = Path("data/learning/answers.jsonl")
+REASONS_PATH = Path("data/learning/feedback_reasons.jsonl")
+REASONS = ["Não respondeu o que perguntei", "Número errado", "Faltou um número importante", "Jogo/time errado",
+           "Faltou explicação tática", "Texto confuso ou longo demais", "Repetiu coisas sem importância"]
+
+
+def record_answer(interaction_id: str, question: str, answer: str, label: str = "", engine: str = "",
+                  intent: Optional[str] = None, path: Optional[Path | str] = None) -> None:
+    """Guarda pergunta + resposta mostrada, para quem for treinar avaliar depois (sem dado pessoal)."""
+    if not interaction_id:
+        return
+    _append(Path(path) if path is not None else ANSWERS_PATH, {
+        "interaction_id": str(interaction_id), "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "question": str(question or "")[:500], "answer": str(answer or "")[:4000], "match": str(label or "")[:160],
+        "engine": str(engine or "")[:60], "intent": intent})
+
+
+def recent_answers(limit: int = 30, only_unrated: bool = True, path: Optional[Path | str] = None,
+                   feedback_path: Optional[Path | str] = None) -> list:
+    rows = list(_read(Path(path) if path is not None else ANSWERS_PATH))
+    done = feedback_ids(feedback_path) if only_unrated else set()
+    out, seen = [], set()
+    for r in reversed(rows):
+        iid = str(r.get("interaction_id"))
+        if iid in seen or iid in done:
+            continue
+        seen.add(iid)
+        out.append(r)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def record_reasons(interaction_id: str, vote: bool, reasons: list, comment: str = "", who: str = "dono",
+                   intent: Optional[str] = None, question: str = "", path: Optional[Path | str] = None) -> None:
+    _append(Path(path) if path is not None else REASONS_PATH, {
+        "interaction_id": str(interaction_id), "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "vote": "positive" if vote else "negative", "reasons": [str(x) for x in reasons or []][:7],
+        "comment": str(comment or "")[:600], "who": who, "intent": intent, "question": str(question or "")[:300]})
+
+
+def improvement_report(path: Optional[Path | str] = None) -> Dict[str, Any]:
+    """Onde a IA mais erra: motivos mais citados, tipos de pergunta com mais 👎 e comentários recentes."""
+    rows = list(_read(Path(path) if path is not None else REASONS_PATH))
+    from collections import Counter
+
+    reasons, by_intent, neg_by_intent = Counter(), Counter(), Counter()
+    comments = []
+    for r in rows:
+        it = r.get("intent") or "pergunta livre"
+        by_intent[it] += 1
+        if r.get("vote") == "negative":
+            neg_by_intent[it] += 1
+            reasons.update(r.get("reasons") or [])
+        if r.get("comment"):
+            comments.append({"quando": str(r.get("created_at"))[:16].replace("T", " "), "voto": r.get("vote"),
+                             "pergunta": r.get("question"), "comentario": r.get("comment"), "quem": r.get("who")})
+    worst = sorted(((it, neg_by_intent[it], by_intent[it]) for it in by_intent if by_intent[it] >= 2),
+                   key=lambda x: (-(x[1] / x[2]), -x[2]))
+    return {"total": len(rows), "negativos": sum(1 for r in rows if r.get("vote") == "negative"),
+            "motivos": reasons.most_common(), "piores_tipos": worst[:6], "comentarios": comments[-12:][::-1]}

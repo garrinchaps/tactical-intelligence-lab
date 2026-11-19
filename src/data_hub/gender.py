@@ -79,3 +79,55 @@ def keep_same_gender(df, names: Sequence[str], col: str = "competition_name"):
         return df
     w = df[col].map(is_women_competition)
     return df[w] if is_women_team(names) else df[~w]
+
+
+# ----------------------------------------------------------------------------------------------- rodada 20
+_WOMEN_PLAYERS: dict = {}
+
+
+def women_only_players(db, ttl_s: float = 3600.0) -> set:
+    """Núcleos de nome de quem SÓ aparece em competições femininas (números por jogador ou escalações).
+    Servem para tirar jogadoras do mercado/elenco masculino quando a fonte deu o mesmo nome aos dois times
+    ("Cruzeiro"). Quem aparece também em competição masculina NÃO entra (homônimo de verdade continua)."""
+    import time as _t
+
+    key = str(getattr(db, "db_path", ""))
+    hit = _WOMEN_PLAYERS.get(key)
+    if hit and _t.time() - hit[1] < ttl_s:
+        return hit[0]
+    from src.data_lake.ids import player_core
+
+    col = "LOWER(COALESCE(m.competition_name, ''))"
+    flag = "(" + " OR ".join(f"{col} LIKE '{p}'" for p in WOMEN_LIKE) + ")"
+    out: set = set()
+    try:
+        with db.connect() as conn:
+            rows = []
+            for table in ("match_player_stats", "match_lineups"):
+                try:
+                    rows += conn.execute(f"SELECT t.player_name, MAX(CASE WHEN {flag} THEN 1 ELSE 0 END), "
+                                         f"MIN(CASE WHEN {flag} THEN 1 ELSE 0 END) FROM {table} t JOIN matches m "
+                                         f"ON m.match_id = t.match_id GROUP BY t.player_name").fetchall()
+                except Exception:
+                    continue
+        men = {player_core(n) for n, mx, mn in rows if n and not (mx == 1 and mn == 1)}
+        women = {player_core(n) for n, mx, mn in rows if n and mx == 1 and mn == 1}
+        out = {c for c in women - men if c}
+    except Exception:
+        out = set()
+    _WOMEN_PLAYERS[key] = (out, _t.time())
+    return out
+
+
+def drop_women_players(df, db, names=None, col: str = "nome"):
+    """Tira do DataFrame (elenco/mercado de time MASCULINO) quem só jogou competições femininas."""
+    if df is None or getattr(df, "empty", True) or col not in df:
+        return df
+    if names is not None and is_women_team(names):
+        return df
+    from src.data_lake.ids import player_core
+
+    women = women_only_players(db)
+    if not women:
+        return df
+    return df[~df[col].astype(str).map(player_core).isin(women)]

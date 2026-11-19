@@ -64,7 +64,7 @@ def remember(kind: str, value: Any) -> None:
 # ------------------------------------------------------------------ passos
 def _plan() -> List[Tuple[str, Callable[[], Any]]]:
     recent = _read_recent()
-    matches = list(dict.fromkeys(recent["jogos"] + [DEFAULT_MATCH_ID]))[:MAX_MATCHES]
+    matches = list(dict.fromkeys(recent["jogos"]))[:MAX_MATCHES]      # rodada 20: sem jogo "padrão"
     teams = recent["times"]
     steps: List[Tuple[str, Callable[[], Any]]] = []
 

@@ -55,6 +55,8 @@ html, body, .stApp {{ font-family: Inter, 'Segoe UI', sans-serif; }}
 h1, h2, h3, h4, h5 {{ color: {P['text']}; font-family: 'Space Grotesk', Inter, sans-serif; letter-spacing: -0.01em; }}
 h4, h5 {{ margin-top: 0.6rem; }}
 a {{ color: {P['accent']}; }}
+/* rodada 20: gráficos sem botão de tela cheia/zoom flutuante (no celular aparecia a cada toque) */
+[data-testid="stElementContainer"]:has(.stPlotlyChart) [data-testid="stElementToolbar"]{{display:none !important}}
 /* sem barra lateral: navegação no topo */
 section[data-testid="stSidebar"], [data-testid="collapsedControl"], [data-testid="stSidebarCollapsedControl"] {{ display: none !important; }}
 .block-container {{ padding-top: 4.2rem; max-width: 1380px; }}
@@ -283,4 +285,7 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 
 
 def inject_theme() -> None:
+    from src.ui.plot_config import install
+
+    install()                                            # rodada 20: gráficos sem barra de zoom/ferramentas
     st.markdown(CSS.strip(), unsafe_allow_html=True)
