@@ -126,6 +126,56 @@ def _simulator() -> None:
                   "para dizer quem criou mais perigo.")
 
 
+def _speed_panel() -> None:
+    """Rodada 16: monitor de velocidade — cada tela aberta e cada função pesada, com meta e alerta."""
+    import plotly.graph_objects as go
+
+    from src.ui import perf as P
+
+    st.markdown("## ⏱️ Velocidade do app")
+    st.caption(f"Cada tela e cada análise pesada é cronometrada e guardada em data/perf.jsonl (só neste PC). Meta: tela em "
+               f"até {P.GOAL_PAGE_S:.0f} s e análise em até {P.GOAL_FUNC_S:.0f} s (com a análise já guardada). A primeira "
+               "abertura de um time/jogo sempre demora mais — depois disso fica guardada em disco.")
+    rows = P.read()
+    if not rows:
+        st.info("Ainda sem medições — navegue pelo app e volte aqui.")
+        return
+    sm = P.summary(rows)
+    telas, funcs = sm[sm["tipo"] == "tela"], sm[sm["tipo"] == "funcao"]
+    k = st.columns(4)
+    k[0].metric("Medições", len(rows))
+    k[1].metric("Telas dentro da meta", f"{(telas['situação'].str.startswith('✅')).mean() * 100:.0f}%" if len(telas) else "—")
+    k[2].metric("Tela mais lenta (90%)", f"{telas['p90_s'].max():.1f} s" if len(telas) else "—")
+    k[3].metric("Análise mais lenta (90%)", f"{funcs['p90_s'].max():.1f} s" if len(funcs) else "—")
+    import pandas as pd
+
+    d = pd.DataFrame(rows).tail(300)
+    if not d.empty:
+        fig = go.Figure()
+        for kind, color in (("tela", "#22D3EE"), ("funcao", "#A78BFA")):
+            x = d[d["tipo"] == kind]
+            fig.add_scatter(x=list(range(len(x))), y=x["s"], mode="markers", name=kind, marker=dict(color=color, size=6),
+                            text=x["nome"], hovertemplate="%{text}: %{y:.2f} s<extra></extra>")
+        fig.add_hline(y=P.GOAL_PAGE_S, line_dash="dot", line_color="#EF4444", annotation_text="meta da tela")
+        fig.update_layout(height=260, paper_bgcolor="#090D16", plot_bgcolor="#0B1120", font=dict(color="#F5F7FB"),
+                          margin=dict(l=40, r=10, t=20, b=30), yaxis_title="segundos")
+        st.plotly_chart(fig, use_container_width=True, key="perf_scatter")
+    st.markdown("#### Telas")
+    styled_dataframe(telas.drop(columns="tipo").rename(columns={"nome": "tela"}), hide_index=True, use_container_width=True)
+    st.markdown("#### Análises pesadas")
+    styled_dataframe(funcs.drop(columns="tipo").rename(columns={"nome": "análise"}), hide_index=True, use_container_width=True)
+    slow = sm[sm["situação"].str.startswith("🔴")]
+    if len(slow):
+        st.warning("Lentas: " + ", ".join(slow["nome"].head(6)) + ". Se uma delas for sempre lenta (não só na 1ª vez), "
+                   "me diga o nome que eu otimizo aquela parte.")
+    if st.button("🧹 Zerar medições", key="perf_reset"):
+        try:
+            P.PATH.unlink()
+        except OSError:
+            pass
+        st.rerun()
+
+
 def _brain_panel() -> None:
     """Rodada 13: uma IA só, com módulos; um botão treina tudo; o 👍/👎 de qualquer tela entra aqui."""
     import pandas as pd
@@ -269,8 +319,12 @@ def render(ctx=None) -> None:
     hero("Bastidores · como a IA aprende", "A matéria de Introdução à IA aplicada ao futebol",
          "Lógica fuzzy, redes neurais e algoritmo genético — cada questão da matéria calculada com os modelos que "
          "realmente decidem o que o programa mostra. Nada aqui é ilustração solta: os números vêm do app.")
-    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA única (treinar tudo)", "🎯 Rede de perigo (treino)"],
+    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🧠 IA única (treinar tudo)", "🎯 Rede de perigo (treino)",
+                                          "⏱️ Velocidade do app"],
                                 default="📚 A matéria aplicada", key="bastidores_view", label_visibility="collapsed")
+    if view == "⏱️ Velocidade do app":
+        _speed_panel()
+        return
     if view == "🧠 IA única (treinar tudo)":
         _brain_panel()
         st.markdown("---")

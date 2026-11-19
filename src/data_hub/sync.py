@@ -19,6 +19,7 @@ Para rodar todo dia no Windows (Agendador de Tarefas), veja o README.
 from __future__ import annotations
 
 import argparse
+import os
 import traceback
 from datetime import date, timedelta
 from typing import Callable, Dict, List, Optional
@@ -311,6 +312,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="Sincroniza a base do Tactical Intelligence Lab.")
     ap.add_argument("--only", nargs="*", choices=ALL_SOURCES + HEAVY_SOURCES,
                     help="fontes a sincronizar (padrão: todas, menos as cargas pesadas como espn_historico)")
+    ap.add_argument("--intervalo", type=float, default=None,
+                    help="segundos entre pedidos à FotMob nesta execução (padrão 0,7; mínimo 0,3)")
     ap.add_argument("--ligas", nargs="*", default=None,
                     help="espn_historico: ligas ESPN (padrão: bra.1 bra.2 bra.copa_do_brazil conmebol.libertadores "
                          "conmebol.sudamericana)")
@@ -332,6 +335,8 @@ def main() -> None:
     ap.add_argument("--rapido", action="store_true",
                     help="só jogos recentes: football-data.co.uk (temporada atual), API-Football, football-data.org e ESPN")
     args = ap.parse_args()
+    if getattr(args, "intervalo", None):                 # rodada 16: ritmo da FotMob só nesta execução
+        os.environ["FOTMOB_INTERVALO"] = str(max(args.intervalo, 0.3))
     if args.tudo:
         print("Base completa: isto baixa vários GB e pode levar horas. Pode interromper com Ctrl+C e rodar de novo —\n"
               "o que já veio fica em cache e não é baixado outra vez.", flush=True)

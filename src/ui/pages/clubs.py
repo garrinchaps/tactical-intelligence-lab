@@ -7,6 +7,8 @@ from typing import List
 import pandas as pd
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.ui.components import render_chart
 
 from src.data_hub.registry import BADGES
@@ -386,6 +388,7 @@ def render(_ctx=None) -> None:
                                 use_container_width=True)
 
 
+@_perf_timed("clubs._style_data")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _style_data(names: tuple, version: str) -> dict:
     from src.analytics import team_history as TH
@@ -403,6 +406,7 @@ def _style_data(names: tuple, version: str) -> dict:
     return out
 
 
+@_perf_timed("clubs._formation_data")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _formation_data(names, version):
     from src.analytics.team_history import formation_patterns

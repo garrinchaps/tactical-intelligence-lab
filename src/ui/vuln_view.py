@@ -10,7 +10,10 @@ from typing import Optional, Any, Dict, List, Sequence
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
 
+
+@_perf_timed("vuln_view._findings")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _findings(names: tuple, our: tuple, version: str) -> Dict[str, Any]:
     from src.analytics.vulnerabilities import team_vulnerabilities

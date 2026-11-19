@@ -12,6 +12,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.scout import engine as E
 from src.squad import data as D
 from src.ui.components import styled_dataframe, comparison_table, empty_state, page_header
@@ -83,6 +85,7 @@ def _market_data_legacy(version: str):
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
 
 
+@_perf_timed("scout._rank_candidates")
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _rank_candidates(version, team, country, competition, season, rejected, feedback_reason,
                      _pool, _needs, _financial, _roster, needs_key=None):
@@ -345,6 +348,7 @@ def _role(role):
     return E.ROLE_LABELS.get(str(role), str(role or "Não identificado"))
 
 
+@_perf_timed("scout._merge_roster")
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _merge_roster(roster, _universe, team=None, version=""):
     """rodada 13: cacheado por elenco + versão (o universo grande não entra no hash) e completado pelos jogos do clube."""
@@ -440,6 +444,7 @@ def _fill_from_club_games(r, universe, team):
     return r
 
 
+@_perf_timed("scout._diagnosis")
 @st.cache_data(show_spinner=False, ttl=900, max_entries=16)
 def _diagnosis(team, version, roster_records):
     from src.ui.context import get_service

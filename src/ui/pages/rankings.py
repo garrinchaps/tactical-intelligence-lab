@@ -9,6 +9,8 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.scout import evaluation as EV
 from src.ui.components import hero, note, styled_dataframe
 
@@ -26,6 +28,7 @@ EVALS = {
 FAM = {"": "Todas", **EV.FAMILY_PT}
 
 
+@_perf_timed("rankings._data")
 @st.cache_data(show_spinner=False, max_entries=4, persist="disk")
 def _data(day: str, stamp: str):
     res = EV.load()

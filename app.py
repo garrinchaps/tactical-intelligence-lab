@@ -310,13 +310,27 @@ def main() -> None:
             from src.data_hub import autosync
             from src.ui.context import get_service
 
-            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)) + "  ·  " + _app_version())
+            last = st.session_state.get("_perf_last")
+            speed = (f"  ·  ⚡ última tela {last[1]:.1f} s" + (" (lenta — ver Bastidores › Velocidade)" if last[1] > 2.0 else "")
+                     if last else "")
+            st.caption(autosync.status_text(autosync.ensure_started(get_service().db)) + "  ·  " + _app_version() + speed)
             fm = autosync.fotmob_status()
             if fm:
                 st.caption(fm)
         except Exception:
             pass
-    page.run()
+    import time as _time
+
+    from src.ui import perf as _perf
+
+    _t0 = _time.perf_counter()
+    try:
+        page.run()
+    finally:                                              # rodada 16: tempo de cada tela (monitor de velocidade)
+        _dt = _time.perf_counter() - _t0
+        _name = getattr(page, "url_path", "") or getattr(page, "title", "?")
+        _perf.record("tela", _name, _dt)
+        st.session_state["_perf_last"] = (_name, _dt)
 
 
 main()

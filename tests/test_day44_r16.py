@@ -87,3 +87,58 @@ def test_more_national_teams_recognized_but_not_clubs():
     assert k("Greece") == "greece" and k("Korea Republic") == "south korea" and k("Australia") == "australia"
     assert k("Brazil U20") == "brazil"
     assert k("Monaco") == "" and k("Flamengo") == "" and k("Barcelona") == ""
+
+
+def test_perf_monitor_records_and_summarizes(tmp_path, monkeypatch):
+    from src.ui import perf as P
+
+    monkeypatch.setattr(P, "PATH", tmp_path / "perf.jsonl")
+    for s in (0.2, 0.3, 4.0):
+        P.record("tela", "jogo", s)
+
+    @P.timed("teste.funcao")
+    def f():
+        return 1
+
+    assert f() == 1
+    sm = P.summary().set_index("nome")
+    assert sm.loc["jogo", "vezes"] == 3 and sm.loc["jogo", "pior_s"] == 4.0
+    assert "teste.funcao" in sm.index
+
+
+def test_league_model_learns_from_players_in_two_competitions(tmp_path):
+    import json
+
+    from src.data_hub.db import DataHubDB
+    from src.scout import evaluation as EV
+
+    db = DataHubDB(db_path=tmp_path / "l.db", schema_path="database/schema.sql")
+    with db.connect() as conn:
+        mid = 1
+        for p in range(12):
+            for comp, rating in (("Liga Forte", 6.6), ("Liga Fraca", 7.4)):
+                for k in range(6):
+                    conn.execute("INSERT INTO matches (match_id, match_date, competition_name, season_name, home_team_name, "
+                                 "away_team_name, data_level, data_source) VALUES (?,?,?,?,?,?,?,?)",
+                                 (mid, "2026-03-01", comp, "2026", "A", "B", "BOXSCORE", "fotmob"))
+                    conn.execute("INSERT INTO match_player_stats (match_id, team_name, player_name, minutes, rating, "
+                                 "stats_json) VALUES (?,?,?,?,?,?)", (mid, "A", f"Jogador {'ABCDEFGHIJKL'[p]}{'XYZWVUTSRQPO'[p]}", 90, rating,
+                                                        json.dumps({})))
+                    mid += 1
+    m = EV.league_model(db).set_index("comp")
+    assert m.loc["Liga Forte", "pares"] == 12 and m.loc["Liga Forte", "base"] == "modelo aprendido"
+    assert m.loc["Liga Forte", "nivel"] > m.loc["Liga Fraca", "nivel"]
+
+
+def test_wikidata_accepts_only_unique_footballer(tmp_path, monkeypatch):
+    from src.data_hub.db import DataHubDB
+    from src.data_hub.sources import wikidata as WD
+
+    db = DataHubDB(db_path=tmp_path / "w.db", schema_path="database/schema.sql")
+    monkeypatch.setattr(WD, "_query", lambda names: [
+        {"label": "Fulano Silva", "p": "Q1", "birth": "2004-05-01T00:00:00Z", "height": "1.81"},
+        {"label": "Gabriel", "p": "Q2"}, {"label": "Gabriel", "p": "Q3"}])
+    monkeypatch.setattr(WD.time, "sleep", lambda s: None)
+    r = WD.enrich(db, ["Fulano Silva", "Gabriel", "Ninguém"])
+    assert r == {"consultados": 3, "achados": 1, "ambiguos": 1, "sem_registro": 1}
+    assert list(WD.ages(db)) == ["fulano silva"]

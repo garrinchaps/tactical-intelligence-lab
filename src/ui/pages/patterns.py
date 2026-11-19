@@ -13,9 +13,12 @@ from typing import Any, Dict, List
 import pandas as pd
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.ui.components import comparison_table, empty_state, note
 
 
+@_perf_timed("patterns._history")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _history(team: str, match_id: int, version: str) -> Dict[str, Any]:
     from src.analytics import team_history as TH
@@ -39,6 +42,7 @@ def _card(txt: str, color: str = "#22D3EE") -> None:
                 f'margin-bottom:.45rem">{txt}</div>', unsafe_allow_html=True)
 
 
+@_perf_timed("patterns._reading")
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=24)
 def _reading(match_id: int, team: str, version: str, _meta, _box):
     from src.intelligence.lab_ai.router import match_reading

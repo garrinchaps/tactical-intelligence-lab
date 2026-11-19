@@ -184,6 +184,16 @@ def _baselines_loop(db) -> None:
 
             if not EV.OUT_PATH.exists() or time.time() - EV.OUT_PATH.stat().st_mtime > 86400:
                 EV.save(EV.build(db))
+                try:                                 # completa idades pela Wikidata (até 400 nomes por dia)
+                    from src.data_hub.sources import wikidata as WD
+
+                    ev = EV.load()["jogadores"]
+                    names = ev.loc[ev["idade"].isna() & (ev["minutes"] >= 450)].sort_values(
+                        "minutes", ascending=False)["player_name"].head(400).tolist()
+                    if names:
+                        WD.enrich(db, names)
+                except Exception:
+                    pass
         except Exception:
             pass
         try:                                         # rodada 13: régua dos confrontos do pré-jogo, 1x por dia

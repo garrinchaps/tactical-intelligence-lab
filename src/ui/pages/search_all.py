@@ -11,6 +11,8 @@ from typing import Dict, List
 import pandas as pd
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.data_hub.registry import BADGES, DataLevel
 from src.ui import nav
 from src.ui.components import empty_state, hero, result_card_html
@@ -219,6 +221,7 @@ def find_matches(q: str) -> pd.DataFrame:
     return one_per_game(out).sort_values(["match_date", "_lv"], ascending=[False, True])
 
 
+@_perf_timed("search_all._search_all")
 @st.cache_data(show_spinner=False, max_entries=64, ttl=3600)
 def _search_all(q: str, version: str, only: str, real: bool):
     return find_matches(q), find_teams(q, version, only), find_players(q, version), find_competitions(q, version, only)

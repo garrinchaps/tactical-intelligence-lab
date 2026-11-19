@@ -300,7 +300,7 @@ def league_factors(players: pd.DataFrame) -> pd.DataFrame:
 
 
 def evaluate(players: pd.DataFrame, ages: Optional[Dict[str, float]] = None,
-             values: Optional[Dict[str, float]] = None) -> pd.DataFrame:
+             values: Optional[Dict[str, float]] = None, levels: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     d = players.copy()
     if d.empty:
         return d
@@ -358,7 +358,10 @@ def evaluate(players: pd.DataFrame, ages: Optional[Dict[str, float]] = None,
     vp = np.log1p(pd.to_numeric(d["valor_eur"], errors="coerce")).groupby(d["family"]).rank(pct=True) * 100
     d["custo_beneficio"] = (50 + (d["desempenho_90"] - vp) / 2).where(vp.notna() & (m >= 900)).round(1)
     lf = league_factors(d)
-    lvl = d["comp"].map(dict(zip(lf["comp"], lf["nivel"]))).fillna(.6)
+    lv_map = dict(zip(lf["comp"], lf["nivel"]))
+    if levels is not None and not levels.empty:           # modelo aprendido (3 anos) manda quando existe
+        lv_map.update(dict(zip(levels["comp"], levels["nivel"])))
+    lvl = d["comp"].map(lv_map).fillna(d["comp"].map(prior_level))
     d["nivel_competicao"] = lvl
     base = d["temporada"].fillna(d["desempenho_90"].where(m >= 900))
     # geral entre ligas: o desempenho DENTRO da competição levado à régua de nível (estimativa declarada)
@@ -524,6 +527,79 @@ def _ages_values() -> tuple:
             {c: r for c, r in roles.items() if r and not r.endswith("?")})
 
 
+def _fotmob_ages_values(db) -> tuple:
+    """Elenco ATUAL da FotMob: nascimento e valor de mercado de quem não está no Transfermarkt (Série B/C, ligas
+    sul-americanas). Nome repetido em dois clubes fica de fora (não chuta)."""
+    try:
+        with db.connect() as conn:
+            r = pd.read_sql_query("SELECT name, birth, market_value FROM fotmob_rosters", conn)
+    except Exception:
+        return {}, {}
+    if r.empty:
+        return {}, {}
+    from src.data_lake.ids import player_core
+
+    r["core"] = r["name"].astype(str).map(player_core)
+    r = r[~r["core"].duplicated(keep=False)]
+    born = pd.to_datetime(r["birth"], errors="coerce")
+    age = ((pd.Timestamp.today() - born).dt.days / 365.25).round(1)
+    return (dict(zip(r["core"], age)), dict(zip(r["core"], pd.to_numeric(r["market_value"], errors="coerce"))))
+
+
+def league_model(db, years: int = 3, prior_weight: float = 15.0) -> pd.DataFrame:
+    """MODELO APRENDIDO do nível das competições (rodada 16): nota de cada jogador por competição e temporada nos
+    últimos `years` anos (≥ 450 min). Ajuste conjunto  nota = habilidade do jogador + facilidade da competição,
+    estimado por mínimos quadrados alternados com regularização para a estimativa prévia (ridge). Quem jogou em duas
+    competições (transferência, Libertadores × liga, Copa × liga) é o que liga as réguas. Facilidade alta (notas
+    infladas) = nível mais baixo. Competição sem pares fica na estimativa prévia e é marcada assim."""
+    since = (date.today() - timedelta(days=365 * int(years))).isoformat()
+    from src.data_hub.gender import comp_sql
+
+    q = f"""SELECT p.player_name, m.competition_name AS comp, m.season_name AS season,
+                   SUM(p.rating * p.minutes) / NULLIF(SUM(CASE WHEN p.rating IS NOT NULL THEN p.minutes END), 0) AS rating,
+                   SUM(p.minutes) AS mins
+            FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+            WHERE m.match_date >= ? AND p.rating IS NOT NULL AND COALESCE(p.minutes, 0) > 0{comp_sql([], "m")}
+            GROUP BY p.player_name, m.competition_name, m.season_name HAVING SUM(p.minutes) >= 450"""
+    try:
+        with db.connect() as conn:
+            d = pd.read_sql_query(q, conn, params=[since])
+    except Exception:
+        return pd.DataFrame()
+    if d.empty:
+        return pd.DataFrame()
+    from src.data_lake.ids import player_core
+
+    d["core"] = d["player_name"].map(player_core)
+    d = d.groupby(["core", "comp"], as_index=False).apply(
+        lambda x: pd.Series({"rating": np.average(x["rating"], weights=x["mins"]), "mins": x["mins"].sum()}),
+        include_groups=False)
+    comps = sorted(d["comp"].unique())
+    prior = {c: prior_level(c) for c in comps}
+    # prior em "pontos de nota": competição mais fraca infla a nota (~0,4 por 0,1 de nível abaixo de 0,8)
+    prior_b = {c: -4.0 * (prior[c] - .8) for c in comps}
+    linked = d.groupby("core")["comp"].transform("nunique") >= 2
+    pairs = d[linked].groupby("comp")["core"].nunique().to_dict()
+    b = pd.Series(prior_b)
+    for _ in range(30):
+        a = (d["rating"] - d["comp"].map(b)).groupby(d["core"]).mean()
+        resid = d["rating"] - d["core"].map(a)
+        num = resid.groupby(d["comp"]).sum() + prior_weight * pd.Series(prior_b)
+        den = d.groupby("comp").size() + prior_weight
+        b = (num / den).reindex(comps).fillna(pd.Series(prior_b))
+    # ancora: a média ponderada dos níveis aprendidos igual à média da estimativa prévia (só a ORDEM e as distâncias vêm
+    # dos dados)
+    b = b - (b - pd.Series(prior_b)).mean()
+    rows = []
+    for c in comps:
+        lvl = float(np.clip(.8 - b[c] / 4.0, .25, 1.0))
+        n = int(pairs.get(c, 0))
+        rows.append({"comp": c, "nivel": round(lvl if n >= 3 else prior[c], 3), "nivel_previo": prior[c],
+                     "nivel_aprendido": round(lvl, 3), "pares": n,
+                     "base": ("modelo aprendido" if n >= 3 else "estimativa prévia (menos de 3 jogadores ligando réguas)")})
+    return pd.DataFrame(rows)
+
+
 def build(db, days: int = 400) -> Dict[str, Any]:
     t0 = time.time()
     g = player_games(db, days)
@@ -532,11 +608,26 @@ def build(db, days: int = 400) -> Dict[str, Any]:
     st = opponent_strength(db, g["comp"].unique().tolist(), days)
     agg = aggregate(g, st)
     ages, values, roles = _ages_values()
+    fa, fv = _fotmob_ages_values(db)                      # quem não está no Transfermarkt: elenco da FotMob
+    try:                                                  # e, por último, a Wikidata (nome único de jogador)
+        from src.data_hub.sources import wikidata as WD
+
+        for k, v in WD.ages(db).items():
+            fa.setdefault(k, v)
+    except Exception:
+        pass
+    for k, v in fa.items():
+        if pd.notna(v) and pd.isna(ages.get(k, np.nan)):
+            ages[k] = v
+    for k, v in fv.items():
+        if pd.notna(v) and v > 0 and pd.isna(values.get(k, np.nan)):
+            values[k] = v
+    model = league_model(db)
     miss = agg["family"] == ""                            # sem posição nos jogos: cadastro do Transfermarkt
     agg.loc[miss, "role"] = agg.loc[miss, "core"].map(roles).fillna("")
     agg.loc[miss, "family"] = agg.loc[miss, "role"].map(FAMILY_OF).fillna("")
-    ev = evaluate(agg, ages, values)
-    return {"jogadores": ev, "niveis": league_factors(ev), "validacao": validate(g, ev),
+    ev = evaluate(agg, ages, values, levels=model)
+    return {"jogadores": ev, "niveis": model if not model.empty else league_factors(ev), "validacao": validate(g, ev),
             "segundos": round(time.time() - t0, 1), "jogos": int(g["match_id"].nunique())}
 
 

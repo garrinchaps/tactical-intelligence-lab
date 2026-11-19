@@ -24,6 +24,7 @@ Os termos de uso da FotMob não autorizam uso comercial dos dados.
 from __future__ import annotations
 
 import os
+import time
 import re
 from datetime import date, datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -477,6 +478,8 @@ class FotmobProvider:
 
         todo.sort(key=_key)
         tot = {"detalhes": 0, "errors": 0, "pendentes": max(len(todo) - limit, 0)}
+        t_start = time.time()
+        n_run = min(limit, len(todo))
         for i, (mid, _lg, _d) in enumerate(todo[:limit], 1):
             if stop is not None and stop():
                 break
@@ -488,8 +491,12 @@ class FotmobProvider:
                 tot["errors"] += 1
                 self._mark_tried(int(mid), False)
                 say(f"  fotmob jogo {mid}: {exc}")
-            if i % 25 == 0:
-                say(f"  detalhes: {i}/{min(limit, len(todo))}")
+            if i % 25 == 0:                       # rodada 16: ritmo e tempo que falta
+                el = time.time() - t_start
+                rate = i / el if el > 0 else 0
+                eta = (n_run - i) / rate if rate > 0 else 0
+                say(f"  detalhes: {i}/{n_run} · {rate * 60:.0f} jogos/min · falta ~{eta / 60:.0f} min"
+                    + (f" · {tot['errors']} sem dado" if tot["errors"] else ""))
         say(f"  detalhes baixados: {tot['detalhes']} · faltam {tot['pendentes']} (rode de novo para continuar)")
         return tot
 

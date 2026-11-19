@@ -13,6 +13,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
+from src.ui.perf import timed as _perf_timed
+
 from src.ui.components import render_chart
 
 from src.squad import data as D
@@ -66,6 +68,7 @@ def _picker(label: str, key: str, default: str = "") -> Optional[str]:
 
 
 # ------------------------------------------------------------------------------------------------ dados do time
+@_perf_timed("squad._squad")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _squad(team: str, version: str) -> Dict[str, Any]:
     from src.ui.context import get_service
@@ -266,6 +269,7 @@ def _left_after(apps: pd.DataFrame, club_id) -> List[Any]:
     return a.loc[a["clube_id"].map(_tid) != _tid(club_id), "transfermarkt_id"].tolist()
 
 
+@_perf_timed("squad._profile")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _profile(team: str, n: int, version: str) -> Dict[str, Any]:
     from src.ui.context import get_service
@@ -401,6 +405,7 @@ def _traits_table(items: List[Dict[str, Any]], better_word: str) -> pd.DataFrame
 
 
 # ------------------------------------------------------------------------------------------------ próximo jogo
+@_perf_timed("squad._matchday")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _matchday(team: str, version: str, n: int, target_competition: Optional[str] = None) -> Dict[str, Any]:
     from src.squad import matchday as M
@@ -750,6 +755,7 @@ def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -
         st.toast("Anotado. Este tipo de análise perde peso.")
 
 
+@_perf_timed("squad._matchups")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _matchups(team, rival, my_names, rv_names, version, my_xi, rv_xi):
     from src.squad import matchups as MU

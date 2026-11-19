@@ -446,6 +446,19 @@ Rodada 16 (19/11/2026, 435 testes verdes) — avaliação de jogadores refeita (
 - Pendente: modelo aprendido de transferência entre ligas (hoje: estimativa prévia + pares), custo-benefício e idade só
   para quem está no cadastro do Transfermarkt sem homônimo.
 
+Rodada 17 (19/11/2026, 438 testes verdes):
+- ✅ Monitor de velocidade (`src/ui/perf.py`): tempo de cada tela e das análises pesadas (@timed) em data/perf.jsonl;
+  barra do topo mostra a última tela; Bastidores › "⏱️ Velocidade do app" com mediana/90%/pior e alerta.
+- ✅ Nível das ligas APRENDIDO (`evaluation.league_model`): nota = habilidade + facilidade da competição (3 anos, ≥ 450
+  min), mínimos quadrados alternados com regularização para a estimativa prévia; competição com < 3 jogadores ligando
+  réguas fica na estimativa e é marcada.
+- ✅ Idade/valor para quem não está no Transfermarkt: elenco da FotMob (`fotmob_rosters`) e Wikidata
+  (`src/data_hub/sources/wikidata.py`, CC0, só nome único de jogador; worker completa 400/dia; CLI
+  `python -m src.data_hub.sources.wikidata --limite 1500`).
+- ✅ Download FotMob mostra ritmo e tempo que falta; `--intervalo` ajusta o ritmo só naquela execução.
+- ✅ Plano completo de publicação 24 h idêntica ao app: `docs/PLANO_PUBLICACAO.md` (VPS + SQLite WAL + Litestream,
+  worker como serviço, Caddy/Cloudflare, CI, monitoramento, licenças e 3 caminhos de abertura).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
