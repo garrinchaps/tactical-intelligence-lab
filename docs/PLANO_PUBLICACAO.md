@@ -81,6 +81,11 @@ python -m src.tools.apresentacao
 Mostra ✅/⚠️/❌ para: banco, índices, rankings, índice de busca, fotografia do Scout, régua dos confrontos, cloudflared,
 porta livre, espaço em disco e versão do código. Resolva os ❌ (os ⚠️ funcionam, só ficam mais lentos).
 
+**Passo 4.5 — Scout completo (Série B/C e sul-americanas).**
+```bash
+python -m src.scout.snapshot
+```
+
 **Passo 5 — ensaio geral (recomendado).**
 ```bash
 .\scripts\apresentar.ps1
@@ -161,6 +166,34 @@ Por isso o link tem senha e só vive durante a apresentação. Abrir para o púb
 derivadas (notas, rankings, análises) ou contratar dados — decisão para depois.
 
 ---
+
+## 6.5 Velocidade no celular (rodada 19)
+
+- **Modo congelado** (o script liga `TIL_CONGELADO=1`): dados parados, nenhuma busca na internet durante a
+  apresentação e o cache vai para o DISCO sem expirar — tudo que for aberto no ENSAIO abre na hora no dia, mesmo depois
+  de fechar e abrir o app (desde que nenhuma sincronização rode entre o ensaio e a apresentação).
+- **Pré-aquecimento ao ligar**: catálogo, Scout, Rankings, índice de jogadores e os últimos 8 jogos / 6 times abertos
+  são calculados em segundo plano, com uma tela de carregamento (campinho animado + passos). Resultado em
+  `data/warmup_status.json` e em Bastidores › ⏱️ Velocidade.
+- **Cobertura de carregamento** em qualquer troca de tela (só aparece se passar de 0,35 s).
+- **Compressão da conexão** ligada (menos dados no 4G) e o visitante fica lembrado por 12 h no aparelho (a tela do
+  celular apagar não pede a senha de novo).
+- **Limite honesto:** análise NUNCA aberta antes (um time novo, um jogo novo) ainda leva o tempo do cálculo no PC
+  (segundos). Por isso o ensaio importa: abra no PC, antes, exatamente o que vai mostrar.
+
+## 6.6 "E sem o meu PC ligado, 24 h, de graça?"
+
+Resposta honesta: **com a base inteira (11,4 GB) e tudo funcionando igual, não existe opção grátis sem cartão hoje.**
+O que existe:
+
+| opção | custo | como fica | o que você perde |
+|---|---|---|---|
+| **A. Versão vitrine no Streamlit Community Cloud** (recomendada para depois da apresentação) | R$ 0, sem cartão | link fixo 24 h; o PC publica uma "fotografia" reduzida da base (competições escolhidas, < 1 GB) quando você quiser | base menor; dorme após ~12 h sem visita (acorda em ~30–60 s); treino e edição continuam só no PC |
+| B. Notebook velho / mini PC em casa como servidor | só a luz (~R$ 5–15/mês) | idêntico ao app, 24 h | exige uma máquina dedicada ligada |
+| C. Oracle Cloud "Always Free" (4 núcleos, 24 GB, 200 GB) | R$ 0 se ficar no plano grátis | idêntico, 24 h | **pede cartão no cadastro** (risco de cobrança por engano) |
+
+Você **continua editando, treinando a IA e atualizando tudo no PC** em qualquer opção: o PC é o "laboratório"; o link
+público só mostra. Na opção A, depois de treinar/atualizar, um comando no PC publica a fotografia nova.
 
 ## 7. Depois deste mês (opcional, ainda grátis quando possível)
 

@@ -6,6 +6,7 @@ import html
 import io
 import json
 import re
+from typing import Dict
 from datetime import date
 
 import numpy as np
@@ -15,6 +16,7 @@ import streamlit as st
 from src.ui.perf import timed as _perf_timed
 
 from src.scout import engine as E
+from src.ui.context import heavy_cache as _heavy_cache
 from src.squad import data as D
 from src.ui.components import styled_dataframe, comparison_table, empty_state, page_header
 from src.ui.nav import back_button, open_view, param
@@ -86,7 +88,7 @@ def _market_data_legacy(version: str):
 
 
 @_perf_timed("scout._rank_candidates")
-@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+@_heavy_cache(show_spinner=False, ttl=900, max_entries=16)
 def _rank_candidates(version, team, country, competition, season, rejected, feedback_reason,
                      _pool, _needs, _financial, _roster, needs_key=None):
     """Reaproveita o ranking caro entre interações; a revisão invalida quando o histórico muda.
@@ -115,6 +117,12 @@ def _window_cards(roster, decisions, loans=None):
     rows = []
     r = roster.copy()
     r["_q"] = pd.to_numeric(r.get("qualidade"), errors="coerce")
+    # rodada 19: o mesmo atleta vindo de duas fontes aparecia 2× (e quebrava a chave "scout_dec_gabriel_oliveira");
+    # homônimos de idades diferentes continuam separados
+    _age = pd.to_numeric(r.get("idade"), errors="coerce").round(0)
+    r = r.assign(_age=_age).sort_values("_q", ascending=False, na_position="last") \
+         .drop_duplicates(["nome", "_age"]).drop(columns="_age")
+    used_keys: Dict[str, int] = {}
     known = set().union(*[s_ for _, s_ in SECTORS])
     # sem posição exata: usa o setor informado pela FotMob (goleiros/defensores/meias/atacantes) só para agrupar
     gmap = {"keepers": "GK", "defenders": "CB", "midfielders": "CM", "attackers": "ST"}
@@ -158,8 +166,13 @@ def _window_cards(roster, decisions, loans=None):
                             f'<div style="display:flex;gap:14px;margin-top:4px;font-size:.85rem;color:#DCE6F4">'
                             f'<span>⭐ {f"{q:.0f}" if pd.notna(q) else "—"}</span><span>💶 {_money(p.get("valor_mercado_eur"))}</span>'
                             f'</div></div>', unsafe_allow_html=True)
-                        picks[name] = (st.radio("Decisão", opts, index=opts.index(cur), key=f"scout_dec_{_slug(name)}",
-                                                horizontal=not loan, label_visibility="collapsed"), p)
+                        base_key = f"scout_dec_{_slug(name)}"
+                        n_used = used_keys.get(base_key, 0)
+                        used_keys[base_key] = n_used + 1
+                        label_name = name if not n_used else f"{name} ({n_used + 1})"
+                        picks[label_name] = (st.radio("Decisão", opts, index=opts.index(cur),
+                                                      key=base_key if not n_used else f"{base_key}_{n_used}",
+                                                      horizontal=not loan, label_visibility="collapsed"), p)
         with tabs_[-1]:
             if not l_out:
                 st.caption("Nenhum jogador do clube emprestado a outro time (segundo a FotMob).")
@@ -349,7 +362,7 @@ def _role(role):
 
 
 @_perf_timed("scout._merge_roster")
-@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+@_heavy_cache(show_spinner=False, ttl=900, max_entries=16)
 def _merge_roster(roster, _universe, team=None, version=""):
     """rodada 13: cacheado por elenco + versão (o universo grande não entra no hash) e completado pelos jogos do clube."""
     universe = _universe
@@ -445,7 +458,7 @@ def _fill_from_club_games(r, universe, team):
 
 
 @_perf_timed("scout._diagnosis")
-@st.cache_data(show_spinner=False, ttl=900, max_entries=16)
+@_heavy_cache(show_spinner=False, ttl=900, max_entries=16)
 def _diagnosis(team, version, roster_records):
     from src.ui.context import get_service
     from src.ui.pages.clubs import same_team_names
@@ -721,6 +734,10 @@ def render(_ctx=None):
             data = _market_data(version)
         if first:
             version = S.version()
+        if (S.meta() or {}).get("parcial") or data.get("parcial"):
+            st.warning("Esta fotografia do mercado é uma versão antiga reaproveitada: faltam os jogadores das ligas "
+                       "baixadas depois (Série B/C, sul-americanas). Com o app fechado, rode "
+                       "`python -m src.scout.snapshot` (ou espere o processo de fundo refazer).")
         age = S.age_hours()
         if age is not None:
             st.caption(f"Mercado e histórico: fotografia de {age:.1f} h atrás (refeita em segundo plano a cada "
@@ -976,6 +993,10 @@ def render(_ctx=None):
             amin = c2.number_input("Idade mínima", 15, 40, 18)
             amax = c3.number_input("Idade máxima", 16, 50, 35)
             qmin = c4.slider("Qualidade mínima", 0, 100, 0)
+            if "origem" not in pool and "clube_liga" in pool:
+                pool = pool.assign(origem=pool["clube_liga"].map(E.origin_group))
+            origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
+            origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
             d1,d2,d3 = st.columns(3)
             nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
             nat = d1.selectbox("Nacionalidade", nats)
@@ -989,6 +1010,8 @@ def render(_ctx=None):
             vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
             vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
             filt = pool.copy()
+            if origin != "Todas" and "origem" in filt:
+                filt = filt[filt["origem"].astype(str) == origin]
             if rf!="Todas": filt=filt[filt["papel"]==rf]
             _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
             filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
@@ -1000,9 +1023,10 @@ def render(_ctx=None):
             filt=filt[values.between(vmin*1e6,vmax*1e6)]
             filt=filt.sort_values("qualidade",ascending=False,na_position="last")
             st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
-            cols = [x for x in ("nome","papel","idade","clube","nacionalidade","valor_mercado_eur",
-                                "qualidade","confianca_pct","minutos_12m","rating_12m") if x in filt]
+            cols = [x for x in ("nome","papel","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
+                                "qualidade","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
             display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
+                "clube_liga":"Liga","nota_rankings":"Nota dos Rankings",
                 "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
                 "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
             if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)

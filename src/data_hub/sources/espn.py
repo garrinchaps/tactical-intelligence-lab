@@ -86,6 +86,8 @@ class EspnProvider:
     # ----------------------------------------------------------------- parse
     @staticmethod
     def parse_scoreboard_event(ev: Dict[str, Any], league: str, include_live: bool = False) -> Optional[Dict[str, Any]]:
+        if not str(ev.get("id") or "").strip().isdigit():   # rodada 19: item sem id (ESPN mudou algo) é pulado, não derruba
+            return None
         comp = (ev.get("competitions") or [{}])[0]
         status = ((comp.get("status") or ev.get("status") or {}).get("type") or {})
         live = status.get("state") == "in" or str(status.get("name", "")).upper() in (
@@ -211,6 +213,8 @@ class EspnProvider:
     @staticmethod
     def parse_fixture(ev: Dict[str, Any], league: str) -> Optional[Dict[str, Any]]:
         """Jogo futuro (ainda não começou): vai para a tabela `fixtures`, nunca para o catálogo de jogos jogados."""
+        if not str(ev.get("id") or "").strip().isdigit():
+            return None
         comp = (ev.get("competitions") or [{}])[0]
         st = ((comp.get("status") or ev.get("status") or {}).get("type") or {})
         if st.get("completed") or st.get("state") == "in":

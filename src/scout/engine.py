@@ -376,6 +376,42 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     return out
 
 
+def fill_positions_from_lineups(db, raw: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 19: os números por jogador da FotMob vêm SEM posição (só o goleiro é marcado), mas a escalação do mesmo
+    jogo traz a posição exata (CB, DM, RW…). Completa a posição vazia pela escalação — sem isso, quem só aparece na
+    FotMob (Série B/C, ligas sul-americanas) ficava sem posição e era descartado do Scout."""
+    if raw is None or raw.empty or "position" not in raw:
+        return raw
+    pos = raw["position"].fillna("").astype(str).str.strip()
+    empty = pos.isin(["", "SUB", "?"])
+    if not empty.any():
+        return raw
+    ids = sorted({int(x) for x in raw.loc[empty, "match_id"].dropna().unique()})
+    if not ids:
+        return raw
+    try:
+        with db.connect() as conn:
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _pos_ids (match_id INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM _pos_ids")
+            conn.executemany("INSERT OR IGNORE INTO _pos_ids VALUES (?)", [(i,) for i in ids])
+            lu = pd.read_sql_query(
+                """SELECT l.match_id, l.player_name, l.position FROM _pos_ids AS t
+                   JOIN match_lineups AS l ON l.match_id = t.match_id
+                   WHERE l.position IS NOT NULL AND TRIM(l.position) NOT IN ('', 'SUB', 'Sub')""", conn)
+            conn.execute("DROP TABLE IF EXISTS _pos_ids")
+    except Exception:
+        return raw
+    if lu.empty:
+        return raw
+    lu = lu.drop_duplicates(["match_id", "player_name"])
+    key = dict(zip(zip(lu["match_id"].astype("int64"), lu["player_name"].astype(str)), lu["position"].astype(str)))
+    out = raw.copy()
+    idx = out.index[empty]
+    fill = [key.get((int(m), str(n)), "") if pd.notna(m) else "" for m, n in zip(out.loc[idx, "match_id"], out.loc[idx, "player_name"])]
+    out.loc[idx, "position"] = [f if f else o for f, o in zip(fill, pos.loc[idx])]
+    return out
+
+
 def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None,
                         progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """Resume histórico completo dos atletas relevantes sem carregar todo o universo de aparições.
@@ -502,6 +538,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         report("Nenhum registro de histórico encontrado para os jogadores selecionados.")
         return raw
 
+    raw = fill_positions_from_lineups(db, raw)
     report("Normalizando nomes e partidas do histórico...")
     # Normaliza cada nome/clube uma única vez, não uma vez por aparição do jogador.
     player_names = raw["player_name"].dropna().drop_duplicates().tolist()
@@ -631,10 +668,11 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         .to_dict("records")
         for core, group in recent_games.groupby("_core", sort=False)
     }
-    positions = raw.groupby("_core", sort=False)["position"].agg(
-        lambda values: values.dropna().astype(str).mode().iloc[0]
-        if values.dropna().size else ""
-    )
+    # rodada 19: registro sem posição (FotMob só marca o goleiro nos números por jogador) não vota na posição
+    _pos = raw["position"].fillna("").astype(str).str.strip()
+    _pos = _pos[~_pos.isin(["", "SUB", "Sub", "sub", "?"])]
+    positions = (_pos.groupby(raw.loc[_pos.index, "_core"], sort=False).agg(lambda v: v.mode().iloc[0])
+                 if len(_pos) else pd.Series(dtype=str))
 
     recent_by_core = recent_totals.to_dict("index") if not recent_totals.empty else {}
     season_by_core = season_by_core or {}
@@ -2280,3 +2318,89 @@ def roster_quality(roster: pd.DataFrame, universe: pd.DataFrame, per_role: int =
     out = q.loc[q["_roster_row"] == True, keep]  # noqa: E712
     out.index = r.index
     return out
+
+
+# ------------------------------------------------------------------ rodada 19: avaliação dos Rankings no Scout
+SA_COUNTRY_WORDS = ("argentin", "paragua", "urugua", "chile", "colomb", "colômb", "equador", "ecuador", "peru", "bolivia",
+                    "bolívia", "conmebol", "copa américa", "recopa",
+                    "venezuel", "libertadores", "sudamericana", "sul-americana", "liga profesional", "primera division",
+                    "primera división", "liga betplay", "liga pro", "liga 1")
+
+
+def origin_group(comp: Any) -> str:
+    """Atalho de origem para o filtro do Scout (pelo nome da competição/liga)."""
+    s = _safe_str(comp).lower()
+    if not s:
+        return "Sem liga identificada"
+    if "série b" in s or "serie b" in s and ("brasil" in s or "brazil" in s):
+        return "Brasil · Série B"
+    if "série c" in s or "serie c" in s and ("brasil" in s or "brazil" in s):
+        return "Brasil · Série C"
+    if "série d" in s or "serie d" in s and ("brasil" in s or "brazil" in s):
+        return "Brasil · Série D"
+    if "brasileir" in s or "série a" in s or "copa do brasil" in s or "supercopa do brasil" in s or "paulist" in s \
+            or any(w in s for w in ("carioca", "mineiro", "gaúcho", "gaucho", "nordeste", "baiano", "goiano")):
+        return "Brasil · Série A e copas"
+    if any(w in s for w in SA_COUNTRY_WORDS):
+        return "América do Sul"
+    if any(w in s for w in ("mls", "liga mx", "usl")):
+        return "América do Norte"
+    return "Europa e outras"
+
+
+def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """
+    Junta a avaliação da tela Rankings (percentil dentro da função e da competição, levada à régua de nível da
+    competição — `geral_entre_ligas`) à qualidade do Scout. Peso da avaliação: 25% a 45%, crescendo com os minutos
+    (1.800 min = peso cheio). Homônimos ficam de fora (não chuta). Também completa idade, valor e liga de quem não está
+    no Transfermarkt (elenco da FotMob / Wikidata) e marca a competição principal.
+    """
+    if universe is None or universe.empty:
+        return universe
+    u = universe.copy()
+    for c in ("nota_rankings", "competicao_principal", "funcao_rankings", "nivel_competicao_principal"):
+        if c not in u:
+            u[c] = np.nan if c.startswith(("nota", "nivel")) else ""
+    if evals is not None and not evals.empty and "core" in evals:
+        e = evals.copy()
+        e["minutes"] = pd.to_numeric(e["minutes"], errors="coerce").fillna(0)
+        e = e.sort_values("minutes", ascending=False).drop_duplicates("core", keep="first")
+        lvl = pd.to_numeric(e.get("nivel_competicao"), errors="coerce").fillna(.5)
+        d90 = pd.to_numeric(e.get("desempenho_90"), errors="coerce")
+        nota = pd.to_numeric(e.get("geral_entre_ligas"), errors="coerce")
+        nota = nota.fillna((d90 * (.45 + .55 * lvl)).where(e["minutes"] >= 450))
+        e["_nota"] = nota.round(1)
+        e = e.set_index("core")
+        core = u["_core"].astype(str) if "_core" in u else u["nome"].map(player_core)
+        blocked = core.duplicated(keep=False)
+        if "historico_ambiguo" in u:
+            blocked = blocked | u["historico_ambiguo"].fillna(False).astype(bool)
+        ok = core.isin(e.index) & ~blocked
+        take = core.where(ok)
+        u["nota_rankings"] = take.map(e["_nota"])
+        u["competicao_principal"] = take.map(e["comp"]).fillna(u["competicao_principal"].fillna(""))
+        if "funcao" in e:
+            u["funcao_rankings"] = take.map(e["funcao"]).fillna("")
+        u["nivel_competicao_principal"] = take.map(e.get("nivel_competicao"))
+        mins = take.map(e["minutes"]).fillna(0)
+        for src_col, dst in (("idade", "idade"), ("valor_eur", "valor_mercado_eur")):
+            if src_col in e and dst in u:
+                cur = pd.to_numeric(u[dst], errors="coerce")
+                u[dst] = cur.where(cur.notna(), pd.to_numeric(take.map(e[src_col]), errors="coerce"))
+        q = pd.to_numeric(u.get("qualidade"), errors="coerce")
+        n = pd.to_numeric(u["nota_rankings"], errors="coerce")
+        w = (.25 + .20 * (mins / 1800).clip(0, 1))
+        both = q.notna() & n.notna()
+        only = q.isna() & n.notna()
+        u.loc[both, "qualidade"] = ((1 - w[both]) * q[both] + w[both] * n[both]).round(1)
+        u.loc[only, "qualidade"] = (50 + (n[only] - 50) * .8).round(1)       # só a avaliação: puxada à média
+        src = u.get("fonte_qualidade", pd.Series("", index=u.index)).fillna("").astype(str)
+        u.loc[both, "fonte_qualidade"] = src[both] + " · com " + (w[both] * 100).round().astype(int).astype(str) + \
+            "% da avaliação dos Rankings"
+        u.loc[only, "fonte_qualidade"] = "avaliação dos Rankings (percentil na função × nível da competição)"
+    liga = u.get("clube_liga", pd.Series("", index=u.index)).fillna("").astype(str)
+    last_comp = u.get("ultima_competicao", pd.Series("", index=u.index)).fillna("").astype(str)
+    main_comp = u["competicao_principal"].fillna("").astype(str)
+    u["clube_liga"] = liga.where(liga.str.strip() != "", main_comp.where(main_comp != "", last_comp))
+    u["origem"] = u["clube_liga"].map(origin_group)
+    return u

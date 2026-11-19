@@ -38,6 +38,15 @@ def open_view(kind: str, **params) -> None:
         st.session_state.setdefault(STACK, []).append(here)
         st.session_state[STACK] = st.session_state[STACK][-30:]
     st.session_state[VIEW] = {"kind": kind, **params}
+    try:                                                 # rodada 19: o pré-aquecimento deixa estes prontos ao ligar
+        from src.ui import warmup
+
+        if kind == "jogo":
+            warmup.remember("jogo", params.get("match_id"))
+        elif kind == "time":
+            warmup.remember("time", params.get("name") or params.get("team"))
+    except Exception:
+        pass
     if kind == "jogo" and params.get("match_id"):
         if int(st.session_state.get("match_id", 0)) != int(params["match_id"]):
             st.session_state["team_focus"] = None

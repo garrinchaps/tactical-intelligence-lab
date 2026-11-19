@@ -66,3 +66,6 @@ data/processed/lab_ai_reference.json
 data/ui_active
 data/processed/player_index.*
 data/processed/evaluations.*
+data/recent_views.json
+data/warmup_status.json
+data/tunel.log

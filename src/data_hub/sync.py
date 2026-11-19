@@ -46,6 +46,22 @@ LAKE_SOURCES = ["transfermarkt", "understat", "api_futebol", "basedosdados", "si
 QUICK_SOURCES = ["fdcouk", "api_football", "football_data", "espn"]   # jogos recentes; rodam a cada poucas horas
 
 
+def _with_lock_retry(job, src: str, say, waits=(20, 40)):
+    """Rodada 19: "database is locked" = outro processo gravando ao mesmo tempo (processo de fundo × sincronização
+    do painel). Espera e tenta de novo, em vez de registrar erro na primeira colisão."""
+    import sqlite3
+    import time as _t
+
+    for i, wait in enumerate(list(waits) + [None]):
+        try:
+            return job()
+        except sqlite3.OperationalError as exc:
+            if "locked" not in str(exc).lower() or wait is None:
+                raise
+            say(f"  … {src}: banco ocupado por outra gravação; nova tentativa em {wait} s")
+            _t.sleep(wait)
+
+
 def run_sync(
     sources: Optional[List[str]] = None,
     days_back: int = 3,
@@ -131,7 +147,7 @@ def run_sync(
         started = utc_now()
         say(f"• {src}: sincronizando...")
         try:
-            res = jobs[src]()
+            res = _with_lock_retry(jobs[src], src, say)
             status = "COTA" if res.get("cota_atingida") else "OK"
             db.log_sync(src, started, status, res.get("added", 0), res.get("updated", 0), redact(str(res)))
             results[src] = {"status": status, **res}

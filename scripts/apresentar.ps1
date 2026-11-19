@@ -43,7 +43,10 @@ $env:TIL_SENHA = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
 [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
 if ([string]::IsNullOrWhiteSpace($env:TIL_SENHA)) { Write-Host "Senha vazia — cancelado."; exit 1 }
 
-if (-not $ComAtualizacao) { $env:AUTO_SYNC = "0" }     # só nesta janela: o app fica leve para quem visita
+if (-not $ComAtualizacao) {
+    $env:AUTO_SYNC = "0"          # só nesta janela: o app fica leve para quem visita
+    $env:TIL_CONGELADO = "1"      # dados parados: o que foi aberto no ensaio continua pronto (cache em disco)
+}
 
 New-Item -ItemType Directory -Force -Path "data" | Out-Null
 $log = "data\tunel.log"
@@ -52,7 +55,7 @@ if (Test-Path $log) { Remove-Item $log -Force }
 Write-Host "Ligando o app na porta $Porta..."
 $app = Start-Process -FilePath $py -PassThru -WindowStyle Minimized -ArgumentList @(
     "-m", "streamlit", "run", "app.py", "--server.port", "$Porta", "--server.headless", "true",
-    "--browser.gatherUsageStats", "false")
+    "--browser.gatherUsageStats", "false", "--server.enableWebsocketCompression", "true")
 
 $ok = $false
 for ($i = 0; $i -lt 90; $i++) {
@@ -87,6 +90,7 @@ Write-Host "  LINK PÚBLICO:  $url" -ForegroundColor Cyan
 Write-Host "  (já copiado — cole no WhatsApp/e-mail do professor)"
 Write-Host "  No seu PC continue em http://localhost:$Porta (sem senha)."
 Write-Host "  O link muda cada vez que este script roda."
+Write-Host "  Abra antes, no PC, as telas que vai mostrar: ficam prontas para o professor."
 Write-Host "=============================================================" -ForegroundColor Cyan
 Write-Host ""
 Read-Host "Deixe esta janela aberta. Aperte Enter para DESLIGAR o link e o app"

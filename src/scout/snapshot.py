@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v6.pkl")    # v6: fama de mercado × minutos, 0 min no ano sem nota
-META_PATH = Path("data/processed/scout_universe_v6.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+SNAP_PATH = Path("data/processed/scout_universe_v7.pkl")    # v7: posições da escalação (FotMob), Rankings na qualidade, origem
+META_PATH = Path("data/processed/scout_universe_v7.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -71,6 +71,7 @@ def build_universe(db) -> Dict[str, Any]:
     # rodada 10: a qualidade usa o nível do clube (valor do elenco), então vem DEPOIS de juntar os clubes
     universe = E.add_quality_scores(universe)
     universe = E.merge_external_ratings(universe, D.external_ratings())
+    universe = E.merge_rankings(universe, _evaluations())
     from src.scout.traits import add_traits
 
     universe = add_traits(universe)
@@ -79,13 +80,25 @@ def build_universe(db) -> Dict[str, Any]:
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
 
 
+def _evaluations():
+    """Avaliações da tela Rankings (data/processed/evaluations.parquet); vazio se ainda não calculadas."""
+    try:
+        from src.scout import evaluation as EV
+
+        res = EV.load()
+        return res["jogadores"] if res else None
+    except Exception:
+        return None
+
+
 def save(data: Dict[str, Any]) -> Dict[str, Any]:
     SNAP_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = SNAP_PATH.with_suffix(".tmp")
     pd.to_pickle(data, tmp)
     os.replace(tmp, SNAP_PATH)
     meta = {"built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "jogadores": int(len(data.get("universe", []))), "clubes": int(len(data.get("clubs", [])))}
+            "jogadores": int(len(data.get("universe", []))), "clubes": int(len(data.get("clubs", []))),
+            "parcial": bool(data.get("parcial", False))}
     META_PATH.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
     return meta
 
@@ -150,7 +163,9 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 ext = None
             from src.scout.traits import add_traits
 
-            data["universe"] = add_traits(E.merge_external_ratings(E.add_quality_scores(u), ext))
+            data["universe"] = add_traits(E.merge_rankings(E.merge_external_ratings(E.add_quality_scores(u), ext),
+                                                           _evaluations()))
+            data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
             save(data)
             return data
         except Exception:
@@ -184,6 +199,26 @@ def rebuild(db) -> Dict[str, Any]:
 
 def rebuild_if_stale(db) -> Optional[Dict[str, Any]]:
     a = age_hours()
-    if a is None or a >= max_age_hours():
+    if a is None or a >= max_age_hours() or (meta() or {}).get("parcial"):
         return rebuild(db)
     return None
+
+
+def main() -> None:
+    """python -m src.scout.snapshot  → refaz a fotografia COMPLETA do Scout (com o app fechado é mais rápido)."""
+    import time
+
+    from src.data_hub.db import DataHubDB
+
+    t0 = time.time()
+    print("Montando o universo do Scout (cadastro + 5 anos de jogos + avaliações dos Rankings)... pode levar minutos.")
+    m = rebuild(DataHubDB())
+    data = load() or {}
+    u = data.get("universe")
+    print(f"Pronto em {time.time() - t0:.0f} s: {m['jogadores']:,} jogadores.".replace(",", "."))
+    if u is not None and "origem" in u:
+        print(u["origem"].value_counts().to_string())
+
+
+if __name__ == "__main__":
+    main()

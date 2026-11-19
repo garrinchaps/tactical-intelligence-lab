@@ -24,8 +24,13 @@ RETRY_MINUTES = 30   # se a última tentativa falhou (ex.: sem internet), espera
 
 _OPENPLAY: Dict[str, Any] = {"running": False, "converted": 0, "pending": None, "failed": 0,
                                  "last_batch": None, "phase": "", "error": None}
-QUICK = ["fdcouk", "open_matchday", "api_football", "football_data", "espn"]
-DAILY = ["espn_elencos", "statsbomb", "wyscout", "openplay", "openfootball", "brasileirao", "open_sources", "transfermarkt", "understat", "api_futebol", "basedosdados", "simonetti", "lake", "estatisticas_brasil"]
+# rodada 19: três ritmos. Antes as bases históricas (que quase não mudam) eram relidas TODO DIA — o OpenPlay sozinho
+# relia 0,94 GB — e a API-Football (plano grátis: só 2022–2024) era consultada a cada 3 h sem nunca trazer jogo novo.
+QUICK = ["fdcouk", "open_matchday", "football_data", "espn"]
+DAILY = ["espn_elencos", "transfermarkt", "lake"]
+WEEKLY = ["statsbomb", "wyscout", "openplay", "openfootball", "brasileirao", "open_sources", "understat", "api_futebol",
+          "basedosdados", "simonetti"]
+MANUAL_ONLY = ["api_football", "estatisticas_brasil", "cbf", "espn_historico", "espn_temporada", "espn_resumos"]
 
 
 def enabled() -> bool:
@@ -67,6 +72,9 @@ def due(db, now: Optional[datetime] = None) -> List[str]:
     d = _last_ok(db, DAILY)
     if d is None or now - d >= timedelta(hours=24):
         out += DAILY
+    w = _last_ok(db, WEEKLY)
+    if w is None or now - w >= timedelta(days=7):
+        out += WEEKLY
     return out
 
 

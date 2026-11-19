@@ -75,6 +75,47 @@ def check(typed: str, expected: str | None = None) -> bool:
     return hmac.compare_digest(a, b)
 
 
+COOKIE = "til_acesso"
+COOKIE_HOURS = 12
+
+
+def token(day: str | None = None, expected: str | None = None) -> str:
+    """Marca de acesso do dia, DERIVADA da senha (HMAC) — a senha nunca vai para o cookie. Trocar a senha invalida."""
+    exp = _expected() if expected is None else expected
+    day = day or time.strftime("%Y-%m-%d")
+    return hmac.new(exp.encode("utf-8"), f"til-gate|{day}".encode("utf-8"), hashlib.sha256).hexdigest()[:40]
+
+
+def cookie_ok(value: str | None, expected: str | None = None) -> bool:
+    """Aceita a marca de hoje ou de ontem (sessão que passou da meia-noite)."""
+    exp = _expected() if expected is None else expected
+    if not value or not exp:
+        return False
+    today = time.strftime("%Y-%m-%d")
+    yesterday = time.strftime("%Y-%m-%d", time.localtime(time.time() - 86400))
+    return any(hmac.compare_digest(str(value), token(d, exp)) for d in (today, yesterday))
+
+
+def _remember_visitor() -> None:
+    """Grava o cookie (mesma origem do app) para a recarga do celular não pedir a senha de novo por 12 h."""
+    try:
+        import streamlit.components.v1 as components
+
+        components.html(f"<script>document.cookie='{COOKIE}={token()}; path=/; max-age={COOKIE_HOURS * 3600}; "
+                        "SameSite=Lax; Secure';</script>", height=0)
+    except Exception:
+        pass
+
+
+def _cookie_value() -> str | None:
+    try:
+        import streamlit as st
+
+        return st.context.cookies.get(COOKIE)
+    except Exception:
+        return None
+
+
 def visitor_blocked(what: str = "Esta ação") -> bool:
     """Chame antes de qualquer botão pesado. Visitante: mostra o aviso e devolve True (não execute)."""
     if not is_visitor():
@@ -92,7 +133,14 @@ def require() -> None:
     """Chamado no topo do app. Visitante sem senha certa não passa daqui."""
     import streamlit as st
 
-    if not is_visitor() or st.session_state.get("_gate_ok"):
+    if not is_visitor():
+        return
+    if st.session_state.get("_gate_ok"):
+        if st.session_state.pop("_gate_set_cookie", False):
+            _remember_visitor()
+        return
+    if password_defined() and cookie_ok(_cookie_value()):     # já entrou neste aparelho nas últimas 12 h
+        st.session_state["_gate_ok"] = True
         return
     if not password_defined():
         if public_mode():                                # servidor sem senha configurada: aberto, mas avisa
@@ -116,6 +164,7 @@ def require() -> None:
                 time.sleep(min(10, fails))               # tentativa repetida fica lenta (sem bloquear o servidor todo)
             if check(typed):
                 st.session_state["_gate_ok"] = True
+                st.session_state["_gate_set_cookie"] = True
                 st.session_state.pop("_gate_fails", None)
                 st.rerun()
             st.session_state["_gate_fails"] = fails + 1

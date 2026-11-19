@@ -64,3 +64,22 @@ def checkpoint(db) -> None:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE);")
     except Exception:
         pass
+
+
+# ------------------------------------------------------------------ rodada 19: modo congelado (apresentação)
+FROZEN_ALLOWED_HOSTS = ("raw.githubusercontent.com",)      # lances do StatsBomb (só leitura, sem gravar no banco)
+
+
+def frozen() -> bool:
+    """TIL_CONGELADO=1 (o script de apresentação liga): dados parados — versões de cache não mudam (nem na virada do
+    dia) e a tela não baixa nada na hora. Tudo que já foi calculado no ensaio continua valendo."""
+    return os.getenv("TIL_CONGELADO", "0").strip().lower() in ("1", "true", "sim", "yes")
+
+
+def network_blocked(url: str) -> bool:
+    if not frozen():
+        return False
+    from urllib.parse import urlparse
+
+    host = (urlparse(str(url)).hostname or "").lower()
+    return host not in FROZEN_ALLOWED_HOSTS

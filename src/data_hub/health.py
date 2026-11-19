@@ -42,11 +42,15 @@ def source_health(db, now: Optional[datetime] = None) -> pd.DataFrame:
     rows = []
     for s in sources:
         r = runs[runs["source"] == s]
+        if r.empty and s in JOBS_OF:                     # rodada 19: partidas gravadas por tarefas de outro nome
+            r = runs[runs["source"].isin(JOBS_OF[s])]
         last = r.iloc[0] if not r.empty else None
         when = _parse(last["finished_at"] or last["started_at"]) if last is not None else None
         ok_recent = r.head(10)["status"].eq("OK").sum() if not r.empty else 0
         st = (last["status"] if last is not None else None) or ""
-        if last is None:
+        if s == "simulated":
+            status = "🧪 exemplos internos (fora das análises reais)"
+        elif last is None:
             status = "— nunca sincronizada"
         elif st == "DESATIVADA":
             status = "⏸ desativada"
@@ -66,8 +70,24 @@ def source_health(db, now: Optional[datetime] = None) -> pd.DataFrame:
                      "com estatísticas": int(l.get("BOXSCORE", 0)), "só placar": int(l.get("RESULT", 0)),
                      "cota hoje": f"{used}/{quota}" if quota else (str(used) if used else "—"),
                      "sucessos (últimas 10)": f"{ok_recent}/{min(len(r), 10)}" if not r.empty else "—",
-                     "erro mais recente": (str(errs.iloc[0]["message"] or "")[:140] if not errs.empty else "")})
+                     "erro mais recente": _err_text(errs, st)})
     return pd.DataFrame(rows)
+
+
+# rodada 19: fonte das PARTIDAS → tarefas de sincronização que as gravam
+JOBS_OF = {"fotmob": ["fotmob_jogos", "fotmob_temporada", "fotmob_recentes", "fotmob_tudo"],
+           "intl": ["open_sources"]}
+
+
+def _err_text(errs: pd.DataFrame, last_status: str) -> str:
+    """Erro com a data; se a última execução deu certo, avisa que é antigo (já resolvido)."""
+    if errs.empty:
+        return ""
+    e = errs.iloc[0]
+    when = _parse(e.get("finished_at") or e.get("started_at"))
+    tag = when.astimezone().strftime("%d/%m %H:%M") if when else "?"
+    msg = str(e.get("message") or "").replace("\n", " ")[:140]
+    return (f"[antigo, {tag} — depois funcionou] " if last_status == "OK" else f"[{tag}] ") + msg
 
 
 def start_job(name: str, fn: Callable[[Callable[[str], None]], Any]) -> bool:

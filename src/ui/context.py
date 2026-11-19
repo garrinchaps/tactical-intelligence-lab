@@ -30,7 +30,17 @@ def get_service() -> MatchDataService:
     ensure_database()
     return MatchDataService()
 
-@st.cache_data(show_spinner=False, max_entries=12, ttl=1800)
+def heavy_cache(**normal):
+    """Rodada 19: no modo congelado (apresentação) o cache vai para o DISCO e não expira — o que foi aberto no ensaio
+    abre na hora no dia, mesmo depois de fechar e abrir o app. Fora dele, o comportamento de sempre (`normal`)."""
+    from src.data_hub.activity import frozen
+
+    if frozen():
+        return st.cache_data(show_spinner=False, max_entries=max(64, int(normal.get("max_entries") or 0)), persist="disk")
+    return st.cache_data(**normal)
+
+
+@heavy_cache(show_spinner=False, max_entries=12, ttl=1800)
 def _bundle_parts(match_id: int) -> Dict[str, Any]:
     """
     O cache guarda só tipos simples (dict, listas, DataFrames). Guardar o próprio MatchBundle quebrava com
@@ -46,7 +56,7 @@ def load_bundle(match_id: int) -> MatchBundle:
     return MatchBundle(**_bundle_parts(int(match_id)))
 
 
-@st.cache_data(show_spinner=False, max_entries=12)
+@heavy_cache(show_spinner=False, max_entries=12)
 def processed_events(match_id: int, _raw: pd.DataFrame):
     df = ExpectedThreatModel.enrich_events_with_xt(EventPreprocessor.process_match_events(_raw))
     return df, EventPreprocessor.build_possession_chains(df)

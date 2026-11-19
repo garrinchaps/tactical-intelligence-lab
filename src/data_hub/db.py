@@ -182,6 +182,15 @@ def _thread_conn(db: "DataHubDB") -> sqlite3.Connection:
     return conn
 
 
+def _frozen() -> bool:
+    try:
+        from src.data_hub.activity import frozen
+
+        return frozen()
+    except Exception:
+        return False
+
+
 class DataHubDB:
     """Wrapper fino sobre o SQLite com migração idempotente."""
 
@@ -491,6 +500,8 @@ class DataHubDB:
         key = str(self.db_path)
         m = DataHubDB._ver_memo.setdefault(key, {"adopted": None, "at": 0.0, "probed": 0.0, "latest": None})
         now = _t.time()
+        if m["adopted"] is not None and not force and _frozen():
+            return m["adopted"]                          # rodada 19: congelado — o catálogo não muda na apresentação
         if force or m["adopted"] is None or now - m["probed"] >= probe_s:
             try:
                 m["latest"] = self.catalog_version()
@@ -511,7 +522,7 @@ class DataHubDB:
 
         ns = sorted({str(n) for n in names if n})
         if not ns:
-            return f"t:none:{datetime.now().date()}"
+            return f"t:none:{'congelado' if _frozen() else datetime.now().date()}"
         key = f"{self.db_path}|{'|'.join(ns)}"
         hit = DataHubDB._team_memo.get(key)
         now = _t.time()
@@ -523,7 +534,7 @@ class DataHubDB:
                 r = conn.execute(f"SELECT COUNT(*), MAX(match_date), SUM(CASE WHEN data_level IN ('EVENTS','BOXSCORE') "
                                  f"THEN 1 ELSE 0 END) FROM matches WHERE home_team_name IN ({ph}) OR away_team_name IN ({ph})",
                                  ns + ns).fetchone()
-            v = f"t:{r[0]}:{r[1]}:{r[2]}:{datetime.now().date()}"
+            v = f"t:{r[0]}:{r[1]}:{r[2]}:{'congelado' if _frozen() else datetime.now().date()}"
         except Exception:
             v = f"t:err:{datetime.now().date()}"
         DataHubDB._team_memo[key] = (v, now)

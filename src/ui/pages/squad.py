@@ -805,6 +805,9 @@ def render(_ctx=None) -> None:
     if not team:
         empty_state("Escolha o seu time", "Digite o nome no campo 'Meu time'.", "📋")
         return
+    from src.ui import warmup as _warm
+
+    _warm.remember("time", team)
     if rival and team:
         from src.ui.pages.clubs import same_team_names
 

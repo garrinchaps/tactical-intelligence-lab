@@ -137,6 +137,17 @@ def _speed_panel() -> None:
     st.caption(f"Cada tela e cada análise pesada é cronometrada e guardada em data/perf.jsonl (só neste PC). Meta: tela em "
                f"até {P.GOAL_PAGE_S:.0f} s e análise em até {P.GOAL_FUNC_S:.0f} s (com a análise já guardada). A primeira "
                "abertura de um time/jogo sempre demora mais — depois disso fica guardada em disco.")
+    from src.ui import warmup as W
+
+    ws = W.state()
+    if ws.get("steps"):
+        tot = sum(x.get("s") or 0 for x in ws["steps"])
+        with st.expander(f"🔥 Pré-aquecimento ao ligar o app — {len(ws['steps'])} passos, {tot:.0f} s"
+                         + (" (rodando…)" if ws.get("running") else ""), expanded=False):
+            st.caption("Calculado em segundo plano assim que o app liga: catálogo, Scout, Rankings, índice de jogadores e "
+                       "os jogos/times abertos por último (data/recent_views.json). Quem entra depois encontra pronto.")
+            styled_dataframe(pd.DataFrame([{"Passo": x["nome"], "Situação": x["status"], "Segundos": x.get("s")}
+                                           for x in ws["steps"]]), hide_index=True, use_container_width=True)
     rows = P.read()
     if not rows:
         st.info("Ainda sem medições — navegue pelo app e volte aqui.")

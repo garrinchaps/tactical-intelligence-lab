@@ -293,6 +293,12 @@ def main() -> None:
     from src.ui import gate                              # rodada 18: link público pede senha; no PC entra direto
 
     gate.require()                                       # depois do menu: o visitante cai na tela que pediu
+    from src.ui import loading, warmup                   # rodada 19: pré-aquecimento + tela de carregamento
+
+    if not loading.splash_gate(warmup.start()):
+        return
+    _cover = st.empty()                                  # cobertura de carregamento (só aparece se passar de 0,35 s)
+    _cover.markdown(loading.overlay_html(), unsafe_allow_html=True)
     nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3],
                    "scout": MAIN[4], "rankings": MAIN[5], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo
@@ -330,6 +336,7 @@ def main() -> None:
     try:
         page.run()
     finally:                                              # rodada 16: tempo de cada tela (monitor de velocidade)
+        _cover.empty()
         _dt = _time.perf_counter() - _t0
         _name = getattr(page, "url_path", "") or getattr(page, "title", "?")
         _perf.record("tela", _name, _dt)

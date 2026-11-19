@@ -121,7 +121,20 @@ def ascii_headers(headers: Optional[Mapping[str, Any]]) -> Dict[str, str]:
     return out
 
 
+def _blocked(url: str) -> None:
+    try:
+        from src.data_hub.activity import network_blocked
+
+        if network_blocked(url):
+            raise NetError("modo congelado (apresentação): sem buscas na internet — usando só o que já está na base")
+    except NetError:
+        raise
+    except Exception:
+        pass
+
+
 def _send(url: str, params, headers, timeout: float) -> Response:
+    _blocked(url)
     headers = ascii_headers(headers)
     global _client
     hx = _httpx()
@@ -234,6 +247,7 @@ def download(url: str, dest, expected_size: Optional[int] = None, headers: Optio
     Baixa um arquivo grande direto para o disco (sem carregar na memória), em `dest.part` e renomeia no fim.
     Retoma do ponto onde parou (Range) se o servidor permitir; pula se o arquivo já existe com o tamanho esperado.
     """
+    _blocked(url)
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists() and (expected_size is None or dest.stat().st_size == expected_size):

@@ -367,15 +367,18 @@ def test_autosync_schedule(tmp_path, monkeypatch):
     from src.data_hub.db import DataHubDB
 
     db = DataHubDB(db_path=tmp_path / "h.db", schema_path="database/schema.sql")
-    assert set(autosync.due(db)) == set(autosync.QUICK + autosync.DAILY)
+    assert set(autosync.due(db)) == set(autosync.QUICK + autosync.DAILY + autosync.WEEKLY)
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     db.log_sync("espn", now, "OK", 0, 0, "")
-    db.log_sync("statsbomb", now, "OK", 0, 0, "")
+    db.log_sync("transfermarkt", now, "OK", 0, 0, "")       # diária
+    db.log_sync("statsbomb", now, "OK", 0, 0, "")           # semanal (rodada 19)
     assert autosync.due(db) == []
+    assert "api_football" not in autosync.QUICK               # plano grátis não traz jogo recente
     monkeypatch.setenv("AUTO_SYNC_HOURS", "3")
     later = datetime.now(timezone.utc) + timedelta(hours=4)
     assert autosync.due(db, later) == autosync.QUICK
     assert set(autosync.due(db, later + timedelta(hours=21))) == set(autosync.QUICK + autosync.DAILY)
+    assert set(autosync.due(db, later + timedelta(days=7))) == set(autosync.QUICK + autosync.DAILY + autosync.WEEKLY)
     monkeypatch.setenv("AUTO_SYNC", "0")
     assert autosync.ensure_started(db)["enabled"] is False
 

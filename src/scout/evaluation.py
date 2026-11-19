@@ -207,6 +207,10 @@ def aggregate(g: pd.DataFrame, strength: Dict[tuple, float]) -> pd.DataFrame:
     out["subs"] = out["games"] - out["starts"]
     role_mode = g[g["role"].astype(str) != ""].groupby(key)["role"].agg(lambda x: x.mode().iat[0])
     out["role"] = pd.Series(out.set_index(key).index.map(role_mode), index=out.index).fillna("")
+    # rodada 19: só entrou do banco nesta competição → usa a posição dele nos OUTROS jogos (qualquer competição)
+    core_mode = g[g["role"].astype(str) != ""].groupby("core")["role"].agg(lambda x: x.mode().iat[0])
+    blank = out["role"] == ""
+    out.loc[blank, "role"] = out.loc[blank, "core"].map(core_mode).fillna("")
     out["family"] = out["role"].map(FAMILY_OF).fillna("")
     tg = g.groupby(["comp", "season", "team_name"])["match_id"].nunique()
     out["team_games"] = pd.Series(out.set_index(["comp", "season", "team_name"]).index.map(tg), index=out.index

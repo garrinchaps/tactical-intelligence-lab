@@ -470,6 +470,28 @@ Rodada 18 (19/11/2026, 445 testes verdes):
   externo) = visitante → senha `TIL_SENHA` (hash + compare_digest) e botões pesados bloqueados (`visitor_blocked`);
   localhost entra direto. `TIL_MODO_PUBLICO=1` trata todos como visitantes e desliga a atualização automática.
 
+Rodada 19 (19/11/2026, 454 testes verdes):
+- ✅ Scout sem Série B/C e sul-americanas: os números por jogador da FotMob vêm SEM posição (só o goleiro) e o universo
+  descartava quem não tinha posição. `engine.fill_positions_from_lineups` completa pela escalação do mesmo jogo e a
+  posição mais comum ignora vazios; Rankings herdam a posição dos outros jogos (reserva). Na base de dev o universo foi
+  de 22 → 188 jogadores. `engine.merge_rankings`: nota dos Rankings (geral entre ligas) entra na qualidade (25–45%
+  conforme minutos; homônimo fora), completa idade/valor/liga de quem não está no Transfermarkt; filtro "Origem"
+  (`origin_group`: Série B, Série C, América do Sul…) e colunas Liga/Nota dos Rankings na Busca manual. Fotografia v7;
+  `python -m src.scout.snapshot` refaz completa; fotografia antiga reaproveitada fica "parcial" (aviso + refeita).
+- ✅ Erro `scout_dec_gabriel_oliveira` (mesmo atleta 2× na janela): elenco sem duplicata (nome+idade) e chave única.
+- ✅ Velocidade/celular: modo congelado (`TIL_CONGELADO=1`, `activity.frozen`): versões de cache sem a data, catálogo
+  não muda, rede bloqueada na tela (só raw.githubusercontent do StatsBomb), caches pesados em disco sem expirar
+  (`context.heavy_cache`: montagem do jogo, lances processados, Scout). Pré-aquecimento (`src/ui/warmup.py`, últimos
+  jogos/times em data/recent_views.json, status em data/warmup_status.json e nos Bastidores) com tela de carregamento
+  (`src/ui/loading.py`: campinho animado + passos; cobertura com atraso de 0,35 s em toda troca de tela). Visitante
+  lembrado 12 h por cookie (HMAC da senha + dia, nunca a senha). Script com compressão do websocket.
+- ✅ Fontes (`docs/FONTES_ANALISE.md`): ESPN `'id'` (item sem id derrubava a tarefa) corrigido; "database is locked" com
+  nova tentativa (`sync._with_lock_retry`); painel junta tarefas (fotmob ← fotmob_jogos…, intl ← open_sources), marca erro
+  antigo e "exemplos internos" (simulated). Agenda em 3 ritmos (`autosync.QUICK/DAILY/WEEKLY`, `MANUAL_ONLY`): bases
+  históricas 1×/semana (antes relidas todo dia), API-Football e estatisticas_brasil só manual. Understat continua fora do ar.
+- Pergunta "24 h sem o PC, grátis": com a base inteira não existe opção grátis sem cartão; proposta = versão vitrine no
+  Streamlit Community Cloud (base reduzida publicada pelo PC) — ainda NÃO implementada (decisão do usuário).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
