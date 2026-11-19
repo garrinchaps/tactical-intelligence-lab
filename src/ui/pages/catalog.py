@@ -18,6 +18,7 @@ from src.data_hub.sync import ALL_SOURCES, run_sync
 from src.ui import charts
 from src.ui.components import comparison_table, empty_state, error_state, kpi, note, page_header, provenance_panel
 from src.ui.context import get_service, load_bundle
+from src.ui.gate import visitor_blocked as _vb
 
 TEMPLATES = Path("data/templates")
 
@@ -69,7 +70,7 @@ def _overview(reg: ProvenanceRegistry) -> None:
     chosen = a.multiselect("Fontes", ALL_SOURCES, default=ALL_SOURCES, format_func=lambda s: SOURCES[s].label if s in SOURCES else s)
     days = int(b.number_input("Dias para trás", min_value=1, max_value=30, value=3))
     prefetch = int(c2.number_input("Baixar eventos de N partidas", min_value=0, max_value=500, value=0))
-    if st.button("🔄 Sincronizar agora", type="primary"):
+    if st.button("🔄 Sincronizar agora", type="primary") and not _vb("A sincronização"):
         log, lines = st.empty(), []
 
         def say(msg):
@@ -120,7 +121,7 @@ def _yaml_catalog(reg: ProvenanceRegistry) -> None:
     nivel = c.selectbox("Nível", ["todos", *sorted(df["nivel_dado"].unique())] if not df.empty else ["todos"])
     res = cc.query(q, None if fonte == "todas" else fonte, None if nivel == "todos" else nivel)
     comparison_table(res.drop(columns=["times"], errors="ignore"), f"{len(res)} entradas.")
-    if st.button("Gravar catálogo no banco (tabela competition_catalog)"):
+    if st.button("Gravar catálogo no banco (tabela competition_catalog)") and not _vb("Gravar no banco"):
         st.success(f"{cc.sync_to_sqlite()} entradas gravadas.")
 
 
@@ -293,12 +294,12 @@ def _health_panel() -> None:
     with a:
         src = st.selectbox("Sincronizar uma fonte", ALL_SOURCES, key="hp_src",
                            format_func=lambda s: SOURCES[s].label if s in SOURCES else s)
-        if st.button("▶ Sincronizar em segundo plano", key="hp_go"):
+        if st.button("▶ Sincronizar em segundo plano", key="hp_go") and not _vb("A sincronização"):
             ok = health.start_job(f"fonte:{src}", lambda say: run_sync([src], 3, 0, service=svc, progress=say))
             st.toast("Sincronização iniciada." if ok else "Essa fonte já está sincronizando.")
     with b:
         lg = st.selectbox("Atualizar uma competição (ESPN)", list(LEAGUE_NAMES), format_func=LEAGUE_NAMES.get, key="hp_lg")
-        if st.button("▶ Atualizar competição", key="hp_lg_go"):
+        if st.button("▶ Atualizar competição", key="hp_lg_go") and not _vb("A atualização"):
             ok = health.start_job(f"competicao:{lg}", lambda say: svc.espn.sync_recent(leagues=[lg]))
             st.toast("Atualização iniciada." if ok else "Essa competição já está atualizando.")
     jobs = health.jobs()

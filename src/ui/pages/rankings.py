@@ -13,6 +13,7 @@ from src.ui.perf import timed as _perf_timed
 
 from src.scout import evaluation as EV
 from src.ui.components import hero, note, styled_dataframe
+from src.ui.gate import visitor_blocked as _vb
 
 EVALS = {
     "🏅 Melhores da temporada": ("temporada", "desempenho por 90 + uso (≥ 900 min e ≥ 35% dos minutos do time)"),
@@ -145,7 +146,7 @@ def render(_ctx=None) -> None:
                     "competição com mais estatísticas tivesse vantagem, a média da ‘completa’ ficaria bem acima.")
         st.caption(f"Gerado em {res.get('gerado', '—')} com {res.get('jogos', '—')} jogos em {res.get('segundos', '—')} s. "
                    "O processo de fundo refaz uma vez por dia.")
-    if st.button("🔄 Recalcular agora", key="rk_rebuild"):
+    if st.button("🔄 Recalcular agora", key="rk_rebuild") and not _vb("O recálculo"):
         from src.ui.context import get_service
 
         with st.spinner("Recalculando todas as avaliações…"):

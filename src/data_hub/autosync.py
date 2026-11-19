@@ -29,6 +29,8 @@ DAILY = ["espn_elencos", "statsbomb", "wyscout", "openplay", "openfootball", "br
 
 
 def enabled() -> bool:
+    if os.getenv("TIL_MODO_PUBLICO", "0").strip().lower() in ("1", "true", "sim", "yes"):
+        return False                                     # rodada 18: versão pública não baixa nada sozinha
     return os.getenv("AUTO_SYNC", "1").strip() not in ("0", "false", "False", "nao", "não")
 
 

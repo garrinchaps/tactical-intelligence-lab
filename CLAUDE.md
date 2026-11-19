@@ -459,6 +459,17 @@ Rodada 17 (19/11/2026, 438 testes verdes):
 - ✅ Plano completo de publicação 24 h idêntica ao app: `docs/PLANO_PUBLICACAO.md` (VPS + SQLite WAL + Litestream,
   worker como serviço, Caddy/Cloudflare, CI, monitoramento, licenças e 3 caminhos de abertura).
 
+Rodada 18 (19/11/2026, 445 testes verdes):
+- ✅ `python -m src.scout.evaluation` travava na base grande: a função tática comparava cada jogador com todos os
+  colegas (O(n²)). Agora os percentis são calculados de uma vez (`_strict_pct` + `_classify`, mesmo resultado, 60 mil
+  jogadores em ~0,5 s); a média ponderada do nível das ligas também ficou sem laço por grupo.
+- ✅ Publicação GRÁTIS (`docs/PLANO_PUBLICACAO.md` reescrito): Hugging Face cobra apps Docker desde 29/09/2026 e
+  Oracle/Google pedem cartão → plano = app no PC + Cloudflare Quick Tunnel (sem conta). `scripts/apresentar.ps1` pede
+  a senha (só na memória da janela), liga o app com `AUTO_SYNC=0`, abre o túnel e copia o link; `python -m
+  src.tools.apresentacao` confere tudo antes. `src/ui/gate.py`: acesso pelo túnel (cabeçalhos Cloudflare/proxy ou Host
+  externo) = visitante → senha `TIL_SENHA` (hash + compare_digest) e botões pesados bloqueados (`visitor_blocked`);
+  localhost entra direto. `TIL_MODO_PUBLICO=1` trata todos como visitantes e desliga a atualização automática.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

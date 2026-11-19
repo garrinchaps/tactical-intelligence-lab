@@ -290,6 +290,9 @@ def main() -> None:
     st.session_state["recent_match_ids"] = recent[:5]
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
+    from src.ui import gate                              # rodada 18: link público pede senha; no PC entra direto
+
+    gate.require()                                       # depois do menu: o visitante cai na tela que pediu
     nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3],
                    "scout": MAIN[4], "rankings": MAIN[5], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo

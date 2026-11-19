@@ -16,6 +16,7 @@ from src.machine_learning.danger_dataset import FEATURES
 from src.machine_learning.neural_net import NeuralNetwork
 from src.ui import charts
 from src.ui.components import comparison_table, empty_state, kpi, note, page_header, provenance_panel
+from src.ui.gate import visitor_blocked as _vb
 
 SAMPLE = Path("data/demo/danger_sample_wc2022.csv.gz")
 SAVED = Path("models/trained/danger_nn.npz")
@@ -168,7 +169,7 @@ def _speed_panel() -> None:
     if len(slow):
         st.warning("Lentas: " + ", ".join(slow["nome"].head(6)) + ". Se uma delas for sempre lenta (não só na 1ª vez), "
                    "me diga o nome que eu otimizo aquela parte.")
-    if st.button("🧹 Zerar medições", key="perf_reset"):
+    if st.button("🧹 Zerar medições", key="perf_reset") and not _vb("Zerar medições"):
         try:
             P.PATH.unlink()
         except OSError:
@@ -200,7 +201,7 @@ def _brain_panel() -> None:
          "o que o treino faz": "usa a régua nova automaticamente"},
     ])
     styled_dataframe(mods, hide_index=True, use_container_width=True)
-    if st.button("🧠 Treinar tudo agora", type="primary", use_container_width=True, key="brain_train_all"):
+    if st.button("🧠 Treinar tudo agora", type="primary", use_container_width=True, key="brain_train_all") and not _vb("O treino"):
         from src.ui.context import get_service
 
         box = st.empty()
@@ -255,7 +256,7 @@ def _lab_ai_panel() -> None:
     weak = h4.toggle("Usar rótulo automático", value=True, key="as_weak",
                      help="Perguntas que pedem um número reconhecível viram exemplos de treino sozinhas.")
     b1, b2 = st.columns(2)
-    if b1.button("🧠 Treinar a IA do Assistente", type="primary", use_container_width=True):
+    if b1.button("🧠 Treinar a IA do Assistente", type="primary", use_container_width=True) and not _vb("O treino"):
         with st.spinner("Treinando (descida do gradiente com parada antecipada)…"):
             r = TR.train(learning_rate=lr, l2=l2, epochs=ep, use_weak=weak)
         (st.success if r.get("promoted") else st.info)(
@@ -275,7 +276,7 @@ def _lab_ai_panel() -> None:
             st.caption("Acerto do 1º fato = nas perguntas de validação, o número que a IA põe em primeiro é o que a pergunta "
                        "pedia? É a métrica que mais se parece com 'a resposta veio certa'.")
         sel = Selector()
-    if b2.button("🎲 Busca automática de parâmetros (validação cruzada, 5 dobras)", use_container_width=True, key="as_auto"):
+    if b2.button("🎲 Busca automática de parâmetros (validação cruzada, 5 dobras)", use_container_width=True, key="as_auto") and not _vb("A busca de parâmetros"):
         with st.spinner("Testando 9 combinações de η e λ, cada uma em 5 dobras por pergunta…"):
             grid = TR.auto_search(use_weak=weak)
         if grid:
@@ -298,7 +299,7 @@ def _lab_ai_panel() -> None:
                           title=f"Curva do último treino (v{hv['version']:03d})", margin=dict(l=40, r=10, t=40, b=30))
         st.plotly_chart(fig, use_container_width=True, key="as_curve")
         st.caption(f"Diagnóstico: {TR.suggest(hv)['diagnostico']['texto']}")
-    if st.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True):
+    if st.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True) and not _vb("Refazer a régua"):
         from src.ui.context import get_service
 
         with st.spinner("Lendo as estatísticas dos jogos mais recentes…"):
@@ -413,9 +414,9 @@ def render(ctx=None) -> None:
                                help="Quantas sementes diferentes treinar de uma vez (vale para todos os botões). "
                                     "Cada tentativa é registrada e julgada sozinha.")
     c1, c2, c3 = st.columns([1, 1, 1])
-    exp_now = c1.button("🧪 Rodar experimentos", type="primary", use_container_width=True, disabled=not exp_pick)
-    train_now = c2.button("▶ Treinar com os hiperparâmetros acima", use_container_width=True)
-    search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", use_container_width=True)
+    exp_now = c1.button("🧪 Rodar experimentos", type="primary", use_container_width=True, disabled=not exp_pick) and not _vb("O treino")
+    train_now = c2.button("▶ Treinar com os hiperparâmetros acima", use_container_width=True) and not _vb("O treino")
+    search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", use_container_width=True) and not _vb("O treino")
     st.caption("O treino roda em segundo plano (processo separado): a tela não trava e você pode continuar usando o app. "
                "Pelo terminal também funciona: `python -m src.machine_learning.model_registry --treinar --experimentos B,A,C,D`")
     from src.machine_learning import train_job
@@ -443,7 +444,7 @@ def render(ctx=None) -> None:
             c1.markdown(f"**Treino:** {status} · {job.get('etapa', '')[:120]}")
             if job.get("status") == "rodando":
                 c2.button("🔄 Atualizar", key="nn_refresh", use_container_width=True)
-                if c3.button("⏹ Parar", key="nn_stop", use_container_width=True):
+                if c3.button("⏹ Parar", key="nn_stop", use_container_width=True) and not _vb("Parar o treino"):
                     train_job.stop()
                     st.rerun()
             for r in job.get("resultados") or []:
@@ -548,7 +549,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
             "ganho mínimo, AUC sem queda relevante e estabilidade no GroupKFold. A validação é reutilizada para selecionar "
             "versões; portanto, não deve ser chamada de teste externo final. Todas as tentativas ficam registradas.")
     with st.expander("📊 Curva de aprendizado: a rede melhora com mais partidas?"):
-        if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go"):
+        if st.button("Calcular a curva (treina 8 redes, ~10 s)", key="lc_go") and not _vb("Calcular a curva"):
             with st.spinner("Treinando com 25%, 50%, 75% e 100% das partidas de treino..."):
                 st.session_state["lc"] = reg.learning_curve(DangerModelRegistry.dataset())
         lc = st.session_state.get("lc")
@@ -639,7 +640,7 @@ def _benchmark() -> None:
             res = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             res = None
-    if st.button("Rodar a comparação agora (~1–2 min)", key="nn_bench"):
+    if st.button("Rodar a comparação agora (~1–2 min)", key="nn_bench") and not _vb("A comparação"):
         from src.machine_learning.benchmark import DEMO, OUT, run
 
         with st.spinner("Treinando 6 modelos nas mesmas dobras por partida..."):

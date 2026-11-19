@@ -366,7 +366,11 @@ def evaluate(players: pd.DataFrame, ages: Optional[Dict[str, float]] = None,
     base = d["temporada"].fillna(d["desempenho_90"].where(m >= 900))
     # geral entre ligas: o desempenho DENTRO da competição levado à régua de nível (estimativa declarada)
     d["geral_entre_ligas"] = (base * (0.45 + 0.55 * lvl)).round(1)
-    d["funcao"] = d.apply(_function, axis=1, df=d)
+    # Rodada 18: percentis da função calculados de uma vez (antes: cada jogador × todos os colegas → travava na base grande)
+    pre = pd.DataFrame({c: _strict_pct(d, c) for c in FUNC_COLS}, index=d.index)
+    recs = pre.to_dict("records")
+    d["funcao"] = [_classify(f, (lambda c, r=r: None if pd.isna(r.get(c)) else float(r[c])))
+                   for f, r in zip(d["family"], recs)]
     d["confianca_amostra"] = np.select([m >= 1800, m >= 900, m >= 450], ["alta", "média", "baixa"], "muito baixa")
     return d
 
@@ -386,15 +390,34 @@ def _avg(*xs):
     return sum(xs) / len(xs) if xs else None
 
 
+FUNC_COLS = ["chances_p90", "ft3_p90", "crs_p90", "def_adj", "duel_pct", "lbp_p90", "pass_pct", "xa_p90",
+             "goals_p90", "xg_p90", "tob_p90", "rec_p90", "drb_p90", "aer_pct", "clr_p90"]
+
+
+def _strict_pct(df: pd.DataFrame, col: str) -> pd.Series:
+    """Igual a `_p` para TODOS de uma vez: % dos colegas (mesma função e competição) com valor MENOR; vazio se < 8."""
+    if col not in df:
+        return pd.Series(np.nan, index=df.index)
+    v = pd.to_numeric(df[col], errors="coerce")
+    g = v.groupby([df["family"], df["comp"]])
+    n = g.transform("count")
+    r = g.rank(method="min")
+    return ((r - 1) / n * 100).where(n >= 8)
+
+
 def _function(row, df: pd.DataFrame) -> str:
-    """Função tática pelo PERFIL de ações (não pela posição cadastrada)."""
-    f = row.get("family")
+    """Função tática pelo PERFIL de ações (não pela posição cadastrada) — versão de uma linha só."""
+    return _classify(row.get("family"), lambda c: _p(df, row, c))
+
+
+def _classify(f, P) -> str:
+    """P(col) → percentil dentro da função (ou None)."""
     if f == "FB":
-        att, de = _avg(_p(df, row, "chances_p90"), _p(df, row, "ft3_p90"), _p(df, row, "crs_p90")), _avg(_p(df, row, "def_adj"), _p(df, row, "duel_pct"))
+        att, de = _avg(P("chances_p90"), P("ft3_p90"), P("crs_p90")), _avg(P("def_adj"), P("duel_pct"))
         if att is not None and de is not None:
             return "lateral construtor" if att - de > 15 else ("lateral defensivo" if de - att > 15 else "lateral equilibrado")
     if f in ("DM", "CM"):
-        de, org, cria = _avg(_p(df, row, "def_adj"), _p(df, row, "duel_pct")), _avg(_p(df, row, "lbp_p90"), _p(df, row, "pass_pct")), _avg(_p(df, row, "chances_p90"), _p(df, row, "xa_p90"), _p(df, row, "ft3_p90"))
+        de, org, cria = _avg(P("def_adj"), P("duel_pct")), _avg(P("lbp_p90"), P("pass_pct")), _avg(P("chances_p90"), P("xa_p90"), P("ft3_p90"))
         if de is not None and org is not None and de >= 60 and _avg(org, cria) >= 60:
             return "box-to-box"
         if de is not None and org is not None:
@@ -404,24 +427,24 @@ def _function(row, df: pd.DataFrame) -> str:
                 return "meia criador"
             return "organizador"
     if f == "ST":
-        fin, apo = _avg(_p(df, row, "goals_p90"), _p(df, row, "xg_p90"), _p(df, row, "tob_p90")), _avg(_p(df, row, "chances_p90"), _p(df, row, "xa_p90"), _p(df, row, "rec_p90"))
+        fin, apo = _avg(P("goals_p90"), P("xg_p90"), P("tob_p90")), _avg(P("chances_p90"), P("xa_p90"), P("rec_p90"))
         if fin is not None and apo is not None:
             return "atacante de área" if fin - apo > 12 else ("atacante de apoio" if apo - fin > 12 else "atacante completo")
     if f == "WIDE":
-        drb, fin, cri = _p(df, row, "drb_p90"), _avg(_p(df, row, "xg_p90"), _p(df, row, "goals_p90")), _avg(_p(df, row, "chances_p90"), _p(df, row, "xa_p90"))
+        drb, fin, cri = P("drb_p90"), _avg(P("xg_p90"), P("goals_p90")), _avg(P("chances_p90"), P("xa_p90"))
         best = max([(drb or 0, "ponta driblador"), (fin or 0, "ponta finalizador"), (cri or 0, "ponta criador")])
         if best[0] >= 55:
             return best[1]
     if f == "CB":
-        con, are = _avg(_p(df, row, "lbp_p90"), _p(df, row, "pass_pct")), _avg(_p(df, row, "aer_pct"), _p(df, row, "clr_p90"))
+        con, are = _avg(P("lbp_p90"), P("pass_pct")), _avg(P("aer_pct"), P("clr_p90"))
         if con is not None and are is not None:
             return "zagueiro construtor" if con - are > 12 else ("zagueiro de área" if are - con > 12 else "zagueiro completo")
     if f == "AM":
-        cri, che = _avg(_p(df, row, "chances_p90"), _p(df, row, "xa_p90")), _avg(_p(df, row, "xg_p90"), _p(df, row, "tob_p90"))
+        cri, che = _avg(P("chances_p90"), P("xa_p90")), _avg(P("xg_p90"), P("tob_p90"))
         if cri is not None and che is not None:
             return "meia criador" if cri >= che else "meia que chega na área"
     if f == "GK":
-        pas = _p(df, row, "pass_pct")
+        pas = P("pass_pct")
         return "goleiro que joga com os pés" if pas is not None and pas >= 70 else "goleiro de defesas"
     return FAMILY_PT.get(f, "função não identificada")
 
@@ -571,9 +594,9 @@ def league_model(db, years: int = 3, prior_weight: float = 15.0) -> pd.DataFrame
     from src.data_lake.ids import player_core
 
     d["core"] = d["player_name"].map(player_core)
-    d = d.groupby(["core", "comp"], as_index=False).apply(
-        lambda x: pd.Series({"rating": np.average(x["rating"], weights=x["mins"]), "mins": x["mins"].sum()}),
-        include_groups=False)
+    d = d.assign(_rm=d["rating"] * d["mins"]).groupby(["core", "comp"], as_index=False)[["_rm", "mins"]].sum()
+    d["rating"] = d["_rm"] / d["mins"]                    # média ponderada pelos minutos (sem laço por grupo)
+    d = d.drop(columns="_rm")
     comps = sorted(d["comp"].unique())
     prior = {c: prior_level(c) for c in comps}
     # prior em "pontos de nota": competição mais fraca infla a nota (~0,4 por 0,1 de nível abaixo de 0,8)
