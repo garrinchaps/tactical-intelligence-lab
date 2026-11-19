@@ -119,6 +119,7 @@ search_render = _lazy_page("search_all")
 compare_render = _lazy_page("compare", "render_page")
 squad_render = _lazy_page("squad")
 scout_render = _lazy_page("scout")
+rankings_render = _lazy_page("rankings")
 games_render = _lazy_page("games")
 clubs_render = _lazy_page("clubs")
 players_render = _lazy_page("players_search")
@@ -138,6 +139,7 @@ MAIN = [
             url_path="comparar"),
     st.Page(standalone(squad_render), title="Escalação", icon="📋", url_path="escalacao"),
     st.Page(standalone(scout_render), title="Scout", icon="🎯", url_path="scout"),
+    st.Page(standalone(rankings_render), title="Rankings", icon="🏆", url_path="rankings"),
 ]
 VIEWS = {   # telas abertas pelo clique (fora do menu)
     "jogo": st.Page(_named(lambda: games_render(current_context), "page_jogo"), title="Jogo", icon="🏟️", url_path="jogo"),
@@ -289,7 +291,7 @@ def main() -> None:
     st.session_state.setdefault("chat_history", [])
     page = st.navigation(MAIN + list(VIEWS.values()) + BACKSTAGE, position="hidden")
     nav.register({"buscar": MAIN[1], "assistente": MAIN[0], "comparar": MAIN[2], "escalacao": MAIN[3],
-                   "scout": MAIN[4], **VIEWS})
+                   "scout": MAIN[4], "rankings": MAIN[5], **VIEWS})
     goto = st.session_state.pop("goto", None)            # pedidos antigos de "abrir em Jogos" viram a tela do jogo
     if goto:
         if goto == "jogos":
@@ -299,7 +301,7 @@ def main() -> None:
     focused = getattr(page, "url_path", "") in {p.url_path for p in VIEWS.values()}
     if not focused:                                      # página do menu = ponto de partida do "← Voltar"
         key = {"assistente": "assistente", "buscar": "buscar", "comparar": "comparar",
-               "escalacao": "escalacao", "scout": "scout"}.get(getattr(page, "url_path", ""))
+               "escalacao": "escalacao", "scout": "scout", "rankings": "rankings"}.get(getattr(page, "url_path", ""))
         if key and nav.current().get("kind") != key:
             st.session_state[nav.VIEW] = {"kind": key, **({"q": st.session_state.get("_last_q", "")} if key == "buscar" else {})}
     top_bar(focused)

@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v5.pkl")    # v5: homônimos pelo clube, construção do zagueiro, sem nota 48
-META_PATH = Path("data/processed/scout_universe_v5.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+SNAP_PATH = Path("data/processed/scout_universe_v6.pkl")    # v6: fama de mercado × minutos, 0 min no ano sem nota
+META_PATH = Path("data/processed/scout_universe_v6.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 

@@ -179,6 +179,13 @@ def _baselines_loop(db) -> None:
                 db.ensure_speed_indexes()
         except Exception:
             pass
+        try:                                         # rodada 16: avaliações de jogadores (rankings), 1x por dia
+            from src.scout import evaluation as EV
+
+            if not EV.OUT_PATH.exists() or time.time() - EV.OUT_PATH.stat().st_mtime > 86400:
+                EV.save(EV.build(db))
+        except Exception:
+            pass
         try:                                         # rodada 13: régua dos confrontos do pré-jogo, 1x por dia
             from src.squad import matchups as MU
 

@@ -66,6 +66,18 @@ _COUNTRY_ALIASES = {
 }
 
 
+# rodada 16: lista ampla de seleções — antes só ~20 países eram reconhecidos e o último jogo pela seleção virava
+# "clube atual" (Tzolis "Greece", Son "Korea Republic", Irankunda "Australia")
+# rodada 16: lista ampla de seleções — antes só ~20 países eram reconhecidos e o último jogo pela seleção virava
+# "clube atual" (Tzolis "Greece", Son "Korea Republic", Irankunda "Australia")
+_MORE_COUNTRIES = ['afghanistan', 'africa do sul', 'albania', 'alemanha', 'algeria', 'andorra', 'angola', 'arabia saudita', 'argelia', 'argentina', 'armenia', 'aruba', 'australia', 'austria', 'azerbaijan', 'bahrain', 'bangladesh', 'belarus', 'belgica', 'belgium', 'belize', 'benin', 'bermuda', 'bhutan', 'bolivia', 'bosnia and herzegovina', 'bosnia-herzegovina', 'botswana', 'brazil', 'bulgaria', 'burkina faso', 'burundi', 'cabo verde', 'camaroes', 'cambodia', 'cameroon', 'canada', 'cape verde', 'catar', 'central african republic', 'chad', 'chile', 'china', 'china pr', 'colombia', 'comoros', 'congo', 'coreia do sul', 'costa do marfim', 'costa rica', "cote d'ivoire", 'croacia', 'croatia', 'cuba', 'curacao', 'cyprus', 'czech republic', 'czechia', 'denmark', 'dinamarca', 'djibouti', 'dominican republic', 'dr congo', 'ecuador', 'egito', 'egypt', 'el salvador', 'england', 'equador', 'equatorial guinea', 'eritrea', 'escocia', 'eslovaquia', 'eslovenia', 'estados unidos', 'estonia', 'eswatini', 'ethiopia', 'faroe islands', 'fiji', 'finland', 'franca', 'france', 'gabon', 'gambia', 'gana', 'georgia', 'germany', 'ghana', 'gibraltar', 'grecia', 'greece', 'grenada', 'guatemala', 'guinea', 'guinea-bissau', 'guyana', 'haiti', 'holanda', 'honduras', 'hong kong', 'hungary', 'hungria', 'iceland', 'india', 'indonesia', 'ir iran', 'ira', 'iran', 'iraq', 'iraque', 'ireland', 'irlanda', 'israel', 'italia', 'italy', 'ivory coast', 'jamaica', 'japan', 'japao', 'jordan', 'kazakhstan', 'kenya', 'korea dpr', 'korea republic', 'korea, south', 'kosovo', 'kuwait', 'kyrgyzstan', 'laos', 'latvia', 'lebanon', 'lesotho', 'liberia', 'libya', 'liechtenstein', 'lithuania', 'luxembourg', 'madagascar', 'malawi', 'malaysia', 'maldives', 'mali', 'malta', 'marrocos', 'mauritania', 'mauritius', 'mexico', 'moldova', 'mongolia', 'montenegro', 'morocco', 'mozambique', 'myanmar', 'namibia', 'nepal', 'netherlands', 'new zealand', 'nicaragua', 'niger', 'nigeria', 'north korea', 'north macedonia', 'northern ireland', 'noruega', 'norway', 'nova zelandia', 'oman', 'pais de gales', 'paises baixos', 'pakistan', 'palestine', 'panama', 'papua new guinea', 'paraguai', 'paraguay', 'peru', 'philippines', 'poland', 'polonia', 'portugal', 'puerto rico', 'qatar', 'republic of ireland', 'republica tcheca', 'romania', 'romenia', 'russia', 'rwanda', 'san marino', 'saudi arabia', 'scotland', 'senegal', 'serbia', 'servia', 'seychelles', 'sierra leone', 'singapore', 'slovakia', 'slovenia', 'solomon islands', 'somalia', 'south africa', 'south korea', 'south sudan', 'spain', 'sri lanka', 'sudan', 'suecia', 'suica', 'suriname', 'sweden', 'switzerland', 'syria', 'tahiti', 'tajikistan', 'tanzania', 'tchequia', 'thailand', 'the gambia', 'togo', 'trinidad and tobago', 'tunisia', 'turkey', 'turkiye', 'turkmenistan', 'turquia', 'uae', 'ucrania', 'uganda', 'ukraine', 'united arab emirates', 'united states', 'uruguai', 'uruguay', 'usa', 'uzbekistan', 'vanuatu', 'venezuela', 'vietnam', 'wales', 'yemen', 'zambia', 'zimbabwe']
+_COUNTRY_SYNONYMS = {'korea republic': 'south korea', 'korea, south': 'south korea', 'ir iran': 'iran', 'china pr': 'china', 'turkiye': 'turkey', 'czechia': 'czech republic', 'the gambia': 'gambia', 'ivory coast': "cote d'ivoire", 'cabo verde': 'cape verde', 'bosnia and herzegovina': 'bosnia-herzegovina', 'usa': 'united states', 'uae': 'united arab emirates', 'republic of ireland': 'ireland', 'korea dpr': 'north korea', 'grecia': 'greece', 'alemanha': 'germany', 'franca': 'france', 'italia': 'italy', 'holanda': 'netherlands', 'paises baixos': 'netherlands', 'belgica': 'belgium', 'croacia': 'croatia', 'suica': 'switzerland', 'suecia': 'sweden', 'noruega': 'norway', 'dinamarca': 'denmark', 'polonia': 'poland', 'ucrania': 'ukraine', 'japao': 'japan', 'coreia do sul': 'south korea', 'estados unidos': 'united states', 'marrocos': 'morocco', 'argelia': 'algeria', 'egito': 'egypt', 'gana': 'ghana', 'camaroes': 'cameroon', 'costa do marfim': "cote d'ivoire", 'arabia saudita': 'saudi arabia', 'catar': 'qatar', 'equador': 'ecuador', 'paraguai': 'paraguay', 'uruguai': 'uruguay', 'escocia': 'scotland', 'pais de gales': 'wales', 'irlanda': 'ireland', 'hungria': 'hungary', 'republica tcheca': 'czech republic', 'tchequia': 'czech republic', 'eslovaquia': 'slovakia', 'eslovenia': 'slovenia', 'servia': 'serbia', 'romenia': 'romania', 'turquia': 'turkey', 'ira': 'iran', 'iraque': 'iraq', 'nova zelandia': 'new zealand', 'africa do sul': 'south africa'}
+for _n in _MORE_COUNTRIES:
+    _COUNTRY_ALIASES.setdefault(_n, _COUNTRY_SYNONYMS.get(_n, _n))
+for _n in ["u20", "u21", "u23", "u17", "sub-20", "sub-17", "sub-23", "olympic"]:
+    pass
+
+
 def _country_key(value: Any) -> str:
     import unicodedata
 
@@ -73,7 +85,13 @@ def _country_key(value: Any) -> str:
         return ""
     raw = unicodedata.normalize("NFKD", str(value).casefold())
     token = " ".join("".join(ch for ch in raw if not unicodedata.combining(ch)).split())
-    return _COUNTRY_ALIASES.get(token, "")
+    hit = _COUNTRY_ALIASES.get(token, "")
+    if not hit:                                   # seleções de base: "Brazil U20", "Brasil Sub-20", "Greece U21"
+        import re as _re
+
+        base = _re.sub(r"\s*(u-?\d{2}|sub-?\d{2}|olympic|olimpic[oa]|women|feminino)$", "", token).strip()
+        hit = _COUNTRY_ALIASES.get(base, "") if base != token else ""
+    return hit
 
 
 def national_team_key(team_name: str) -> str:

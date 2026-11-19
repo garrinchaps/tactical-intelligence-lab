@@ -429,6 +429,23 @@ Rodada 15 (19/11/2026, 429 testes verdes):
   promoção exige perder menos E não acertar menos o 1º fato, validação cruzada em 5 dobras por pergunta
   (`cross_validate`) e busca automática η × λ (`auto_search`) na tela de treino.
 
+Rodada 16 (19/11/2026, 435 testes verdes) — avaliação de jogadores refeita (diagnóstico em docs/DIAGNOSTICO_AVALIACAO.md):
+- ✅ Etapa 0: seleções reconhecidas (lista ampla PT/EN + "U20/Sub-20"; Monaco fica clube) — Tzolis/Son/Irankunda não têm
+  mais a seleção como "clube atual". `python -m src.tools.cobertura_jogadores` mede a cobertura POR JOGADOR por competição.
+- ✅ Etapas 1–5 (`src/scout/evaluation.py`, CLI `python -m src.scout.evaluation`, refeito 1×/dia pelo worker →
+  `data/processed/evaluations.parquet`): jogo a jogo (titular × reserva pela escalação, posição pela escalação → cadastro,
+  adversário pelo PageRank da competição, casa/fora, posse do time); uso (jogos, minutos, titularidades, entradas, % dos
+  minutos do time); por 90 com ações defensivas ajustadas pela posse; fatia do xG+xA do time; percentil DENTRO da
+  função e da competição (métrica ausente = não avaliada); avaliações separadas — desempenho/90, temporada (≥ 900 min e
+  ≥ 35% dos minutos), regularidade, impacto, contra fortes, potencial, revelação, custo-benefício, geral entre ligas
+  (nível da competição ESTIMADO: tabela prévia + jogadores que atuaram em duas competições); função tática pelo perfil;
+  ficha explicável (qualidades, limitações, contexto, onde rende, não avaliado/não observável); validação (estabilidade
+  entre turnos, zero sem minutos, zero reservas, viés por cobertura). Tela nova "🏆 Rankings" no menu.
+- ✅ Nota antiga do Scout (mantida como avaliação geral): 0 min no último ano = sem nota; fama de mercado × minutos do ano
+  (peso cheio só com 1.350+ min); fotografia v6.
+- Pendente: modelo aprendido de transferência entre ligas (hoje: estimativa prévia + pares), custo-benefício e idade só
+  para quem está no cadastro do Transfermarkt sem homônimo.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

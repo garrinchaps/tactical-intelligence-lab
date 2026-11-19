@@ -968,11 +968,17 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
             # preenchimento) e dezenas de jovens apareciam com a mesma nota. Agora fica sem nota (lacuna é lacuna).
             if mins < 90 and rep is None:
                 continue
+            # rodada 16: 0 minuto no ÚLTIMO ANO = fora da avaliação (Adryelson, Payet, Hübers apareciam com 74–78)
+            if m12 is not None and m12 <= 0:
+                continue
             lvl100 = 100 * lvl if lvl is not None else 45.0
             # rodada 13: jovem já muito valorizado na função (topo do mercado aos ≤ 23) — o mercado enxerga seleção,
             # liderança e projeção que as estatísticas abertas não mostram (ex.: Cubarsí); pesa mais a reputação
             age_i = _num(d.at[row_idx, "idade"])
             w_rep = .45 if (rep is not None and rep >= 85 and age_i is not None and age_i <= 23) else .3
+            # rodada 16: a fama de mercado pesa na proporção dos minutos recentes (Darwin com 376 min, Messi com 335 min
+            # e Maddison com 229 min ficavam no topo pela reputação). Com 1.350+ min no ano vale o peso cheio.
+            w_rep *= min(1.0, (m12 or 0) / 1350.0)
             q = (.9 - w_rep) * perf + w_rep * (rep if rep is not None else lvl100) + .1 * lvl100
             d.at[row_idx, "qualidade"] = round(q, 1)
             d.at[row_idx, "confianca_pct"] = round(confidence * 100)

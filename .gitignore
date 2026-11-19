@@ -65,3 +65,4 @@ data/processed/scout_universe*
 data/processed/lab_ai_reference.json
 data/ui_active
 data/processed/player_index.*
+data/processed/evaluations.*

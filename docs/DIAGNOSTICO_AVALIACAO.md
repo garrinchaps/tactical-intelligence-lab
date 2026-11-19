@@ -194,3 +194,16 @@ atual; nada removido (rodar a suíte inteira).
 
 **Interface/velocidade (em paralelo):** depois das etapas 0–2, padronizar o visual do Scout no estilo do pré-jogo
 (cartões, campinho), ranking com abas por avaliação e ficha do jogador em uma página.
+
+---
+
+## 5. Estado da implementação (rodada 16)
+
+| etapa | situação |
+|---|---|
+| 0 — dados | seleções corrigidas; ferramenta de cobertura por jogador; download das ligas depende de rodar os comandos no PC |
+| 1 — ficha de uso | ✅ jogos, minutos, titularidades, entradas, % dos minutos do time |
+| 2 — avaliações separadas | ✅ 9 rankings + filtro por competição (Série A/B/C separadas quando houver números por jogador) |
+| 3 — função e contexto | ✅ função pelo perfil; ações defensivas ajustadas pela posse; fatia da produção do time |
+| 4 — adversários e ligas | ✅ contra fortes/fracos pelo PageRank; nível da liga = estimativa + pares (modelo aprendido fica para quando houver mais pares) |
+| 5 — ficha e validação | ✅ ficha explicável na tela 🏆 Rankings; painel de validação |
