@@ -66,6 +66,29 @@ def _audit_panel(h) -> None:
             st.caption(f"Gemini indisponível nesta resposta: {h['llm_error']}")
 
 
+@st.fragment
+def _feedback_box(learning_id: str, kind: str, question: str) -> None:
+    """Rodada 21: o 👍/👎 refaz só este pedaço (antes recarregava a conversa inteira)."""
+    from src.intelligence.learning_hub import record_feedback
+
+    flag = f"_as_voted_{learning_id}"
+    if st.session_state.get(flag):
+        st.caption("✅ Avaliação registrada — vira exemplo de treino da IA (Bastidores › 🎓 Treinar a IA).")
+        return
+    st.caption("Avalie: o 👍/👎 vira exemplo de treino da IA do laboratório (Bastidores › 🎓 Treinar a IA).")
+    vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
+    if vote is not None:
+        record_feedback(learning_id, vote)
+        st.session_state[flag] = True
+        try:                                           # rodada 13: o mesmo voto treina o cérebro único do laboratório
+            from src.intelligence import lab_brain as LB
+
+            LB.feedback("assistente", kind, bool(vote), {"pergunta": question})
+        except Exception:
+            pass
+        st.rerun(scope="fragment")
+
+
 def _answer(question: str, current_context, use_llm: bool):
     from src.intelligence.match_locator import locate
     from src.ui.context import analyzable_only, cached_catalog, get_service
@@ -261,18 +284,8 @@ def render(current_context, match_bar) -> None:
             learning_id = h.get("learning_id")
             if learning_id:
                 if learning_id not in reviewed:
-                    st.caption("Avalie: o 👍/👎 vira exemplo de treino da IA do laboratório (Bastidores → 🧠 Treinar).")
-                    vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
-                    if vote is not None:
-                        record_feedback(learning_id, vote)
-                        try:                           # rodada 13: o mesmo voto treina o cérebro único do laboratório
-                            from src.intelligence import lab_brain as LB
-
-                            LB.feedback("assistente", str(h.get("engine") or h.get("intent") or "resposta")[:60],
-                                        bool(vote), {"pergunta": str(h.get("question") or "")[:200]})
-                        except Exception:
-                            pass
-                        st.rerun()
+                    _feedback_box(learning_id, str(h.get("engine") or h.get("intent") or "resposta")[:60],
+                                  str(h.get("question") or h.get("q") or "")[:200])
                 else:
                     st.caption("Feedback registrado para revisão.")
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "

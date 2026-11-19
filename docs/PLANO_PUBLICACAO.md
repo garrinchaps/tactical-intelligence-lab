@@ -181,6 +181,32 @@ derivadas (notas, rankings, análises) ou contratar dados — decisão para depo
 - **Limite honesto:** análise NUNCA aberta antes (um time novo, um jogo novo) ainda leva o tempo do cálculo no PC
   (segundos). Por isso o ensaio importa: abra no PC, antes, exatamente o que vai mostrar.
 
+## 6.55 Link FIXO e contas (rodada 21)
+
+**Link que não muda (grátis, sem cartão):**
+- **Tailscale Funnel** (recomendado): instale (`winget install --id Tailscale.Tailscale`), entre com uma conta grátis
+  (Google/Microsoft/GitHub), no painel da Tailscale ligue **HTTPS** e **Funnel** (Access controls → Funnel) e pronto:
+  o link é `https://NOME-DO-PC.xxxx.ts.net` — sempre o mesmo. Plano pessoal grátis, uso não comercial, com limite de
+  banda (de sobra para professor e amigos).
+- **ngrok** (alternativa): `winget install --id Ngrok.Ngrok`, crie conta grátis em ngrok.com e rode uma vez
+  `ngrok config add-authtoken SEU_TOKEN` (o token fica na configuração do ngrok, não no projeto). A conta grátis tem um
+  domínio fixo `algo.ngrok-free.app`; quem abre vê uma página de aviso do ngrok na primeira vez ("Visit Site").
+- O script escolhe sozinho: Tailscale → ngrok → Cloudflare (esta muda o link a cada vez).
+
+**Contas (cada um com a sua):** o script pede um **código de convite** (só na memória da janela). Quem abre o link cria
+a própria conta (nome, e-mail, senha de 8+ caracteres) usando esse código — ou entra com o **Google**, se configurado.
+A senha é guardada só como hash scrypt em `data/contas.db` (fora do Git); "lembrar neste aparelho" por 30 dias com
+cookie assinado. Em **Bastidores › 👥 Contas** você vê nome, e-mail, como entra, quando criou, último acesso e quantos
+acessos — e pode bloquear ou apagar. No PC você é o dono; pelo link, entre com o e-mail passado em `-Dono`.
+
+**Entrar com Google (opcional, grátis):**
+1. `pip install Authlib`
+2. Google Cloud Console → APIs e serviços → Credenciais → Criar "ID do cliente OAuth" (aplicativo da Web). Em
+   "URIs de redirecionamento autorizados" coloque `https://SEU-LINK-FIXO/oauth2callback`. Tela de consentimento em modo
+   "Teste" com os e-mails convidados (ou publicada).
+3. `python -m src.tools.configurar_login` — pede o link fixo, o ID e o segredo (sem mostrar na tela) e grava
+   `.streamlit/secrets.toml` (fora do Git).
+
 ## 6.6 "E sem o meu PC ligado, 24 h, de graça?"
 
 Resposta honesta: **com a base inteira (11,4 GB) e tudo funcionando igual, não existe opção grátis sem cartão hoje.**

@@ -363,21 +363,33 @@ def _overall_explainer():
     with st.expander("ℹ️ Como a nota (overall 0–100) é feita" + (f" — {rep['resumo']}" if rep else ""), expanded=False):
         w = (rep or {}).get("pesos") or O.DEFAULT_WEIGHTS
         st.markdown("\n".join([
-            f"- **Reputação ajustada pela idade ({w['wR']:.0%})** — valor de mercado (ou 80% do pico de 3 anos), corrigido "
-            "pela idade: o veterano perde valor pela idade, não pela bola; o prêmio de projeção do jovem vai para o "
-            "**teto**, não para a nota de hoje. Pesa metade para quem jogou pouco no ano.",
-            f"- **Desempenho na função ({w['wP']:.0%})** — números por 90 da posição (encolhidos pelos minutos) levados ao "
-            "nível da liga, + nota dos Rankings + nota externa (quando há).",
-            f"- **Nível da liga e do clube ({w['wL']:.0%})**.",
-            "- **Escala tipo FC por posição**: mediana ≈ 63, top 1% ≈ 86+, os melhores de cada posição 89–94 "
-            "(teto: atacante 94 · ponta 93 · meia/volante/zagueiro 92 · goleiro 91 · lateral 90).",
-            "- **Calibração**: os pesos são escolhidos para colocar os craques de referência no topo da posição, sem "
-            "perder a ligação com o desempenho de quem joga muito (correlação mínima 0,55) — para não ser injusto com quem "
-            "rende e vale pouco no mercado."]))
+            f"- **Reputação ajustada pela idade ({w.get('wR', 0):.0%})** — valor de mercado (ou 80% do pico de 3 anos), "
+            "corrigido pela idade; vale bem menos para quem jogou pouco no ano.",
+            f"- **Desempenho na função ({w.get('wP', 0):.0%})** — números por 90 da posição (encolhidos pelos minutos) "
+            "levados ao nível da liga, + nota dos Rankings + nota externa.",
+            f"- **Nota da FotMob ajustada pela liga ({w.get('wT', 0):.0%})** — média dos últimos 12 meses (450+ min).",
+            f"- **Nível da liga e do clube ({w.get('wL', 0):.0%})**.",
+            "- **Disponibilidade**: tudo é encolhido pelos minutos do ano (1.800 min = régua cheia) — quem jogou pouco não "
+            "chega ao topo, por melhor que seja o nome.",
+            "- **Escala pela colocação no mundo**: só ~10 jogadores passam de 90, ~40 de 87, ~80 de 85, ~400 de 80; "
+            "mediana ≈ 62. As posições são padronizadas (competem em pé de igualdade) e têm teto (lateral ≤ 90, goleiro ≤ 91).",
+            "- **Calibração**: os pesos são escolhidos para pôr os craques de referência no alto e respeitar os TETOS que "
+            "você apontou (ex.: Maddison, Isak, Gnabry, Ekitiké ≤ 85; Lacroix ≤ 87), sem perder a ligação com o desempenho."]))
+        if rep and rep.get("distribuicao"):
+            d = rep["distribuicao"]
+            st.caption(f"No universo atual: {d.get('90+')} jogadores com 90+ · {d.get('87+')} com 87+ · {d.get('85+')} com "
+                       f"85+ · {d.get('80+')} com 80+ · mediana {d.get('mediana')}.")
+        if rep and rep.get("tetos"):
+            tt = pd.DataFrame(rep["tetos"]).rename(columns={"craque": "Jogador", "overall": "Overall", "teto": "Teto",
+                                                             "minutos_12m": "Min. 12 meses"})
+            st.markdown("**Tetos de referência**")
+            styled_dataframe(tt[[c for c in ("Jogador", "Overall", "Teto", "Min. 12 meses") if c in tt]],
+                             hide_index=True, use_container_width=True)
         if rep and rep.get("craques"):
             t = pd.DataFrame(rep["craques"]).rename(columns={"craque": "Craque", "posicao": "Posição", "overall": "Overall",
-                                                              "percentil_na_posicao": "Percentil na posição"})
-            styled_dataframe(t[["Craque", "Posição", "Overall", "Percentil na posição"]], hide_index=True,
+                                                              "minutos_12m": "Min. 12 meses"})
+            st.markdown("**Craques de referência**")
+            styled_dataframe(t[[c for c in ("Craque", "Posição", "Overall", "Min. 12 meses") if c in t]], hide_index=True,
                              use_container_width=True)
             if rep.get("nao_encontrados"):
                 st.caption("Fora do universo agora (sem cadastro ou sem jogos recentes na base): "
@@ -671,25 +683,10 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
              on_click=_add_player, args=(player, plan_key))
     if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
         open_view("jogador", name=name, core=player.get("_core"))
-    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões
-    up, down = player.get("votos_scout") or (0, 0)
-    v1, v2 = st.columns([1, 3])
-    with v1:
-        vote = st.feedback("thumbs", key=f"scout_vote_{_slug(team)}_{_slug(name)}_{idx}")
-    v2.caption(f"Boa sugestão? Seu voto ajusta a ordem das próximas listas (não adiciona nem descarta)."
-               + (f" Votos até aqui: 👍 {up} · 👎 {down}." if (up or down) else ""))
-    if vote is not None and not st.session_state.get(f"_voted_{team}_{name}_{idx}"):
-        st.session_state[f"_voted_{team}_{name}_{idx}"] = True
-        from src.ui.context import get_service
-
-        E.record_vote(get_service().db, team, name, bool(vote))
-        try:
-            from src.intelligence import lab_brain as LB
-
-            LB.feedback("scout", str(player.get("papel_alvo") or player.get("papel") or "sugestao"), bool(vote),
-                        {"jogador": name, "clube": team})
-        except Exception:
-            pass
+    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
+    # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
+    _vote_box(team, name, idx, player.get("votos_scout") or (0, 0),
+              str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
     with st.expander("Descartar e recalcular"):
@@ -707,6 +704,31 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
                 rejected.append(name)
             st.rerun()
 
+
+
+@st.fragment
+def _vote_box(team, name, idx, votes, role):
+    up, down = votes
+    v1, v2 = st.columns([1, 3])
+    with v1:
+        vote = st.feedback("thumbs", key=f"scout_vote_{_slug(team)}_{_slug(name)}_{idx}")
+    flag = f"_voted_{team}_{name}_{idx}"
+    if vote is not None and not st.session_state.get(flag):
+        st.session_state[flag] = True
+        from src.ui.context import get_service
+
+        E.record_vote(get_service().db, team, name, bool(vote))
+        try:
+            from src.intelligence import lab_brain as LB
+
+            LB.feedback("scout", role, bool(vote), {"jogador": name, "clube": team})
+        except Exception:
+            pass
+    if st.session_state.get(flag):
+        v2.caption("✅ Voto registrado — a ordem das próximas listas já considera.")
+    else:
+        v2.caption("Boa sugestão? Seu voto ajusta a ordem das próximas listas (não adiciona nem descarta)."
+                   + (f" Votos até aqui: 👍 {up} · 👎 {down}." if (up or down) else ""))
 
 
 def _pitch_figure(xi, title):
@@ -918,6 +940,18 @@ def render(_ctx=None):
         used = E.roles_used(service.db, aliases) or {"GK","CB","LB","RB","DM","CM","AM","LW","RW","ST"}
         needs = [{"papel": r, "urgencia": 55, "motivo": "profundidade posicional reduzida"}
                  for r in sorted(used) if int(counts.get(r, 0)) < 2]
+    # rodada 21: a IA sugere para as carências OU para qualquer posição (reforço/concorrência), à escolha do usuário
+    scope = st.segmented_control("A IA sugere para", ["Carências do elenco", "Todas as posições", "Escolher posições"],
+                                 default="Carências do elenco", key="scout_need_scope") or "Carências do elenco"
+    urg = {n.get("papel"): float(n.get("urgencia") or 40) for n in needs}
+    if scope == "Todas as posições":
+        needs = [{"papel": r, "urgencia": urg.get(r, 40),
+                  "motivo": next((n.get("motivo") for n in needs if n.get("papel") == r), "reforço/concorrência na posição")}
+                 for r in E.ROLE_LABELS if r in ("GK", "CB", "LB", "RB", "DM", "CM", "AM", "LW", "RW", "ST")]
+    elif scope == "Escolher posições":
+        picked = st.multiselect("Posições", list(E.ROLE_LABELS), default=[n.get("papel") for n in needs][:2],
+                                format_func=_role, key="scout_need_pick")
+        needs = [{"papel": r, "urgencia": urg.get(r, 50), "motivo": "posição escolhida por você"} for r in picked]
     with st.spinner("Classificando qualidade, realismo, encaixe e sinergia..."):
         ranked = _rank_candidates(version, team, country, competition, next_season,
                                   tuple(rejected_for_run), feedback_reason,
@@ -938,400 +972,405 @@ def render(_ctx=None):
                     + html.escape(", ".join(str(p.get("nome")) for p in plan_now)) + '</div>', unsafe_allow_html=True)
         pb.button("Ver planejamento →", key="scout_go_plan", use_container_width=True,
                   on_click=lambda: st.session_state.__setitem__("scout_tabs", "Planejamento"))
-    tabs = st.tabs(tab_names, key="scout_tabs", default="IA · Top 5")
+    tabs = st.tabs(tab_names, key="scout_tabs", default="IA · Top 5", on_change="rerun")
     with tabs[0]:
-        st.markdown("#### Cinco nomes priorizados")
-        if feedback.get("amostra"):
-            st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
-        st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
-        if ranked.empty:
-            empty_state("Ainda não há candidatos suficientes",
-                "Sincronize jogadores/valores do Transfermarkt e estatísticas individuais. A busca manual continua disponível.", "🎯")
-        else:
-            for idx, row in ranked.head(5).iterrows():
-                _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
-            st.markdown("#### Três melhores por posição")
-            # rodada 10: TODAS as posições (não só as carentes) — a IA ranqueia sob demanda a posição escolhida
-            need_roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
-            roles = need_roles + [r for r in E.ROLE_LABELS if r not in need_roles]
-            # rodada 11: tudo num formulário — só recalcula ao clicar "Aplicar filtros" (antes cada mexida recalculava)
-            all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
-            nm = financial.get("nat_market") or {}
-            aff = {n: nm.get(n) or E._affinity(n, country) for n in all_nat}
-            nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
-            with st.form("scout_top3_form", border=False):
-                role = st.selectbox("Posição", roles, key="scout_top3_role",
-                                    format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
-                fa, fb, fc = st.columns(3)
-                age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
-                quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
-                maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
-                nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
-                                      format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
-                st.form_submit_button("🔎 Aplicar filtros", type="primary")
-            if False:
-                base_rank = ranked
+        if tabs[0].open is not False:          # rodada 21: só a aba aberta é montada
+            st.markdown("#### Cinco nomes priorizados")
+            if feedback.get("amostra"):
+                st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
+            st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
+            if ranked.empty:
+                empty_state("Ainda não há candidatos suficientes",
+                    "Sincronize jogadores/valores do Transfermarkt e estatísticas individuais. A busca manual continua disponível.", "🎯")
             else:
-                # rodada 11: sempre só esta posição — no ranking geral o mesmo atleta fica na posição em que pontua mais
-                # (um lateral virava "ala"/"ponta") e a lista desta posição chegava vazia
-                urg = next((float(n.get("urgencia") or 40) for n in needs if n.get("papel") == role), 40)
-                with st.spinner(f"A IA está garimpando {_role(role).lower()}s…"):
-                    base_rank = _rank_candidates(version, team, country, competition, next_season,
-                                                 tuple(rejected_for_run), feedback_reason, pool,
-                                                 [{"papel": role, "urgencia": urg,
-                                                   "motivo": next((n.get("motivo") for n in needs if n.get("papel") == role),
-                                                                  "posição escolhida por você (reforço/concorrência)")}],
-                                                 financial, roster, needs_key=("top3", role))
-            base_rank = E.apply_votes(_not_ours(base_rank, team, version, roster), votes)
-            filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
-            if not filt3.empty:
-                ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
-                filt3 = filt3[ages.isna() | ages.between(*age_band)]
-                filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
-                filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
-            if nation != "Todas":
-                st.caption(f"Contexto: {aff[nation][1]}. Exceções existem, mas a IA pesa a adaptação no índice de realismo.")
-                filt3 = filt3[filt3["nacionalidade"].astype(str) == nation] if not filt3.empty else filt3
-            for idx, row in filt3.head(3).iterrows():
-                _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
-            if filt3.empty:
-                st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
-    with tabs[1]:
-        quality = pd.to_numeric(roster.get("qualidade"), errors="coerce").mean() if not roster.empty else np.nan
-        age = pd.to_numeric(roster.get("idade"), errors="coerce").mean() if not roster.empty else np.nan
-        k = st.columns(5)
-        k[0].metric("Jogadores", len(roster))
-        k[1].metric("Qualidade média", f"{quality:.0f}/100" if pd.notna(quality) else "—")
-        k[2].metric("Idade média", f"{age:.1f}" if pd.notna(age) else "—")
-        k[3].metric("Valor do elenco", _money(financial.get("valor_elenco_eur")))
-        k[4].metric("Jogos analisados", diagnosis.get("partidas_analisadas", 0))
-        st.caption(f"Elenco: {squad_data.get('fonte','fontes locais')} · FotMob/estatísticas de partidas · "
-                   "Transfermarkt/mercado e contratos. Referência de ingestão: " + data.get("atualizacao", "n/d"))
-        st.markdown("#### Carências e prioridades")
-        needs = diagnosis.get("necessidades") or []
-        if needs:
-            comparison_table(pd.DataFrame([{"Prioridade": round(float(x.get("urgencia",0))),
-                "Posição": _role(x["papel"]), "Diagnóstico": x.get("motivo"),
-                "Evidências": json.dumps(x.get("evidencias") or {}, ensure_ascii=False, default=str)} for x in needs]))
-        else:
-            st.info("Sem carência posicional suficientemente sustentada. Use a busca manual para explorar oportunidades.")
-        st.markdown("#### Identidade tática e treinador")
-        style = diagnosis.get("estilo") or {}
-        lvl = style.get("nivel_identidade")
-        badge = {"detalhada": "🟢 identidade detalhada (30+ jogos)", "inicial": "🟡 identidade inicial (8–29 jogos)",
-                 "superficial": "🟠 leitura superficial (menos de 8 jogos)"}.get(lvl, "")
-        if badge:
-            st.caption(badge)
-        forms = style.get("formacoes") or []
-        if forms:
-            st.write("**Desenhos usados:** " + " · ".join(f"{f} ({n} jogo{'s' if n != 1 else ''})" for f, n in forms))
-        st.write(" · ".join(style.get("tracos") or ["Amostra insuficiente para traços de estilo"]))
-        st.caption(style.get("fonte","") + " · " + style.get("contexto_tecnico","") + " · " + style.get("limite",""))
-        if style.get("tracos_tecnico"):
-            st.write("**Padrões anteriores do treinador:** " + " · ".join(style["tracos_tecnico"]))
-            st.caption(f"{style.get('amostra_tecnico',0)} jogos anteriores · "
-                       + ", ".join(style.get("clubes_anteriores_tecnico",[])))
-        coach = diagnosis.get("treinador") or {}
-        st.write(f"**Técnico identificado:** {coach.get('nome') or 'não identificado'} · "
-                 f"{coach.get('jogos',0)} jogos observados no clube")
-        st.markdown("#### O clube por jogo × a média da competição")
-        _club_averages_chart(diagnosis, team)
-        if not roster.empty:
-            st.markdown("#### Elenco e notas")
-            show = roster.copy()
-            show["Posição"] = show["papel"].map(E.ROLE_LABELS).fillna("—")
-            cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","caracteristicas_top",
-                                "potencial_teto","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
-            display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
-                "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Teto",
-                "valor_mercado_eur":"Valor de mercado","jogos_12m":"Jogos (12m)","minutos_12m":"Minutos (últimos 12 meses)",
-                "rating_12m":"Nota média 12m"})
-            st.caption("Números de cada atleta pelos jogos do PRÓPRIO clube nos últimos 12 meses (nomes comuns não se "
-                       "confundem mais com homônimos). Confiança = quanto a nota se apoia em minutos medidos: com poucos "
-                       "minutos ela é puxada para a média. Características só aparecem quando o atleta está bem acima "
-                       "da média da função (passe o mouse no perfil para ver o porquê).")
-            if "Valor de mercado" in display:
-                display["Valor de mercado"] = display["Valor de mercado"].map(_money)
-            styled_dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
-                         use_container_width=True, hide_index=True)
-            selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
-                                    key="scout_roster_select")
-            if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
-                open_view("jogador", name=selected)
-        else:
-            st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
-        st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")
-        if financial.get("faixa_proxy_eur"):
-            lo, hi = financial["faixa_proxy_eur"]
-            st.markdown("#### Capacidade financeira estimada")
-            st.write(f"Faixa proxy: **{_money(lo)} a {_money(hi)}**.")
-            st.caption(financial["natureza"] + f" · {financial.get('transferencias_pagas_amostra',0)} taxas pagas na amostra.")
-        else:
-            st.info("Não há histórico financeiro suficiente para estimar capacidade de investimento.")
-    with tabs[2]:
-        st.markdown("#### Filtros de jogador")
-        if pool.empty:
-            empty_state("Universo de jogadores indisponível", "Sincronize o catálogo Transfermarkt.", "👥")
-        else:
-            if "origem" not in pool and "clube_liga" in pool:
-                pool = pool.assign(origem=pool["clube_liga"].map(E.origin_group))
-            # rodada 20: filtros num formulário — nada é pesquisado até apertar "Buscar" (antes cada mudança refazia tudo)
-            with st.form("scout_manual_filters", border=False):
-                n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador")
-                c1,c2,c3,c4 = st.columns(4)
-                roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
-                rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
-                amin = c2.number_input("Idade mínima", 15, 40, 18)
-                amax = c3.number_input("Idade máxima", 16, 50, 35)
-                qmin = c4.slider("Qualidade mínima", 0, 100, 0)
-                origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
-                origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
-                d1,d2,d3 = st.columns(3)
-                nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
-                nat = d1.selectbox("Nacionalidade", nats)
-                leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
-                league_filter = d2.selectbox("Liga atual", leagues)
-                clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
-                seller = d3.selectbox("Clube atual", clubs_list)
-                e1,e2 = st.columns(2)
-                max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
-                upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
-                vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
-                vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
-                go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", use_container_width=True)
-            if go_search:
-                st.session_state["scout_mf_on"] = True
-            if not st.session_state.get("scout_mf_on"):
-                st.info("Escolha os filtros e aperte **🔎 Buscar com estes filtros**.")
-            filt = pool.copy() if st.session_state.get("scout_mf_on") else pool.iloc[0:0].copy()
-            if n0.strip():
-                from src.data_lake.ids import player_core as _pc
-
-                _k = _pc(n0)
-                filt = filt[filt["nome"].astype(str).map(_pc).str.contains(_k, regex=False, na=False)]
-            if origin != "Todas" and "origem" in filt:
-                filt = filt[filt["origem"].astype(str) == origin]
-            if rf!="Todas": filt=filt[filt["papel"]==rf]
-            _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
-            filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
-            if nat!="Todas": filt=filt[filt["nacionalidade"].astype(str)==nat]
-            if league_filter!="Todas" and "clube_liga" in filt:
-                filt=filt[filt["clube_liga"].astype(str)==league_filter]
-            if seller!="Todos": filt=filt[filt["clube"].astype(str)==seller]
-            values=pd.to_numeric(filt["valor_mercado_eur"],errors="coerce").fillna(0)
-            filt=filt[values.between(vmin*1e6,vmax*1e6)]
-            filt=filt.sort_values("qualidade",ascending=False,na_position="last")
-            st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
-            cols = [x for x in ("nome","papel","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
-                                "qualidade","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
-            display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
-                "clube_liga":"Liga","nota_rankings":"Nota dos Rankings",
-                "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
-                "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
-            if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)
-            styled_dataframe(display,use_container_width=True,hide_index=True)
-            if not filt.empty:
-                chosen=st.selectbox("Selecionar jogador",filt["nome"].astype(str).tolist(),key="scout_manual_pick")
-                p=filt[filt["nome"].astype(str)==chosen].iloc[0].to_dict()
-                p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
-                p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
-                p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
-                p["sinergia"]=E.chemistry(p,roster)
-                with st.expander("Dossiê do jogador escolhido"):
-                    _dossier(p,roster)
-                if st.button("＋ Adicionar jogador selecionado",key="scout_manual_add",type="primary"):
-                    _add_player(p,plan_key); st.rerun()
-        with st.expander("＋ Cadastrar atleta manualmente", expanded=False):
-            st.caption("Cadastro próprio para planejamento. Sem estatísticas verificadas, a qualidade fica como não avaliada.")
-            with st.form("scout_manual_create_form"):
-                ca, cb, cc = st.columns(3)
-                custom_name = ca.text_input("Nome do jogador")
-                custom_role = cb.selectbox("Posição natural", list(E.ROLE_LABELS), format_func=_role)
-                custom_age = cc.number_input("Idade", 15, 45, 22)
-                cd, ce, cf = st.columns(3)
-                custom_club = cd.text_input("Clube atual", "Sem clube informado")
-                custom_nation = ce.text_input("Nacionalidade")
-                custom_value = cf.number_input("Valor de referência (€)", min_value=0, value=0, step=100000)
-                custom_rating = st.number_input("Nota manual de qualidade (0 = sem nota)", min_value=0, max_value=100, value=0)
-                custom_obs = st.text_input("Observação de scout")
-                submitted = st.form_submit_button("Salvar jogador e adicionar ao plano", type="primary")
-            if submitted:
-                if not custom_name.strip():
-                    st.error("Informe o nome do jogador.")
+                for idx, row in ranked.head(5).iterrows():
+                    _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
+                st.markdown("#### Três melhores por posição")
+                # rodada 10: TODAS as posições (não só as carentes) — a IA ranqueia sob demanda a posição escolhida
+                need_roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
+                roles = need_roles + [r for r in E.ROLE_LABELS if r not in need_roles]
+                # rodada 11: tudo num formulário — só recalcula ao clicar "Aplicar filtros" (antes cada mexida recalculava)
+                all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
+                nm = financial.get("nat_market") or {}
+                aff = {n: nm.get(n) or E._affinity(n, country) for n in all_nat}
+                nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
+                with st.form("scout_top3_form", border=False):
+                    role = st.selectbox("Posição", roles, key="scout_top3_role",
+                                        format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
+                    fa, fb, fc = st.columns(3)
+                    age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
+                    quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
+                    maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
+                    nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
+                                          format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
+                    st.form_submit_button("🔎 Aplicar filtros", type="primary")
+                if False:
+                    base_rank = ranked
                 else:
-                    from src.data_lake.ids import player_core
-                    from src.squad.formations import ROLE_PT
-                    funcao = E.ROLE_LABELS.get(custom_role, custom_role)
-                    birth_year = date.today().year - int(custom_age)
-                    observation = (custom_obs + " · " if custom_obs else "") + "Idade declarada; data de nascimento aproximada para cadastro."
-                    D.add_player({"nome": custom_name.strip(), "clube": custom_club.strip(),
-                        "posicao": custom_role, "funcao": funcao, "nascimento": f"{birth_year}-07-01",
-                        "valor_mercado_eur": float(custom_value) if custom_value else None,
-                        "nota_manual": float(custom_rating) if custom_rating else None, "observacao": observation})
-                    custom = {"nome": custom_name.strip(), "clube": custom_club.strip(), "papel": custom_role,
-                        "papel_alvo": custom_role, "papel_alvo_label": _role(custom_role), "idade": int(custom_age),
-                        "nacionalidade": custom_nation, "valor_mercado_eur": float(custom_value) if custom_value else None,
-                        "qualidade": float(custom_rating) if custom_rating else None, "confianca_pct": 0,
-                        "_core": player_core(custom_name), "historico_temporadas": "[]", "ultimos_jogos": "[]",
-                        "motivo_principal": "Cadastro manual; não há estatísticas verificadas associadas.",
-                        "realismo": E.transfer_realism({"valor_mercado_eur": custom_value or None,
-                            "nacionalidade": custom_nation, "idade": custom_age}, financial, country, competition,
-                            season=next_season),
-                        "compatibilidade": {"score": 50, "label": "sem histórico estatístico", "confianca": "baixa"},
-                        "sinergia": E.chemistry({"papel": custom_role}, roster)}
-                    _add_player(custom, plan_key)
-                    try:
-                        from src.ui.pages.squad import _squad
-                        _squad.clear()
-                    except Exception:
-                        pass
-                    st.rerun()
+                    # rodada 11: sempre só esta posição — no ranking geral o mesmo atleta fica na posição em que pontua mais
+                    # (um lateral virava "ala"/"ponta") e a lista desta posição chegava vazia
+                    urg = next((float(n.get("urgencia") or 40) for n in needs if n.get("papel") == role), 40)
+                    with st.spinner(f"A IA está garimpando {_role(role).lower()}s…"):
+                        base_rank = _rank_candidates(version, team, country, competition, next_season,
+                                                     tuple(rejected_for_run), feedback_reason, pool,
+                                                     [{"papel": role, "urgencia": urg,
+                                                       "motivo": next((n.get("motivo") for n in needs if n.get("papel") == role),
+                                                                      "posição escolhida por você (reforço/concorrência)")}],
+                                                     financial, roster, needs_key=("top3", role))
+                base_rank = E.apply_votes(_not_ours(base_rank, team, version, roster), votes)
+                filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
+                if not filt3.empty:
+                    ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
+                    filt3 = filt3[ages.isna() | ages.between(*age_band)]
+                    filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
+                    filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
+                if nation != "Todas":
+                    st.caption(f"Contexto: {aff[nation][1]}. Exceções existem, mas a IA pesa a adaptação no índice de realismo.")
+                    filt3 = filt3[filt3["nacionalidade"].astype(str) == nation] if not filt3.empty else filt3
+                for idx, row in filt3.head(3).iterrows():
+                    _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
+                if filt3.empty:
+                    st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
+    with tabs[1]:
+        if tabs[1].open is not False:          # rodada 21: só a aba aberta é montada
+            quality = pd.to_numeric(roster.get("qualidade"), errors="coerce").mean() if not roster.empty else np.nan
+            age = pd.to_numeric(roster.get("idade"), errors="coerce").mean() if not roster.empty else np.nan
+            k = st.columns(5)
+            k[0].metric("Jogadores", len(roster))
+            k[1].metric("Qualidade média", f"{quality:.0f}/100" if pd.notna(quality) else "—")
+            k[2].metric("Idade média", f"{age:.1f}" if pd.notna(age) else "—")
+            k[3].metric("Valor do elenco", _money(financial.get("valor_elenco_eur")))
+            k[4].metric("Jogos analisados", diagnosis.get("partidas_analisadas", 0))
+            st.caption(f"Elenco: {squad_data.get('fonte','fontes locais')} · FotMob/estatísticas de partidas · "
+                       "Transfermarkt/mercado e contratos. Referência de ingestão: " + data.get("atualizacao", "n/d"))
+            st.markdown("#### Carências e prioridades")
+            needs = diagnosis.get("necessidades") or []
+            if needs:
+                comparison_table(pd.DataFrame([{"Prioridade": round(float(x.get("urgencia",0))),
+                    "Posição": _role(x["papel"]), "Diagnóstico": x.get("motivo"),
+                    "Evidências": json.dumps(x.get("evidencias") or {}, ensure_ascii=False, default=str)} for x in needs]))
+            else:
+                st.info("Sem carência posicional suficientemente sustentada. Use a busca manual para explorar oportunidades.")
+            st.markdown("#### Identidade tática e treinador")
+            style = diagnosis.get("estilo") or {}
+            lvl = style.get("nivel_identidade")
+            badge = {"detalhada": "🟢 identidade detalhada (30+ jogos)", "inicial": "🟡 identidade inicial (8–29 jogos)",
+                     "superficial": "🟠 leitura superficial (menos de 8 jogos)"}.get(lvl, "")
+            if badge:
+                st.caption(badge)
+            forms = style.get("formacoes") or []
+            if forms:
+                st.write("**Desenhos usados:** " + " · ".join(f"{f} ({n} jogo{'s' if n != 1 else ''})" for f, n in forms))
+            st.write(" · ".join(style.get("tracos") or ["Amostra insuficiente para traços de estilo"]))
+            st.caption(style.get("fonte","") + " · " + style.get("contexto_tecnico","") + " · " + style.get("limite",""))
+            if style.get("tracos_tecnico"):
+                st.write("**Padrões anteriores do treinador:** " + " · ".join(style["tracos_tecnico"]))
+                st.caption(f"{style.get('amostra_tecnico',0)} jogos anteriores · "
+                           + ", ".join(style.get("clubes_anteriores_tecnico",[])))
+            coach = diagnosis.get("treinador") or {}
+            st.write(f"**Técnico identificado:** {coach.get('nome') or 'não identificado'} · "
+                     f"{coach.get('jogos',0)} jogos observados no clube")
+            st.markdown("#### O clube por jogo × a média da competição")
+            _club_averages_chart(diagnosis, team)
+            if not roster.empty:
+                st.markdown("#### Elenco e notas")
+                show = roster.copy()
+                show["Posição"] = show["papel"].map(E.ROLE_LABELS).fillna("—")
+                cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","caracteristicas_top",
+                                    "potencial_teto","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
+                display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
+                    "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Teto",
+                    "valor_mercado_eur":"Valor de mercado","jogos_12m":"Jogos (12m)","minutos_12m":"Minutos (últimos 12 meses)",
+                    "rating_12m":"Nota média 12m"})
+                st.caption("Números de cada atleta pelos jogos do PRÓPRIO clube nos últimos 12 meses (nomes comuns não se "
+                           "confundem mais com homônimos). Confiança = quanto a nota se apoia em minutos medidos: com poucos "
+                           "minutos ela é puxada para a média. Características só aparecem quando o atleta está bem acima "
+                           "da média da função (passe o mouse no perfil para ver o porquê).")
+                if "Valor de mercado" in display:
+                    display["Valor de mercado"] = display["Valor de mercado"].map(_money)
+                styled_dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
+                             use_container_width=True, hide_index=True)
+                selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
+                                        key="scout_roster_select")
+                if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
+                    open_view("jogador", name=selected)
+            else:
+                st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
+            st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")
+            if financial.get("faixa_proxy_eur"):
+                lo, hi = financial["faixa_proxy_eur"]
+                st.markdown("#### Capacidade financeira estimada")
+                st.write(f"Faixa proxy: **{_money(lo)} a {_money(hi)}**.")
+                st.caption(financial["natureza"] + f" · {financial.get('transferencias_pagas_amostra',0)} taxas pagas na amostra.")
+            else:
+                st.info("Não há histórico financeiro suficiente para estimar capacidade de investimento.")
+    with tabs[2]:
+        if tabs[2].open is not False:          # rodada 21: só a aba aberta é montada
+            st.markdown("#### Filtros de jogador")
+            if pool.empty:
+                empty_state("Universo de jogadores indisponível", "Sincronize o catálogo Transfermarkt.", "👥")
+            else:
+                if "origem" not in pool and "clube_liga" in pool:
+                    pool = pool.assign(origem=pool["clube_liga"].map(E.origin_group))
+                # rodada 20: filtros num formulário — nada é pesquisado até apertar "Buscar" (antes cada mudança refazia tudo)
+                with st.form("scout_manual_filters", border=False):
+                    n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador")
+                    c1,c2,c3,c4 = st.columns(4)
+                    roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
+                    rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
+                    amin = c2.number_input("Idade mínima", 15, 40, 18)
+                    amax = c3.number_input("Idade máxima", 16, 50, 35)
+                    qmin = c4.slider("Qualidade mínima", 0, 100, 0)
+                    origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
+                    origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
+                    d1,d2,d3 = st.columns(3)
+                    nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
+                    nat = d1.selectbox("Nacionalidade", nats)
+                    leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
+                    league_filter = d2.selectbox("Liga atual", leagues)
+                    clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
+                    seller = d3.selectbox("Clube atual", clubs_list)
+                    e1,e2 = st.columns(2)
+                    max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
+                    upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
+                    vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
+                    vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
+                    go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", use_container_width=True)
+                if go_search:
+                    st.session_state["scout_mf_on"] = True
+                if not st.session_state.get("scout_mf_on"):
+                    st.info("Escolha os filtros e aperte **🔎 Buscar com estes filtros**.")
+                filt = pool.copy() if st.session_state.get("scout_mf_on") else pool.iloc[0:0].copy()
+                if n0.strip():
+                    from src.data_lake.ids import player_core as _pc
+
+                    _k = _pc(n0)
+                    filt = filt[filt["nome"].astype(str).map(_pc).str.contains(_k, regex=False, na=False)]
+                if origin != "Todas" and "origem" in filt:
+                    filt = filt[filt["origem"].astype(str) == origin]
+                if rf!="Todas": filt=filt[filt["papel"]==rf]
+                _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
+                filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
+                if nat!="Todas": filt=filt[filt["nacionalidade"].astype(str)==nat]
+                if league_filter!="Todas" and "clube_liga" in filt:
+                    filt=filt[filt["clube_liga"].astype(str)==league_filter]
+                if seller!="Todos": filt=filt[filt["clube"].astype(str)==seller]
+                values=pd.to_numeric(filt["valor_mercado_eur"],errors="coerce").fillna(0)
+                filt=filt[values.between(vmin*1e6,vmax*1e6)]
+                filt=filt.sort_values("qualidade",ascending=False,na_position="last")
+                st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
+                cols = [x for x in ("nome","papel","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
+                                    "qualidade","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
+                display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
+                    "clube_liga":"Liga","nota_rankings":"Nota dos Rankings",
+                    "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
+                    "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
+                if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)
+                styled_dataframe(display,use_container_width=True,hide_index=True)
+                if not filt.empty:
+                    chosen=st.selectbox("Selecionar jogador",filt["nome"].astype(str).tolist(),key="scout_manual_pick")
+                    p=filt[filt["nome"].astype(str)==chosen].iloc[0].to_dict()
+                    p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
+                    p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
+                    p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
+                    p["sinergia"]=E.chemistry(p,roster)
+                    with st.expander("Dossiê do jogador escolhido"):
+                        _dossier(p,roster)
+                    if st.button("＋ Adicionar jogador selecionado",key="scout_manual_add",type="primary"):
+                        _add_player(p,plan_key); st.rerun()
+            with st.expander("＋ Cadastrar atleta manualmente", expanded=False):
+                st.caption("Cadastro próprio para planejamento. Sem estatísticas verificadas, a qualidade fica como não avaliada.")
+                with st.form("scout_manual_create_form"):
+                    ca, cb, cc = st.columns(3)
+                    custom_name = ca.text_input("Nome do jogador")
+                    custom_role = cb.selectbox("Posição natural", list(E.ROLE_LABELS), format_func=_role)
+                    custom_age = cc.number_input("Idade", 15, 45, 22)
+                    cd, ce, cf = st.columns(3)
+                    custom_club = cd.text_input("Clube atual", "Sem clube informado")
+                    custom_nation = ce.text_input("Nacionalidade")
+                    custom_value = cf.number_input("Valor de referência (€)", min_value=0, value=0, step=100000)
+                    custom_rating = st.number_input("Nota manual de qualidade (0 = sem nota)", min_value=0, max_value=100, value=0)
+                    custom_obs = st.text_input("Observação de scout")
+                    submitted = st.form_submit_button("Salvar jogador e adicionar ao plano", type="primary")
+                if submitted:
+                    if not custom_name.strip():
+                        st.error("Informe o nome do jogador.")
+                    else:
+                        from src.data_lake.ids import player_core
+                        from src.squad.formations import ROLE_PT
+                        funcao = E.ROLE_LABELS.get(custom_role, custom_role)
+                        birth_year = date.today().year - int(custom_age)
+                        observation = (custom_obs + " · " if custom_obs else "") + "Idade declarada; data de nascimento aproximada para cadastro."
+                        D.add_player({"nome": custom_name.strip(), "clube": custom_club.strip(),
+                            "posicao": custom_role, "funcao": funcao, "nascimento": f"{birth_year}-07-01",
+                            "valor_mercado_eur": float(custom_value) if custom_value else None,
+                            "nota_manual": float(custom_rating) if custom_rating else None, "observacao": observation})
+                        custom = {"nome": custom_name.strip(), "clube": custom_club.strip(), "papel": custom_role,
+                            "papel_alvo": custom_role, "papel_alvo_label": _role(custom_role), "idade": int(custom_age),
+                            "nacionalidade": custom_nation, "valor_mercado_eur": float(custom_value) if custom_value else None,
+                            "qualidade": float(custom_rating) if custom_rating else None, "confianca_pct": 0,
+                            "_core": player_core(custom_name), "historico_temporadas": "[]", "ultimos_jogos": "[]",
+                            "motivo_principal": "Cadastro manual; não há estatísticas verificadas associadas.",
+                            "realismo": E.transfer_realism({"valor_mercado_eur": custom_value or None,
+                                "nacionalidade": custom_nation, "idade": custom_age}, financial, country, competition,
+                                season=next_season),
+                            "compatibilidade": {"score": 50, "label": "sem histórico estatístico", "confianca": "baixa"},
+                            "sinergia": E.chemistry({"papel": custom_role}, roster)}
+                        _add_player(custom, plan_key)
+                        try:
+                            from src.ui.pages.squad import _squad
+                            _squad.clear()
+                        except Exception:
+                            pass
+                        st.rerun()
 
     with tabs[3]:
-        st.markdown("#### Joias subvalorizadas e potencial")
-        # rodada 11: só jovens que ESTE clube consegue contratar (preço dentro do alcance, nacionalidade viável e clube
-        # de origem de porte igual ou menor). Craques de elite (Yamal, Karl…) não são "joia subvalorizada" para o Cruzeiro.
-        budget = float(financial.get("orcamento_proxy_eur") or 0) or None
-        own_value = float(financial.get("valor_elenco_eur") or 0) or None
-        # rodada 20: capacidade = maior compra dos últimos 5 anos ou topo da faixa estimada; padrão = 75% dela
-        fx = financial.get("faixa_proxy_eur") or [None, None]
-        capacity = max([x for x in (financial.get("maior_taxa_5_anos_eur"), fx[1], (budget or 0) * 1.5) if x] or [8e6])
-        default_cap = round(max(capacity * .75, 2e6) / 1e6, 1)
-        g1, g2 = st.columns([2, 1])
-        cap_m = g1.slider("Valor máximo das joias (€ mi)", 0.5, float(max(60.0, round(capacity / 1e6 * 2, 0))),
-                          float(default_cap), 0.5, key=f"scout_gem_cap_{_slug(team)}",
-                          help=f"Capacidade estimada do clube: {_money(capacity)} (maior compra recente / faixa de "
-                               "investimento). O padrão fica em 75% dela; aumente para incluir nomes mais conhecidos.")
-        keep_unknown = g2.toggle("Incluir quem não tem valor publicado", value=True, key="scout_gem_unknown",
-                                 help="Série B/C e ligas sem valor no Transfermarkt — muitas vezes são as melhores pechinchas.")
-        cap = cap_m * 1e6
-        st.caption(f"Até 23 anos, com produção observada, valor de mercado até {_money(cap)} (capacidade estimada do "
-                   f"clube: {_money(capacity)}), nacionalidade comum na liga e clube de origem de porte igual ou menor. "
-                   "Teto = qualidade atual + crescimento esperado pela idade e nível — projeção, não certeza.")
-        gems=_not_ours(pool.copy(), team, version, roster)
-        if not gems.empty and "potencial_teto" in gems:
-            ages=np.floor(pd.to_numeric(gems["idade"],errors="coerce"))
-            mv=pd.to_numeric(gems["valor_mercado_eur"],errors="coerce")
-            nm=financial.get("nat_market") or {}
-            affs=gems["nacionalidade"].map(lambda n: (nm.get(E._first_nat(n)) or (50,""))[0])
-            cv=pd.to_numeric(gems.get("clube_valor_total_eur",pd.Series(np.nan,index=gems.index)),errors="coerce")
-            ok=(ages.le(23) & pd.to_numeric(gems["potencial_teto"],errors="coerce").notna()
-                & ((mv.isna() & keep_unknown) | mv.le(cap))
-                & (affs >= 45) & (cv.isna() | (own_value is None) | (cv <= (own_value or 0) * 1.5)))
-            gems=gems[ok].assign(_aff=affs[ok])
-            gems=gems.assign(_rank=pd.to_numeric(gems["potencial_teto"],errors="coerce")*.6
-                             + pd.to_numeric(gems["qualidade"],errors="coerce").fillna(40)*.25 + gems["_aff"]*.15)
-            gems=gems.sort_values(["_rank","confianca_pct"],ascending=False).head(30)
-        if gems.empty:
-            empty_state("Nenhuma joia com amostra mínima", "Só aparecem jovens com dados estatísticos suficientes.", "💎")
-        else:
-            table=gems.rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
-                "nacionalidade":"Nacionalidade","qualidade":"Qualidade hoje","potencial_teto":"Teto projetado",
-                "confianca_pct":"Confiança (%)","_aff":"Adaptação (%)",
-                "projecao_valorizacao_24m_pct":"Valorização possível 24m (%)","valor_mercado_eur":"Valor (€)"})
-            keep=[x for x in ("Jogador","Posição","Idade","Clube","Nacionalidade","Qualidade hoje","Teto projetado",
-                              "Confiança (%)","Adaptação (%)","Valorização possível 24m (%)","Valor (€)") if x in table]
-            table=table[keep].copy()
-            if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])
-            if "Valor (€)" in table: table["Valor (€)"]=table["Valor (€)"].map(_money)
-            styled_dataframe(table,use_container_width=True,hide_index=True)
-            name=st.selectbox("Escolher joia",gems["nome"].astype(str).tolist(),key="scout_gem_pick")
-            if st.button("Adicionar joia ao plano",key="scout_gem_add"):
-                p=gems[gems["nome"].astype(str)==name].iloc[0].to_dict()
-                p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
-                p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
-                p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
-                p["sinergia"]=E.chemistry(p,roster)
-                _add_player(p,plan_key); st.rerun()
+        if tabs[3].open is not False:          # rodada 21: só a aba aberta é montada
+            st.markdown("#### Joias subvalorizadas e potencial")
+            # rodada 11: só jovens que ESTE clube consegue contratar (preço dentro do alcance, nacionalidade viável e clube
+            # de origem de porte igual ou menor). Craques de elite (Yamal, Karl…) não são "joia subvalorizada" para o Cruzeiro.
+            budget = float(financial.get("orcamento_proxy_eur") or 0) or None
+            own_value = float(financial.get("valor_elenco_eur") or 0) or None
+            # rodada 20: capacidade = maior compra dos últimos 5 anos ou topo da faixa estimada; padrão = 75% dela
+            fx = financial.get("faixa_proxy_eur") or [None, None]
+            capacity = max([x for x in (financial.get("maior_taxa_5_anos_eur"), fx[1], (budget or 0) * 1.5) if x] or [8e6])
+            default_cap = round(max(capacity * .75, 2e6) / 1e6, 1)
+            g1, g2 = st.columns([2, 1])
+            cap_m = g1.slider("Valor máximo das joias (€ mi)", 0.5, float(max(60.0, round(capacity / 1e6 * 2, 0))),
+                              float(default_cap), 0.5, key=f"scout_gem_cap_{_slug(team)}",
+                              help=f"Capacidade estimada do clube: {_money(capacity)} (maior compra recente / faixa de "
+                                   "investimento). O padrão fica em 75% dela; aumente para incluir nomes mais conhecidos.")
+            keep_unknown = g2.toggle("Incluir quem não tem valor publicado", value=True, key="scout_gem_unknown",
+                                     help="Série B/C e ligas sem valor no Transfermarkt — muitas vezes são as melhores pechinchas.")
+            cap = cap_m * 1e6
+            st.caption(f"Até 23 anos, com produção observada, valor de mercado até {_money(cap)} (capacidade estimada do "
+                       f"clube: {_money(capacity)}), nacionalidade comum na liga e clube de origem de porte igual ou menor. "
+                       "Teto = qualidade atual + crescimento esperado pela idade e nível — projeção, não certeza.")
+            gems=_not_ours(pool.copy(), team, version, roster)
+            if not gems.empty and "potencial_teto" in gems:
+                ages=np.floor(pd.to_numeric(gems["idade"],errors="coerce"))
+                mv=pd.to_numeric(gems["valor_mercado_eur"],errors="coerce")
+                nm=financial.get("nat_market") or {}
+                affs=gems["nacionalidade"].map(lambda n: (nm.get(E._first_nat(n)) or (50,""))[0])
+                cv=pd.to_numeric(gems.get("clube_valor_total_eur",pd.Series(np.nan,index=gems.index)),errors="coerce")
+                ok=(ages.le(23) & pd.to_numeric(gems["potencial_teto"],errors="coerce").notna()
+                    & ((mv.isna() & keep_unknown) | mv.le(cap))
+                    & (affs >= 45) & (cv.isna() | (own_value is None) | (cv <= (own_value or 0) * 1.5)))
+                gems=gems[ok].assign(_aff=affs[ok])
+                gems=gems.assign(_rank=pd.to_numeric(gems["potencial_teto"],errors="coerce")*.6
+                                 + pd.to_numeric(gems["qualidade"],errors="coerce").fillna(40)*.25 + gems["_aff"]*.15)
+                gems=gems.sort_values(["_rank","confianca_pct"],ascending=False).head(30)
+            if gems.empty:
+                empty_state("Nenhuma joia com amostra mínima", "Só aparecem jovens com dados estatísticos suficientes.", "💎")
+            else:
+                table=gems.rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
+                    "nacionalidade":"Nacionalidade","qualidade":"Qualidade hoje","potencial_teto":"Teto projetado",
+                    "confianca_pct":"Confiança (%)","_aff":"Adaptação (%)",
+                    "projecao_valorizacao_24m_pct":"Valorização possível 24m (%)","valor_mercado_eur":"Valor (€)"})
+                keep=[x for x in ("Jogador","Posição","Idade","Clube","Nacionalidade","Qualidade hoje","Teto projetado",
+                                  "Confiança (%)","Adaptação (%)","Valorização possível 24m (%)","Valor (€)") if x in table]
+                table=table[keep].copy()
+                if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])
+                if "Valor (€)" in table: table["Valor (€)"]=table["Valor (€)"].map(_money)
+                styled_dataframe(table,use_container_width=True,hide_index=True)
+                name=st.selectbox("Escolher joia",gems["nome"].astype(str).tolist(),key="scout_gem_pick")
+                if st.button("Adicionar joia ao plano",key="scout_gem_add"):
+                    p=gems[gems["nome"].astype(str)==name].iloc[0].to_dict()
+                    p["papel_alvo"]=p.get("papel"); p["papel_alvo_label"]=_role(p.get("papel"))
+                    p["realismo"]=E.transfer_realism(p,financial,country,competition,season=next_season)
+                    p["compatibilidade"]=E.tactical_compatibility(p,diagnosis.get("estilo") or {})
+                    p["sinergia"]=E.chemistry(p,roster)
+                    _add_player(p,plan_key); st.rerun()
     with tabs[4]:
-        st.markdown("#### Janela de transferências")
-        if not roster.empty:
-            st.caption("Marque quem fica, sai ou deve ser emprestado — por setor. Vendas usam deságio estimado.")
-            _manual_loan_form(team, roster)
-            rows=_window_cards(roster, decisions, _loans(team, version))
-            if rows: comparison_table(pd.DataFrame(rows))
-        plan=st.session_state[plan_key]
-        if plan:
-            comparison_table(pd.DataFrame([{"Entrada":p.get("nome"),"Posição":p.get("papel_alvo_label"),
-                "Qualidade":p.get("qualidade"),"Realismo":(p.get("realismo") or {}).get("score"),
-                "Taxa estimada":_money((p.get("realismo") or {}).get("taxa_estimada_eur"))} for p in plan]))
-            remove=st.selectbox("Remover do plano",["—"]+[p.get("nome") for p in plan],key="scout_remove")
-            if remove!="—" and st.button("Remover jogador",key="scout_remove_button"):
-                st.session_state[plan_key]=[p for p in plan if p.get("nome")!=remove]; st.rerun()
-        else:
-            st.caption("Adicione um atleta pela IA, pelos filtros ou pelo radar de joias.")
-        formations=list(E.FORMATIONS)
-        default_form=formations.index("4-3-3") if "4-3-3" in formations else 0
-        formation=st.selectbox("Formação",formations,index=default_form,key="scout_formation")
-        entry=st.selectbox("Testar contratação",["Nenhuma"]+[p.get("nome") for p in plan],key="scout_entry")
-        outgoing=st.selectbox("Simular saída / venda",["Nenhum"]+(roster["nome"].astype(str).tolist() if not roster.empty else []),
-                              key="scout_outgoing")
-        if st.session_state.get("scout_plan_final") or plan:
-            from src.ui.plan_board import render_board
+        if tabs[4].open is not False:          # rodada 21: só a aba aberta é montada
+            st.markdown("#### Janela de transferências")
+            if not roster.empty:
+                st.caption("Marque quem fica, sai ou deve ser emprestado — por setor. Vendas usam deságio estimado.")
+                _manual_loan_form(team, roster)
+                rows=_window_cards(roster, decisions, _loans(team, version))
+                if rows: comparison_table(pd.DataFrame(rows))
+            plan=st.session_state[plan_key]
+            if plan:
+                comparison_table(pd.DataFrame([{"Entrada":p.get("nome"),"Posição":p.get("papel_alvo_label"),
+                    "Qualidade":p.get("qualidade"),"Realismo":(p.get("realismo") or {}).get("score"),
+                    "Taxa estimada":_money((p.get("realismo") or {}).get("taxa_estimada_eur"))} for p in plan]))
+                remove=st.selectbox("Remover do plano",["—"]+[p.get("nome") for p in plan],key="scout_remove")
+                if remove!="—" and st.button("Remover jogador",key="scout_remove_button"):
+                    st.session_state[plan_key]=[p for p in plan if p.get("nome")!=remove]; st.rerun()
+            else:
+                st.caption("Adicione um atleta pela IA, pelos filtros ou pelo radar de joias.")
+            formations=list(E.FORMATIONS)
+            default_form=formations.index("4-3-3") if "4-3-3" in formations else 0
+            formation=st.selectbox("Formação",formations,index=default_form,key="scout_formation")
+            entry=st.selectbox("Testar contratação",["Nenhuma"]+[p.get("nome") for p in plan],key="scout_entry")
+            outgoing=st.selectbox("Simular saída / venda",["Nenhum"]+(roster["nome"].astype(str).tolist() if not roster.empty else []),
+                                  key="scout_outgoing")
+            if st.session_state.get("scout_plan_final") or plan:
+                from src.ui.plan_board import render_board
 
-            with st.container(border=True):
-                render_board(team, roster, plan, decisions, formation)
-        if st.button("⚽ Simular antes vs. depois",key="scout_sim",type="primary"):
-            player=next((p for p in plan if p.get("nome")==entry),None) if entry!="Nenhuma" else None
-            simulation=E.build_simulation(roster,player,outgoing if outgoing!="Nenhum" else None,formation)
-            st.session_state["scout_sim_"+_slug(team)]=simulation
-        simulation=st.session_state.get("scout_sim_"+_slug(team))
-        if simulation:
+                with st.container(border=True):
+                    render_board(team, roster, plan, decisions, formation)
+            if st.button("⚽ Simular antes vs. depois",key="scout_sim",type="primary"):
+                player=next((p for p in plan if p.get("nome")==entry),None) if entry!="Nenhuma" else None
+                simulation=E.build_simulation(roster,player,outgoing if outgoing!="Nenhum" else None,formation)
+                st.session_state["scout_sim_"+_slug(team)]=simulation
+            simulation=st.session_state.get("scout_sim_"+_slug(team))
+            if simulation:
+                a,b=st.columns(2)
+                with a:
+                    st.markdown("**XI atual**")
+                    st.plotly_chart(_pitch_figure(simulation["xi_antes"], "Antes"), use_container_width=True,
+                                    config={"displayModeBar": False})
+                    comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
+                                                   for p in simulation["xi_antes"]]))
+                with b:
+                    st.markdown("**XI simulado**")
+                    st.plotly_chart(_pitch_figure(simulation["xi_depois"], "Depois"), use_container_width=True,
+                                    config={"displayModeBar": False})
+                    comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
+                                                   for p in simulation["xi_depois"]]))
+                if simulation.get("deltas"):
+                    _sim_radar(simulation["deltas"], team)
+                    styled_dataframe(pd.DataFrame(simulation["deltas"]).rename(columns={"indicador":"Indicador","antes":"Antes",
+                        "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),use_container_width=True,hide_index=True)
+                st.caption(simulation.get("limite",""))
+            incoming=sum(float((p.get("realismo") or {}).get("taxa_estimada_eur") or 0) for p in plan)
+            sales=0.0
+            if not roster.empty:
+                for name,decision in decisions.items():
+                    if decision in ("Vender","Comprar em definitivo"):
+                        row=roster[roster["nome"]==name]
+                        value=pd.to_numeric(row["valor_mercado_eur"],errors="coerce").iloc[0] if not row.empty else np.nan
+                        if pd.notna(value):
+                            if decision=="Vender": sales+=float(value)*.60
+                            else: incoming+=float(value)*.90          # compra do emprestado: ~90% do valor (estimativa)
+            st.metric("Saldo estimado da janela",_money(sales-incoming),
+                      help="Vendas estimadas a 60% do valor de referência menos taxas estimadas.")
+            st.caption("Sem salários e orçamento oficial: as faixas são proxies e podem divergir da negociação real.")
+            decisions_clean={k:v for k,v in decisions.items() if v!="Fica"}
+            markdown=E.export_markdown(team,financial,decisions_clean,plan,simulation)
             a,b=st.columns(2)
-            with a:
-                st.markdown("**XI atual**")
-                st.plotly_chart(_pitch_figure(simulation["xi_antes"], "Antes"), use_container_width=True,
-                                config={"displayModeBar": False})
-                comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
-                                               for p in simulation["xi_antes"]]))
-            with b:
-                st.markdown("**XI simulado**")
-                st.plotly_chart(_pitch_figure(simulation["xi_depois"], "Depois"), use_container_width=True,
-                                config={"displayModeBar": False})
-                comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
-                                               for p in simulation["xi_depois"]]))
-            if simulation.get("deltas"):
-                _sim_radar(simulation["deltas"], team)
-                styled_dataframe(pd.DataFrame(simulation["deltas"]).rename(columns={"indicador":"Indicador","antes":"Antes",
-                    "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),use_container_width=True,hide_index=True)
-            st.caption(simulation.get("limite",""))
-        incoming=sum(float((p.get("realismo") or {}).get("taxa_estimada_eur") or 0) for p in plan)
-        sales=0.0
-        if not roster.empty:
-            for name,decision in decisions.items():
-                if decision in ("Vender","Comprar em definitivo"):
-                    row=roster[roster["nome"]==name]
-                    value=pd.to_numeric(row["valor_mercado_eur"],errors="coerce").iloc[0] if not row.empty else np.nan
-                    if pd.notna(value):
-                        if decision=="Vender": sales+=float(value)*.60
-                        else: incoming+=float(value)*.90          # compra do emprestado: ~90% do valor (estimativa)
-        st.metric("Saldo estimado da janela",_money(sales-incoming),
-                  help="Vendas estimadas a 60% do valor de referência menos taxas estimadas.")
-        st.caption("Sem salários e orçamento oficial: as faixas são proxies e podem divergir da negociação real.")
-        decisions_clean={k:v for k,v in decisions.items() if v!="Fica"}
-        markdown=E.export_markdown(team,financial,decisions_clean,plan,simulation)
-        a,b=st.columns(2)
-        a.download_button("⇩ Dossiê Markdown",markdown,file_name=f"scout_{_slug(team)}.md",
-                          mime="text/markdown",use_container_width=True)
-        # rodada 11: dossiê visual — campinho com o XI planejado, um cartão por chegada (porquê + viabilidade), saídas
-        from src.scout import dossier_pdf as DP
+            a.download_button("⇩ Dossiê Markdown",markdown,file_name=f"scout_{_slug(team)}.md",
+                              mime="text/markdown",use_container_width=True)
+            # rodada 11: dossiê visual — campinho com o XI planejado, um cartão por chegada (porquê + viabilidade), saídas
+            from src.scout import dossier_pdf as DP
 
-        xi_plan=(simulation or {}).get("xi_depois") or (simulation or {}).get("xi_antes") or []
-        if not xi_plan and not roster.empty:
-            try:
-                xi_plan=E.build_simulation(roster,None,None,formation)["xi_antes"]
-            except Exception:
-                xi_plan=[]
-        pdf=DP.build(team, formation, xi_plan, plan, decisions, sales-incoming, next_season) or _pdf_bytes(markdown)
-        if pdf:
-            b.download_button("⇩ Dossiê PDF (campinho + decisões)",pdf,file_name=f"scout_{_slug(team)}.pdf",
-                              mime="application/pdf",use_container_width=True)
-        else:
-            b.caption("Para PDF, instale a dependência reportlab.")
-        if st.button("💾 Salvar planejamento",key="scout_save"):
-            plan_id=E.save_plan(service.db,team,f"Janela {date.today().year}",{
-                "decisoes":decisions_clean,"contratacoes":plan,"simulacao":simulation,
-                "saldo_estimado_eur":sales-incoming,"financeiro":financial})
-            st.success(f"Planejamento salvo no banco local · ID {plan_id}.")
+            xi_plan=(simulation or {}).get("xi_depois") or (simulation or {}).get("xi_antes") or []
+            if not xi_plan and not roster.empty:
+                try:
+                    xi_plan=E.build_simulation(roster,None,None,formation)["xi_antes"]
+                except Exception:
+                    xi_plan=[]
+            pdf=DP.build(team, formation, xi_plan, plan, decisions, sales-incoming, next_season) or _pdf_bytes(markdown)
+            if pdf:
+                b.download_button("⇩ Dossiê PDF (campinho + decisões)",pdf,file_name=f"scout_{_slug(team)}.pdf",
+                                  mime="application/pdf",use_container_width=True)
+            else:
+                b.caption("Para PDF, instale a dependência reportlab.")
+            if st.button("💾 Salvar planejamento",key="scout_save"):
+                plan_id=E.save_plan(service.db,team,f"Janela {date.today().year}",{
+                    "decisoes":decisions_clean,"contratacoes":plan,"simulacao":simulation,
+                    "saldo_estimado_eur":sales-incoming,"financeiro":financial})
+                st.success(f"Planejamento salvo no banco local · ID {plan_id}.")
 
 

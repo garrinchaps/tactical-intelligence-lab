@@ -310,95 +310,100 @@ def render(_ctx=None) -> None:
         st.markdown("##### 📅 Próximos jogos")
         st.caption("Agenda do open-matchday (horário de início em CET-1, como a fonte publica).")
         comparison_table(nxt.head(5))
-    t1, t0, t2, t3 = st.tabs(["🗓️ Jogos", "🧬 Estilo e tendências", "💶 Elenco e valores", "📈 Temporada (xG)"])
+    t1, t0, t2, t3 = st.tabs(["🗓️ Jogos", "🧬 Estilo e tendências", "💶 Elenco e valores", "📈 Temporada (xG)"],
+                             key="club_tabs", on_change="rerun")
     with t0:
-        _style_tab(name, names)
+        if t0.open is not False:          # rodada 21: só a aba aberta é montada
+            _style_tab(name, names)
     with t1:
-        level_filter = st.selectbox(
-            "Exibir partidas",
-            ["Todos os jogos", "Com estatísticas ou lances (sem só placar)", "Somente com lances",
-             "Somente com estatísticas", "Somente placares"],
-            key=f"team_level_filter_{name}",
-            help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",
-        )
-        m = filter_team_matches(allm, level_filter)
-        if m.empty:
-            empty_state("Nenhuma partida neste filtro", f"Há {len(allm)} resultado(s) deste time no catálogo. "
-                        "Experimente 'Todos os jogos' ou outra profundidade de dados.", "🗓️")
-        else:
-            f1, f2 = st.columns(2)
-            seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)
-            sea = f1.selectbox("Temporada", seasons, key=f"team_season_{name}")
-            comps = ["todas"] + m["competition_name"].dropna().value_counts().index.tolist()
-            cmp_ = f2.selectbox("Competição", comps, key=f"team_comp_{name}")
-            mm = m if sea == "todas" else m[m["season_name"].astype(str) == sea]
-            mm = mm if cmp_ == "todas" else mm[mm["competition_name"] == cmp_]
-            if cmp_ != "todas":
-                nav.link(f"🏆 Abrir {cmp_}", "competicao", key=f"team_open_comp_{name}", name=cmp_,
-                         season=None if sea == "todas" else sea)
-            pk = f"team_page_{name}_{sea}_{cmp_}"
-            shown = int(st.session_state.get(pk, PAGE))
-            st.caption(f"{len(mm)} jogo(s) · mostrando {min(shown, len(mm))}")
-            for i, row in enumerate(mm.head(shown).to_dict("records")):
-                a, b = st.columns([8, 1.3])
-                a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
-                b.write("")
-                if b.button("Analisar →", key=f"team_open_{row['match_id']}_{i}", use_container_width=True, type="primary"):
-                    st.session_state["team_focus"] = next((n for n in names if n in (row["home_team_name"],
-                                                                                      row["away_team_name"])), None)
-                    nav.open_view("jogo", match_id=int(row["match_id"]))
-            if shown < len(mm) and st.button(f"Mostrar mais {min(PAGE, len(mm) - shown)}", key=f"more_{pk}",
-                                             use_container_width=True):
-                st.session_state[pk] = shown + PAGE
-                st.rerun()
-    with t2:
-        _official_roster(name, names)
-        if lake is None or ids.empty or not lake.exists("tm_clubes"):
-            empty_state("Sem dados do Transfermarkt para este clube", "", "💶",
-                        "python -m src.data_hub.sync --only transfermarkt lake")
-        else:
-            tm_id = ids[ids["fonte"] == "transfermarkt"]["id_fonte"].astype(str).tolist()
-            clubs = lake.read("tm_clubes")
-            cl = clubs[clubs["transfermarkt_id"].astype(str).isin(tm_id)]
-            if not cl.empty:
-                c = cl.iloc[0]
-                x = st.columns(4)
-                x[0].metric("Elenco", int(c.get("elenco", 0) or 0))
-                x[1].metric("Idade média", c.get("idade_media", "—"))
-                x[2].metric("Estádio", str(c.get("estadio", "—"))[:22])
-                x[3].metric("Capacidade", f"{int(c.get('capacidade', 0) or 0):,}".replace(",", "."))
-            pl = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
-            if not pl.empty:
-                sq = pl[pl["clube_id"].astype(str).isin(tm_id)].sort_values("valor_mercado_eur", ascending=False)
-                if not sq.empty:
-                    st.metric("Valor somado do elenco (€ mi)", round(sq["valor_mercado_eur"].fillna(0).sum() / 1e6, 1))
-                    comparison_table(sq[["nome", "posicao", "funcao", "nascimento", "nacionalidade", "valor_mercado_eur"]]
-                                     .assign(valor_mercado_eur=lambda d: (d["valor_mercado_eur"] / 1e6).round(1))
-                                     .rename(columns={"valor_mercado_eur": "valor (€ mi)"}).head(40),
-                                     "Fonte: Transfermarkt (transfermarkt-datasets).")
-    with t3:
-        if lake is None or ids.empty or not lake.exists("us_partidas"):
-            empty_state("Sem xG do Understat para este clube", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
-        else:
-            us_names = ids[ids["fonte"] == "understat"]["nome"].tolist()
-            u = lake.read("us_partidas")
-            u = u[u["mandante"].isin(us_names) | u["visitante"].isin(us_names)].copy()
-            if u.empty:
-                empty_state("Sem partidas no Understat", icon="📈")
+        if t1.open is not False:          # rodada 21: só a aba aberta é montada
+            level_filter = st.selectbox(
+                "Exibir partidas",
+                ["Todos os jogos", "Com estatísticas ou lances (sem só placar)", "Somente com lances",
+                 "Somente com estatísticas", "Somente placares"],
+                key=f"team_level_filter_{name}",
+                help="Filtro independente do seletor global. Todos os jogos inclui também partidas sem estatísticas ou eventos.",
+            )
+            m = filter_team_matches(allm, level_filter)
+            if m.empty:
+                empty_state("Nenhuma partida neste filtro", f"Há {len(allm)} resultado(s) deste time no catálogo. "
+                            "Experimente 'Todos os jogos' ou outra profundidade de dados.", "🗓️")
             else:
-                home = u["mandante"].isin(us_names)
-                u["xg_pro"] = u["xg_mandante"].where(home, u["xg_visitante"])
-                u["xg_contra"] = u["xg_visitante"].where(home, u["xg_mandante"])
-                u["adversario"] = u["visitante"].where(home, u["mandante"])
-                by = u.groupby("temporada")[["xg_pro", "xg_contra"]].mean().round(2).reset_index()
-                comparison_table(by.rename(columns={"xg_pro": "xG pró por jogo", "xg_contra": "xG contra por jogo"}),
-                                 "Fonte: Understat.")
-                from src.ui import charts
+                f1, f2 = st.columns(2)
+                seasons = ["todas"] + sorted(m["season_name"].dropna().astype(str).unique(), reverse=True)
+                sea = f1.selectbox("Temporada", seasons, key=f"team_season_{name}")
+                comps = ["todas"] + m["competition_name"].dropna().value_counts().index.tolist()
+                cmp_ = f2.selectbox("Competição", comps, key=f"team_comp_{name}")
+                mm = m if sea == "todas" else m[m["season_name"].astype(str) == sea]
+                mm = mm if cmp_ == "todas" else mm[mm["competition_name"] == cmp_]
+                if cmp_ != "todas":
+                    nav.link(f"🏆 Abrir {cmp_}", "competicao", key=f"team_open_comp_{name}", name=cmp_,
+                             season=None if sea == "todas" else sea)
+                pk = f"team_page_{name}_{sea}_{cmp_}"
+                shown = int(st.session_state.get(pk, PAGE))
+                st.caption(f"{len(mm)} jogo(s) · mostrando {min(shown, len(mm))}")
+                for i, row in enumerate(mm.head(shown).to_dict("records")):
+                    a, b = st.columns([8, 1.3])
+                    a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
+                    b.write("")
+                    if b.button("Analisar →", key=f"team_open_{row['match_id']}_{i}", use_container_width=True, type="primary"):
+                        st.session_state["team_focus"] = next((n for n in names if n in (row["home_team_name"],
+                                                                                          row["away_team_name"])), None)
+                        nav.open_view("jogo", match_id=int(row["match_id"]))
+                if shown < len(mm) and st.button(f"Mostrar mais {min(PAGE, len(mm) - shown)}", key=f"more_{pk}",
+                                                 use_container_width=True):
+                    st.session_state[pk] = shown + PAGE
+                    st.rerun()
+    with t2:
+        if t2.open is not False:          # rodada 21: só a aba aberta é montada
+            _official_roster(name, names)
+            if lake is None or ids.empty or not lake.exists("tm_clubes"):
+                empty_state("Sem dados do Transfermarkt para este clube", "", "💶",
+                            "python -m src.data_hub.sync --only transfermarkt lake")
+            else:
+                tm_id = ids[ids["fonte"] == "transfermarkt"]["id_fonte"].astype(str).tolist()
+                clubs = lake.read("tm_clubes")
+                cl = clubs[clubs["transfermarkt_id"].astype(str).isin(tm_id)]
+                if not cl.empty:
+                    c = cl.iloc[0]
+                    x = st.columns(4)
+                    x[0].metric("Elenco", int(c.get("elenco", 0) or 0))
+                    x[1].metric("Idade média", c.get("idade_media", "—"))
+                    x[2].metric("Estádio", str(c.get("estadio", "—"))[:22])
+                    x[3].metric("Capacidade", f"{int(c.get('capacidade', 0) or 0):,}".replace(",", "."))
+                pl = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
+                if not pl.empty:
+                    sq = pl[pl["clube_id"].astype(str).isin(tm_id)].sort_values("valor_mercado_eur", ascending=False)
+                    if not sq.empty:
+                        st.metric("Valor somado do elenco (€ mi)", round(sq["valor_mercado_eur"].fillna(0).sum() / 1e6, 1))
+                        comparison_table(sq[["nome", "posicao", "funcao", "nascimento", "nacionalidade", "valor_mercado_eur"]]
+                                         .assign(valor_mercado_eur=lambda d: (d["valor_mercado_eur"] / 1e6).round(1))
+                                         .rename(columns={"valor_mercado_eur": "valor (€ mi)"}).head(40),
+                                         "Fonte: Transfermarkt (transfermarkt-datasets).")
+    with t3:
+        if t3.open is not False:          # rodada 21: só a aba aberta é montada
+            if lake is None or ids.empty or not lake.exists("us_partidas"):
+                empty_state("Sem xG do Understat para este clube", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
+            else:
+                us_names = ids[ids["fonte"] == "understat"]["nome"].tolist()
+                u = lake.read("us_partidas")
+                u = u[u["mandante"].isin(us_names) | u["visitante"].isin(us_names)].copy()
+                if u.empty:
+                    empty_state("Sem partidas no Understat", icon="📈")
+                else:
+                    home = u["mandante"].isin(us_names)
+                    u["xg_pro"] = u["xg_mandante"].where(home, u["xg_visitante"])
+                    u["xg_contra"] = u["xg_visitante"].where(home, u["xg_mandante"])
+                    u["adversario"] = u["visitante"].where(home, u["mandante"])
+                    by = u.groupby("temporada")[["xg_pro", "xg_contra"]].mean().round(2).reset_index()
+                    comparison_table(by.rename(columns={"xg_pro": "xG pró por jogo", "xg_contra": "xG contra por jogo"}),
+                                     "Fonte: Understat.")
+                    from src.ui import charts
 
-                last = u.sort_values("data").tail(20)
-                render_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
-                                             ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
-                                use_container_width=True)
+                    last = u.sort_values("data").tail(20)
+                    render_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
+                                                 ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
+                                    use_container_width=True)
 
 
 @_perf_timed("clubs._style_data")

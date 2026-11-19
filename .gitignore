@@ -72,3 +72,7 @@ data/tunel.log
 data/learning/answers.jsonl
 data/learning/feedback_reasons.jsonl
 data/processed/overall_calibration.json
+.streamlit/secrets.toml
+data/contas.db
+data/contas_segredo.bin
+data/processed/matchup_ref_v2.parquet

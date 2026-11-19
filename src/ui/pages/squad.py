@@ -604,7 +604,8 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         mu = {"forcar": [], "proteger": [], "estilo": [], "evitar": [], "base": f"confrontos indisponíveis ({exc})"}
     flags = {}
     for i, x in enumerate(mu["forcar"][:6], 1):
-        flags.setdefault(x["defensor"], i)
+        if x.get("defensor"):
+            flags.setdefault(x["defensor"], i)
     pc, sc = st.columns([1.05, 1])
     with pc:
         st.markdown(MV.double_pitch(xm, xr, f"{team} ({fm})", f"{rival} ({fr})", flags), unsafe_allow_html=True)
@@ -612,8 +613,9 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
                    "como alvo (ver o confronto com o mesmo número ao lado). Passe o mouse para ver nome e posição.")
     with sc:
         st.markdown("#### ⚔️ Onde ganhar o jogo")
-        st.caption("Nossa qualidade contra o defeito deles, pelos últimos jogos. 🔥 = escancarado (topo × fundo da "
-                   "base); ✅ = claro. " + mu.get("base", ""))
+        st.caption("Nossa qualidade contra o defeito deles, pelos últimos jogos: duelos 1×1, combinações (cruzamento + "
+                   "cabeceio, bola longa nas costas, pressão no pivô…) e de onde saem os gols deles. No máximo 2 dicas do "
+                   "mesmo tipo. 🔥 = escancarado (topo × fundo da base); ✅ = claro. " + mu.get("base", ""))
         if not (mu["forcar"] or mu["estilo"]):
             st.info("Nenhum confronto com vantagem clara nos números dos últimos jogos — veja 'Onde atacar' para as "
                     "fragilidades gerais do rival.")
@@ -737,7 +739,7 @@ def _tv(*teams) -> str:
 
     db = get_service().db
     # "r20": apelidos aprendidos entre fontes — análises guardadas antes (rival com "0 jogos") são refeitas
-    return "r20|" + ("|".join(db.team_version([t]) for t in teams if t) or db.stable_version())
+    return "r21|" + ("|".join(db.team_version([t]) for t in teams if t) or db.stable_version())
 
 
 def _pl(word):
@@ -746,8 +748,10 @@ def _pl(word):
     return plural(word)
 
 
+@st.fragment
 def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -> None:
-    """👍/👎 que treinam a IA do laboratório (o tipo aprovado sobe nas próximas análises)."""
+    """👍/👎 que treinam a IA do laboratório (o tipo aprovado sobe nas próximas análises).
+    Rodada 21: fragmento — o clique refaz só os botões, não o pré-jogo inteiro."""
     from src.intelligence import lab_brain as LB
 
     a, b, _ = st.columns([.6, .6, 6])
@@ -828,265 +832,272 @@ def render(_ctx=None) -> None:
     plan = matchup_plan(mine, theirs, team, rival) if theirs else None
 
     t0, th, t1, t2, t3, t4, t5 = st.tabs(["🔭 Próximo jogo", "🧪 Jogo hipotético", "🧩 Campinho", "🎯 Plano de jogo",
-                                          "👥 Elenco e notas", "➕ Adicionar atleta", "💾 Escalações salvas"])
+                                          "👥 Elenco e notas", "➕ Adicionar atleta", "💾 Escalações salvas"],
+                                         key="sq_main_tabs", on_change="rerun")
     for tab_, kind_ in ((t0, "prox"), (th, "hyp")):
         with tab_:
-            try:
-                _next_match_tab(team, version, max(n, 10), kind_)
-            except Exception as exc:
-                from src.ui.components import error_state
+            if tab_.open is not False:          # rodada 21: só a aba aberta é montada
+                try:
+                    _next_match_tab(team, version, max(n, 10), kind_)
+                except Exception as exc:
+                    from src.ui.components import error_state
 
-                error_state("Próximo jogo indisponível" if kind_ == "prox" else "Jogo hipotético indisponível", exc)
+                    error_state("Próximo jogo indisponível" if kind_ == "prox" else "Jogo hipotético indisponível", exc)
     with t1:
-        if squad.empty:
-            empty_state("Sem elenco para este time", f"Fonte procurada: Transfermarkt e escalações da base.", "👥",
-                        "O Transfermarkt aberto cobre as principais ligas europeias. Para outros clubes, cadastre os "
-                        "atletas na aba ➕ ou sincronize jogos com escalação (ESPN histórico).")
-        else:
-            why: List[str] = []
-            info: Dict[str, Any] = {}
-            md = _matchday(team, version, max(n, 10))["info"]
-            has_recent = md["jogadores"] is not None and not md["jogadores"].empty and len(md["jogos"]) >= 3
-            info = {}
-            pool = squad
-            if has_recent and mode in ("Provável", "Melhor possível"):
-                # v36: escalações reais recentes (ESPN) — titularidade, posição, gols/assistências, lesões e suspensões
-                from src.squad import matchday as M
-
-                xi, _f = M.xi_for(md, formation, "provavel" if mode == "Provável" else "melhor")
-                info = {"jogos_considerados": len(md["jogos"])}
-                pool = md["jogadores"]
-                st.caption(f"Baseado nos últimos {len(md['jogos'])} jogos com escalação ({md['fonte_elenco']}). "
-                           "Lesionados e suspensos ficam de fora. O porquê de cada escolha está logo abaixo do campinho.")
-            elif mode == "Provável":
-                lu = D.club_lineups(sq["club"]["transfermarkt_id"], n) if sq["club"] else pd.DataFrame()
-                if lu.empty:
-                    lu = D.db_lineups(get_service().db, sq["names"], n)
-                xi, info = probable_xi(lu, squad, formation, n)
-            elif mode == "Contra o adversário" and plan:
-                bonus, why = plan_bonus(squad, plan)
-                xi = best_xi(squad, formation, bonus=bonus)
+        if t1.open is not False:          # rodada 21: só a aba aberta é montada
+            if squad.empty:
+                empty_state("Sem elenco para este time", f"Fonte procurada: Transfermarkt e escalações da base.", "👥",
+                            "O Transfermarkt aberto cobre as principais ligas europeias. Para outros clubes, cadastre os "
+                            "atletas na aba ➕ ou sincronize jogos com escalação (ESPN histórico).")
             else:
-                xi = best_xi(squad, formation)
-            with st.expander("✏️ Ajustar à mão (troque qualquer vaga)"):
-                names = ["—"] + pool.sort_values("nota", ascending=False, na_position="last")["nome"].tolist()
-                cols = st.columns(4)
-                for i, p in enumerate(xi):
-                    k = f"sq_slot_{team}_{formation}_{mode}_{i}"
-                    cur = p["jogador"] if p["jogador"] in names else "—"
-                    pick = cols[i % 4].selectbox(f"{p['papel_pt']} ({i + 1})", names, index=names.index(cur), key=k)
-                    if pick != p["jogador"]:
-                        row = pool[pool["nome"] == pick]
-                        p.update(jogador=None if pick == "—" else pick,
-                                 nota=None if row.empty or pd.isna(row.iloc[0]["nota"]) else float(row.iloc[0]["nota"]),
-                                 encaixe=None if row.empty else round(fit(p["papel"], row.iloc[0]["papel"]), 2),
-                                 papel_natural=None if row.empty else ROLE_PT.get(row.iloc[0]["papel"], "—"))
-            corr = (theirs or {}).get("corredores") or {}
-            interactive = st.toggle("🖐️ Campinho interativo (arrastar jogadores, trocar com o banco e de formação)",
-                                    value=False, key="sq_drag")
-            if interactive:
-                import streamlit.components.v1 as components
+                why: List[str] = []
+                info: Dict[str, Any] = {}
+                md = _matchday(team, version, max(n, 10))["info"]
+                has_recent = md["jogadores"] is not None and not md["jogadores"].empty and len(md["jogos"]) >= 3
+                info = {}
+                pool = squad
+                if has_recent and mode in ("Provável", "Melhor possível"):
+                    # v36: escalações reais recentes (ESPN) — titularidade, posição, gols/assistências, lesões e suspensões
+                    from src.squad import matchday as M
 
-                from src.ui import drag_pitch
-
-                in_xi = {p["jogador"] for p in xi if p.get("jogador")}
-                bench = [{"nome": r["nome"], "nota": None if pd.isna(r.get("nota")) else float(r["nota"]),
-                          "papel_pt": ROLE_PT.get(r.get("papel"), "")}
-                         for r in pool.sort_values("nota", ascending=False).to_dict("records") if r["nome"] not in in_xi]
-                components.html(drag_pitch.html(team, formation, xi, bench, drag_pitch.pitch_tips(plan, corr)), height=760)
-                st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
-                           "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
-            else:
-                render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
-                if any(p.get("porque") for p in xi):
-                    with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
-                        _xi_cards(xi, "#22D3EE")
-                if plan:
-                    st.caption("Marcas no campo (passe o mouse): E = explorar a fraqueza do rival · N = neutralizar a força "
-                               "dele · F = nossa força · C = cuidado com o nosso ponto fraco.")
-            vals = [p["nota"] for p in xi if p.get("nota") is not None]
-            k = st.columns(4)
-            k[0].metric("Nota média do XI", f"{sum(vals) / len(vals):.0f}" if vals else "—")
-            k[1].metric("Fora de posição", sum(1 for p in xi if (p.get("encaixe") or 0) < 0.85 and p["jogador"]))
-            k[2].metric("Elenco disponível", len(squad))
-            if mode == "Provável":
-                k[3].metric("Jogos usados", info.get("jogos_considerados", 0))
-            st.caption("🔵 na posição de origem · 🟡 adaptado · 🔴 improvisado. O número no círculo é a nota do "
-                       "laboratório. Fonte do elenco: " + sq["fonte"] + ".")
-            mud = sq.get("mudancas") or []
-            if mud:
-                with st.expander(f"🔁 Elenco atualizado pelos jogos: {sum(m['mudanca'] == 'saiu' for m in mud)} saída(s), "
-                                 f"{sum(m['mudanca'] == 'chegou' for m in mud)} chegada(s)"):
-                    st.caption("O cadastro do Transfermarkt atrasa nas janelas. Quem jogou por outro clube depois do último "
-                               "jogo por este saiu (venda ou empréstimo); quem jogou por este nos últimos 150 dias chegou.")
-                    comparison_table(pd.DataFrame(mud).rename(columns={"nome": "Jogador", "mudanca": "Mudança",
-                                                                        "motivo": "Por quê"}))
-            nc = sq.get("nao_confirmados")
-            if nc is not None and not nc.empty:
-                with st.expander(f"❔ {len(nc)} atleta(s) do cadastro sem vínculo confirmado (fora do elenco)"):
-                    st.caption("Sem transferência registrada e sem jogo pelo clube nos últimos 12 meses: não dá para "
-                               "afirmar que ainda estão no clube. Cadastre-os em “Adicionar atleta” se estiverem.")
-                    comparison_table(nc.rename(columns={"nome": "Atleta", "posicao": "Posição",
-                                                        "ultima_temporada": "Última temporada no cadastro"}))
-            if why:
-                note("Ajustes pelo adversário", "; ".join(why) + ".")
-            if mode == "Provável" and not info.get("jogos_considerados"):
-                note("Sem escalações recentes", "Não há escalações dos últimos jogos deste clube na base: mostrei a melhor "
-                     "possível pela nota.", "warn")
-            name = st.text_input("Nome para salvar", f"{team} x {rival or 'adversário'} — {formation}", key="sq_save_name")
-            if st.button("💾 Salvar esta escalação", key="sq_save"):
-                path = D.save_lineup(name, {"time": team, "adversario": rival, "formacao": formation, "modo": mode,
-                                            "jogos_considerados": n, "xi": xi, "plano": plan})
-                st.success(f"Salva em {path}.")
-    with t2:
-        if not rival:
-            empty_state("Escolha o adversário", "O plano compara os últimos jogos dos dois times.", "🎯")
-        elif not theirs or not theirs.get("n"):
-            empty_state(f"Base insuficiente para diagnóstico de {rival}", "", "🎯",
-                        "O plano usa só jogos recentes com escalação/números individuais ou lances (nível 2 ou mais). "
-                        "Sincronize a liga do adversário.")
-        else:
-            st.markdown(f"#### {team} x {rival} — últimos {theirs['n']} jogo(s) do rival e {mine.get('n', 0)} nossos")
-            skip = sum((x.get("descartados_por_dado_incompleto") or 0) + (x.get("rasos") or 0) for x in (theirs, mine))
-            st.caption("Critério: " + (theirs.get("criterio") or "") +
-                       (f". {skip} jogo(s) recente(s) com dado incompleto ficaram de fora." if skip else "."))
-            from src.squad.planner import rival_diagnosis
-
-            dg = rival_diagnosis(theirs)
-            from src.ui import vuln_view
-            from src.ui.pages.clubs import same_team_names as _stn
-
-            vuln_view.render(rival, _stn(rival), _stn(team), version, where="plano")   # rodada 7: fragilidades reais por setor/jogador
-            _ga_section(team, rival, squad, formation, version)          # rodada 9: algoritmo genético
-            st.markdown(f"##### 🔍 Diagnóstico de {rival} pelas estatísticas do time")
-            if not dg["suficiente"]:
-                st.caption("Pelas médias do time, não há 2 pontos fortes e 2 fracos claros — veja acima as fragilidades por "
-                           "jogador e setor, que usam os números individuais.")
-            cards = st.columns(2)
-            for col, (title, items, color) in zip(cards, ((f"💪 Onde {rival} é forte", dg["fortalezas"], "#EF4444"),
-                                                         (f"🎯 Onde {rival} pode ser explorado", dg["vulnerabilidades"], "#22C55E"))):
-                with col:
-                    st.markdown(f"**{title}**")
-                    for d in items or []:
-                        st.markdown(
-                            f'<div class="fm-card" style="border-left:4px solid {color};border-radius:14px;padding:.6rem .9rem;'
-                            f'margin-bottom:.5rem"><b>{d["texto"].capitalize()}</b><br><span style="color:#94A3B8;'
-                            f'font-size:.85rem">{d["rotulo"]}: {d["media"]} por jogo (média das mesmas competições: '
-                            f'{d["referencia"]}, {d["dif_pct"]:+.0f}%) em {d["jogos"]} jogos · onde mais apareceu: '
-                            f'{d["origem"]}</span></div>', unsafe_allow_html=True)
-                    if not items:
-                        st.caption("Nada claro o bastante nos jogos recentes.")
-            from src.squad.planner import deep_tactical_signals
-            signals = deep_tactical_signals(theirs)
-            if signals:
-                st.markdown("##### 🧪 Sinais derivados — além do volume bruto")
-                st.caption("Indicadores calculados jogo a jogo. Não representam tracking posicional; só aparecem quando há "
-                           "amostra mínima e estatísticas pareadas.")
-                signal_cols = st.columns(min(3, len(signals)))
-                for col, signal in zip(signal_cols, signals):
-                    with col:
-                        val = signal["valor"]
-                        shown = f"{val:.2f} {signal['unidade']}"
-                        st.markdown(
-                            f'<div class="fm-card" style="border-top:3px solid #38BDF8;border-radius:12px;padding:.8rem;'
-                            f'min-height:170px"><div style="font-size:.78rem;color:#94A3B8">{signal["titulo"]}</div>'
-                            f'<div style="font-size:1.45rem;font-weight:800;color:#E0F2FE">{shown}</div>'
-                            f'<div style="font-size:.78rem;color:#94A3B8">{signal["jogos"]} jogos pareados</div>'
-                            f'<div style="margin-top:.55rem;font-size:.84rem">{signal["leitura"]}</div>'
-                            f'<div style="margin-top:.4rem;font-size:.72rem;color:#64748B">{signal["evidencia"]}</div></div>',
-                            unsafe_allow_html=True)
-            st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
-            x, y = st.columns(2)
-            with x:
-                st.markdown(f"**Pontos fortes de {rival}**")
-                comparison_table(_traits_table(plan["rival_fortes"], "Acima da média"),
-                                 "Comparado com a média das mesmas competições no período.")
-                st.markdown(f"**Pontos fracos de {rival}**")
-                comparison_table(_traits_table(plan["rival_fracos"], "Abaixo do esperado"))
-            with y:
-                st.markdown(f"**Pontos fortes de {team}**")
-                comparison_table(_traits_table(plan["nossos_fortes"], "Acima da média"))
-                st.markdown(f"**Pontos fracos de {team}**")
-                comparison_table(_traits_table(plan["nossos_fracos"], "Abaixo do esperado"))
-            _bars(mine, theirs, team, rival)
-            corr = theirs.get("corredores") or {}
-            if corr.get("ataca_por"):
-                st.markdown(f"**Por onde {rival} chega ao último terço** ({corr['jogos']} jogo(s) com lances, "
-                            f"{corr['acoes_ataque']} ações)")
-                render_chart(_corridor_bars(corr), use_container_width=True)
-            st.markdown("**Jogos considerados**")
-            comparison_table(pd.DataFrame(theirs["jogos"]).drop(columns=["match_id"]), "")
-    with t3:
-        if squad.empty:
-            empty_state("Sem elenco", "", "👥")
-        else:
-            show = squad.assign(posicao_pt=squad["papel"].map(ROLE_PT).fillna("—"),
-                                valor=(pd.to_numeric(squad["valor_mercado_eur"], errors="coerce") / 1e6).round(1))
-            cols = {"nome": "Atleta", "posicao_pt": "Posição", "idade": "Idade", "altura_cm": "Altura (cm)", "pe": "Pé",
-                    "valor": "Valor (€ mi)", "nota": "Nota", "nota_base": "Base da nota",
-                    "minutos_temporada": "Min. (12 meses)", "gols_temporada": "Gols", "assist_temporada": "Assist.",
-                    "origem": "Origem"}
-            from src.ui.components import clickable_table
-
-            clickable_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
-                            .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador",
-                             "Nota do laboratório (0–100): valor de mercado comparado com a mesma posição + minutos e "
-                             "participação em gols nos últimos 12 meses + nota externa quando houver. É uma estimativa: "
-                             "a base de cada nota aparece ao lado.")
-            pick = st.selectbox("Ver a carreira de", squad["nome"].tolist(), key="sq_career")
-            from src.ui import nav
-
-            nav.link(f"👤 Abrir {pick}", "jogador", key="sq_open_player", name=pick)
-    with t4:
-        st.caption("O atleta fica salvo na sua base local (data/lake) e entra no elenco do clube informado, no "
-                   "planejador e na busca de jogadores.")
-        with st.form("sq_add"):
-            f1, f2, f3 = st.columns(3)
-            nome = f1.text_input("Nome *")
-            clube = f2.text_input("Clube *", value=team or "")
-            funcao = f3.selectbox("Posição", ["Goalkeeper", "Centre-Back", "Left-Back", "Right-Back", "Defensive Midfield",
-                                              "Central Midfield", "Attacking Midfield", "Left Midfield", "Right Midfield",
-                                              "Left Winger", "Right Winger", "Centre-Forward"],
-                                  format_func=lambda v: ROLE_PT.get(natural_role(v), v))
-            g1, g2, g3, g4 = st.columns(4)
-            nasc = g1.date_input("Nascimento", value=date(2000, 1, 1), min_value=date(1960, 1, 1))
-            alt = g2.number_input("Altura (cm)", 150, 210, 180)
-            pe = g3.selectbox("Pé", ["right", "left", "both"], format_func={"right": "direito", "left": "esquerdo",
-                                                                            "both": "ambos"}.get)
-            valor = g4.number_input("Valor de mercado (€ mi)", 0.0, 300.0, 0.0, step=0.1)
-            nota = st.slider("Sua nota (opcional, 0 = sem nota)", 0, 100, 0)
-            obs = st.text_input("Observação")
-            if st.form_submit_button("Salvar atleta", type="primary"):
-                if not nome.strip() or not clube.strip():
-                    st.error("Nome e clube são obrigatórios.")
+                    xi, _f = M.xi_for(md, formation, "provavel" if mode == "Provável" else "melhor")
+                    info = {"jogos_considerados": len(md["jogos"])}
+                    pool = md["jogadores"]
+                    st.caption(f"Baseado nos últimos {len(md['jogos'])} jogos com escalação ({md['fonte_elenco']}). "
+                               "Lesionados e suspensos ficam de fora. O porquê de cada escolha está logo abaixo do campinho.")
+                elif mode == "Provável":
+                    lu = D.club_lineups(sq["club"]["transfermarkt_id"], n) if sq["club"] else pd.DataFrame()
+                    if lu.empty:
+                        lu = D.db_lineups(get_service().db, sq["names"], n)
+                    xi, info = probable_xi(lu, squad, formation, n)
+                elif mode == "Contra o adversário" and plan:
+                    bonus, why = plan_bonus(squad, plan)
+                    xi = best_xi(squad, formation, bonus=bonus)
                 else:
-                    D.add_player({"nome": nome.strip(), "clube": clube.strip(), "funcao": funcao, "posicao": funcao,
-                                  "nascimento": nasc.isoformat(), "altura_cm": alt, "pe": pe,
-                                  "valor_mercado_eur": valor * 1e6 if valor else None,
-                                  "nota_manual": nota or None, "observacao": obs})
-                    _squad.clear()
-                    st.success(f"{nome} salvo no elenco de {clube}.")
-        ad = D.added_players()
-        if not ad.empty:
-            comparison_table(ad.drop(columns=[c for c in ("fonte", "conector", "licenca", "ingestao_utc")
-                                              if c in ad.columns]), "Atletas cadastrados por você.")
-            rm = st.selectbox("Remover", ["—"] + [f"{r.nome} ({r.clube})" for r in ad.itertuples()], key="sq_rm")
-            if rm != "—" and st.button("Remover atleta", key="sq_rm_btn"):
-                r = ad.iloc[[f"{x.nome} ({x.clube})" for x in ad.itertuples()].index(rm)]
-                D.remove_added(r["nome"], r["clube"])
-                _squad.clear()
-                st.rerun()
-    with t5:
-        files = D.saved_lineups()
-        if not files:
-            empty_state("Nenhuma escalação salva", "Use 💾 no campinho.", "💾")
-        for f in files[:30]:
-            import json
+                    xi = best_xi(squad, formation)
+                with st.expander("✏️ Ajustar à mão (troque qualquer vaga)"):
+                    names = ["—"] + pool.sort_values("nota", ascending=False, na_position="last")["nome"].tolist()
+                    cols = st.columns(4)
+                    for i, p in enumerate(xi):
+                        k = f"sq_slot_{team}_{formation}_{mode}_{i}"
+                        cur = p["jogador"] if p["jogador"] in names else "—"
+                        pick = cols[i % 4].selectbox(f"{p['papel_pt']} ({i + 1})", names, index=names.index(cur), key=k)
+                        if pick != p["jogador"]:
+                            row = pool[pool["nome"] == pick]
+                            p.update(jogador=None if pick == "—" else pick,
+                                     nota=None if row.empty or pd.isna(row.iloc[0]["nota"]) else float(row.iloc[0]["nota"]),
+                                     encaixe=None if row.empty else round(fit(p["papel"], row.iloc[0]["papel"]), 2),
+                                     papel_natural=None if row.empty else ROLE_PT.get(row.iloc[0]["papel"], "—"))
+                corr = (theirs or {}).get("corredores") or {}
+                interactive = st.toggle("🖐️ Campinho interativo (arrastar jogadores, trocar com o banco e de formação)",
+                                        value=False, key="sq_drag")
+                if interactive:
+                    import streamlit.components.v1 as components
 
-            d = json.loads(f.read_text(encoding="utf-8"))
-            with st.expander(f"{f.stem} — {d.get('time')} x {d.get('adversario') or '—'} ({d.get('formacao')})"):
-                comparison_table(pd.DataFrame([{"Posição": p.get("papel_pt"), "Atleta": p.get("jogador"),
-                                                "Nota": p.get("nota")} for p in d.get("xi", [])]), d.get("modo", ""))
+                    from src.ui import drag_pitch
+
+                    in_xi = {p["jogador"] for p in xi if p.get("jogador")}
+                    bench = [{"nome": r["nome"], "nota": None if pd.isna(r.get("nota")) else float(r["nota"]),
+                              "papel_pt": ROLE_PT.get(r.get("papel"), "")}
+                             for r in pool.sort_values("nota", ascending=False).to_dict("records") if r["nome"] not in in_xi]
+                    components.html(drag_pitch.html(team, formation, xi, bench, drag_pitch.pitch_tips(plan, corr)), height=760)
+                    st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
+                               "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
+                else:
+                    render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                    if any(p.get("porque") for p in xi):
+                        with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
+                            _xi_cards(xi, "#22D3EE")
+                    if plan:
+                        st.caption("Marcas no campo (passe o mouse): E = explorar a fraqueza do rival · N = neutralizar a força "
+                                   "dele · F = nossa força · C = cuidado com o nosso ponto fraco.")
+                vals = [p["nota"] for p in xi if p.get("nota") is not None]
+                k = st.columns(4)
+                k[0].metric("Nota média do XI", f"{sum(vals) / len(vals):.0f}" if vals else "—")
+                k[1].metric("Fora de posição", sum(1 for p in xi if (p.get("encaixe") or 0) < 0.85 and p["jogador"]))
+                k[2].metric("Elenco disponível", len(squad))
+                if mode == "Provável":
+                    k[3].metric("Jogos usados", info.get("jogos_considerados", 0))
+                st.caption("🔵 na posição de origem · 🟡 adaptado · 🔴 improvisado. O número no círculo é a nota do "
+                           "laboratório. Fonte do elenco: " + sq["fonte"] + ".")
+                mud = sq.get("mudancas") or []
+                if mud:
+                    with st.expander(f"🔁 Elenco atualizado pelos jogos: {sum(m['mudanca'] == 'saiu' for m in mud)} saída(s), "
+                                     f"{sum(m['mudanca'] == 'chegou' for m in mud)} chegada(s)"):
+                        st.caption("O cadastro do Transfermarkt atrasa nas janelas. Quem jogou por outro clube depois do último "
+                                   "jogo por este saiu (venda ou empréstimo); quem jogou por este nos últimos 150 dias chegou.")
+                        comparison_table(pd.DataFrame(mud).rename(columns={"nome": "Jogador", "mudanca": "Mudança",
+                                                                            "motivo": "Por quê"}))
+                nc = sq.get("nao_confirmados")
+                if nc is not None and not nc.empty:
+                    with st.expander(f"❔ {len(nc)} atleta(s) do cadastro sem vínculo confirmado (fora do elenco)"):
+                        st.caption("Sem transferência registrada e sem jogo pelo clube nos últimos 12 meses: não dá para "
+                                   "afirmar que ainda estão no clube. Cadastre-os em “Adicionar atleta” se estiverem.")
+                        comparison_table(nc.rename(columns={"nome": "Atleta", "posicao": "Posição",
+                                                            "ultima_temporada": "Última temporada no cadastro"}))
+                if why:
+                    note("Ajustes pelo adversário", "; ".join(why) + ".")
+                if mode == "Provável" and not info.get("jogos_considerados"):
+                    note("Sem escalações recentes", "Não há escalações dos últimos jogos deste clube na base: mostrei a melhor "
+                         "possível pela nota.", "warn")
+                name = st.text_input("Nome para salvar", f"{team} x {rival or 'adversário'} — {formation}", key="sq_save_name")
+                if st.button("💾 Salvar esta escalação", key="sq_save"):
+                    path = D.save_lineup(name, {"time": team, "adversario": rival, "formacao": formation, "modo": mode,
+                                                "jogos_considerados": n, "xi": xi, "plano": plan})
+                    st.success(f"Salva em {path}.")
+    with t2:
+        if t2.open is not False:          # rodada 21: só a aba aberta é montada
+            if not rival:
+                empty_state("Escolha o adversário", "O plano compara os últimos jogos dos dois times.", "🎯")
+            elif not theirs or not theirs.get("n"):
+                empty_state(f"Base insuficiente para diagnóstico de {rival}", "", "🎯",
+                            "O plano usa só jogos recentes com escalação/números individuais ou lances (nível 2 ou mais). "
+                            "Sincronize a liga do adversário.")
+            else:
+                st.markdown(f"#### {team} x {rival} — últimos {theirs['n']} jogo(s) do rival e {mine.get('n', 0)} nossos")
+                skip = sum((x.get("descartados_por_dado_incompleto") or 0) + (x.get("rasos") or 0) for x in (theirs, mine))
+                st.caption("Critério: " + (theirs.get("criterio") or "") +
+                           (f". {skip} jogo(s) recente(s) com dado incompleto ficaram de fora." if skip else "."))
+                from src.squad.planner import rival_diagnosis
+
+                dg = rival_diagnosis(theirs)
+                from src.ui import vuln_view
+                from src.ui.pages.clubs import same_team_names as _stn
+
+                vuln_view.render(rival, _stn(rival), _stn(team), version, where="plano")   # rodada 7: fragilidades reais por setor/jogador
+                _ga_section(team, rival, squad, formation, version)          # rodada 9: algoritmo genético
+                st.markdown(f"##### 🔍 Diagnóstico de {rival} pelas estatísticas do time")
+                if not dg["suficiente"]:
+                    st.caption("Pelas médias do time, não há 2 pontos fortes e 2 fracos claros — veja acima as fragilidades por "
+                               "jogador e setor, que usam os números individuais.")
+                cards = st.columns(2)
+                for col, (title, items, color) in zip(cards, ((f"💪 Onde {rival} é forte", dg["fortalezas"], "#EF4444"),
+                                                             (f"🎯 Onde {rival} pode ser explorado", dg["vulnerabilidades"], "#22C55E"))):
+                    with col:
+                        st.markdown(f"**{title}**")
+                        for d in items or []:
+                            st.markdown(
+                                f'<div class="fm-card" style="border-left:4px solid {color};border-radius:14px;padding:.6rem .9rem;'
+                                f'margin-bottom:.5rem"><b>{d["texto"].capitalize()}</b><br><span style="color:#94A3B8;'
+                                f'font-size:.85rem">{d["rotulo"]}: {d["media"]} por jogo (média das mesmas competições: '
+                                f'{d["referencia"]}, {d["dif_pct"]:+.0f}%) em {d["jogos"]} jogos · onde mais apareceu: '
+                                f'{d["origem"]}</span></div>', unsafe_allow_html=True)
+                        if not items:
+                            st.caption("Nada claro o bastante nos jogos recentes.")
+                from src.squad.planner import deep_tactical_signals
+                signals = deep_tactical_signals(theirs)
+                if signals:
+                    st.markdown("##### 🧪 Sinais derivados — além do volume bruto")
+                    st.caption("Indicadores calculados jogo a jogo. Não representam tracking posicional; só aparecem quando há "
+                               "amostra mínima e estatísticas pareadas.")
+                    signal_cols = st.columns(min(3, len(signals)))
+                    for col, signal in zip(signal_cols, signals):
+                        with col:
+                            val = signal["valor"]
+                            shown = f"{val:.2f} {signal['unidade']}"
+                            st.markdown(
+                                f'<div class="fm-card" style="border-top:3px solid #38BDF8;border-radius:12px;padding:.8rem;'
+                                f'min-height:170px"><div style="font-size:.78rem;color:#94A3B8">{signal["titulo"]}</div>'
+                                f'<div style="font-size:1.45rem;font-weight:800;color:#E0F2FE">{shown}</div>'
+                                f'<div style="font-size:.78rem;color:#94A3B8">{signal["jogos"]} jogos pareados</div>'
+                                f'<div style="margin-top:.55rem;font-size:.84rem">{signal["leitura"]}</div>'
+                                f'<div style="margin-top:.4rem;font-size:.72rem;color:#64748B">{signal["evidencia"]}</div></div>',
+                                unsafe_allow_html=True)
+                st.markdown(_plan_text(plan, plan_bonus(squad, plan)[1] if not squad.empty else []))
+                x, y = st.columns(2)
+                with x:
+                    st.markdown(f"**Pontos fortes de {rival}**")
+                    comparison_table(_traits_table(plan["rival_fortes"], "Acima da média"),
+                                     "Comparado com a média das mesmas competições no período.")
+                    st.markdown(f"**Pontos fracos de {rival}**")
+                    comparison_table(_traits_table(plan["rival_fracos"], "Abaixo do esperado"))
+                with y:
+                    st.markdown(f"**Pontos fortes de {team}**")
+                    comparison_table(_traits_table(plan["nossos_fortes"], "Acima da média"))
+                    st.markdown(f"**Pontos fracos de {team}**")
+                    comparison_table(_traits_table(plan["nossos_fracos"], "Abaixo do esperado"))
+                _bars(mine, theirs, team, rival)
+                corr = theirs.get("corredores") or {}
+                if corr.get("ataca_por"):
+                    st.markdown(f"**Por onde {rival} chega ao último terço** ({corr['jogos']} jogo(s) com lances, "
+                                f"{corr['acoes_ataque']} ações)")
+                    render_chart(_corridor_bars(corr), use_container_width=True)
+                st.markdown("**Jogos considerados**")
+                comparison_table(pd.DataFrame(theirs["jogos"]).drop(columns=["match_id"]), "")
+    with t3:
+        if t3.open is not False:          # rodada 21: só a aba aberta é montada
+            if squad.empty:
+                empty_state("Sem elenco", "", "👥")
+            else:
+                show = squad.assign(posicao_pt=squad["papel"].map(ROLE_PT).fillna("—"),
+                                    valor=(pd.to_numeric(squad["valor_mercado_eur"], errors="coerce") / 1e6).round(1))
+                cols = {"nome": "Atleta", "posicao_pt": "Posição", "idade": "Idade", "altura_cm": "Altura (cm)", "pe": "Pé",
+                        "valor": "Valor (€ mi)", "nota": "Nota", "nota_base": "Base da nota",
+                        "minutos_temporada": "Min. (12 meses)", "gols_temporada": "Gols", "assist_temporada": "Assist.",
+                        "origem": "Origem"}
+                from src.ui.components import clickable_table
+
+                clickable_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
+                                .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador",
+                                 "Nota do laboratório (0–100): valor de mercado comparado com a mesma posição + minutos e "
+                                 "participação em gols nos últimos 12 meses + nota externa quando houver. É uma estimativa: "
+                                 "a base de cada nota aparece ao lado.")
+                pick = st.selectbox("Ver a carreira de", squad["nome"].tolist(), key="sq_career")
+                from src.ui import nav
+
+                nav.link(f"👤 Abrir {pick}", "jogador", key="sq_open_player", name=pick)
+    with t4:
+        if t4.open is not False:          # rodada 21: só a aba aberta é montada
+            st.caption("O atleta fica salvo na sua base local (data/lake) e entra no elenco do clube informado, no "
+                       "planejador e na busca de jogadores.")
+            with st.form("sq_add"):
+                f1, f2, f3 = st.columns(3)
+                nome = f1.text_input("Nome *")
+                clube = f2.text_input("Clube *", value=team or "")
+                funcao = f3.selectbox("Posição", ["Goalkeeper", "Centre-Back", "Left-Back", "Right-Back", "Defensive Midfield",
+                                                  "Central Midfield", "Attacking Midfield", "Left Midfield", "Right Midfield",
+                                                  "Left Winger", "Right Winger", "Centre-Forward"],
+                                      format_func=lambda v: ROLE_PT.get(natural_role(v), v))
+                g1, g2, g3, g4 = st.columns(4)
+                nasc = g1.date_input("Nascimento", value=date(2000, 1, 1), min_value=date(1960, 1, 1))
+                alt = g2.number_input("Altura (cm)", 150, 210, 180)
+                pe = g3.selectbox("Pé", ["right", "left", "both"], format_func={"right": "direito", "left": "esquerdo",
+                                                                                "both": "ambos"}.get)
+                valor = g4.number_input("Valor de mercado (€ mi)", 0.0, 300.0, 0.0, step=0.1)
+                nota = st.slider("Sua nota (opcional, 0 = sem nota)", 0, 100, 0)
+                obs = st.text_input("Observação")
+                if st.form_submit_button("Salvar atleta", type="primary"):
+                    if not nome.strip() or not clube.strip():
+                        st.error("Nome e clube são obrigatórios.")
+                    else:
+                        D.add_player({"nome": nome.strip(), "clube": clube.strip(), "funcao": funcao, "posicao": funcao,
+                                      "nascimento": nasc.isoformat(), "altura_cm": alt, "pe": pe,
+                                      "valor_mercado_eur": valor * 1e6 if valor else None,
+                                      "nota_manual": nota or None, "observacao": obs})
+                        _squad.clear()
+                        st.success(f"{nome} salvo no elenco de {clube}.")
+            ad = D.added_players()
+            if not ad.empty:
+                comparison_table(ad.drop(columns=[c for c in ("fonte", "conector", "licenca", "ingestao_utc")
+                                                  if c in ad.columns]), "Atletas cadastrados por você.")
+                rm = st.selectbox("Remover", ["—"] + [f"{r.nome} ({r.clube})" for r in ad.itertuples()], key="sq_rm")
+                if rm != "—" and st.button("Remover atleta", key="sq_rm_btn"):
+                    r = ad.iloc[[f"{x.nome} ({x.clube})" for x in ad.itertuples()].index(rm)]
+                    D.remove_added(r["nome"], r["clube"])
+                    _squad.clear()
+                    st.rerun()
+    with t5:
+        if t5.open is not False:          # rodada 21: só a aba aberta é montada
+            files = D.saved_lineups()
+            if not files:
+                empty_state("Nenhuma escalação salva", "Use 💾 no campinho.", "💾")
+            for f in files[:30]:
+                import json
+
+                d = json.loads(f.read_text(encoding="utf-8"))
+                with st.expander(f"{f.stem} — {d.get('time')} x {d.get('adversario') or '—'} ({d.get('formacao')})"):
+                    comparison_table(pd.DataFrame([{"Posição": p.get("papel_pt"), "Atleta": p.get("jogador"),
+                                                    "Nota": p.get("nota")} for p in d.get("xi", [])]), d.get("modo", ""))
 
 
 def _bars(mine: Dict[str, Any], theirs: Dict[str, Any], team: str, rival: str) -> None:

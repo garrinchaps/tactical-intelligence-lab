@@ -24,3 +24,5 @@ PyJWT>=2.8.0,<3
 
 # huggingface_hub NÃO entra aqui: ele puxa a biblioteca de YAML (proibida no projeto e sem build no Python 3.15). Só o script
 # opcional scripts/fetch_db.py usa (baixar o banco na nuvem); quem precisar instala à parte: pip install huggingface_hub
+# Authlib NÃO entra aqui (puxa cryptography, que pode não ter pacote pronto para o Python 3.15). Só para o
+# "Entrar com Google" (rodada 21): pip install Authlib — sem ele, as contas com e-mail e senha funcionam.

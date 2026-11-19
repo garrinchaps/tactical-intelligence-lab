@@ -81,7 +81,8 @@ def checks(port: int = 8501) -> List[Tuple[str, str, str]]:
     for path, name, cmd in [
         (Path("data/processed/evaluations.parquet"), "Rankings (avaliações)", "python -m src.scout.evaluation"),
         (Path("data/processed/player_index.parquet"), "Índice da busca de jogadores", "abre o app 1× e espere o processo de fundo"),
-        (Path("data/processed/scout_universe_v6.pkl"), "Fotografia do Scout", "abra a tela Scout 1× e espere o processo de fundo"),
+        (__import__("src.scout.snapshot", fromlist=["SNAP_PATH"]).SNAP_PATH, "Fotografia do Scout",
+         "python -m src.scout.snapshot"),
         (Path("data/processed/matchup_ref.parquet"), "Régua dos confrontos (pré-jogo)", "abre o app 1× e espere o processo de fundo"),
     ]:
         h = _age_h(path)
@@ -93,8 +94,25 @@ def checks(port: int = 8501) -> List[Tuple[str, str, str]]:
     out.append((OK if sb == "definida" else WARN, "StatsBomb no disco", f"STATSBOMB_OPEN_DATA_PATH {sb}" + ("" if sb == "definida" else
                 " — sem ela os lances vêm do GitHub (mais lento na 1ª abertura de cada jogo)")))
     cf = _cloudflared()
+    ts = shutil.which("tailscale") or (r"C:\Program Files\Tailscale\tailscale.exe"
+                                       if Path(r"C:\Program Files\Tailscale\tailscale.exe").exists() else None)
+    ng = shutil.which("ngrok")
+    if ts or ng:
+        out.append((OK, "Link FIXO (rodada 21)", ("Tailscale Funnel" if ts else "ngrok") + " instalado — o link não muda"))
+    else:
+        out.append((WARN, "Link FIXO (rodada 21)", "para o link ser sempre o mesmo: winget install --id Tailscale.Tailscale "
+                                                    "(ou Ngrok.Ngrok); sem eles usa a Cloudflare (link muda a cada vez)"))
     out.append((OK, "cloudflared (túnel grátis)", cf) if cf else
-               (BAD, "cloudflared (túnel grátis)", "instale: winget install --id Cloudflare.cloudflared (e abra um terminal novo)"))
+               ((WARN if (ts or ng) else BAD), "cloudflared (túnel grátis)",
+                "instale: winget install --id Cloudflare.cloudflared (e abra um terminal novo)"))
+    try:
+        from src.ui.accounts import google_ready
+
+        g = Path(".streamlit/secrets.toml").exists()
+        out.append((OK if g else WARN, "Entrar com Google", "configurado" if g else
+                    "opcional: pip install Authlib e python -m src.tools.configurar_login (contas com senha já funcionam)"))
+    except Exception:
+        pass
     out.append((WARN, f"Porta {port}", "ocupada — feche o app aberto antes de rodar o script de apresentação")
                if _port_busy(port) else (OK, f"Porta {port}", "livre"))
     try:

@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v8.pkl")    # v8: overall 0–100 calibrado, feminino fora, clube com 1 nome
-META_PATH = Path("data/processed/scout_universe_v8.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+SNAP_PATH = Path("data/processed/scout_universe_v9.pkl")    # v9: overall mais exigente (escada global, tetos, minutos)
+META_PATH = Path("data/processed/scout_universe_v9.json")
+OLD_SNAPS = [Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 

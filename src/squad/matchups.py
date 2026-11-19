@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-REF_PATH = Path("data/processed/matchup_ref.parquet")
+REF_PATH = Path("data/processed/matchup_ref_v2.parquet")      # v2 (rodada 21): impedimentos, cruzamentos, bolas longas
 REF_MAX_AGE_S = 86400
 
 # chave do stats_json → nome curto
@@ -32,7 +32,10 @@ KEYS = {"dribbles_succeeded": "drb", "dribbles_succeeded_total": "drb_t", "dribb
         "accurate_crosses": "crs", "chances_created": "cc", "xg": "xg", "xa": "xa", "touches_opp_box": "tob",
         "was_fouled": "fouled", "foulsCommitted": "fouls", "interceptions": "int", "dispossessed": "disp",
         "recoveries": "rec", "defensive_actions": "def", "matchstats.headers.tackles": "tkl",
-        "ground_duels_won": "gd_w", "ground_duels_won_total": "gd_t"}
+        "ground_duels_won": "gd_w", "ground_duels_won_total": "gd_t",
+        # rodada 21: mais fundamentos para dicas além do drible
+        "Offsides": "off", "accurate_crosses_total": "crs_t", "long_balls_accurate": "lb", "long_balls_accurate_total": "lb_t",
+        "line_breaking_passes": "lbp", "passes_into_final_third": "pft", "headed_clearance": "hclr", "clearances": "clr"}
 
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST", "CF": "ST"}
@@ -50,6 +53,8 @@ DIMENSIONS = [
      "jogar no corpo a corpo: {att} ganha duelos e {deff} perde"),
     ("presenca", "Ataque à área", "tob_p90", "int_p90", False,
      "{att} vive dentro da área e {deff} intercepta pouco: atacar o espaço nas costas dele"),
+    ("pressao", "Pressão na saída de bola", "rec_p90", "disp_p90", True,
+     "pressionar {deff} assim que receber: {att} recupera muitas bolas e {deff} perde a posse com frequência"),
 ]
 
 PAIRS_ATTACK = [  # (minha função, funções deles que marcam)
@@ -82,11 +87,16 @@ def _sum_sql(alias: str = "p") -> str:
 def _per90(df: pd.DataFrame) -> pd.DataFrame:
     d = df.copy()
     m = pd.to_numeric(d["mins"], errors="coerce").replace(0, np.nan)
-    for v in ("drb", "drb_past", "aer", "crs", "cc", "xg", "xa", "tob", "fouled", "fouls", "int", "disp", "rec", "def", "tkl"):
+    for v in ("drb", "drb_past", "aer", "crs", "cc", "xg", "xa", "tob", "fouled", "fouls", "int", "disp", "rec", "def", "tkl",
+              "off", "lb", "lbp", "pft", "hclr", "clr", "crs_t", "lb_t"):
         if v in d:
             d[f"{v}_p90"] = d[v] * 90 / m
     d["drb_pct"] = 100 * d["drb"] / d["drb_t"].replace(0, np.nan)
     d["aer_pct"] = (100 * d["aer"] / d["aer_t"].replace(0, np.nan)).where(d["aer_t"] >= 6)
+    if "crs_t" in d:
+        d["crs_pct"] = (100 * d["crs"] / d["crs_t"].replace(0, np.nan)).where(d["crs_t"] >= 8)
+    if "lb_t" in d:
+        d["lb_pct"] = (100 * d["lb"] / d["lb_t"].replace(0, np.nan)).where(d["lb_t"] >= 10)
     tot = d["duel_w"] + d["duel_l"]
     d["duel_pct"] = (100 * d["duel_w"] / tot.replace(0, np.nan)).where(tot >= 10)
     return d
@@ -308,12 +318,207 @@ def style_findings(db, my_names: Sequence[str], rv_names: Sequence[str], me: str
     return out
 
 
+# ------------------------------------------------------------------ rodada 21: dicas além do duelo 1×1
+def _players(xi, stats, roles):
+    out = []
+    for s_ in _find(xi, roles):
+        r = _stats_row(stats, s_["jogador"])
+        if r:
+            out.append((s_["jogador"], r))
+    return out
+
+
+def _best(cands, ref, col, min_pct=70.0):
+    best = None
+    for name, r in cands:
+        p = _pct(ref, col, r.get(col))
+        if p is not None and p >= min_pct and (best is None or p > best[2]):
+            best = (name, r, p)
+    return best
+
+
+def _base(*rows) -> str:
+    return " · ".join(f"{int(r.get('jogos') or 0)} jogos" for r in rows if r) + " recentes com números por jogador"
+
+
+def combo_findings(my_xi, rv_xi, ms, rs, ref, me: str, rival: str) -> Dict[str, List[Dict[str, Any]]]:
+    """Leituras que juntam dois ou três jogadores (o nosso ponto forte × o defeito deles) e alertas individuais."""
+    force, protect = [], []
+    if ref is None or ref.empty:
+        return {"forcar": force, "proteger": protect}
+    # 1. cruzamento + cabeceio contra zagueiros fracos pelo alto
+    crosser = _best(_players(my_xi, ms, ["LB", "RB", "LWB", "RWB", "LW", "RW", "LM", "RM"]), ref, "crs_p90", 70)
+    target = _best(_players(my_xi, ms, ["ST", "CF", "AM", "CB"]), ref, "aer_pct", 65)
+    cbs = [(n, r, _pct(ref, "aer_pct", r.get("aer_pct"))) for n, r in _players(rv_xi, rs, ["CB"])]
+    cbs = [c for c in cbs if c[2] is not None]
+    weak_cb = min(cbs, key=lambda c: c[2]) if cbs else None
+    if crosser and target and weak_cb and weak_cb[2] <= 35:
+        cp = crosser[1].get("crs_pct")
+        force.append({"tipo": "combo", "dimensao": "cruzamento", "titulo": "Cruzamento na área",
+                      "nivel": "escancarado" if crosser[2] >= 85 and weak_cb[2] <= 20 else "claro",
+                      "atacante": f"{crosser[0]} → {target[0]}", "defensor": weak_cb[0],
+                      "evidencia": (f"{crosser[0]} cruza {_fmt('crs_p90', crosser[1].get('crs_p90'))}"
+                                    + (f" ({cp:.0f}% certos)" if cp is not None and pd.notna(cp) else "")
+                                    + f" · {target[0]} ganha {target[1].get('aer_pct'):.0f}% das bolas pelo alto · "
+                                    f"{weak_cb[0]} ganha só {weak_cb[1].get('aer_pct'):.0f}% ({_label(weak_cb[2])})"),
+                      "acao": (f"FORÇAR: levar a bola até {crosser[0]} e cruzar na direção de {weak_cb[0]} — "
+                               f"{target[0]} atacando a primeira trave contra ele"),
+                      "base": _base(crosser[1], target[1], weak_cb[1])})
+    # 2. bola longa nas costas: nosso lançador + nosso jogador de profundidade × defensor que é driblado/perde duelo
+    passer = _best(_players(my_xi, ms, ["CB", "DM", "CM", "GK", "LB", "RB"]), ref, "lb_p90", 75)
+    runner = _best(_players(my_xi, ms, ["ST", "CF", "LW", "RW"]), ref, "tob_p90", 70)
+    backs = [(n, r, _pct(ref, "duel_pct", r.get("duel_pct"))) for n, r in _players(rv_xi, rs, ["CB", "LB", "RB"])]
+    backs = [b for b in backs if b[2] is not None]
+    slow = min(backs, key=lambda b: b[2]) if backs else None
+    if passer and runner and slow and slow[2] <= 35:
+        lp = passer[1].get("lb_pct")
+        force.append({"tipo": "combo", "dimensao": "bola_longa", "titulo": "Bola longa nas costas",
+                      "nivel": "claro", "atacante": f"{passer[0]} → {runner[0]}", "defensor": slow[0],
+                      "evidencia": (f"{passer[0]} acerta {_fmt('lb_p90', passer[1].get('lb_p90'))}"
+                                    + (f" ({lp:.0f}% certas)" if lp is not None and pd.notna(lp) else "")
+                                    + f" · {runner[0]}: {_fmt('tob_p90', runner[1].get('tob_p90'))} · "
+                                    f"{slow[0]} ganha só {slow[1].get('duel_pct'):.0f}% dos duelos ({_label(slow[2])}). "
+                                    "Velocidade não é medida pelas fontes abertas — a leitura é pelos duelos."),
+                      "acao": (f"FORÇAR: atrair a pressão de um lado e virar com {passer[0]} na corrida de {runner[0]} "
+                               f"às costas de {slow[0]}"),
+                      "base": _base(passer[1], runner[1], slow[1])})
+    # 3. alertas sobre o atacante deles que vive no limite do impedimento
+    for name, r in _players(rv_xi, rs, ["ST", "CF", "LW", "RW", "AM"]):
+        p = _pct(ref, "off_p90", r.get("off_p90"))
+        if p is not None and p >= 85 and (r.get("off") or 0) >= 4:
+            protect.append({"tipo": "alerta", "dimensao": "impedimento", "titulo": "Linha de impedimento",
+                            "nivel": "claro", "atacante": name, "defensor": "nossa linha",
+                            "evidencia": (f"{name}: {r.get('off_p90'):.2f} impedimentos por 90 ({_label(p)}) — "
+                                          "joga colado no último defensor"),
+                            "acao": (f"PROTEGER: linha alinhada e subida coordenada — {name} ataca as costas no limite; "
+                                     "um zagueiro atrasado dá condição"),
+                            "base": _base(r)})
+            break
+    # 4. nosso atacante que cai muito em impedimento (orientação)
+    for name, r in _players(my_xi, ms, ["ST", "CF", "LW", "RW"]):
+        p = _pct(ref, "off_p90", r.get("off_p90"))
+        if p is not None and p >= 90 and (r.get("off") or 0) >= 5:
+            protect.append({"tipo": "alerta", "dimensao": "impedimento_nosso", "titulo": "Nosso atacante no impedimento",
+                            "nivel": "claro", "atacante": name, "defensor": "",
+                            "evidencia": f"{name}: {r.get('off_p90'):.2f} impedimentos por 90 ({_label(p)})",
+                            "acao": f"ORIENTAR: {name} precisa atacar a profundidade saindo de trás da linha, não parado nela",
+                            "base": _base(r)})
+            break
+    # 5. pivô deles que perde a bola de costas → pressionar por trás
+    for name, r in _players(rv_xi, rs, ["ST", "CF"]):
+        pd_ = _pct(ref, "disp_p90", r.get("disp_p90"))
+        pdl = _pct(ref, "duel_pct", r.get("duel_pct"))
+        if pd_ is not None and pd_ >= 75 and (pdl is None or pdl <= 45):
+            force.append({"tipo": "combo", "dimensao": "pivo", "titulo": "Pivô deles sob pressão",
+                          "nivel": "claro", "atacante": "nossos zagueiros/volantes", "defensor": name,
+                          "evidencia": (f"{name}: perde a bola {r.get('disp_p90'):.2f} vezes por 90 ({_label(pd_)})"
+                                        + (f" e ganha {r.get('duel_pct'):.0f}% dos duelos" if pdl is not None else "")),
+                          "acao": (f"FORÇAR: marcar {name} por trás quando ele recebe de costas — antecipar e sair rápido "
+                                   "na transição"),
+                          "base": _base(r)})
+            break
+    # 6. lateral deles que cruza muito e erra: deixar cruzar, fechar por dentro
+    for name, r in _players(rv_xi, rs, ["LB", "RB", "LWB", "RWB", "LW", "RW"]):
+        vol = _pct(ref, "crs_p90", r.get("crs_p90"))
+        acc = _pct(ref, "crs_pct", r.get("crs_pct"))
+        if vol is not None and acc is not None and (r.get("crs_t") or 0) >= 15 and acc <= 25:
+            force.append({"tipo": "combo", "dimensao": "cruzamento_ruim", "titulo": "Deixar cruzar quem erra",
+                          "nivel": "claro", "atacante": "nosso bloco", "defensor": name,
+                          "evidencia": f"{name} tenta muitos cruzamentos e acerta só {r.get('crs_pct'):.0f}% ({_label(acc)})",
+                          "acao": (f"FORÇAR: fechar o meio e empurrar o jogo deles para o lado de {name} — o cruzamento "
+                                   "dele raramente encontra alguém; ganhar a segunda bola"),
+                          "base": _base(r)})
+            break
+    return {"forcar": force, "proteger": protect}
+
+
+GOAL_SITUATIONS = {"FastBreak": "contra-ataque", "FromCorner": "escanteio", "SetPiece": "bola parada",
+                   "FreeKick": "falta", "ThrowInSetPiece": "lateral", "Penalty": "pênalti"}
+
+
+def shot_findings(db, my_names: Sequence[str], rv_names: Sequence[str], me: str, rival: str, n: int = 20) -> Dict[str, List]:
+    """Como os gols aconteceram (mapa de chutes da FotMob): de onde o rival sofre e de onde ele marca, contra o normal
+    da base inteira. Ex.: '40% dos gols que eles sofreram foram de contra-ataque (normal: 12%)'."""
+    out = {"forcar": [], "proteger": []}
+    rv = [x for x in rv_names if x]
+    if not rv:
+        return out
+    ph = ",".join("?" * len(rv))
+    try:
+        with db.connect() as conn:
+            ids = [r[0] for r in conn.execute(
+                f"SELECT match_id FROM matches WHERE (home_team_name IN ({ph}) OR away_team_name IN ({ph})) AND "
+                f"match_id IN (SELECT DISTINCT match_id FROM match_shots) ORDER BY match_date DESC LIMIT {int(n)}",
+                rv + rv).fetchall()]
+            if len(ids) < 6:
+                return out
+            iph = ",".join("?" * len(ids))
+            g = pd.read_sql_query(f"SELECT match_id, team_name, situation, shot_type FROM match_shots WHERE outcome = 'Goal' "
+                                  f"AND COALESCE(own_goal, 0) = 0 AND match_id IN ({iph})", conn, params=ids)
+            base = pd.read_sql_query("SELECT situation, shot_type FROM match_shots WHERE outcome = 'Goal' "
+                                     "AND COALESCE(own_goal, 0) = 0", conn)
+    except Exception:
+        return out
+    if g.empty or len(base) < 100:
+        return out
+    mine = g["team_name"].isin(rv)
+    conceded, scored = g[~mine], g[mine]
+
+    def share(df, col, vals):
+        return float(df[col].isin(vals).mean()) if len(df) else 0.0
+
+    checks = [("FastBreak", ["FastBreak"], "situation", "Transição rápida",
+               "atacar rápido depois de recuperar — eles demoram a recompor"),
+              ("bola parada", ["FromCorner", "SetPiece", "FreeKick", "ThrowInSetPiece"], "situation", "Bola parada",
+               "buscar escanteios e faltas laterais: é por aí que eles mais sofrem"),
+              ("cabeça", ["Header"], "shot_type", "Jogo aéreo na área",
+               "cruzar e atacar a área pelo alto: muitos gols sofridos de cabeça")]
+    for label, vals, col, title, how in checks:
+        sc = share(conceded, col, vals)
+        sb = share(base, col, vals)
+        if len(conceded) >= 6 and sc >= max(1.6 * sb, sb + .12):
+            out["forcar"].append({"tipo": "estilo", "dimensao": f"gols_sofridos_{label}", "titulo": title,
+                                  "nivel": "escancarado" if sc >= 2.2 * sb else "claro",
+                                  "evidencia": (f"{100 * sc:.0f}% dos {len(conceded)} gols que o {rival} sofreu nos últimos "
+                                                f"{len(ids)} jogos com mapa de chutes (normal da base: {100 * sb:.0f}%)"),
+                                  "acao": "FORÇAR: " + how, "base": "mapa de chutes da FotMob (gols contra, sem gol contra)"})
+        ss = share(scored, col, vals)
+        if len(scored) >= 6 and ss >= max(1.6 * sb, sb + .12):
+            out["proteger"].append({"tipo": "estilo_contra", "dimensao": f"gols_feitos_{label}", "titulo": title,
+                                    "nivel": "claro",
+                                    "evidencia": (f"{100 * ss:.0f}% dos {len(scored)} gols do {rival} nos últimos "
+                                                  f"{len(ids)} jogos (normal: {100 * sb:.0f}%)"),
+                                    "acao": f"EVITAR: é a arma deles — {title.lower()} pede atenção redobrada",
+                                    "base": "mapa de chutes da FotMob"})
+    return out
+
+
+def _diverse(items: List[Dict[str, Any]], per_kind: int = 2) -> List[Dict[str, Any]]:
+    """No máximo `per_kind` dicas do MESMO tipo (antes eram 4 de drible seguidas)."""
+    seen: Dict[str, int] = {}
+    out = []
+    for x in items:
+        k = str(x.get("dimensao") or x.get("tipo"))
+        if seen.get(k, 0) >= per_kind:
+            continue
+        seen[k] = seen.get(k, 0) + 1
+        out.append(x)
+    return out
+
+
 def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi) -> Dict[str, Any]:
     ref = reference(db)
     ms, rs = team_players(db, my_names), team_players(db, rv_names)
     force = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=True)
     protect = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=False)
+    combos = combo_findings(my_xi, rv_xi, ms, rs, ref, me, rival)
+    shots = shot_findings(db, my_names, rv_names, me, rival)
+    # rodada 21: mistura os tipos — combinações e "de onde saem os gols" entram entre os duelos
+    force = _diverse(sorted(force, key=lambda x: (x["nivel"] != "escancarado", -x.get("score", 0)))
+                     [:2] + combos["forcar"] + shots["forcar"] + force[2:])
+    protect = _diverse(combos["proteger"] + protect)
     style = style_findings(db, my_names, rv_names, me, rival)
+    style += [x for x in shots["proteger"]]
     return {"forcar": force, "proteger": protect, "estilo": [s for s in style if s["tipo"] == "estilo"],
             "evitar": [s for s in style if s["tipo"] == "estilo_contra"],
             "base": (f"régua: {len(ref)} jogadores com ≥ 450 min nos últimos 12 meses" if not ref.empty

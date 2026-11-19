@@ -526,6 +526,29 @@ Rodada 20 (19/11/2026, 467 testes verdes) — pedidos com prints do celular:
   data/learning/answers.jsonl) · 3 Treine (1 botão, parâmetros sugeridos pela IA, liberado para visitante) · 4 Onde
   melhorar (motivos, tipos com mais 👎, comentários, dicas). Treinos pesados continuam só no PC.
 
+Rodada 21 (19/11/2026, 475 testes verdes):
+- ✅ Erro `UnboundLocalError: pd` em Bastidores › Velocidade (import local escondia o módulo) corrigido.
+- ✅ Overall mais exigente (`src/scout/overall.py`): componente novo T = nota FotMob 12 meses ajustada pela liga;
+  Z padronizado por família e encolhido pela disponibilidade (min 12 m / 1.800); overall pela COLOCAÇÃO GLOBAL
+  (`LADDER_R/LADDER_O`: ~10 jogadores 90+, ~40 87+, ~80 85+, ~400 80+, universo de referência 20 mil, reescalado em
+  bases menores; resto pela curva `REST_*`, mediana ≈ 62) + teto por família; calibração com craques (sobe) E tetos do
+  usuário (`REFERENCE_CEILINGS`: Maddison, Isak, Gnabry, Ekitiké, Musiala… ≤ 85; Lacroix ≤ 87); relatório com
+  distribuição e tetos no Scout. Fotografia v9. Musiala saiu da lista de craques (pedido do usuário).
+- ✅ Scout: "A IA sugere para" — carências / todas as posições / escolher posições.
+- ✅ Velocidade: votos (Scout, Assistente, confrontos) em `st.fragment` — o clique refaz só o botão; abas pesadas montam
+  só a aba aberta (`st.tabs(..., on_change="rerun")` + `if aba.open is not False`) no Scout, Escalação e clube; tela de
+  carregamento com animação por área (`loading._ANIM`: assistente, buscar, scout, escalação, rankings, comparar, jogo,
+  time, jogador, bastidores).
+- ✅ "Onde ganhar o jogo" (`squad/matchups.py`): régua v2 com impedimentos, cruzamentos certos/tentados, bolas longas,
+  passes que quebram linhas; duelo novo "pressão na saída"; combinações (`combo_findings`: cruzamento + cabeceio × zagueiro
+  fraco no alto, bola longa nas costas × defensor que perde duelos — velocidade não é medida —, atacante deles no limite
+  do impedimento, nosso atacante impedido, pivô que perde a bola de costas, deixar cruzar quem erra); de onde saem os gols
+  (`shot_findings`, mapa de chutes: contra-ataque, bola parada, cabeça × normal da base); no máximo 2 dicas do mesmo tipo.
+- ✅ Link FIXO + contas: `scripts/apresentar.ps1 -Tunel auto|tailscale|ngrok|cloudflare -Dono email` (Tailscale Funnel/ngrok
+  = link sempre igual); `TIL_CONTAS=1` + código de convite `TIL_CONVITE`; `src/ui/accounts.py` (data/contas.db, scrypt,
+  cookie assinado 30 dias, Google via `st.login` quando `.streamlit/secrets.toml` tem [auth] + Authlib —
+  `python -m src.tools.configurar_login`); Bastidores › 👥 Contas (só dono: PC ou e-mail `TIL_DONO_EMAIL`); "Sair da conta".
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

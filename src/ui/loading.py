@@ -37,6 +37,8 @@ _CSS = """
 .til-pitch .pl.b{fill:#22D3EE}.til-pitch .pl.c{fill:#60A5FA}
 .til-pitch .ball{fill:#F8FAFC;filter:drop-shadow(0 0 3px #fff)}
 @keyframes tilDash{to{stroke-dashoffset:-12}}
+.til-flip{transform-box:fill-box;transform-origin:center;animation:tilFlip 1.8s ease-in-out infinite}
+@keyframes tilFlip{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.08)}}
 @keyframes tilIn{to{opacity:1;visibility:visible}}
 @keyframes tilPulse{0%,100%{opacity:.55}50%{opacity:1}}
 .til-overlay{position:fixed;inset:0;z-index:999990;display:flex;flex-direction:column;align-items:center;
@@ -56,8 +58,60 @@ _CSS = """
 """
 
 
-def overlay_html(msg: str = "Preparando a análise…") -> str:
-    return (_CSS + f'<div class="til-overlay">{_PITCH}<div class="til-msg">{html.escape(msg)}</div></div>')
+# rodada 21: uma animação por área (o usuário pediu telas de carregamento diferentes para lugares diferentes)
+_C, _B, _W, _R = "#22D3EE", "#3B82F6", "#F8FAFC", "#EF4444"
+_ANIM = {
+    "assistente": ("Pensando na resposta…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><rect x="14" y="16" width="70" height="30" rx="10" fill="#111A2E" stroke="{_B}"/>
+<path d="M30 46 l-6 10 l14-10z" fill="#111A2E" stroke="{_B}"/>
+<circle cx="36" cy="31" r="3.4" fill="{_C}"><animate attributeName="opacity" values=".2;1;.2" dur="1.2s" repeatCount="indefinite"/></circle>
+<circle cx="49" cy="31" r="3.4" fill="{_C}"><animate attributeName="opacity" values=".2;1;.2" dur="1.2s" begin=".2s" repeatCount="indefinite"/></circle>
+<circle cx="62" cy="31" r="3.4" fill="{_C}"><animate attributeName="opacity" values=".2;1;.2" dur="1.2s" begin=".4s" repeatCount="indefinite"/></circle>
+<rect x="56" y="50" width="50" height="18" rx="8" fill="#0F2A3A" stroke="{_C}" opacity=".7"/></svg>"""),
+    "buscar": ("Procurando na base…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><circle cx="60" cy="40" r="30" fill="none" stroke="#1E3A5F"/>
+<circle cx="60" cy="40" r="19" fill="none" stroke="#1E3A5F"/><circle cx="60" cy="40" r="8" fill="none" stroke="#1E3A5F"/>
+<path d="M60 40 L60 10 A30 30 0 0 1 86 25 Z" fill="{_C}" opacity=".35">
+<animateTransform attributeName="transform" type="rotate" from="0 60 40" to="360 60 40" dur="1.8s" repeatCount="indefinite"/></path>
+<circle cx="78" cy="30" r="2.6" fill="{_W}"><animate attributeName="opacity" values="0;1;0" dur="1.8s" repeatCount="indefinite"/></circle>
+<circle cx="45" cy="55" r="2.6" fill="{_W}"><animate attributeName="opacity" values="0;1;0" dur="1.8s" begin=".9s" repeatCount="indefinite"/></circle></svg>"""),
+    "scout": ("Garimpando o mercado…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch">
+{''.join(f'<rect x="{12 + i * 24}" y="22" width="18" height="28" rx="3" fill="#111A2E" stroke="#1E3A5F"/><circle cx="{21 + i * 24}" cy="31" r="4" fill="#1E3A5F"/>' for i in range(4))}
+<g><circle cx="0" cy="0" r="11" fill="none" stroke="{_C}" stroke-width="2.4"/><line x1="8" y1="8" x2="16" y2="16" stroke="{_C}" stroke-width="3" stroke-linecap="round"/>
+<animateTransform attributeName="transform" type="translate" values="21,36;45,36;69,36;93,36;21,36" dur="2.4s" repeatCount="indefinite"/></g></svg>"""),
+    "escalacao": ("Montando a escalação…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><rect x="1" y="1" width="118" height="78" rx="3" class="ln"/><line x1="60" y1="1" x2="60" y2="79" class="ln"/>
+{''.join(f'<circle r="3.2" fill="{_B}" stroke="#90CDF4" stroke-width=".5"><animate attributeName="cx" values="60;{x};{x}" dur="2.2s" repeatCount="indefinite"/><animate attributeName="cy" values="40;{y};{y}" dur="2.2s" repeatCount="indefinite"/></circle>' for x, y in [(10, 40), (26, 14), (24, 31), (24, 49), (26, 66), (44, 40), (52, 22), (52, 58), (74, 16), (82, 40), (74, 64)])}
+</svg>"""),
+    "rankings": ("Ordenando os melhores…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch">{''.join(f'<rect x="{18 + i * 22}" width="16" rx="2" fill="{c}"><animate attributeName="height" values="0;{h};{h}" dur="1.6s" repeatCount="indefinite"/><animate attributeName="y" values="70;{70 - h};{70 - h}" dur="1.6s" repeatCount="indefinite"/></rect>' for i, (h, c) in enumerate([(34, "#94A3B8"), (52, "#FBBF24"), (24, "#B45309"), (14, "#1E3A5F")]))}
+<line x1="10" y1="70" x2="110" y2="70" stroke="#1E3A5F"/></svg>"""),
+    "comparar": ("Colocando lado a lado…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><line x1="60" y1="12" x2="60" y2="70" stroke="#1E3A5F" stroke-width="2"/>
+<g><line x1="24" y1="22" x2="96" y2="22" stroke="{_C}" stroke-width="2"/><circle cx="24" cy="38" r="9" fill="{_B}" opacity=".8"/>
+<circle cx="96" cy="38" r="9" fill="{_R}" opacity=".8"/>
+<animateTransform attributeName="transform" type="rotate" values="-8 60 22;8 60 22;-8 60 22" dur="2s" repeatCount="indefinite"/></g></svg>"""),
+    "jogo": ("Lendo os lances do jogo…", None),
+    "time": ("Abrindo o clube…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><path d="M60 10 L86 18 L82 50 Q60 70 60 70 Q60 70 38 50 L34 18 Z" fill="#111A2E" stroke="{_C}" stroke-width="2">
+<animate attributeName="stroke-width" values="1;3;1" dur="1.4s" repeatCount="indefinite"/></path>
+<circle cx="60" cy="38" r="9" fill="none" stroke="{_B}" stroke-width="2"><animate attributeName="r" values="6;11;6" dur="1.4s" repeatCount="indefinite"/></circle></svg>"""),
+    "jogador": ("Abrindo a ficha do jogador…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch"><g class="til-flip"><rect x="42" y="8" width="36" height="58" rx="5" fill="#111A2E" stroke="{_C}"/>
+<circle cx="60" cy="28" r="9" fill="#1E3A5F"/><rect x="48" y="44" width="24" height="4" rx="2" fill="#1E3A5F"/><rect x="50" y="52" width="20" height="4" rx="2" fill="#1E3A5F"/>
+</g></svg>"""),
+    "como-a-ia-aprende": ("A IA está calculando…", f"""
+<svg viewBox="0 0 120 80" class="til-pitch">{''.join(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="#1E3A5F"/>' for x1, y1 in [(20, 20), (20, 40), (20, 60)] for x2, y2 in [(60, 15), (60, 32), (60, 48), (60, 65)])}
+{''.join(f'<line x1="60" y1="{y}" x2="100" y2="40" stroke="#1E3A5F"/>' for y in (15, 32, 48, 65))}
+{''.join(f'<circle cx="{x}" cy="{y}" r="4" fill="{_B}"><animate attributeName="fill" values="{_B};{_C};{_B}" dur="1.5s" begin="{d}s" repeatCount="indefinite"/></circle>' for x, y, d in [(20, 20, 0), (20, 40, 0), (20, 60, 0), (60, 15, .3), (60, 32, .3), (60, 48, .3), (60, 65, .3), (100, 40, .6)])}</svg>"""),
+}
+
+
+def overlay_html(kind: str = "", msg: str = "") -> str:
+    """Cobertura de carregamento com a animação da ÁREA (`kind` = url da tela)."""
+    label, svg = _ANIM.get(kind or "", ("Preparando a análise…", None))
+    return (_CSS + f'<div class="til-overlay">{svg or _PITCH}<div class="til-msg">{html.escape(msg or label)}</div></div>')
 
 
 def splash_html(state: Dict[str, Any]) -> str:

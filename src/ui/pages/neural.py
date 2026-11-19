@@ -159,7 +159,6 @@ def _speed_panel() -> None:
     k[1].metric("Telas dentro da meta", f"{(telas['situação'].str.startswith('✅')).mean() * 100:.0f}%" if len(telas) else "—")
     k[2].metric("Tela mais lenta (90%)", f"{telas['p90_s'].max():.1f} s" if len(telas) else "—")
     k[3].metric("Análise mais lenta (90%)", f"{funcs['p90_s'].max():.1f} s" if len(funcs) else "—")
-    import pandas as pd
 
     d = pd.DataFrame(rows).tail(300)
     if not d.empty:
@@ -331,9 +330,17 @@ def render(ctx=None) -> None:
     hero("Bastidores · como a IA aprende", "A matéria de Introdução à IA aplicada ao futebol",
          "Lógica fuzzy, redes neurais e algoritmo genético — cada questão da matéria calculada com os modelos que "
          "realmente decidem o que o programa mostra. Nada aqui é ilustração solta: os números vêm do app.")
-    view = st.segmented_control("Parte", ["📚 A matéria aplicada", "🎓 Treinar a IA (guiado)", "🧠 IA única (treinar tudo)",
-                                          "🎯 Rede de perigo (treino)", "⏱️ Velocidade do app"],
-                                default="📚 A matéria aplicada", key="bastidores_view", label_visibility="collapsed")
+    from src.ui.gate import is_owner
+
+    parts = ["📚 A matéria aplicada", "🎓 Treinar a IA (guiado)", "🧠 IA única (treinar tudo)",
+             "🎯 Rede de perigo (treino)", "⏱️ Velocidade do app"] + (["👥 Contas"] if is_owner() else [])
+    view = st.segmented_control("Parte", parts, default="📚 A matéria aplicada", key="bastidores_view",
+                                label_visibility="collapsed")
+    if view == "👥 Contas":                            # rodada 21: quem criou conta / entrou pelo link
+        from src.ui.pages.accounts_view import render_accounts
+
+        render_accounts()
+        return
     if view == "🎓 Treinar a IA (guiado)":            # rodada 20: liberado também para quem entra pelo link
         from src.ui.pages.ai_trainer import render_trainer
 

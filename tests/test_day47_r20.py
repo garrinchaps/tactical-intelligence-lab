@@ -68,29 +68,40 @@ def test_team_alias_groups(tmp_path):
 
 def _universe(n=1500, seed=0):
     rng = np.random.default_rng(seed)
+    q = rng.normal(0, 1, n)
     roles = rng.choice(["ST", "CB", "GK", "CM", "LW", "RB", "AM", "DM"], n)
     return pd.DataFrame({"nome": [f"P{i}" for i in range(n)], "_core": [f"p{i}" for i in range(n)], "papel": roles,
-                         "valor_mercado_eur": np.exp(rng.normal(14, 1.4, n)), "idade": rng.integers(18, 36, n),
-                         "_perf_raw": rng.uniform(20, 95, n), "_conf": rng.uniform(.3, .9, n), "_lvl": rng.uniform(.2, 1, n),
-                         "minutos_12m": rng.integers(0, 4000, n), "qualidade": 50.0})
+                         "valor_mercado_eur": np.exp(14 + 1.1 * q + rng.normal(0, .6, n)), "idade": rng.integers(18, 36, n),
+                         "_perf_raw": np.clip(50 + 14 * q + rng.normal(0, 12, n), 1, 99), "_conf": rng.uniform(.3, .9, n),
+                         "_lvl": np.clip(.5 + .15 * q + rng.normal(0, .15, n), .1, 1),
+                         "minutos_12m": rng.integers(0, 4200, n), "rating_12m": 6.8 + .3 * q + rng.normal(0, .2, n),
+                         "qualidade": 50.0})
 
 
-def test_overall_puts_reference_stars_on_top(tmp_path, monkeypatch):
+def _add(u, nm, r, v, a, pr, lv, m, rt):
+    u.loc[len(u)] = {"nome": nm, "_core": player_core(nm), "papel": r, "valor_mercado_eur": v, "idade": a,
+                     "_perf_raw": pr, "_conf": .9, "_lvl": lv, "minutos_12m": m, "rating_12m": rt, "qualidade": 50.0}
+
+
+def test_overall_world_class_is_rare_and_ceilings_hold(tmp_path, monkeypatch):
+    """Rodada 21: 90+ só para ~10 no mundo; quem jogou pouco não chega ao topo; tetos de referência respeitados."""
     from src.scout import overall as O
 
     monkeypatch.setattr(O, "CALIB_PATH", tmp_path / "c.json")
-    u = _universe()
-    for nm, (r, v, a, pr, lv) in {"Kylian Mbappé": ("ST", 180e6, 27, 92, 1.0), "Erling Haaland": ("ST", 200e6, 26, 90, 1.0),
-                                  "Harry Kane": ("ST", 60e6, 33, 93, .95), "Achraf Hakimi": ("RB", 80e6, 28, 88, 1.0)}.items():
-        u.loc[len(u)] = {"nome": nm, "_core": player_core(nm), "papel": r, "valor_mercado_eur": v, "idade": a,
-                         "_perf_raw": pr, "_conf": .9, "_lvl": lv, "minutos_12m": 3500, "qualidade": 50.0}
+    u = _universe(20000)
+    for x in [("Kylian Mbappé", "ST", 180e6, 27, 92, 1, 3850, 8.25), ("Erling Haaland", "ST", 200e6, 26, 90, 1, 3898, 7.82),
+              ("Harry Kane", "ST", 60e6, 33, 94, .95, 4115, 8.34), ("Achraf Hakimi", "RB", 80e6, 28, 86, .95, 2668, 7.67),
+              ("James Maddison", "AM", 20e6, 30, 70, 1, 229, 7.24), ("Alexander Isak", "ST", 85e6, 27, 60, 1, 1581, 7.19)]:
+        _add(u, *x)
     out = O.finalize_overall(u)
     q = dict(zip(out["nome"], out["qualidade"]))
-    assert q["Kylian Mbappé"] >= 92 and q["Erling Haaland"] >= 90 and q["Harry Kane"] >= 90
-    assert q["Achraf Hakimi"] <= O.FAMILY_CAP["FB"]                    # lateral tem teto menor
-    med = out["qualidade"].median()
-    assert 58 <= med <= 68                                              # escala tipo FC (mediana ≈ 63)
-    assert (tmp_path / "c.json").exists() and O.load_report()["craques"]
+    assert q["Kylian Mbappé"] >= 90 and q["Erling Haaland"] >= 88 and q["Harry Kane"] >= 87
+    assert q["Achraf Hakimi"] <= O.FAMILY_CAP["FB"]
+    assert q["James Maddison"] <= 85 and q["Alexander Isak"] <= 85
+    assert (out["qualidade"] >= 90).sum() <= 20                          # craque mundial é raro
+    assert 58 <= out["qualidade"].median() <= 68
+    rep = O.load_report()
+    assert rep["distribuicao"]["90+"] <= 20 and rep["tetos"]
 
 
 def test_overall_reference_scale_is_consistent(tmp_path, monkeypatch):
