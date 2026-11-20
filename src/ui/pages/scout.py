@@ -978,7 +978,20 @@ def render(_ctx=None):
     next_season = st.selectbox("Temporada do planejamento",
         [date.today().year + 1, date.today().year], index=0, key="scout_target_season")
     financial = E.buyer_financial_profile(service.db, club, roster, transfers, season=next_season)
-    financial["estilo"] = diagnosis.get("estilo") or {}
+    financial["estilo"] = dict(diagnosis.get("estilo") or {})
+    try:                                   # rodada 22: o MODELO DE JOGO (identidade tática) entra no encaixe tático
+        from src.ui import identity_view
+
+        _idn = identity_view._data(tuple(aliases), service.db.team_version(aliases), 20)
+        words = set((_idn.get("estatisticas") or {}).get("estilo") or [])
+        extra = (["posse e construção"] if "propõe o jogo (gosta da bola)" in words else []) + \
+                (["transição e ataque vertical"] if ("reativo (abre mão da bola)" in words or "jogo direto" in words) else []) + \
+                (["amplitude e cruzamentos"] if "ataque pelos lados com cruzamento" in words else [])
+        if extra:
+            financial["estilo"]["tracos"] = list(dict.fromkeys(list(financial["estilo"].get("tracos") or []) + extra))
+        financial["modelo_de_jogo"] = _idn.get("contratacao") or []
+    except Exception:
+        pass
     financial["club_aliases"] = aliases
     foreign_count = 0
     if not roster.empty and country and "nacionalidade" in roster:
@@ -1125,6 +1138,12 @@ def render(_ctx=None):
                     "Evidências": json.dumps(x.get("evidencias") or {}, ensure_ascii=False, default=str)} for x in needs]))
             else:
                 st.info("Sem carência posicional suficientemente sustentada. Use a busca manual para explorar oportunidades.")
+            if financial.get("modelo_de_jogo"):
+                st.markdown("#### 🎯 O modelo de jogo pede (contratação por função)")
+                for r in financial["modelo_de_jogo"]:
+                    st.markdown(f"- **{r['funcao']}** — {r['porque']} · medir: {r['metricas']}")
+                st.caption("Vem da identidade tática do clube (página do time › 🧭 Identidade tática). A IA usa esses traços "
+                           "no encaixe tático de cada candidato.")
             st.markdown("#### Identidade tática e treinador")
             style = diagnosis.get("estilo") or {}
             lvl = style.get("nivel_identidade")

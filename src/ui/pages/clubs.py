@@ -313,8 +313,15 @@ def render(_ctx=None) -> None:
         st.markdown("##### 📅 Próximos jogos")
         st.caption("Agenda do open-matchday (horário de início em CET-1, como a fonte publica).")
         comparison_table(nxt.head(5))
-    t1, t0, t2, t3 = st.tabs(["🗓️ Jogos", "🧬 Estilo e tendências", "💶 Elenco e valores", "📈 Temporada (xG)"],
-                             key="club_tabs", on_change="rerun")
+    t1, t0, tI, t2, t3 = st.tabs(["🗓️ Jogos", "🧬 Estilo e tendências", "🧭 Identidade tática", "💶 Elenco e valores",
+                                  "📈 Temporada (xG)"], key="club_tabs", on_change="rerun")
+    with tI:
+        if tI.open is not False:          # rodada 22: modelo de jogo por fase, treinador e contratação por função
+            from src.ui import identity_view
+
+            from src.ui.context import get_service as _gs
+
+            identity_view.render(name, names, _gs().db.team_version(names), key=f"club_{name}")
     with t0:
         if t0.open is not False:          # rodada 21: só a aba aberta é montada
             _style_tab(name, names)

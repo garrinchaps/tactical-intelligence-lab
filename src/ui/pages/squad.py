@@ -632,7 +632,21 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
                 st.markdown(MV.finding_card(i, x, "proteger" if x.get("tipo") == "duelo" else "evitar"),
                             unsafe_allow_html=True)
     tabs = st.tabs(["🧭 Onde atacar", "👥 Escalações e porquês", "🔍 Leitura do rival", "🩹 Onde sofremos",
-                    "✏️ Editar o campinho"] + (["📰 Notícias"] if pv.get("noticias") else []), key=f"{w}_tabs")
+                    "✏️ Editar o campinho"] + (["📰 Notícias"] if pv.get("noticias") else []) + ["🧠 Modelo de jogo do rival"],
+                   key=f"{w}_tabs")
+    with tabs[-1]:                                     # rodada 22: identidade tática do rival + plano por fase
+        from src.ui import identity_view
+        from src.analytics import tactical_identity as TI
+
+        identity_view.render(rival, rv["names"], version, key=f"{w}_rival")
+        try:
+            plan = TI.opposition_plan(identity_view._data(tuple(rv["names"]), version, 20))
+        except Exception:
+            plan = []
+        if plan:
+            st.markdown(f"##### ♟️ Plano contra o modelo de jogo de {rival}")
+            for x in plan:
+                st.markdown(f"- **{x['fase']}** — {x['acao']} *(base: {x['base']})*")
     with tabs[0]:
         from src.ui import vuln_view
 

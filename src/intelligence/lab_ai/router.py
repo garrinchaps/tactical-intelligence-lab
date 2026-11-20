@@ -306,7 +306,38 @@ def _big_chances(q, c: Ctx):
     return "\n\n".join(out) if out else "Não tenho grandes chances nem xG por jogador neste jogo."
 
 
-INTENTS = [_next_match, _absences, _best_player, _substitution, _depth, _big_chances, _strength_weakness]
+def _identity(q, c: Ctx):
+    """Rodada 22: modelo de jogo do time (identidade tática) — vários jogos, não só esta partida."""
+    if not _has(q, r"como (o |a )?\w+ joga", r"modelo de jogo", r"estilo de jogo", r"identidade tatica", r"pressiona alto",
+                r"pressao alta", r"\bppda\b", r"sai jogando", r"saida de bola", r"bloco baixo", r"bloco alto",
+                r"altura do bloco", r"linha de 3", r"sai com 3", r"contra.?ataque", r"transic", r"como (o |a )?\w+ ataca",
+                r"como (o |a )?\w+ defende", r"formacao (com|sem) bola", r"treinador", r"tecnico"):
+        return None
+    team = c.named_team(q) or c.focus
+    if not team:
+        return None
+    from src.analytics import tactical_identity as TI
+
+    try:
+        ident = TI.identity(c.db, [team], 20)
+    except Exception:
+        return None
+    lines = ident.get("resumo") or []
+    plan = TI.opposition_plan(ident)
+    rec = TI.recruitment_needs(ident)
+    md = f"**Modelo de jogo de {c.pt(team)}** (vários jogos, não só esta partida):\n\n" + "\n".join(f"- {x}" for x in lines)
+    if plan and _has(q, r"explorar", r"enfrentar", r"contra", r"vencer", r"ganhar", r"neutraliz"):
+        md += "\n\n**Como enfrentar:**\n" + "\n".join(f"- {x['fase']}: {x['acao']} ({x['base']})" for x in plan[:4])
+    if rec and _has(q, r"contrat", r"refor", r"precisa"):
+        md += "\n\n**O modelo pede:**\n" + "\n".join(f"- {x['funcao']} — {x['porque']}" for x in rec)
+    st_ = ident.get("estatisticas") or {}
+    md += ("\n\n_Fonte: " + (st_.get("metodo") if st_.get("jogos") else "sem estatísticas por jogo deste time")
+           + ("; lances com coordenadas para desenho por fase, PPDA real e transições" if (ident.get("lances") or {}).get("jogos") else
+              "; sem jogos com lances deste time — desenho por fase e altura do bloco não medidos") + "._")
+    return md
+
+
+INTENTS = [_next_match, _absences, _best_player, _substitution, _identity, _depth, _big_chances, _strength_weakness]
 
 
 def route(question: str, meta: Dict[str, Any], df, box, focus, db, pt=lambda x: x) -> Optional[Dict[str, Any]]:

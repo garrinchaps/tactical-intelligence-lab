@@ -291,3 +291,72 @@ def test_youth_players_mapped_by_fotmob_id(tmp_path):
     extra = E.youth_only_players(uni, caps)
     assert list(extra["nome"]) == ["Pedro Ramos"] and extra.loc[0, "qualidade"] <= 72
     assert "ESTIMADA" in extra.loc[0, "fonte_qualidade"]
+
+
+def _toy_events():
+    """Jogo mínimo com coordenadas: A pressiona alto e sai com 3; B joga longo."""
+    rows, idx = [], 0
+    def add(team, poss, typ, player, pos, x, y, ex=None, ey=None, t=0, period=1, length=None):
+        nonlocal idx
+        idx += 1
+        rows.append({"match_id": 1, "index_num": idx, "period": period, "minute": t // 60, "second": t % 60,
+                     "possession": poss, "possession_team_name": team if typ not in ("Duel", "Interception", "Pressure", "Ball Recovery") else ("B" if team == "A" else "A"),
+                     "team_name": team, "player_name": player, "position_name": pos, "type_name": typ,
+                     "x": x, "y": y, "end_x": ex, "end_y": ey, "pass_length": length, "tactics_formation": "433"})
+    a_players = [("GK A", "Goalkeeper", 5, 40), ("CB1", "Left Center Back", 25, 30), ("CB2", "Right Center Back", 25, 50),
+                 ("DM", "Center Defensive Midfield", 28, 40), ("LB", "Left Back", 60, 8), ("RB", "Right Back", 60, 72),
+                 ("CM1", "Left Center Midfield", 55, 30), ("CM2", "Right Center Midfield", 55, 50),
+                 ("LW", "Left Wing", 95, 10), ("RW", "Right Wing", 95, 70), ("ST", "Center Forward", 100, 40)]
+    t = 0
+    for k in range(12):
+        for name, pos, x, y in a_players:
+            t += 2
+            add("A", k, "Pass", name, pos, x, y, x + 15, y, t=t, length=15)
+    for k in range(40):
+        t += 3
+        add("B", 100 + k, "Pass", "B CB", "Center Back", 30, 40, 85, 40, t=t, length=55)
+        add("A", 100 + k, "Pressure", "ST", "Center Forward", 90, 40, t=t)
+        add("A", 100 + k, "Duel", "CM1", "Left Center Midfield", 70, 35, t=t)
+    return pd.DataFrame(rows)
+
+
+def test_tactical_identity_from_events():
+    from src.analytics import tactical_identity as TI
+
+    ev = _toy_events()
+    shape = TI.phase_shapes(ev, "A")
+    assert shape["saida_com"] == 3 and shape["quem_recua"] == "volante recua entre os zagueiros"
+    assert shape["laterais_altos"] is True
+    p = TI.match_profile(ev, "A")
+    assert p["ppda"] is not None and p["ppda"] <= 1.5                      # 40 passes ÷ 40 duelos no campo deles
+    assert p["desenho_fonte"] == "4-3-3"
+    assert TI._three_lines([25, 25, 28, 55, 55, 60, 60, 95, 95, 100]) == [3, 4, 3]
+
+
+def test_identity_plan_and_recruitment_are_grounded():
+    from src.analytics import tactical_identity as TI
+
+    ident = {"estatisticas": {"estilo": ["jogo direto", "ataque pelos lados com cruzamento"],
+                              "perfil": {"posse_pct": 41.0, "pct_bolas_longas": 18.0, "cruzamentos": 24.0, "ppda_aprox": 9.0},
+                              "referencia": {"posse_pct": 50.0, "pct_bolas_longas": 12.0, "cruzamentos": 16.0, "ppda_aprox": 12.0}},
+             "lances": {}}
+    plan = TI.opposition_plan(ident)
+    assert any("bola longa" in x["acao"] or "jogam direto" in x["acao"] for x in plan)
+    assert all(x["base"] for x in plan)                                   # toda dica traz o número de base
+    rec = TI.recruitment_needs(ident)
+    assert any("centroavante" in r["funcao"] for r in rec) and any("cruza" in r["funcao"] for r in rec)
+
+
+def test_coach_periods_split(tmp_path):
+    from src.analytics import tactical_identity as TI
+    from src.data_hub.db import DataHubDB
+
+    db = DataHubDB(tmp_path / "co.db")
+    _mk_matches(db, [(500000201 + i, "Série A", f"2026-0{1 + i // 3}-1{i % 3}", "Bahia", f"X{i}", "BOXSCORE") for i in range(6)])
+    with db.connect() as c:
+        for i in range(6):
+            c.execute("INSERT INTO match_lineups (match_id, team_name, player_name, coach, formation) VALUES (?,?,?,?,?)",
+                      (500000201 + i, "Bahia", "J", "Técnico A" if i < 3 else "Técnico B", "4-3-3" if i < 3 else "3-5-2"))
+    per = TI.coach_periods(db, ["Bahia"])
+    assert [p["treinador"] for p in per] == ["Técnico B", "Técnico A"]
+    assert per[0]["desenho_mais_usado"] == "3-5-2" and per[1]["jogos"] == 3
