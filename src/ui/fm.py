@@ -49,6 +49,8 @@ def attr_color(v: Any) -> str:
         v = float(v)
     except (TypeError, ValueError):
         return "#475569"
+    if v != v:                                          # NaN = não medido
+        return "#475569"
     return GREEN if v >= 16 else CYAN if v >= 12 else "#CBD5E1" if v >= 8 else AMBER if v >= 5 else RED
 
 

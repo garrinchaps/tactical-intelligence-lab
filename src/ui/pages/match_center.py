@@ -45,8 +45,9 @@ def momentum_figure(df: pd.DataFrame, team_a: str, team_b: str) -> go.Figure:
                            hovertext=[f"{b}'–{b + 5}': domínio de {team_a if v >= 0 else team_b} ({abs(v):.1f})"
                                       for b, v in zip(bins, vals)], hoverinfo="text"))
     fig.update_xaxes(title="minuto (janelas de 5 min)")
-    fig.update_yaxes(title="índice de domínio (adimensional)")
-    return _layout(fig, f"Momento da partida — verde: {team_a} · azul: {team_b}", 300)
+    fig.update_yaxes(title="domínio")
+    # rodada 23: a legenda dizia "verde/azul", mas as barras são azul (para cima) e vermelho (para baixo)
+    return _layout(fig, f"Momento da partida — azul ▲ {team_a} · vermelho ▼ {team_b}", 300)
 
 
 def render_events(ctx: MatchContext) -> None:

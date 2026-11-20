@@ -126,3 +126,20 @@ def test_squad_facts_and_coach_profile():
                              "estatisticas": {"perfil": {"posse_pct": 58.0, "ppda_aprox": 8.0},
                                               "referencia": {"posse_pct": 50.0, "ppda_aprox": 12.0}}})
     assert prof["mentalidade"].startswith("Proativa") and prof["pressao"].startswith("Com mais frequência")
+
+
+def test_fm_components_render_without_errors():
+    """Os componentes visuais novos rodam sem a sessão do Streamlit (só avisos) — pega erros que o try/except do
+    dossiê esconderia (ex.: coluna com '_' some no itertuples)."""
+    from src.scout import attributes as AT
+    from src.ui import fm, player_fm
+
+    row = {"nome": "Fulano", "papel": "ST", "papel_alvo": "ST", "_fam": "ST", "qualidade": 74, "potencial": 82,
+           "atr_Finalização": 17, "atr_Passe": 5, "idade": 20, "minutos_12m": 2100, "rating_12m": 7.1,
+           "forma_5": [7.5, 7.6, 7.4], "score_scout": 81}
+    roster = pd.DataFrame({"nome": ["A", "B"], "papel": ["ST", "ST"], "qualidade": [70, 66], "potencial": [72, 75]})
+    fm.panel("x"); fm.icon_list([("✅", "ok")], "pro", "Prós"); fm.rank_list([("⚽", "Gols", "10 — Melhor")])
+    fm.people_tiles([("Melhor marcador", "Fulano", "10 gols")]); fm.verdict_card(*AT.verdict(81))
+    fm.facts_table([{"fato": "Idade", "a": "25", "b": "26", "melhor": "a", "dif": "1"}], "Nós", "Eles")
+    fm.attr_table(row); player_fm.squad_compare(row, roster, key="t")
+    assert fm.ordinal_rank(3, [1, 2, 3]) == "Melhor" and fm.ordinal_rank(1, [1, 2, 3]) == "Pior"

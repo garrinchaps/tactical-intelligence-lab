@@ -174,10 +174,19 @@ def pros_cons(row: Dict[str, Any], fam_label: str = "da posição") -> Tuple[Lis
         v = row.get(f"atr_{name}")
         if v is None or (isinstance(v, float) and np.isnan(v)):
             continue
-        if v >= 16:
+        if v >= 15:
             pros.append((ICON.get(name, "✅"), f"{name}: {int(v)}/20 — entre os melhores {fam_label}"))
-        elif v <= 5:
+        elif v <= 6:
             cons.append((ICON.get(name, "⚠️"), f"{name}: {int(v)}/20 — bem abaixo {fam_label}"))
+    tr = row.get("caracteristicas_top") or row.get("caracteristicas")
+    if isinstance(tr, str) and tr:
+        for t in [x.strip() for x in tr.replace(";", ",").split(",") if x.strip()][:3]:
+            pros.append(("⭐", f"Característica: {t}"))
+    elif isinstance(tr, (list, tuple)):
+        for t in list(tr)[:3]:
+            label = t.get("nome") if isinstance(t, dict) else str(t)
+            if label:
+                pros.append(("⭐", f"Característica: {label}"))
     pe = str(row.get("pe") or "").lower()
     if pe in ("both", "ambos", "ambidestro"):
         pros.append(("🦶", "Usa bem os dois pés"))

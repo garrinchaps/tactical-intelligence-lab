@@ -170,17 +170,30 @@ def unify_names(m: pd.DataFrame) -> pd.DataFrame:
 
 
 def position_history(m: pd.DataFrame, names: set) -> List[Dict[str, Any]]:
-    """Posição do time na tabela depois de cada jogo dele (temporada em ordem de data)."""
-    from src.ui.pages.competition import standings
-
+    """Posição do time na tabela depois de cada jogo dele (temporada em ordem de data). Incremental: soma pontos/saldo
+    jogo a jogo e só ordena nas datas em que o time jogou (antes recalculava a tabela inteira a cada data)."""
     m = m.dropna(subset=["home_score", "away_score"]).sort_values("match_date")
-    mine = m[m["home_team_name"].isin(names) | m["away_team_name"].isin(names)]
+    pts: Dict[str, List[int]] = {}
     out = []
-    for d in mine["match_date"].astype(str).unique():
-        t = standings(m[m["match_date"].astype(str) <= d])
-        row = t[t["time"].isin(names)]
-        if not row.empty:
-            out.append({"data": d[:10], "posicao": int(row.iloc[0]["#"]), "times": int(len(t))})
+    dates = m["match_date"].astype(str).values
+    hs, as_ = m["home_score"].astype(int).values, m["away_score"].astype(int).values
+    ht, at = m["home_team_name"].values, m["away_team_name"].values
+    n = len(m)
+    played = {d for d, h, a in zip(dates, ht, at) if h in names or a in names}
+    for i in range(n):
+        for team, gf, ga in ((ht[i], hs[i], as_[i]), (at[i], as_[i], hs[i])):
+            p = pts.setdefault(team, [0, 0, 0])
+            p[0] += 3 if gf > ga else 1 if gf == ga else 0
+            p[1] += gf - ga
+            p[2] += gf
+        last_of_day = i == n - 1 or dates[i + 1] != dates[i]
+        if last_of_day and dates[i] in played:
+            mine = next((t for t in pts if t in names), None)
+            if mine is None:
+                continue
+            key = pts[mine]
+            pos = 1 + sum(1 for t, v in pts.items() if t != mine and (v[0], v[1], v[2]) > (key[0], key[1], key[2]))
+            out.append({"data": dates[i][:10], "posicao": pos, "times": len(pts)})
     return out
 
 
@@ -221,6 +234,7 @@ def team_ranks(db, names: Sequence[str]) -> Dict[str, Any]:
     last = mine.sort_values("match_date", ascending=False).iloc[0]
     comp, season = last["competition_name"], last["season_name"]
     m = cat[(cat["competition_name"] == comp) & (cat["season_name"] == season) & cat["home_score"].notna()]
+    m = m.sort_values("match_date", ascending=False).head(1200)        # uma temporada tem no máximo ~400 jogos
     m = unify_names(m)
     rep = m.attrs.get("rep", {})
     t = standings(m)

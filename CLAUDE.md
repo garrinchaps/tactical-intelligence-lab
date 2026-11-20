@@ -586,6 +586,30 @@ Rodada 22 (20/11/2026, 499 testes verdes):
   `data/publicacao/nucleo.db`; `src/tools/baixar_nucleo.py` baixa no servidor quando `TIL_NUCLEO_URL` existe.
 - Não verificável daqui: notas de jogadores reais na base do PC (ajustar `REFERENCE_TARGETS` se algum nome ficar longe).
 
+Rodada 23 (20/11/2026, 507 testes verdes) — inspiração FM24 (prints) com as cores do laboratório:
+- ✅ Atualização "com o PC desligado": ao entrar no Windows (tarefa `TacticalLabAoLigar`, 2 min depois), a cada 3 h e às
+  6h (`-WakeToRun`: acorda da suspensão; desligado de vez nada roda) — `sync_silencioso.catch_up` busca os resultados de
+  CADA dia perdido (FotMob por dia, até 30 dias, `autosync.missing_days`) + detalhes desses jogos; com o app aberto as
+  tarefas não fazem nada. `scripts/atualizar_tudo.ps1` (e `-Rapido`) roda em ordem tudo o que ficou faltando.
+- ✅ Atributos estilo FM 1–20 MEDIDOS (`src/scout/attributes.py`): percentil na função com encolhimento pelos minutos;
+  mentais não observáveis e velocidade sem sprints aparecem como "não obs."; grupos para radar; estrelas de capacidade e
+  potencial pelo titular típico da liga (P75); veredito do olheiro 1–20; prós/contras (atributos, pé, altura, fase,
+  seleção de base, estrangeiros, patamar). Fotografia do Scout v11 (`snapshot.with_attributes`).
+- ✅ Jogador: aba "📋 Visão geral (olheiro)" (`src/ui/player_fm.py`: informação-chave, estrelas, atributos coloridos,
+  radar, forma, prós/contras); dossiê do Scout com veredito + comparação do elenco na posição.
+- ✅ Time: "🏠 Painel" (classificação, calendário e resultados, próximo jogo com lesões, estatísticas com colocação,
+  dados dos jogadores, posição ao longo da temporada) e "📋 Relatório do olheiro" (`src/analytics/team_report.py`,
+  `src/ui/team_report_view.py`: fortes/fracos com colocação na competição, jogadores-chave, jovem promessa, lesões,
+  treinador/formação/mentalidade/pressão, factos do elenco × média da liga); no pré-jogo, com comparação de equipe.
+- ✅ Interface: `src/ui/fm.py` (painéis, listas com ícones, atributos, radar, estrelas, veredito, pessoas, factos) + CSS
+  global — todo `####`/`#####` vira cabeçalho de painel, expansores no mesmo padrão, cartões compactos no celular.
+- ✅ Corrigido: apelido "tricolor" fazia São Paulo virar Fluminense (dedupe da busca e tabela com 22 times);
+  legenda do momento ("verde/azul" com barras azul/vermelho); comparação do elenco quebrava (coluna `_cand`).
+- ✅ Velocidade: universo do Scout em memória por processo (`snapshot.cached_universe/cached_data`, sem cópia a cada
+  clique); Elo dos adversários com chave pela revisão do catálogo (antes refeito a cada jogo: forma de jogador 18 s →
+  ~4 s na base simulada de 301 mil jogos); posição ao longo da temporada incremental.
+- Seu PC não estava ligado a esta sessão: os comandos ficam para o `atualizar_tudo.ps1`.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

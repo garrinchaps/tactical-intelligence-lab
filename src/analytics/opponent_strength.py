@@ -29,7 +29,13 @@ def _revision(db) -> str:
 
 
 def _history(db) -> Dict[str, Any]:
-    key = _revision(db)
+    # rodada 23: a chave usa a REVISÃO DO CATÁLOGO (muda só quando partidas entram/mudam). A antiga usava tamanho e data
+    # do arquivo do banco/WAL, que mudam a cada gravação qualquer (notas guardadas, logs) — o Elo de 8 anos de jogos era
+    # refeito a cada jogo avaliado (8–18 s na forma de um jogador na base grande).
+    try:
+        key = f"{getattr(db, 'db_path', '')}|{db.catalog_version()}"
+    except Exception:
+        key = _revision(db)
     if key in _CACHE:
         return _CACHE[key]
 
@@ -49,8 +55,10 @@ def _history(db) -> Dict[str, Any]:
     elo = defaultdict(lambda: 1500.0)
     games = defaultdict(int)
     snapshots: Dict[tuple, Dict[str, Any]] = {}
+    core = {n: team_core(n) for n in pd.unique(pd.concat([rows["home_team_name"], rows["away_team_name"]]).dropna())}
+    rows = rows.assign(core_h=rows["home_team_name"].map(core), core_a=rows["away_team_name"].map(core))
     for row in rows.itertuples(index=False):
-        home, away = team_core(row.home_team_name), team_core(row.away_team_name)
+        home, away = row.core_h, row.core_a
         if not home or not away or home == away:
             continue
         game_key = (str(row.match_date)[:10], home, away)

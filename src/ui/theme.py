@@ -54,6 +54,12 @@ html, body, .stApp {{ font-family: Inter, 'Segoe UI', sans-serif; }}
               linear-gradient(180deg, #090D16 0%, #070A12 100%); background-attachment: fixed; }}
 h1, h2, h3, h4, h5 {{ color: {P['text']}; font-family: 'Space Grotesk', Inter, sans-serif; letter-spacing: -0.01em; }}
 h4, h5 {{ margin-top: 0.6rem; }}
+/* rodada 23: TODO título de seção (#### / #####) vira cabeçalho de painel estilo FM, em todas as telas */
+[data-testid="stMarkdownContainer"] h4, [data-testid="stMarkdownContainer"] h5 {{ background: #0B1120; border: 1px solid {P['border']};
+  border-left: 4px solid {P['accent']}; border-radius: 10px; padding: 7px 12px !important; margin: 14px 0 8px 0 !important;
+  font-size: 1.02rem !important; font-weight: 700; letter-spacing: .01em; }}
+[data-testid="stMarkdownContainer"] h5 {{ border-left-color: {P['primary']}; font-size: .95rem !important; }}
+[data-testid="stMarkdownContainer"] h4 a, [data-testid="stMarkdownContainer"] h5 a {{ display: none; }}
 a {{ color: {P['accent']}; }}
 /* rodada 20: gráficos sem botão de tela cheia/zoom flutuante (no celular aparecia a cada toque) */
 [data-testid="stElementContainer"]:has(.stPlotlyChart) [data-testid="stElementToolbar"]{{display:none !important}}
@@ -148,7 +154,9 @@ table.fm-facts {{ width: 100%; border-collapse: collapse; background: #0F1626; b
 table.fm-facts th {{ color: #94A3B8; font-weight: 600; font-size: .78rem; text-align: left; padding: 7px 10px; border-bottom: 1px solid #1E2A44; }}
 table.fm-facts td {{ padding: 6px 10px; border-bottom: 1px solid #141C2E; font-size: .85rem; }}
 table.fm-facts td.f {{ color: #94A3B8; text-transform: uppercase; font-size: .74rem; letter-spacing: .03em; }}
-@media (max-width: 640px) {{ .fm-attrs {{ grid-template-columns: 1fr; }} }}
+@media (max-width: 640px) {{ .fm-attrs {{ grid-template-columns: 1fr; }}
+  .til-kpi {{ min-height: auto; padding: 7px 10px; margin-bottom: 6px; }} .til-kpi .vl {{ font-size: 1.1rem; }}
+  .til-kpi .ic {{ width: 30px; height: 30px; font-size: 1rem; }} .til-kpi .bar {{ display: none; }} }}
 @media (max-width: 640px) {{ .til-vs {{ grid-template-columns: 1fr; }} .til-vs .side.r {{ flex-direction: row; text-align: left; }} }}
 .stButton button[kind="primary"], [data-testid="stBaseButton-primary"] {{ background: var(--til-grad); border: none; color: white; }}
 .stTextInput input, .stNumberInput input, .stTextArea textarea, [data-baseweb="select"] > div {{
@@ -182,6 +190,8 @@ table.fm-facts td.f {{ color: #94A3B8; text-transform: uppercase; font-size: .74
 [data-testid="stTable"] tbody tr:nth-child(even) td {{ background: #172945; }}
 [data-testid="stTable"] tbody tr:hover td {{ background: rgba(34,211,238,.10); }}
 [data-testid="stExpander"] {{ border-radius: 14px; border: 1px solid {P['border']}; background: rgba(11,17,32,0.6); }}
+[data-testid="stExpander"] summary {{ background: #0B1120; border-radius: 12px; border-left: 3px solid {P['primary']}; }}
+[data-testid="stExpander"] summary:hover {{ border-left-color: {P['accent']}; }}
 /* gráficos: cartão elevado, fundo consistente e bordas suaves */
 [data-testid="stPlotlyChart"] {{
   position: relative; border-radius: 18px; overflow: hidden;

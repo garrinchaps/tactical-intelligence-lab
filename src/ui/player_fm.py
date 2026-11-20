@@ -29,6 +29,11 @@ def _money(v: Any) -> str:
     return f"€ {v / 1e6:.1f} mi" if v >= 1e6 else f"€ {v / 1e3:.0f} mil"
 
 
+def _date(v: Any) -> str:
+    d = pd.to_datetime(v, errors="coerce")
+    return "n/d" if pd.isna(d) else d.strftime("%d/%m/%Y")
+
+
 def header(row: Dict[str, Any]) -> None:
     from src.scout import attributes as AT
     from src.scout import snapshot as S
@@ -37,9 +42,18 @@ def header(row: Dict[str, Any]) -> None:
     refs = AT.league_reference(u) if u is not None else {}
     liga = str(row.get("clube_liga") or row.get("ultima_competicao") or "")
     ref = refs.get(liga)
+    if ref is None and u is not None and "qualidade" in u:      # liga com poucos jogadores na base: régua do universo
+        q = pd.to_numeric(u["qualidade"], errors="coerce").dropna()
+        ref = float(q.quantile(.75)) if len(q) >= 30 else None
+        liga = liga or "base"
     ovr, pot = row.get("qualidade"), row.get("potencial", row.get("potencial_teto"))
     age = _num(row.get("idade"))
-    bits = [str(row.get("papel_label") or row.get("papel") or ""), str(row.get("clube") or ""),
+    try:
+        from src.scout.engine import ROLE_LABELS
+    except Exception:
+        ROLE_LABELS = {}
+    role = str(row.get("papel_alvo_label") or ROLE_LABELS.get(str(row.get("papel") or ""), row.get("papel") or ""))
+    bits = [role, str(row.get("clube") or ""),
             f"{int(age)} anos" if age else "idade n/d", str(row.get("nacionalidade") or "nacionalidade n/d")]
     h = _num(row.get("altura_cm"))
     if h:
@@ -52,7 +66,7 @@ def header(row: Dict[str, Any]) -> None:
         fm.panel("Informação-chave", fm.CYAN)
         st.markdown(f'<div class="fm-stars"><div class="lb">{" · ".join(b for b in bits if b)}</div>'
                     f'<div class="tx">Valor {_money(row.get("valor_mercado_eur"))} · contrato até '
-                    f'{str(row.get("fim_contrato") or "n/d")[:10]} · minutos no ano {int(_num(row.get("minutos_12m")) or 0)}'
+                    f'{_date(row.get("fim_contrato"))} · minutos no ano {int(_num(row.get("minutos_12m")) or 0)}'
                     f' · nota média {row.get("rating_12m") if _num(row.get("rating_12m")) else "—"}</div></div>',
                     unsafe_allow_html=True)
     with c2:
@@ -113,14 +127,14 @@ def squad_compare(row: Dict[str, Any], roster: pd.DataFrame, key: str) -> None:
     role = row.get("papel_alvo") or row.get("papel")
     same = roster[roster["papel"] == role].copy()
     cand = pd.DataFrame([{"nome": row.get("nome"), "qualidade": row.get("qualidade"),
-                          "potencial": row.get("potencial", row.get("potencial_teto")), "_cand": True}])
-    same = same.assign(_cand=False, potencial=same.get("potencial", same.get("potencial_teto")))
-    t = pd.concat([same[["nome", "qualidade", "potencial", "_cand"]], cand], ignore_index=True)
+                          "potencial": row.get("potencial", row.get("potencial_teto")), "cand": True}])
+    same = same.assign(cand=False, potencial=same.get("potencial", same.get("potencial_teto")))
+    t = pd.concat([same[["nome", "qualidade", "potencial", "cand"]], cand], ignore_index=True)
     t["q"] = pd.to_numeric(t["qualidade"], errors="coerce")
     t = t.sort_values("q", ascending=False).head(6)
     ref = _num(pd.to_numeric(roster.get("qualidade"), errors="coerce").quantile(.75)) if "qualidade" in roster else None
     rows = "".join(
-        f'<tr style="{"background:#0E3B2E" if r._cand else ""}"><td>{i}</td><td>{fm._e(r.nome)}</td>'
+        f'<tr style="{"background:#0E3B2E" if r.cand else ""}"><td>{i}</td><td>{fm._e(r.nome)}</td>'
         f'<td>{AT.star_html(AT.stars(r.qualidade, ref))}</td><td>{AT.star_html(AT.stars(r.potencial, ref), "#3B82F6")}</td></tr>'
         for i, r in enumerate(t.itertuples(), 1))
     fm.panel(f"Comparação do elenco · {row.get('papel_alvo_label') or role}", fm.CYAN, "estrelas contra o titular típico do elenco")

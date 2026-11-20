@@ -22,13 +22,14 @@ from src.ui.components import styled_dataframe, comparison_table, empty_state, p
 from src.ui.nav import back_button, open_view, param
 
 
-@st.cache_data(show_spinner=False, max_entries=2)
 def _market_data(version: str):
-    """Rodada 7: lê a fotografia pronta do universo (instantâneo); só monta na hora se ainda não existir nenhuma."""
+    """Rodada 7: lê a fotografia pronta do universo (instantâneo); só monta na hora se ainda não existir nenhuma.
+    Rodada 23: cópia ÚNICA em memória por processo (`snapshot.cached_data`) — o cache do Streamlit copiava o universo
+    inteiro (dezenas de milhares de jogadores × centenas de colunas) a cada clique. Não altere o que volta daqui."""
     from src.scout import snapshot as S
     from src.ui.context import get_service
 
-    data = S.load()
+    data = S.cached_data()
     if data is not None:
         return data
     data = S.build_universe(get_service().db)
