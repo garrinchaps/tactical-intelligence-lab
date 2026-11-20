@@ -1,15 +1,15 @@
 """
-Rodada 23 — ATRIBUTOS no estilo Football Manager (1–20), mas MEDIDOS: cada atributo vem de números reais da FotMob/ESPN
+Rodada 23/24 — ATRIBUTOS no estilo Football Manager (rodada 24: escala 1–100), mas MEDIDOS: cada atributo vem de números reais da FotMob/ESPN
 (por 90 minutos e % de acerto) comparados com os jogadores da MESMA posição no universo do Scout.
 
-* 1–20 = percentil na função (P5 ≈ 2 · P50 ≈ 10 · P95 ≈ 19), puxado para 10 quando há poucos minutos
+* 1–100 = percentil na função (P5 ≈ 6 · P50 ≈ 50 · P95 ≈ 95), puxado para 50 quando há poucos minutos
   (minutos / (minutos + 900)) — quem jogou pouco não ganha 19 por sorte.
 * Só aparece o que é OBSERVÁVEL. Velocidade/explosão só onde a liga mede sprints; atributos mentais que nenhuma fonte
   mede (liderança, determinação, decisões) ficam como "não observável" — nunca chutados.
 * Grupos para o radar "Análise de atributos" (Ataque, Técnica, Visão, Defesa, Jogo aéreo, Passe, Físico, Trabalho).
 * Estrelas de CAPACIDADE e POTENCIAL relativas ao nível da liga do atleta (ou do clube que está contratando): o titular
   típico da liga = 2,5–3 estrelas, como o "Bom para o Brasileirão" do FM.
-* Veredito do olheiro (1–20) e prós/contras com o porquê de cada item.
+* Nota da contratação (1–100) e prós/contras com o porquê de cada item.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def family(u: pd.DataFrame) -> pd.Series:
 
 
 def compute(u: pd.DataFrame) -> pd.DataFrame:
-    """Atributos 1–20 de todos (colunas `atr_<nome>`), comparando dentro da posição; NaN = não medido."""
+    """Atributos 1–100 de todos (colunas `atr_<nome>`), comparando dentro da posição; NaN = não medido."""
     out = pd.DataFrame(index=u.index)
     if u is None or u.empty:
         return out
@@ -82,9 +82,10 @@ def compute(u: pd.DataFrame) -> pd.DataFrame:
             num[ok] += abs(w) * p[ok]
             den[ok] += abs(w)
         pct = (num / den.replace(0, np.nan))
-        score = 1 + 19 * pct                                      # 1..20
-        score = 10 + (score - 10) * shrink                        # poucos minutos → perto de 10
-        out[f"atr_{name}"] = score.round(0).clip(1, 20).where(pct.notna())
+        # rodada 24: escala 1–100 (pedido do usuário: "só uma de 1 a 100"); poucos minutos → perto de 50
+        score = 1 + 99 * pct
+        score = 50 + (score - 50) * shrink
+        out[f"atr_{name}"] = score.round(0).clip(1, 100).where(pct.notna())
     gk = fam == "GK"
     for name in ATTRS:
         c = f"atr_{name}"
@@ -96,7 +97,7 @@ def compute(u: pd.DataFrame) -> pd.DataFrame:
 
 
 def groups(row: Dict[str, Any]) -> Dict[str, Optional[float]]:
-    """Média dos atributos de cada grupo (0–20) — base do radar; grupo sem medida = None."""
+    """Média dos atributos de cada grupo (1–100) — base do radar; grupo sem medida = None."""
     res = {}
     for g, names in GROUPS.items():
         vals = [row.get(f"atr_{n}") for n in names]
@@ -157,13 +158,13 @@ def star_html(s: Optional[float], color: str = "#22D3EE") -> str:
 
 # ------------------------------------------------------------------ veredito e prós/contras
 def verdict(score_scout: Any) -> Tuple[Optional[int], str]:
-    """score do Scout (0–100) → nota do olheiro 1–20 + frase."""
+    """score do Scout (0–100) → nota da contratação 1–100 + frase (rodada 24: sem a escala 1–20)."""
     try:
-        v = int(np.clip(round(float(score_scout) / 5), 1, 20))
+        v = int(np.clip(round(float(score_scout)), 1, 100))
     except (TypeError, ValueError):
         return None, "sem avaliação"
-    txt = ("Seria uma excelente contratação" if v >= 17 else "Seria uma boa contratação" if v >= 14 else
-           "Contratação razoável" if v >= 11 else "Contratação duvidosa" if v >= 8 else "Não recomendado")
+    txt = ("Seria uma excelente contratação" if v >= 85 else "Seria uma boa contratação" if v >= 70 else
+           "Contratação razoável" if v >= 55 else "Contratação duvidosa" if v >= 40 else "Não recomendado")
     return v, txt
 
 
@@ -174,10 +175,10 @@ def pros_cons(row: Dict[str, Any], fam_label: str = "da posição") -> Tuple[Lis
         v = row.get(f"atr_{name}")
         if v is None or (isinstance(v, float) and np.isnan(v)):
             continue
-        if v >= 15:
-            pros.append((ICON.get(name, "✅"), f"{name}: {int(v)}/20 — entre os melhores {fam_label}"))
-        elif v <= 6:
-            cons.append((ICON.get(name, "⚠️"), f"{name}: {int(v)}/20 — bem abaixo {fam_label}"))
+        if v >= 75:
+            pros.append((ICON.get(name, "✅"), f"{name}: {int(v)}/100 — entre os melhores {fam_label}"))
+        elif v <= 28:
+            cons.append((ICON.get(name, "⚠️"), f"{name}: {int(v)}/100 — bem abaixo {fam_label}"))
     tr = row.get("caracteristicas_top") or row.get("caracteristicas")
     if isinstance(tr, str) and tr:
         for t in [x.strip() for x in tr.replace(";", ",").split(",") if x.strip()][:3]:

@@ -79,7 +79,8 @@ def render(team: str, names: Sequence[str], version: str, key: str = "club") -> 
     if evi.get("jogos"):
         c = st.columns(4)
         c[0].markdown(_card("Desenho com bola (lances)", evi.get("desenho_com_bola") or "—",
-                            f"fonte: {evi.get('desenho_fonte') or '—'} · {evi['jogos']} jogos"), unsafe_allow_html=True)
+                            (f"escalação da fonte: {evi['desenho_fonte']}" if evi.get('desenho_fonte') else "a fonte não informa o desenho")
+                            + f" · sem bola ~{evi.get('desenho_sem_bola') or '?'} · {evi['jogos']} jogos com lances"), unsafe_allow_html=True)
         c[1].markdown(_card("Saída com 3", f"{evi.get('saida_com_3_pct') or 0:.0f}% dos jogos", evi.get("quem_recua") or ""), unsafe_allow_html=True)
         c[2].markdown(_card("Goleiro joga longo", fmt(m.get("goleiro_longo_pct"), "%"), "passes do goleiro com 40+ jardas"), unsafe_allow_html=True)
         c[3].markdown(_card("Do fundo ao último terço", fmt(m.get("pct_fundo_ao_ultimo_terco"), "%"),

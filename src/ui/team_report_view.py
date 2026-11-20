@@ -55,6 +55,15 @@ def _youth_star(names: Sequence[str]) -> Optional[Dict[str, Any]]:
     return {"nome": r["nome"], "valor": f"{int(r['idade'])} anos · potencial {int(pot.max())}"}
 
 
+@st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=32, persist="disk")
+def _league_roster(names: tuple, version: str) -> pd.DataFrame:
+    from src.analytics import team_report as TR
+    from src.ui.context import get_service
+
+    db = get_service().db
+    return TR.league_rosters(db, TR.main_competition(db, list(names)))
+
+
 def _league_of(names: Sequence[str]) -> str:
     from src.scout import snapshot as S
     from src.data_lake.ids import team_core
@@ -89,7 +98,7 @@ def render(team: str, names: Sequence[str], version: str, key: str, my_team: str
                       ("🧭", "Mentalidade de jogo", co.get("mentalidade") or "—"),
                       ("🔥", "Tipo de pressão", (co.get("pressao") or "—") + (f" · PPDA {co['ppda']:.1f}" if co.get("ppda") else ""))])
     with right:
-        fm.panel("Jogadores", fm.CYAN, f"{pl.get('usados', 0)} usados em {pl.get('jogos', 0)} jogos")
+        fm.panel("Jogadores", fm.CYAN, f"{pl.get('usados', 0)} usados em {pl.get('jogos', 0)} jogos · {pl.get('recorte', '')}")
         tiles = []
         for lab, k in (("Jogador-chave", "mais_melhor_em_campo"), ("Melhor marcador", "melhor_marcador"),
                        ("Mais assistências", "mais_assistencias"), ("Melhor nota média", "melhor_nota"),
@@ -114,7 +123,8 @@ def render(team: str, names: Sequence[str], version: str, key: str, my_team: str
     ro = d.get("elenco")
     u = S.cached_universe()
     liga = _league_of(names)
-    facts = TR.squad_facts(ro if isinstance(ro, pd.DataFrame) else pd.DataFrame(), u, liga)
+    lr = _league_roster(tuple(names), version)
+    facts = TR.squad_facts(ro if isinstance(ro, pd.DataFrame) else pd.DataFrame(), u, liga, lr)
     if facts:
         fm.panel("Factos do elenco atual", fm.CYAN, f"média da liga: {liga}" if liga else "")
         fm.facts_table(facts, team, f"Média da {liga}" if liga else "Liga")

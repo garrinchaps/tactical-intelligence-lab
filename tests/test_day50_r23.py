@@ -53,7 +53,7 @@ def test_attributes_1_to_20_within_position():
     u = _uni()
     a = AT.compute(u)
     fin = a["atr_Finalização"].dropna()
-    assert fin.between(1, 20).all() and fin.max() >= 15 and fin.min() <= 6
+    assert fin.between(1, 100).all() and fin.max() >= 75 and fin.min() <= 28
     few = u["minutos_12m"] < 300
     assert a.loc[few, "atr_Finalização"].isna().all()                        # sem minutos = não medido
     gk = u["papel"] == "GK"
@@ -69,10 +69,10 @@ def test_stars_levels_and_verdict():
     assert AT.stars(70, 70) == 3.0 and AT.stars(80, 70) == 5.0 and AT.stars(55, 70) == .5
     assert "bom para a Série B" == AT.level_label(72, 70, "Série B")
     assert "abaixo" in AT.level_label(60, 70, "Série B") and AT.level_label(90, 70, "x") == "nível de elite mundial"
-    assert AT.verdict(90) == (18, "Seria uma excelente contratação") and AT.verdict(None)[0] is None
+    assert AT.verdict(90) == (90, "Seria uma excelente contratação") and AT.verdict(None)[0] is None
     refs = AT.league_reference(_uni(600))
     assert set(refs) == {"Liga A", "Liga B"}
-    pros, cons = AT.pros_cons({"atr_Finalização": 18, "atr_Passe": 4, "pe": "both", "altura_cm": 192, "_fam": "CB",
+    pros, cons = AT.pros_cons({"atr_Finalização": 88, "atr_Passe": 18, "pe": "both", "altura_cm": 192, "_fam": "CB",
                                "realismo": {"penalidade_estrangeiros": 8}})
     assert any("Finalização" in t for _, t in pros) and any("dois pés" in t for _, t in pros)
     assert any("Passe" in t for _, t in cons) and any("estrangeiros" in t for _, t in cons)
@@ -135,7 +135,7 @@ def test_fm_components_render_without_errors():
     from src.ui import fm, player_fm
 
     row = {"nome": "Fulano", "papel": "ST", "papel_alvo": "ST", "_fam": "ST", "qualidade": 74, "potencial": 82,
-           "atr_Finalização": 17, "atr_Passe": 5, "idade": 20, "minutos_12m": 2100, "rating_12m": 7.1,
+           "atr_Finalização": 85, "atr_Passe": 22, "idade": 20, "minutos_12m": 2100, "rating_12m": 7.1,
            "forma_5": [7.5, 7.6, 7.4], "score_scout": 81}
     roster = pd.DataFrame({"nome": ["A", "B"], "papel": ["ST", "ST"], "qualidade": [70, 66], "potencial": [72, 75]})
     fm.panel("x"); fm.icon_list([("✅", "ok")], "pro", "Prós"); fm.rank_list([("⚽", "Gols", "10 — Melhor")])

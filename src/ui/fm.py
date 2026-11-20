@@ -4,10 +4,10 @@ borda #1E2A44, azul #22D3EE/#3B82F6 para o nosso lado, vermelho #EF4444 para o r
 
 panel(título)            → cabeçalho de painel
 icon_list(itens, tipo)   → linhas com ícone (prós, contras, notícias, pontos fortes/fracos)
-attr_table(linha)        → atributos 1–20 coloridos em colunas (técnicos / mentais medidos / físicos)
+attr_table(linha)        → atributos 1–100 coloridos em colunas (técnicos / mentais medidos / físicos)
 radar(grupos)            → "Análise de atributos" (plotly polar, sem barra de ferramentas)
 stars_line(...)          → capacidade/potencial em estrelas com a frase de nível
-verdict_card(nota, frase)→ cartão verde/amarelo/vermelho do olheiro (1–20)
+verdict_card(nota, frase)→ cartão verde/amarelo/vermelho da contratação (1–100)
 people_tiles(...)        → capitão / jogador-chave / melhor marcador… com iniciais
 facts_table(linhas)      → "Factos": nosso × liga, com a diferença colorida
 rank_list(...)           → estatísticas de equipe com a colocação ("26 — Melhor", "10 — 7º melhor")
@@ -51,7 +51,7 @@ def attr_color(v: Any) -> str:
         return "#475569"
     if v != v:                                          # NaN = não medido
         return "#475569"
-    return GREEN if v >= 16 else CYAN if v >= 12 else "#CBD5E1" if v >= 8 else AMBER if v >= 5 else RED
+    return GREEN if v >= 78 else CYAN if v >= 58 else "#CBD5E1" if v >= 38 else AMBER if v >= 22 else RED
 
 
 def attr_table(row: Dict[str, Any], gk: bool = False) -> None:
@@ -74,8 +74,8 @@ def attr_table(row: Dict[str, Any], gk: bool = False) -> None:
         return f'<div class="fm-attr-col"><div class="fm-attr-h">{_e(title)}</div>{"".join(rows)}</div>'
     st.markdown('<div class="fm-attrs">' + col("TÉCNICOS", tech) + col("MENTAIS (medidos)", ment, AT.NOT_OBSERVABLE[:3])
                 + col("FÍSICOS", phys, ["Velocidade", "Resistência"]) + '</div>', unsafe_allow_html=True)
-    st.caption("1–20 = posição contra os jogadores da MESMA função no universo do Scout (números por 90 e % de acerto da "
-               "FotMob/ESPN), puxada para 10 com poucos minutos. 'não obs.' = nenhuma fonte aberta mede (não é chute).")
+    st.caption("1–100 = posição contra os jogadores da MESMA função no universo do Scout (números por 90 e % de acerto da "
+               "FotMob/ESPN), puxada para 50 com poucos minutos. 'não obs.' = nenhuma fonte aberta mede (não é chute).")
 
 
 def radar(groups: Dict[str, Optional[float]], key: str, title: str = "Análise de atributos", compare: Optional[Dict[str, Optional[float]]] = None):
@@ -95,7 +95,7 @@ def radar(groups: Dict[str, Optional[float]], key: str, title: str = "Análise d
                                       line=dict(color=RED), fillcolor="rgba(239,68,68,.15)"))
     fig.update_layout(title=dict(text=title, font=dict(size=13, color="#CBD5E1")), height=320, showlegend=bool(compare),
                       margin=dict(l=30, r=30, t=40, b=20), paper_bgcolor="#090D16",
-                      polar=dict(bgcolor="#0F1626", radialaxis=dict(range=[0, 20], showticklabels=False, gridcolor="#1E2A44"),
+                      polar=dict(bgcolor="#0F1626", radialaxis=dict(range=[0, 100], showticklabels=False, gridcolor="#1E2A44"),
                                  angularaxis=dict(gridcolor="#1E2A44", tickfont=dict(color="#CBD5E1", size=11))))
     st.plotly_chart(fig, use_container_width=True, key=key)
 
@@ -111,7 +111,7 @@ def stars_line(label: str, s: Optional[float], text: str, value: Any = None) -> 
 def verdict_card(score: Optional[int], text: str) -> None:
     if score is None:
         return
-    color = GREEN if score >= 14 else AMBER if score >= 10 else RED
+    color = GREEN if score >= 70 else AMBER if score >= 50 else RED
     st.markdown(f'<div class="fm-verdict" style="background:{color}22;border-color:{color}">'
                 f'<div class="n" style="border-color:{color};color:{color}">{score}</div><div class="t">{_e(text)}.</div></div>',
                 unsafe_allow_html=True)

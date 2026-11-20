@@ -1,6 +1,6 @@
 """Rodada 23 — "Visão geral (olheiro)" do jogador, inspirada no Football Manager, com números MEDIDOS:
 cabeçalho (posição, clube, idade, nacionalidade, altura, pé, valor, contrato), capacidade e potencial em estrelas pelo nível
-da liga, atributos 1–20, radar "Análise de atributos", forma dos últimos jogos, prós/contras e (no Scout) o veredito do
+da liga, atributos 1–100, radar "Análise de atributos", forma dos últimos jogos, prós/contras e (no Scout) o veredito do
 olheiro com a comparação do elenco na posição."""
 
 from __future__ import annotations

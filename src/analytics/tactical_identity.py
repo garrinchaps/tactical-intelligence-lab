@@ -98,6 +98,59 @@ def _three_lines(xs: List[float], band: float = 9.0) -> List[int]:
     return [len(back), len(xs) - len(back) - len(front), len(front)]
 
 
+def shape_lines(xs: List[float], k: Optional[int] = None) -> List[int]:
+    """Rodada 24 — linhas do desenho por agrupamento ÓTIMO em 1 dimensão (k-médias exato por programação dinâmica):
+    corta as posições médias onde a soma das distâncias ao centro de cada linha é mínima. Antes a regra de "9 jardas do
+    mais recuado/avançado" virava 1-9-1 quando um jogador ficava muito atrás ou muito à frente.
+    k = número de linhas do desenho da fonte (4-2-3-1 → 4); sem fonte, testa 3 e 4 linhas e só usa 4 quando a 4ª linha
+    explica muito mais (custo cai ≥ 70%). Linha de trás e da frente com ao menos 1; linha de trás com ao menos 2 quando
+    há 10 jogadores de linha."""
+    xs = sorted(float(x) for x in xs if pd.notna(x))
+    n = len(xs)
+    if n >= 11:                                        # sobrou o goleiro: o mais recuado sai
+        xs = xs[1:]
+        n -= 1
+    if n < 3:
+        return [n] if n else []
+    pre = np.concatenate([[0.0], np.cumsum(xs)])
+    pre2 = np.concatenate([[0.0], np.cumsum(np.square(xs))])
+
+    def cost(i, j):                                    # variância (soma) do trecho xs[i:j]
+        m = j - i
+        s = pre[j] - pre[i]
+        return (pre2[j] - pre2[i]) - s * s / m
+
+    min_back = 3 if n >= 10 else 1
+
+    def solve(kk):
+        INF = float("inf")
+        dp = np.full((kk + 1, n + 1), INF)
+        cut = np.zeros((kk + 1, n + 1), dtype=int)
+        dp[0, 0] = 0.0
+        for c in range(1, kk + 1):
+            for j in range(c, n + 1):
+                for i in range(c - 1, j):
+                    if c == 1 and j - i < min_back:
+                        continue
+                    v = dp[c - 1, i] + cost(i, j)
+                    if v < dp[c, j]:
+                        dp[c, j], cut[c, j] = v, i
+        sizes, j = [], n
+        for c in range(kk, 0, -1):
+            i = cut[c, j]
+            sizes.append(j - i)
+            j = i
+        return float(dp[kk, n]), sizes[::-1]
+    if k:
+        k = int(np.clip(k, 2, min(5, n)))
+        sizes = solve(k)[1]
+    else:
+        c3, s3 = solve(3)
+        c4, s4 = solve(4) if n >= 4 else (c3, s3)
+        sizes = s4 if c3 > 0 and c4 <= .3 * c3 else s3
+    return [int(x) for x in sizes]
+
+
 def phase_shapes(ev: pd.DataFrame, team: str) -> Dict[str, Any]:
     """Desenho com bola e sem bola de UM jogo, pelas posições médias dos titulares."""
     starters = _starters(ev, team)
@@ -116,7 +169,7 @@ def phase_shapes(ev: pd.DataFrame, team: str) -> Dict[str, Any]:
         avg = d[~d["player_name"].isin(gk)].groupby("player_name")[["x", "y"]].mean()
         if len(avg) < 8:
             continue
-        lines = _three_lines(avg["x"].tolist())
+        lines = shape_lines(avg["x"].tolist(), k if src_form else None)
         res[key] = {"linhas": lines, "desenho": "-".join(str(n) for n in lines),
                     "posicoes": {p: (round(float(r.x), 1), round(float(r.y), 1), str(pos.get(p, ""))) for p, r in avg.iterrows()}}
     if "com_bola" in res:

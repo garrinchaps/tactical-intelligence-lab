@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v11.pkl")   # v11: atributos 1–20 estilo FM
+SNAP_PATH = Path("data/processed/scout_universe_v12.pkl")   # v12: identidade por id FotMob + clube, atributos 1–100
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 

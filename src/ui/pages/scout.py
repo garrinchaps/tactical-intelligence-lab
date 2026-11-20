@@ -708,7 +708,7 @@ def _ai_filter_form(key: str, nations: List[str], aff: Dict[str, Any], role_choi
                     need_roles: Optional[List[str]] = None, defaults: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Rodada 22: os MESMOS filtros nas duas listas da IA (Top 5 e Três melhores): idade, qualidade, valor, nacionalidade
     e "incluir estrelas fora do patamar". Num formulário: só recalcula ao apertar o botão."""
-    d = {"age": (16, 40), "q": 0, "fee": 0.0, "nation": "Todas", "stars": False, **(defaults or {})}
+    d = {"age": (16, 40), "q": 0, "pot": 0, "fee": 0.0, "nation": "Todas", "stars": False, **(defaults or {})}
     out: Dict[str, Any] = {}
     with st.form(f"{key}_form", border=False):
         if role_choices:
@@ -718,7 +718,9 @@ def _ai_filter_form(key: str, nations: List[str], aff: Dict[str, Any], role_choi
         out["age"] = fa.slider("Faixa etária", 16, 40, d["age"], key=f"{key}_age")
         out["q"] = fb.slider("Qualidade mínima", 0, 100, d["q"], key=f"{key}_quality")
         out["fee"] = fc.number_input("Valor máximo (€ mi · 0 = sem limite)", 0.0, 500.0, float(d["fee"]), key=f"{key}_max_value")
-        fd, fe = st.columns([2, 1])
+        fd, fp, fe = st.columns([2, 1, 1])
+        out["pot"] = fp.number_input("Potencial mínimo", 0, 100, int(d["pot"]), key=f"{key}_pot",
+                                     help="Até onde pode chegar (idade × talento). 0 = não filtra.")
         out["nation"] = fd.selectbox("Nacionalidade desejada", nations, key=f"{key}_nation",
                                      format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
         out["stars"] = fe.toggle("Incluir estrelas fora do patamar", value=d["stars"], key=f"{key}_stars",
@@ -737,6 +739,9 @@ def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
         out = out[ages.isna() | ages.between(lo, hi)]
     if f.get("q") and "qualidade" in out:
         out = out[pd.to_numeric(out["qualidade"], errors="coerce").fillna(0) >= f["q"]]
+    pcol = "potencial" if "potencial" in out else ("potencial_teto" if "potencial_teto" in out else None)
+    if f.get("pot") and pcol:
+        out = out[pd.to_numeric(out[pcol], errors="coerce").fillna(0) >= f["pot"]]
     if f.get("fee") and "valor_mercado_eur" in out:
         out = out[pd.to_numeric(out["valor_mercado_eur"], errors="coerce").fillna(0) <= float(f["fee"]) * 1e6]
     if f.get("nation") and f["nation"] != "Todas" and "nacionalidade" in out:
@@ -1228,19 +1233,24 @@ def render(_ctx=None):
             if pool.empty:
                 empty_state("Universo de jogadores indisponível", "Sincronize o catálogo Transfermarkt.", "👥")
             else:
-                if "origem" not in pool and "clube_liga" in pool:
-                    pool = pool.assign(origem=pool["clube_liga"].map(E.origin_group))
+                if "clube_liga" in pool:           # rodada 24: liga + país do clube (Brasil nunca cai em "Europa e outras")
+                    pool = pool.assign(origem=[E.origin_group_full(l, c) for l, c in
+                                               zip(pool["clube_liga"], pool.get("clube_pais", pd.Series(None, index=pool.index)))])
                 # rodada 20: filtros num formulário — nada é pesquisado até apertar "Buscar" (antes cada mudança refazia tudo)
                 with st.form("scout_manual_filters", border=False):
                     n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador")
-                    c1,c2,c3,c4 = st.columns(4)
+                    c1,c2,c3 = st.columns(3)
                     roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
                     rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
-                    amin = c2.number_input("Idade mínima", 15, 40, 18)
-                    amax = c3.number_input("Idade máxima", 16, 50, 35)
-                    qmin = c4.slider("Qualidade mínima", 0, 100, 0)
-                    origins = ["Todas"] + (sorted(pool["origem"].dropna().astype(str).unique().tolist()) if "origem" in pool else [])
-                    origin = st.segmented_control("Origem", origins, default="Todas", key="scout_origin") or "Todas"
+                    amin = c2.number_input("Idade mínima", 15, 40, 15)
+                    amax = c3.number_input("Idade máxima", 16, 50, 45)
+                    q1, q2 = st.columns(2)
+                    qmin = q1.number_input("Qualidade mínima", 0, 100, 0)
+                    qmax = q2.number_input("Qualidade máxima", 0, 100, 100)
+                    origins = E.origin_options(pool["origem"].dropna().unique()) if "origem" in pool else ["Todas"]
+                    origin = st.selectbox("Origem", origins, key="scout_origin",
+                                          help="'Todas' = todos os jogadores da base. 'América do Sul (com Brasil)' junta "
+                                               "Brasil e os vizinhos; 'Brasil (todas as séries)' junta A, B, C e D.")
                     d1,d2,d3 = st.columns(3)
                     nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
                     nat = d1.selectbox("Nacionalidade", nats)
@@ -1248,7 +1258,10 @@ def render(_ctx=None):
                     league_filter = d2.selectbox("Liga atual", leagues)
                     clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
                     seller = d3.selectbox("Clube atual", clubs_list)
-                    e1,e2 = st.columns(2)
+                    e0,e1,e2 = st.columns(3)
+                    pmin = e0.number_input("Potencial mínimo", 0, 100, 0,
+                                           help="Potencial = até onde o atleta pode chegar (idade × talento por posição). "
+                                                "Jogador sem potencial calculado some quando o mínimo é maior que 0.")
                     max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
                     upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
                     vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
@@ -1265,22 +1278,30 @@ def render(_ctx=None):
                     _k = _pc(n0)
                     filt = filt[filt["nome"].astype(str).map(_pc).str.contains(_k, regex=False, na=False)]
                 if origin != "Todas" and "origem" in filt:
-                    filt = filt[filt["origem"].astype(str) == origin]
+                    filt = filt[E.origin_match(filt["origem"], origin)]
                 if rf!="Todas": filt=filt[filt["papel"]==rf]
                 _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
-                filt=filt[pd.to_numeric(filt["qualidade"],errors="coerce").fillna(0)>=qmin]
+                _q=pd.to_numeric(filt["qualidade"],errors="coerce")
+                if qmin>0: filt=filt[_q.reindex(filt.index).fillna(0)>=qmin]
+                if qmax<100:
+                    _q=pd.to_numeric(filt["qualidade"],errors="coerce"); filt=filt[_q.isna()|(_q<=qmax)]
+                _pcol="potencial" if "potencial" in filt else ("potencial_teto" if "potencial_teto" in filt else None)
+                if pmin>0 and _pcol: filt=filt[pd.to_numeric(filt[_pcol],errors="coerce").fillna(0)>=pmin]
                 if nat!="Todas": filt=filt[filt["nacionalidade"].astype(str)==nat]
                 if league_filter!="Todas" and "clube_liga" in filt:
                     filt=filt[filt["clube_liga"].astype(str)==league_filter]
                 if seller!="Todos": filt=filt[filt["clube"].astype(str)==seller]
-                values=pd.to_numeric(filt["valor_mercado_eur"],errors="coerce").fillna(0)
-                filt=filt[values.between(vmin*1e6,vmax*1e6)]
+                values=pd.to_numeric(filt["valor_mercado_eur"],errors="coerce")
+                # rodada 24: sem valor publicado não some da busca (lacuna ≠ zero), só quando o mínimo pede valor
+                filt=filt[(values.isna() & (vmin<=0)) | values.between(vmin*1e6,vmax*1e6)]
                 filt=filt.sort_values("qualidade",ascending=False,na_position="last")
                 st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
+                if "potencial" not in filt and "potencial_teto" in filt:
+                    filt = filt.assign(potencial=filt["potencial_teto"])
                 cols = [x for x in ("nome","papel","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
-                                    "qualidade","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
+                                    "qualidade","potencial","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
                 display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
-                    "clube_liga":"Liga","nota_rankings":"Nota dos Rankings",
+                    "clube_liga":"Liga","nota_rankings":"Nota dos Rankings","potencial":"Potencial",
                     "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
                     "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
                 if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)

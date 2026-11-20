@@ -2650,11 +2650,48 @@ SA_COUNTRY_WORDS = ("argentin", "paragua", "urugua", "chile", "colomb", "colômb
                     "primera división", "liga betplay", "liga pro", "liga 1")
 
 
+ORIGIN_PARENTS = {
+    # rodada 24: "América do Sul" inclui o Brasil; "Brasil (todas)" junta as séries; "Todas" = todo o universo
+    "Brasil (todas as séries)": ("Brasil · Série A e copas", "Brasil · Série B", "Brasil · Série C", "Brasil · Série D"),
+    "América do Sul (com Brasil)": ("Brasil · Série A e copas", "Brasil · Série B", "Brasil · Série C", "Brasil · Série D",
+                                    "América do Sul"),
+}
+
+
+def origin_options(present: Iterable[str]) -> List[str]:
+    present = [str(x) for x in present if str(x)]
+    return ["Todas"] + list(ORIGIN_PARENTS) + sorted(set(present))
+
+
+def origin_match(series: pd.Series, choice: str) -> pd.Series:
+    if choice in ("", "Todas"):
+        return pd.Series(True, index=series.index)
+    allowed = ORIGIN_PARENTS.get(choice, (choice,))
+    return series.astype(str).isin(allowed)
+
+
+def origin_group_full(comp: Any, country: Any = None) -> str:
+    """origin_group + país do clube quando a liga não diz (cadastro com código de liga, clube sem liga)."""
+    g = origin_group(comp)
+    if g not in ("Europa e outras", "Sem liga identificada"):
+        return g
+    c = _safe_str(country).lower()
+    if c in ("brazil", "brasil"):
+        return "Brasil · Série A e copas" if g == "Europa e outras" and "2" not in _safe_str(comp) else "Brasil · Série B"
+    if any(w in c for w in SA_COUNTRY_WORDS) or c in ("venezuela", "bolivia", "bolívia", "peru", "colombia", "colômbia"):
+        return "América do Sul"
+    if c in ("united states", "usa", "estados unidos", "mexico", "méxico", "canada", "canadá"):
+        return "América do Norte"
+    return g
+
+
 def origin_group(comp: Any) -> str:
     """Atalho de origem para o filtro do Scout (pelo nome da competição/liga)."""
     s = _safe_str(comp).lower()
     if not s:
         return "Sem liga identificada"
+    if s in ("bra1", "bra2", "bra3"):
+        return {"bra1": "Brasil · Série A e copas", "bra2": "Brasil · Série B", "bra3": "Brasil · Série C"}[s]
     if "série b" in s or "serie b" in s and ("brasil" in s or "brazil" in s):
         return "Brasil · Série B"
     if "série c" in s or "serie c" in s and ("brasil" in s or "brazil" in s):
@@ -2729,7 +2766,8 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
     fallback = np.where(observed & (last_comp != ""), last_comp, np.where(main_comp != "", main_comp, last_comp))
     u["clube_liga"] = liga.where(liga.str.strip() != "", pd.Series(fallback, index=u.index))
-    u["origem"] = u["clube_liga"].map(origin_group)
+    pais = u.get("clube_pais", pd.Series(None, index=u.index))
+    u["origem"] = [origin_group_full(l, c) for l, c in zip(u["clube_liga"], pais)]
     return u
 
 
