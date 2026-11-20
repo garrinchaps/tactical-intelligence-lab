@@ -7,6 +7,9 @@ Só desenho: as contas vêm de src/squad/matchups.py e src/squad/matchday.py.
 from __future__ import annotations
 
 import html
+
+import numpy as np
+import pandas as pd
 from typing import Any, Dict, List, Optional
 
 LEVEL = {"escancarado": ("#F59E0B", "🔥 ESCANCARADO"), "claro": ("#22D3EE", "✅ CLARO")}
@@ -36,8 +39,11 @@ def hero(team: str, rival: str, when: str = "", comp: str = "", status: str = ""
 def _dot(s: Dict[str, Any], top: float, left: float, color: str, flag: Optional[int] = None) -> str:
     name = str(s.get("jogador") or "vaga")
     short = name if len(name) <= 16 else name.split()[-1]
-    q = s.get("qualidade", s.get("nota"))
-    qtxt = "—" if q is None else f"{float(q):.1f}"
+    q = s.get("qualidade") if "qualidade_fonte" in s else s.get("qualidade", s.get("nota"))
+    try:
+        qtxt = "—" if q is None or q != q else f"{float(q):.0f}"
+    except (TypeError, ValueError):
+        qtxt = "—"
     ring = "#F59E0B" if flag else "#E6F7FF"
     badge = (f'<span style="position:absolute;top:-6px;right:34px;background:#F59E0B;color:#06101F;border-radius:50%;'
              f'width:18px;height:18px;font-size:.7rem;font-weight:800;line-height:18px">{flag}</span>') if flag else ""
@@ -51,10 +57,38 @@ def _dot(s: Dict[str, Any], top: float, left: float, color: str, flag: Optional[
             f'color:#F5F7FB;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{html.escape(short)}</div></div>')
 
 
+def unified_quality(xi: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]:
+    """Rodada 24: o número no círculo é a MESMA qualidade do Scout/elenco/página do jogador (universo, pelo clube),
+    ajustada à FUNÇÃO que ele faz neste desenho: fora da posição perde até 8 pontos pelo encaixe (0–1).
+    Sem nota no universo, fica a nota da escalação marcada como estimativa."""
+    try:
+        from src.data_lake.ids import player_core
+        from src.scout import snapshot as S
+    except Exception:
+        return xi
+    out = []
+    for s in xi or []:
+        s = dict(s)
+        name = s.get("jogador")
+        row = S.find_player(player_core(str(name)), [str(name)], team) if name else None
+        q = pd.to_numeric(row.get("qualidade"), errors="coerce") if row else np.nan
+        if pd.notna(q):
+            fit = pd.to_numeric(s.get("encaixe"), errors="coerce")
+            fit = 1.0 if pd.isna(fit) else float(np.clip(fit, 0, 1))
+            s["qualidade"] = round(float(q) - 8 * (1 - fit))
+            s["qualidade_fonte"] = "Scout" + ("" if fit >= .99 else f" ajustada à função (encaixe {fit:.0%})")
+        elif s.get("nota") is not None:
+            s["qualidade"] = None
+            s["qualidade_fonte"] = "sem nota no Scout"
+        out.append(s)
+    return out
+
+
 def double_pitch(my_xi: List[Dict[str, Any]], rv_xi: List[Dict[str, Any]], team: str, rival: str,
                  flags: Optional[Dict[str, int]] = None) -> str:
     """Campo em pé: nosso time na metade de baixo atacando para cima (azul); o rival na de cima (vermelho)."""
     flags = flags or {}
+    my_xi, rv_xi = unified_quality(my_xi, team), unified_quality(rv_xi, rival)
     dots = []
     for s in my_xi or []:
         if s.get("x") is None:
@@ -95,6 +129,8 @@ def finding_card(i: int, f: Dict[str, Any], kind: str = "forcar") -> str:
             f'padding:2px 7px">{tag}</span></div>{who}'
             f'<div style="font-size:.82rem;color:#CBD5E1;margin-top:4px">{html.escape(f["evidencia"])}</div>'
             f'<div style="font-size:.88rem;color:#F5F7FB;margin-top:6px;font-weight:700">{html.escape(f["acao"])}</div>'
+            + ("".join(f'<div style="font-size:.8rem;color:#CBD5E1;margin-top:2px">• {html.escape(str(s))}</div>'
+                       for s in (f.get("passos") or [])))
             + (f'<div style="font-size:.72rem;color:#A7F3D0;margin-top:3px">Índice fuzzy de exploração {f["fuzzy"]:.0f}/100'
                f'{" · peso aprendido com seus 👍/👎: " + format(f["peso_aprendido"], ".2f") if f.get("peso_aprendido", 1) != 1 else ""}'
                f'</div>' if f.get("fuzzy") is not None else "")

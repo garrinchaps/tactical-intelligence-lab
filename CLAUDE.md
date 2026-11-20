@@ -610,6 +610,34 @@ Rodada 23 (20/11/2026, 507 testes verdes) — inspiração FM24 (prints) com as 
   ~4 s na base simulada de 301 mil jogos); posição ao longo da temporada incremental.
 - Seu PC não estava ligado a esta sessão: os comandos ficam para o `atualizar_tudo.ps1`.
 
+Rodada 24 (20/11/2026, 515 testes verdes) — lista do usuário com overall, homônimos e cobertura:
+- ✅ Identidade: histórico do Scout agrupado por PESSOA (`engine.assign_person_ids`: id da FotMob; sem id, junta ao id
+  do mesmo nome no MESMO clube; senão "nome|clube") — o Otávio goleiro do Cruzeiro e o Otávio do Paris FC são dois
+  perfis. Cadastro Transfermarkt só casa com a pessoa quando confere (`match_market_to_history`: nascimento > 13 meses
+  ou goleiro × linha = outra pessoa; clube/nascimento/país somam; homônimo sem confirmação fica separado). Idade, país,
+  valor, altura e clube inscrito pelo elenco FotMob (`attach_roster_identity`). Coluna `pid` única; página do jogador
+  aberta de um elenco/tabela recebe o clube (`nav.open_view(..., club=, pid=)`) e mostra só o atleta desse clube.
+- ✅ Cobertura: atleta ativo = 90 min no último ano (`ACTIVE_DAYS/ACTIVE_MIN_MINUTES`; antes 450 min e 4 jogos em 180 dias).
+  `python -m src.tools.cobertura_scout` → docs/COBERTURA_SCOUT.md (por liga: na base, no Scout, com qualidade/idade/
+  país/valor/potencial e o motivo de quem falta). Fotografia do Scout v12 (precisa refazer: `python -m src.scout.snapshot`).
+- ✅ Qualidade única: elenco do Scout, Rankings (colunas Qualidade/Potencial do universo) e campinho do pré-jogo usam a
+  qualidade do universo (`matchday_view.unified_quality`, ajustada à função pelo encaixe, até −8).
+- ✅ Overall mais justo: veterano ×1,49 no máximo (era ×2,2), régua mais estreita para goleiros/laterais/zagueiros
+  (`FAMILY_SPREAD`), tetos GK 90/FB 89/CB 91, lesão longa usa 85% da melhor temporada recente (`previous_season_minutes`),
+  correção mais forte, ~70 alvos novos (goleiros e laterais inflados, veteranos, brasileiros). Liga do clube observado =
+  competição do último jogo (acabou "Premier League" no Inter Miami). Não verificável daqui: notas reais no PC.
+- ✅ Busca manual: Nome, Posição, Idade mín/máx, Qualidade mín/máx, Origem ("América do Sul (com Brasil)", "Brasil (todas
+  as séries)", liga + país do clube), Nacionalidade, Liga, Clube, Potencial mínimo, Valor mín/máx (sem valor não some);
+  coluna Potencial; potencial mínimo nas listas da IA. Atributos e nota da contratação em 1–100 (estrelas mantidas).
+- ✅ Relatório do time: temporada atual (≥ 8 jogos) ou últimos 30 jogos COM números por jogador, partida única, atleta único
+  (`team_report.key_players`); médias da liga pelos elencos inscritos dos clubes da competição (`league_rosters`).
+- ✅ Desenho por fase: k-médias exato 1D (`tactical_identity.shape_lines`, linha de trás ≥ 3) — acabou o 1-9-1.
+- ✅ Dicas individuais (`src/squad/advice.py`): cada confronto com lado, perfil completo do atacante, 2ª fraqueza do
+  defensor, quem apoia, nosso desenho e o modelo do rival (posse/pressão/cruzamentos); "Onde atacar" com plano combinado
+  por jogador e 2×1 no mesmo lado (`vulnerabilities.personalize`).
+- ✅ Treino da IA: 10 parâmetros (taxa, L2, épocas, paciência, lote, validação, peso 👍/👎, peso automático, redução do
+  passo, semente) com (i) e recomendação pelo estado (`trainer.PARAMS/recommend`); abas "Em palavras simples" × "Parte técnica".
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

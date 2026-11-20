@@ -37,7 +37,8 @@ def _label_key(question: str) -> Optional[str]:
     return D.FACT_KEY.get(k, k)
 
 
-def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None, use_weak: bool = True):
+def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None, use_weak: bool = True,
+                  feedback_weight: float = 3.0, weak_weight: float = 1.0):
     shown_path, feedback_path = shown_path or SHOWN_PATH, feedback_path or FEEDBACK_PATH
     ratings = {}
     for r in _read_jsonl(feedback_path):
@@ -52,7 +53,8 @@ def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Pat
             continue
         if iid in ratings:
             for f in facts:
-                X.append(f["features"]); y.append(ratings[iid]); w.append(3.0); g.append(iid); src.append("avaliação")
+                X.append(f["features"]); y.append(ratings[iid]); w.append(float(feedback_weight)); g.append(iid)
+                src.append("avaliação")
             continue
         if not use_weak:
             continue
@@ -60,7 +62,8 @@ def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Pat
         if not key or not any(str(f.get("key")) == key for f in facts):
             continue                                     # sem número reconhecido, não há rótulo honesto
         for f in facts:
-            X.append(f["features"]); y.append(1.0 if str(f.get("key")) == key else 0.0); w.append(1.0); g.append(iid)
+            X.append(f["features"]); y.append(1.0 if str(f.get("key")) == key else 0.0); w.append(float(weak_weight))
+            g.append(iid)
             src.append("automático")
     return (np.asarray(X, float).reshape(-1, N_FEATURES), np.asarray(y, float), np.asarray(w, float),
             np.asarray(g), np.asarray(src))
@@ -73,9 +76,11 @@ def _loss(X, y, w, wt):
 
 def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patience: int = 15, val_fraction: float = 0.25,
           batch: int = 256, seed: int = 7, use_weak: bool = True, sel: Optional[Selector] = None,
-          shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None) -> Dict[str, Any]:
+          shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None, feedback_weight: float = 3.0,
+          weak_weight: float = 1.0, lr_decay: float = 0.0, min_delta: float = 1e-5) -> Dict[str, Any]:
     sel = sel or Selector()
-    X, y, w, g, src = build_dataset(shown_path, feedback_path, use_weak=use_weak)
+    X, y, w, g, src = build_dataset(shown_path, feedback_path, use_weak=use_weak, feedback_weight=feedback_weight,
+                                    weak_weight=weak_weight)
     ug = np.unique(g)
     if len(ug) < 5 or len(np.unique(y)) < 2:
         return {"promoted": False, "reason": f"poucos exemplos com rótulo ({len(ug)} perguntas); faça perguntas que "
@@ -91,15 +96,16 @@ def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patie
     idx = np.where(~va)[0]
     for ep in range(int(epochs)):
         rng.shuffle(idx)
-        for s in range(0, len(idx), batch):
-            b = idx[s:s + batch]
+        lr_ep = learning_rate / (1 + float(lr_decay) * ep)          # rodada 24: passo que diminui com as épocas
+        for s in range(0, len(idx), max(1, int(batch))):
+            b = idx[s:s + max(1, int(batch))]
             p = 1 / (1 + np.exp(-np.clip(X[b] @ wt, -30, 30)))
             grad = X[b].T @ (w[b] * (p - y[b])) / max(w[b].sum(), 1e-9) + l2 * (wt - w0)
-            wt -= learning_rate * grad
+            wt -= lr_ep * grad
         tr, vl = _loss(X[~va], y[~va], w[~va], wt), _loss(X[va], y[va], w[va], wt)
         hist["train_loss"].append(round(tr, 5))
         hist["val_loss"].append(round(vl, 5))
-        if vl < best - 1e-5:
+        if vl < best - float(min_delta):
             best, best_w, bad = vl, wt.copy(), 0
         else:
             bad += 1
@@ -114,6 +120,9 @@ def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patie
     rec = {"version": v, "created": time.strftime("%Y-%m-%d %H:%M"), "weights": best_w.tolist(),
            "origin": "treino (avaliações + rótulo automático)" if use_weak else "treino (só avaliações)",
            "learning_rate": learning_rate, "l2": l2, "epochs": int(epochs), "epochs_run": len(hist["train_loss"]),
+           "params": {"batch": int(batch), "patience": int(patience), "val_fraction": float(val_fraction), "seed": int(seed),
+                      "feedback_weight": float(feedback_weight), "weak_weight": float(weak_weight),
+                      "lr_decay": float(lr_decay), "min_delta": float(min_delta), "use_weak": bool(use_weak)},
            "n_perguntas": int(len(ug)), "n_exemplos": int(len(y)),
            "n_avaliados": int(len(np.unique(g[src == "avaliação"]))) if len(src) else 0,
            "val_logloss": round(best, 5), "champion_logloss": round(champ, 5), "promoted": bool(promoted),
@@ -128,6 +137,69 @@ def train(learning_rate: float = 0.1, l2: float = 0.01, epochs: int = 200, patie
             "metricas": ev_new, "metricas_campea": ev_old,
             "reason": ("PROMOVIDA: errou menos que a versão atual nas perguntas de validação" if promoted else
                        "rejeitada: não errou menos que a versão atual nas perguntas de validação (a atual continua)")}
+
+
+# rodada 24: cada parâmetro com explicação simples, o que acontece alto/baixo e recomendação pelo estado atual
+PARAMS = {
+    "learning_rate": ("Taxa de aprendizado", 0.001, 1.0, 0.1,
+                      "Tamanho do passo que a IA dá ao corrigir um erro. ALTA: aprende rápido, mas pode pular a resposta "
+                      "certa e a curva fica serrilhada. BAIXA: aprende devagar e com segurança."),
+    "l2": ("Freio (L2)", 0.0, 1.0, 0.01,
+           "Quanto a IA é puxada de volta para o jeito do analista (pesos iniciais). ALTO: muda pouco e não decora as "
+           "perguntas de treino. BAIXO: muda à vontade — bom com muitos exemplos, arriscado com poucos."),
+    "epochs": ("Épocas (voltas nos exemplos)", 20, 1000, 200,
+               "Quantas vezes a IA relê todos os exemplos. MUITAS: aprende mais, pode decorar (a parada antecipada "
+               "segura). POUCAS: pode parar antes de aprender."),
+    "patience": ("Paciência", 3, 60, 15,
+                 "Quantas épocas sem melhorar na validação antes de parar. ALTA: insiste mais. BAIXA: para cedo."),
+    "batch": ("Tamanho do lote", 8, 1024, 256,
+              "Quantos exemplos a IA olha antes de cada correção. GRANDE: correções estáveis. PEQUENO: mais barulho, às "
+              "vezes escapa de vícios."),
+    "val_fraction": ("Fração de validação", 0.1, 0.5, 0.25,
+                     "Parte das perguntas guardada para a prova (a IA não treina nelas). ALTA: prova confiável, menos "
+                     "treino. BAIXA: mais treino, prova fraca."),
+    "feedback_weight": ("Peso dos seus 👍/👎", 1.0, 10.0, 3.0,
+                        "Quanto uma avaliação sua vale contra um rótulo automático. ALTO: a IA segue mais o seu gosto. "
+                        "BAIXO: confia mais nos rótulos automáticos."),
+    "weak_weight": ("Peso dos rótulos automáticos", 0.0, 3.0, 1.0,
+                    "Rótulo automático = a pergunta pedia um número e a IA sabe qual era. 0 desliga. ALTO: aprende "
+                    "muito com eles (bom quando há poucas avaliações)."),
+    "lr_decay": ("Redução do passo", 0.0, 0.2, 0.0,
+                 "Faz o passo diminuir a cada época (começa rápido e termina fino). ALTO: estabiliza curvas "
+                 "serrilhadas. 0: passo constante."),
+    "seed": ("Semente", 0, 9999, 7,
+             "Sorteio de quais perguntas vão para a prova. Mudar a semente e treinar de novo mostra se o ganho é "
+             "real ou sorte da divisão."),
+}
+
+
+def recommend(version: Dict[str, Any], n_questions: int, n_rated: int) -> Dict[str, str]:
+    """Recomendação de CADA parâmetro para o estado atual (curva do último treino + quantidade de exemplos)."""
+    from src.intelligence.course import diagnose_curve
+
+    d = diagnose_curve((version or {}).get("history") or {}).get("diagnostico", "")
+    r: Dict[str, str] = {}
+    few = n_questions < 40
+    r["learning_rate"] = ("Recomendo BAIXAR (÷3): a última curva oscilou." if d == "oscilação" else
+                          "Recomendo SUBIR um pouco (×2): a IA ainda está aprendendo pouco." if d == "subajuste" else
+                          "Pode manter: a curva está estável.")
+    r["l2"] = ("Recomendo SUBIR (×5): ela decorou as perguntas de treino." if d == "sobreajuste" else
+               "Recomendo ALTO (0,05+): com poucas perguntas, mudar pouco é mais seguro." if few else
+               "Pode baixar aos poucos: já há perguntas suficientes.")
+    r["epochs"] = ("Recomendo MAIS épocas: parou antes de aprender." if d == "subajuste" else
+                   "200 basta: a parada antecipada corta o excesso.")
+    r["patience"] = "Com poucos exemplos, 10–15; com 200+ perguntas, 20–30." if few else "20–30 funciona bem agora."
+    r["batch"] = (f"Com {n_questions} perguntas, use lote pequeno (16–64) para ter várias correções por época." if few
+                  else "256 é um bom equilíbrio.")
+    r["val_fraction"] = ("Com menos de 40 perguntas, 0,3 deixa a prova minimamente confiável." if few else
+                         "0,2–0,25 está bom.")
+    r["feedback_weight"] = (f"Você avaliou {n_rated} respostas: com menos de 30, 3–5 faz suas avaliações pesarem." if n_rated < 30
+                            else "Com 30+ avaliações, 3 já basta.")
+    r["weak_weight"] = ("Mantenha 1: os rótulos automáticos são a maior parte dos exemplos." if n_rated < 30 else
+                        "Pode baixar para 0,5: suas avaliações já ensinam bastante.")
+    r["lr_decay"] = "Use 0,02–0,05 para firmar a curva." if d == "oscilação" else "0 está ok."
+    r["seed"] = "Troque e treine de novo: se o resultado mudar muito, o ganho era sorte."
+    return r
 
 
 def suggest(version: Dict[str, Any]) -> Dict[str, Any]:

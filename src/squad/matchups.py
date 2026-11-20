@@ -515,11 +515,25 @@ def _diverse(items: List[Dict[str, Any]], per_kind: int = 2) -> List[Dict[str, A
     return out
 
 
-def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi) -> Dict[str, Any]:
+def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi, formation: str = "",
+            rival_formation: str = "") -> Dict[str, Any]:
     ref = reference(db)
     ms, rs = team_players(db, my_names), team_players(db, rv_names)
     force = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=True)
     protect = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=False)
+    # rodada 24: cada confronto vira uma dica PRÓPRIA (perfil dos dois, lado, quem apoia, nosso desenho, modelo do rival)
+    try:
+        from src.analytics.tactical_identity import stats_identity
+        from src.squad import advice as AD
+
+        rv_id = stats_identity(db, list(rv_names), n=15)
+        rv_ctx = AD.rival_context(rv_id.get("perfil") or {}, rv_id.get("referencia") or {})
+        me_id = stats_identity(db, list(my_names), n=15)
+        me_ctx = AD.rival_context(me_id.get("perfil") or {}, me_id.get("referencia") or {})
+        force = AD.individualize_all(force, my_xi, rv_xi, ms, rs, ref, formation, rv_ctx, attack=True)
+        protect = AD.individualize_all(protect, my_xi, rv_xi, ms, rs, ref, rival_formation, me_ctx, attack=False)
+    except Exception:
+        pass
     combos = combo_findings(my_xi, rv_xi, ms, rs, ref, me, rival)
     shots = shot_findings(db, my_names, rv_names, me, rival)
     # rodada 21: mistura os tipos — combinações e "de onde saem os gols" entram entre os duelos

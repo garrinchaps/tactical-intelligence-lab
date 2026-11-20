@@ -37,6 +37,7 @@ if (-not $Rapido) {
     Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation }
 }
 Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot }
-Step "13. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho }
+Step "13. Cobertura do Scout por liga (docs\COBERTURA_SCOUT.md)" { & $py -m src.tools.cobertura_scout }
+Step "14. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho }
 Write-Host ""
 Write-Host "Tudo pronto. Abra o app: streamlit run app.py" -ForegroundColor Green

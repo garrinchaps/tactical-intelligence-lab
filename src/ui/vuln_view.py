@@ -153,6 +153,8 @@ def cards_html(found: List[Dict[str, Any]], color: str = "#EF4444") -> str:
             + (f'<div style="color:#FDE68A;font-size:.86rem;margin-top:3px">💡 <b>Interpretação:</b> {interp}</div>'
                if interp else "")
             + f'<div style="color:#A7F3D0;font-size:.88rem;margin-top:4px">🎯 <b>Como explorar:</b> {f["explorar"]}</div>'
+            + (f'<div style="color:#FDE68A;font-size:.86rem;margin-top:3px">🧩 <b>Plano para este jogador:</b> '
+               f'{f["plano_combinado"]}</div>' if f.get("plano_combinado") else "")
             + (f'<div style="color:#C4B5FD;font-size:.8rem;margin-top:3px">🔍 <b>Hipótese a confirmar:</b> {hyp}</div>'
                if hyp else "") + '</div>')
     return "".join(out)

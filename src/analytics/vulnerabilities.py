@@ -135,6 +135,56 @@ FUNC_OF = {"GK": "goleiro", "CB": "zagueiro", "LB": "lateral", "RB": "lateral", 
            "RW": "ponta", "ST": "centroavante"}
 
 
+# rodada 24: combinações de fragilidades do MESMO jogador (ou do mesmo lado) viram um plano próprio
+COMBOS = [
+    (("muito driblado", "desarma pouco"), "{j} é driblado E não rouba a bola: conduzir para cima dele sem medo — se ele "
+     "não ganhar no primeiro contato, não há segunda chance de desarme. Ideal com quem conduz em velocidade."),
+    (("muito driblado", "perde muitos duelos"), "{j} perde no 1×1 e no corpo a corpo: jogar a bola nos pés de quem enfrenta "
+     "ele e apoiar por perto para a segunda bola, que tende a sobrar para nós."),
+    (("perde o jogo aéreo", "perde muitos duelos"), "{j} perde pelo alto e no chão: bola longa no corpo dele, com dois "
+     "jogadores atacando a sobra — mesmo que ele toque primeiro, a disputa seguinte é nossa."),
+    (("desarma pouco", "perde muitos duelos"), "{j} não desarma e perde duelos: atraí-lo com passe curto e girar nas costas "
+     "dele; ele chega, mas não tira."),
+    (("Saída de bola frágil", "perde muitos duelos"), "{j} erra passe sob pressão e perde duelos: pressão com dois — um no "
+     "corpo, outro na linha de passe — logo que o goleiro der a bola para ele."),
+]
+
+
+def personalize(found: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Cada achado de jogador ganha o que é DELE: as outras fragilidades medidas e o plano combinado; achados do mesmo
+    lado (ponta que não volta + lateral driblado) viram um 2×1 com os dois nomes."""
+    by_player: Dict[str, List[Dict[str, Any]]] = {}
+    for f in found:
+        if f.get("jogador"):
+            by_player.setdefault(f["jogador"], []).append(f)
+    for j, items in by_player.items():
+        titles = [x["titulo"] for x in items]
+        for f in items:
+            others = [t.replace(j, "").strip(" :") for t in titles if t != f["titulo"]]
+            if others:
+                f["explorar"] += f" Ele também {' e '.join(o.strip() for o in others[:2])}."
+            for keys, plan in COMBOS:
+                if all(any(k in t for t in titles) for k in keys) and any(k in f["titulo"] for k in keys):
+                    f["plano_combinado"] = plan.format(j=j)
+                    f["gravidade"] = int(min(100, f["gravidade"] + 6))
+                    break
+    by_side: Dict[str, List[Dict[str, Any]]] = {}
+    for f in found:
+        if f.get("jogador") and f.get("lado"):
+            by_side.setdefault(f["lado"], []).append(f)
+    for lado, items in by_side.items():
+        noback = [x for x in items if "quase não defende" in x["titulo"]]
+        weak = [x for x in items if any(k in x["titulo"] for k in ("muito driblado", "desarma pouco", "perde muitos duelos"))
+                and x["jogador"] not in {n["jogador"] for n in noback}]
+        if noback and weak:
+            a, b = noback[0]["jogador"], weak[0]["jogador"]
+            txt = (f"Pela {lado} deles, {a} não volta e {b} fica exposto: levar o lateral e o ponta para esse lado e "
+                   f"fazer 2×1 em cima de {b} — a ajuda que ele deveria receber não chega.")
+            for x in (noback[0], weak[0]):
+                x["plano_combinado"] = x.get("plano_combinado") or txt
+    return found
+
+
 def team_vulnerabilities(db, names: Sequence[str], n: int = 12, our_names: Optional[Sequence[str]] = None,
                          heights: Optional[pd.DataFrame] = None) -> Dict[str, Any]:
     ids = _recent_ids(db, names, n)
@@ -314,6 +364,7 @@ def team_vulnerabilities(db, names: Sequence[str], n: int = 12, our_names: Optio
                     f"dos duelos aéreos ({an})", grav,
                     f"Bolas aéreas e cruzamentos direcionados para {a} disputar com {r['jogador']}; escanteio no setor dele.",
                     f"altura: {hsrc.get(player_core(a), 'cadastro')}; duelos aéreos dos últimos jogos (FotMob)")
+    out = personalize(out)
     out.sort(key=lambda d: -d["gravidade"])
     # rodada 12: função de cada jogador citado + o XI habitual (para desenhar os jogadores no campinho)
     xi = []

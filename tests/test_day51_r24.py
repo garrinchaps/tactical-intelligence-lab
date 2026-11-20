@@ -64,3 +64,52 @@ def test_unique_name_still_merges_when_club_is_outdated():
     hist = pd.DataFrame([{"core": "kaio jorge", "core_nome": "kaio jorge", "ultimo_time": "Cruzeiro",
                           "posicao_observada": "ST", "nascimento_fm": None}])
     assert E.match_market_to_history(p, hist).tolist() == ["kaio jorge"]
+
+
+def test_advice_is_individual_per_matchup():
+    import numpy as np
+
+    from src.squad import advice as AD
+
+    rng = np.random.default_rng(1)
+    cols = ["drb_p90", "crs_p90", "cc_p90", "xg_p90", "tob_p90", "aer_pct", "fouled_p90", "lbp_p90", "rec_p90",
+            "drb_past_p90", "duel_pct", "int_p90", "disp_p90", "fouls_p90", "tkl_p90"]
+    ref = pd.DataFrame(rng.uniform(0, 1, size=(300, len(cols))), columns=cols)
+    xi = [{"papel": "RW", "jogador": "Ponta A"}, {"papel": "RB", "jogador": "Lateral A"}, {"papel": "LW", "jogador": "Ponta B"},
+          {"papel": "LB", "jogador": "Lateral B"}]
+    a1 = {c: .5 for c in cols} | {"drb_p90": .99, "crs_p90": .95}
+    a2 = {c: .5 for c in cols} | {"drb_p90": .99, "xg_p90": .97}
+    d = {c: .5 for c in cols} | {"drb_past_p90": .99, "aer_pct": .02}
+    base = {"tipo": "duelo", "dimensao": "drible", "gap": 70, "acao": "x"}
+    i1 = AD.individualize(dict(base, atacante="Ponta A", defensor="Zag 1", papel_atacante="RW", papel_defensor="LB"),
+                          xi, a1, d, ref, "4-3-3", {"momento": "eles ficam com a bola"})
+    i2 = AD.individualize(dict(base, atacante="Ponta B", defensor="Zag 2", papel_atacante="LW", papel_defensor="RB"),
+                          xi, a2, d, ref, "3-4-3", {})
+    assert i1["passos"] != i2["passos"]
+    assert any("direito" in s for s in i1["passos"]) and any("esquerdo" in s for s in i2["passos"])
+    assert any("cruzamento" in s for s in i1["passos"]) and any("finalização" in s for s in i2["passos"])
+    assert any("Lateral A" in s for s in i1["passos"])                    # quem apoia, do mesmo lado
+    assert any("4-3-3" in s for s in i1["passos"]) and any("três zagueiros" in s for s in i2["passos"])
+
+
+def test_trainer_params_have_help_and_recommendations():
+    from src.intelligence.lab_ai import trainer as TR
+
+    rec = TR.recommend({"history": {"train_loss": [1, .8, .6, .5, .4], "val_loss": [1, .9, .95, 1.0, 1.1]}}, 10, 2)
+    assert set(TR.PARAMS) <= set(rec) and all(len(v[4]) > 40 for v in TR.PARAMS.values())
+    assert "SUBIR" in rec["l2"] or "ALTO" in rec["l2"]
+
+
+def test_shape_lines_never_one_nine_one():
+    from src.analytics.tactical_identity import shape_lines
+
+    assert shape_lines([20, 21, 22, 23, 40, 41, 42, 60, 61, 62]) == [4, 3, 3]
+    assert shape_lines([25, 40, 41, 42, 43, 44, 45, 46, 47, 70])[0] >= 3
+    assert shape_lines([30, 31, 32, 50, 51, 52, 53, 54, 70, 71]) == [3, 5, 2]
+
+
+def test_origin_south_america_includes_brazil():
+    s = pd.Series(["Brasil · Série B", "América do Sul", "Europa e outras"])
+    assert E.origin_match(s, "América do Sul (com Brasil)").tolist() == [True, True, False]
+    assert E.origin_match(s, "Todas").all()
+    assert E.origin_group_full("", "Brazil").startswith("Brasil")

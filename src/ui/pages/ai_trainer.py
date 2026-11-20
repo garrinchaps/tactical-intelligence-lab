@@ -138,13 +138,72 @@ def render_trainer() -> None:
     with t3:
         last = sel.meta["versions"][-1] if sel.meta.get("versions") else {}
         sug = TR.suggest(last)
-        st.markdown("A IA sugere os próprios ajustes a partir do último treino:")
-        for p in sug["porque"]:
-            st.markdown(f"- {p}")
-        if st.button("🧠 Treinar agora com a sugestão da IA", type="primary", use_container_width=True, key="tr_go"):
+        try:
+            Xd, yd, wd, gd, srcd = TR.build_dataset()
+            n_q, n_rated = int(len(set(gd))), int(len(set(gd[srcd == "avaliação"]))) if len(srcd) else 0
+        except Exception:
+            n_q, n_rated = 0, 0
+        rec = TR.recommend(last, n_q, n_rated)
+        simple, technical = st.tabs(["🙂 Em palavras simples", "🔧 Parte técnica (ajuste fino)"])
+        with simple:
+            st.markdown(
+                "**Como a IA aprende, sem matemática:** cada resposta mostra alguns números do jogo. A IA dá uma "
+                "\"nota de importância\" para cada número e mostra primeiro os que acha mais importantes. Quando você diz 👍 "
+                "ou 👎, ela ajusta essas notas um pouquinho. Para não se enganar, ela guarda algumas perguntas como "
+                "**prova**: só aprende com as outras e, no fim, faz a prova. A versão nova só substitui a atual se tirar "
+                "nota melhor na prova.")
+            st.markdown(f"**Agora:** {n_q} perguntas com rótulo, {n_rated} avaliadas por você. "
+                        + ("Ainda é pouco — o que mais ajuda é perguntar e avaliar." if n_q < 40 else
+                           "Já dá para testar ajustes finos na parte técnica."))
+            for p_ in sug["porque"]:
+                st.markdown(f"- {p_}")
+            go_simple = st.button("🧠 Treinar agora com a sugestão da IA", type="primary", use_container_width=True,
+                                  key="tr_go")
+        with technical:
+            st.caption("Cada controle tem um (i): o que é, o que muda quando está alto ou baixo e a recomendação para o "
+                       "estado atual da IA. A sugestão automática já vem preenchida.")
+            sg = sug["sugerido"]
+            prev = (last or {}).get("params") or {}
+            defaults = {k: v[3] for k, v in TR.PARAMS.items()}
+            defaults.update({k: prev[k] for k in prev if k in defaults})
+            defaults.update({"learning_rate": sg["learning_rate"], "l2": sg["l2"], "epochs": sg["epochs"]})
+            vals = {}
+            with st.form("tr_tech", border=False):
+                cols = st.columns(2)
+                for i, (k_, (label, lo, hi, _d, expl)) in enumerate(TR.PARAMS.items()):
+                    help_ = f"{expl}\n\n👉 {rec.get(k_, '')}"
+                    c = cols[i % 2]
+                    if isinstance(lo, int) and isinstance(hi, int):
+                        vals[k_] = c.number_input(label, int(lo), int(hi), int(defaults[k_]), key=f"tr_p_{k_}", help=help_)
+                    else:
+                        vals[k_] = c.number_input(label, float(lo), float(hi), float(defaults[k_]), key=f"tr_p_{k_}",
+                                                  help=help_, format="%.4f" if k_ in ("learning_rate", "l2", "lr_decay") else "%.2f")
+                use_weak = st.toggle("Usar rótulos automáticos", value=bool(prev.get("use_weak", True)), key="tr_p_weak",
+                                     help="Desligado: a IA aprende só com as suas avaliações (mais fiel ao seu gosto, "
+                                          "mas com muito menos exemplos).")
+                go_tech = st.form_submit_button("🔧 Treinar com estes parâmetros", type="primary")
+            diag = sug.get("diagnostico") or {}
+            if diag:
+                st.caption(f"Diagnóstico da última curva: **{diag.get('diagnostico', '—')}** — {diag.get('texto', '')}")
+            if (last or {}).get("history"):
+                h = last["history"]
+                st.line_chart(pd.DataFrame({"treino": h.get("train_loss") or [], "validação": h.get("val_loss") or []}),
+                              height=180)
+                st.caption("Perda por época (quanto menor, melhor). Treino caindo e validação subindo = decorou; "
+                           "as duas caindo juntas = aprendendo de verdade.")
+        r = None
+        if go_simple:
             with st.spinner("Treinando…"):
-                r = TR.train(learning_rate=sug["sugerido"]["learning_rate"], l2=sug["sugerido"]["l2"],
-                             epochs=int(sug["sugerido"]["epochs"]), use_weak=True)
+                r = TR.train(learning_rate=sug["sugerido"]["learning_rate"],
+                             l2=sug["sugerido"]["l2"], epochs=int(sug["sugerido"]["epochs"]), use_weak=True)
+        elif go_tech:
+            with st.spinner("Treinando com os seus parâmetros…"):
+                r = TR.train(learning_rate=float(vals["learning_rate"]), l2=float(vals["l2"]), epochs=int(vals["epochs"]),
+                             patience=int(vals["patience"]), batch=int(vals["batch"]),
+                             val_fraction=float(vals["val_fraction"]), seed=int(vals["seed"]), use_weak=use_weak,
+                             feedback_weight=float(vals["feedback_weight"]), weak_weight=float(vals["weak_weight"]),
+                             lr_decay=float(vals["lr_decay"]))
+        if r is not None:
             if r.get("promoted"):
                 st.success("✅ A versão nova errou menos nas respostas de teste e passou a ser usada. " + str(r.get("reason")))
             else:

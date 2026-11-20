@@ -599,7 +599,8 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
 
         mu = _matchups(team, rival, tuple(me["names"]), tuple(rv["names"]), version,
                        tuple((x.get("papel"), x.get("jogador"), x.get("x"), x.get("y")) for x in xm),
-                       tuple((x.get("papel"), x.get("jogador"), x.get("x"), x.get("y")) for x in xr))
+                       tuple((x.get("papel"), x.get("jogador"), x.get("x"), x.get("y")) for x in xr),
+                       str(fm or ""), str(fr or ""))
     except Exception as exc:                          # noqa: BLE001
         mu = {"forcar": [], "proteger": [], "estilo": [], "evitar": [], "base": f"confrontos indisponíveis ({exc})"}
     flags = {}
@@ -785,12 +786,13 @@ def _brain_buttons(module: str, kind: str, key: str, ctx_info: Dict[str, Any]) -
 
 @_perf_timed("squad._matchups")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
-def _matchups(team, rival, my_names, rv_names, version, my_xi, rv_xi):
+def _matchups(team, rival, my_names, rv_names, version, my_xi, rv_xi, formation="", rival_formation=""):
     from src.squad import matchups as MU
     from src.ui.context import get_service
 
     unpack = lambda xs: [{"papel": p, "jogador": j, "x": x, "y": y} for p, j, x, y in xs]
-    return MU.analyze(get_service().db, team, rival, list(my_names), list(rv_names), unpack(my_xi), unpack(rv_xi))
+    return MU.analyze(get_service().db, team, rival, list(my_names), list(rv_names), unpack(my_xi), unpack(rv_xi),
+                      str(formation or ""), str(rival_formation or ""))
 
 
 # ------------------------------------------------------------------------------------------------ página
