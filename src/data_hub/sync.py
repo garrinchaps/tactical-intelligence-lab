@@ -155,7 +155,14 @@ def run_sync(
             status = "COTA" if res.get("cota_atingida") else "OK"
             db.log_sync(src, started, status, res.get("added", 0), res.get("updated", 0), redact(str(res)))
             results[src] = {"status": status, **res}
-            say(f"  ✔ {src}: {res.get('added', 0)} novas, {res.get('updated', 0)} atualizadas"
+            # rodada 24: tarefas que não contam "novas/atualizadas" (elencos, detalhes) mostram o que fizeram de fato
+            if "added" in res or "updated" in res or not res:
+                summary = f"{res.get('added', 0)} novas, {res.get('updated', 0)} atualizadas"
+            else:
+                labels = {"clubes": "clubes", "jogadores": "jogadores", "detalhes": "jogos com detalhes",
+                          "pendentes": "ainda na fila", "erros": "erros", "errors": "erros", "sem_dado_7d": "sem dado na fonte"}
+                summary = " · ".join(f"{v} {labels[k]}" for k, v in res.items() if k in labels and isinstance(v, (int, float)))
+            say(f"  ✔ {src}: {summary or 'concluído'}"
                 + (" · cota diária atingida, parou com segurança" if status == "COTA" else ""))
         except QuotaExceeded as exc:
             db.log_sync(src, started, "COTA", 0, 0, redact(exc))

@@ -52,6 +52,11 @@ def catch_up(detail_limit: int = 400) -> dict:
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if "--esperar" in argv:                   # rodada 24: atalho da pasta Inicializar espera o Windows assentar
+        try:
+            time.sleep(min(600, int(argv[argv.index("--esperar") + 1])))
+        except (ValueError, IndexError):
+            time.sleep(120)
     LOG.parent.mkdir(parents=True, exist_ok=True)
     with LOG.open("a", encoding="utf-8") as fh:
         sys.stdout = sys.stderr = fh                    # pythonw: sem console; tudo vai para o arquivo

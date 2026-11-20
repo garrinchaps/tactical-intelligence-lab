@@ -16,7 +16,11 @@ foreach ($n in $names) {
         Write-Host "Removida a tarefa antiga: $n"
     }
 }
-if ($Remover) { Write-Host "Pronto: nenhuma atualização agendada do laboratório."; exit 0 }
+if ($Remover) {
+    $old = Join-Path ([Environment]::GetFolderPath("Startup")) "TacticalLabAoLigar.lnk"
+    if (Test-Path $old) { Remove-Item $old -Force; Write-Host "Removido o atalho da pasta Inicializar." }
+    Write-Host "Pronto: nenhuma atualização agendada do laboratório."; exit 0
+}
 
 $pyw = Join-Path $proj "venv\Scripts\pythonw.exe"
 if (-not (Test-Path $pyw)) { Write-Host "Não achei $pyw (o venv existe?)." -ForegroundColor Yellow; exit 1 }
@@ -35,10 +39,39 @@ $t2 = New-ScheduledTaskTrigger -Daily -At 6am
 Register-ScheduledTask -TaskName "TacticalLabDiario" -Action $a2 -Trigger $t2 -Settings $setWake `
         -Description "Tactical Lab: atualização diária às 6h (sem janela; acorda o PC da suspensão)" | Out-Null
 # rodada 23: 2 min depois de entrar no Windows recupera os dias em que o PC ficou desligado (antes de você abrir o app)
-$a3 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --ao-ligar" -WorkingDirectory $proj
-$t3 = New-ScheduledTaskTrigger -AtLogOn
-$t3.Delay = "PT2M"
-Register-ScheduledTask -TaskName "TacticalLabAoLigar" -Action $a3 -Trigger $t3 -Settings $set `
-        -Description "Tactical Lab: ao entrar no Windows, busca os resultados dos dias com o PC desligado" | Out-Null
-Write-Host "Pronto. Tarefas silenciosas: TacticalLabRapido (3 h), TacticalLabDiario (6h, acorda o PC) e TacticalLabAoLigar."
+# rodada 24: "ao entrar no Windows" para TODOS os usuários exige administrador ("Acesso negado"). Agora: primeiro tenta
+# só para o SEU usuário; se o Windows ainda recusar, cria um atalho na pasta Inicializar (não precisa de administrador,
+# não abre janela: chama o pythonw, que espera 2 min sozinho).
+$startup = [Environment]::GetFolderPath("Startup")
+$lnk = Join-Path $startup "TacticalLabAoLigar.lnk"
+if (Test-Path $lnk) { Remove-Item $lnk -Force }
+$okLogon = $false
+try {
+    $a3 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --ao-ligar" -WorkingDirectory $proj
+    $t3 = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
+    $t3.Delay = "PT2M"
+    $p3 = New-ScheduledTaskPrincipal -UserId "$env:USERDOMAIN\$env:USERNAME" -LogonType Interactive -RunLevel Limited
+    Register-ScheduledTask -TaskName "TacticalLabAoLigar" -Action $a3 -Trigger $t3 -Settings $set -Principal $p3 `
+            -Description "Tactical Lab: ao entrar no Windows, busca os resultados dos dias com o PC desligado" `
+            -ErrorAction Stop | Out-Null
+    $okLogon = $true
+    $logonInfo = "TacticalLabAoLigar (tarefa ao entrar no Windows)"
+} catch {
+    $ws = New-Object -ComObject WScript.Shell
+    $sc = $ws.CreateShortcut($lnk)
+    $sc.TargetPath = $pyw
+    $sc.Arguments = "-m src.tools.sync_silencioso --ao-ligar --esperar 120"
+    $sc.WorkingDirectory = $proj
+    $sc.WindowStyle = 7
+    $sc.Description = "Tactical Lab: recupera os resultados dos dias com o PC desligado"
+    $sc.Save()
+    $logonInfo = "atalho na pasta Inicializar (o Windows recusou a tarefa ao entrar sem administrador)"
+}
+foreach ($n in @("TacticalLabRapido", "TacticalLabDiario")) {
+    if (-not (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue)) {
+        Write-Host "Atenção: a tarefa $n não foi criada (o Windows recusou). Rode este script numa janela do PowerShell" `
+                   "aberta como administrador." -ForegroundColor Yellow
+    }
+}
+Write-Host "Pronto. Tarefas silenciosas: TacticalLabRapido (3 h), TacticalLabDiario (6h, acorda o PC) e $logonInfo."
 Write-Host "Com o app aberto elas não fazem nada (o próprio app atualiza). Registro: data\sync_log.txt"

@@ -534,7 +534,9 @@ class FotmobProvider:
                              "AND match_id NOT IN (SELECT DISTINCT match_id FROM match_lineups)", (since,)).fetchall()
         rank = {lg: i for i, lg in enumerate(order)}
         tried = self._recently_tried()
-        todo = [r for r in todo if r[1] in rank and int(r[0]) not in tried]
+        in_scope = [r for r in todo if r[1] in rank]
+        todo = [r for r in in_scope if int(r[0]) not in tried]
+        skipped = len(in_scope) - len(todo)
         # rodada 14: o mais RECENTE de todas as ligas primeiro (faixas de 120 dias), prioridade dentro da faixa — antes a
         # fila inteira de Brasil/Europa (5 temporadas) vinha antes de qualquer jogo do Paraguai/Uruguai/Chile
         today_n = int(date.today().strftime("%Y%m%d"))
@@ -568,7 +570,15 @@ class FotmobProvider:
                 eta = (n_run - i) / rate if rate > 0 else 0
                 say(f"  detalhes: {i}/{n_run} · {rate * 60:.0f} jogos/min · falta ~{eta / 60:.0f} min"
                     + (f" · {tot['errors']} sem dado" if tot["errors"] else ""))
-        say(f"  detalhes baixados: {tot['detalhes']} · faltam {tot['pendentes']} (rode de novo para continuar)")
+        tot["sem_dado_7d"] = skipped
+        if not n_run:
+            # rodada 24: "faltam 0" sem explicação parecia defeito — diz o motivo
+            say(f"  nada a baixar: todos os jogos encerrados dessas ligas desde {since[:10]} já têm detalhes"
+                + (f" ({skipped} foram pedidos nos últimos 7 dias e a FotMob não tinha escalação — tentam de novo depois)"
+                   if skipped else "") + ".")
+        else:
+            say(f"  detalhes baixados: {tot['detalhes']} · faltam {tot['pendentes']} (rode de novo para continuar)"
+                + (f" · {skipped} sem dado na FotMob (nova tentativa em 7 dias)" if skipped else ""))
         return tot
 
     # ------------------------------------------------------------------ tentativas (não repete jogo sem dado)
