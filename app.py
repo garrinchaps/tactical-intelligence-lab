@@ -291,6 +291,12 @@ def _app_version() -> str:
 
 def main() -> None:
     theme.inject_theme()
+    try:                                                 # rodada 22: servidor na nuvem baixa a base núcleo na 1ª vez
+        from src.tools.baixar_nucleo import first_run_gate
+
+        first_run_gate()
+    except Exception:
+        pass
     try:                                                 # rodada 11: avisa o processo de fundo que a tela está em uso
         from src.data_hub import activity
 

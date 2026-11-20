@@ -221,6 +221,62 @@ O que existe:
 Você **continua editando, treinando a IA e atualizando tudo no PC** em qualquer opção: o PC é o "laboratório"; o link
 público só mostra. Na opção A, depois de treinar/atualizar, um comando no PC publica a fotografia nova.
 
+## 6.7 Rodada 22 — pesquisa completa: "a base pública, link fixo, 24 h, atualizada, com contas"
+
+**Pergunta:** dá para pôr a base num lugar público, com link fixo, sempre atualizada, rápida, com contas, rodando sem o
+meu PC — e eu continuar editando tudo? **Sim, com uma divisão da base em partes.** Ninguém dá de graça um servidor com
+11 GB em disco + 3–4 GB de memória ligado 24 h; mas cada PARTE cabe num serviço grátis diferente:
+
+| parte | o que é | onde fica (grátis) | tamanho |
+|---|---|---|---|
+| 1. **App** (o código) | este repositório | **Streamlit Community Cloud** (até ~2,7 GB de memória, 50 GB de disco, dorme após 12 h sem visita e acorda em ~1 min) | — |
+| 2. **Base núcleo** | todas as partidas + estatísticas/escalações/jogadores dos últimos 3 anos + elencos + Scout, SEM lances | **Hugging Face Datasets, repositório PRIVADO** (cabe fácil; baixado pelo app na 1ª abertura) | ~1–2 GB (estimativa; `--tamanho` mostra o seu) |
+| 3. **Lances** (StatsBomb, OpenPlay) | eventos com coordenadas | **as próprias fontes públicas** (GitHub do StatsBomb, release do OpenPlay) — o app já baixa quando abrem o jogo | 0 no servidor |
+| 4. **Histórico antigo** (opcional) | estatísticas de antes de 3 anos | arquivos parquet no mesmo repositório do Hugging Face, lidos pelo DuckDB sob demanda (só quando alguém pedir temporadas antigas) | o resto |
+| 5. **Atualização diária** | resultados e estatísticas novos | **GitHub Actions** (agenda grátis): baixa o núcleo, roda a atualização rápida, envia de volta | — |
+| 6. **Contas** | quem entra | **Entrar com Google** (`st.login`, configurado nos *Secrets* do Streamlit) — a lista de contas com senha do PC (`data/contas.db`) NÃO sobrevive a reinícios na nuvem | — |
+
+**Você continua editando tudo:** o código vive no GitHub — cada `git push` republica o app sozinho; os dados vivem no PC e
+no Hugging Face — `python -m src.tools.publicar_nucleo` gera a base nova e um comando a envia. Treinar a IA continua no
+PC (na nuvem o disco é apagado quando o app reinicia).
+
+**Pagamento ÚNICO (sem mensalidade), se quiser a base INTEIRA e tudo igual ao PC:** um **mini PC usado** (Intel N100 ou
+similar, 8–16 GB de RAM, SSD de 256 GB+) ligado em casa 24 h com o **Tailscale Funnel** (link fixo grátis) — custo só
+da compra e da luz (~R$ 5–10/mês). É a única forma de ter 100% (lances, treino, atualização automática) sem depender do
+seu PC e sem pagar mês a mês. Um Raspberry Pi 5 de 8 GB também roda, porém mais lento com a base grande.
+
+**Licenças (importante):** FotMob e ESPN são fontes para uso pessoal/não comercial. Publicar a base como dataset PÚBLICO
+pode violar os termos — por isso o repositório do Hugging Face deve ser **privado** (o app usa um token nos *Secrets*) e o
+link do app fica com login (convidados). StatsBomb Open Data e openfootball permitem redistribuição com crédito.
+
+### Passo a passo da versão 24 h (quando decidir)
+
+1. No PC, com o app fechado:
+
+```bash
+python -m src.tools.publicar_nucleo --tamanho
+```
+
+```bash
+python -m src.tools.publicar_nucleo --anos 3
+```
+
+2. Criar conta grátis no Hugging Face → *New dataset* → **Private** → enviar `data/publicacao/nucleo.db` (pela página, em
+   "Add file › Upload", ou pelo comando `huggingface-cli upload` depois de `pip install huggingface_hub`).
+3. Criar um token de LEITURA no Hugging Face (Settings › Access Tokens).
+4. Em share.streamlit.io → *New app* → este repositório, branch `claude/gifted-knuth-q93cbz`, arquivo `app.py`.
+   Em *Secrets*: `TIL_NUCLEO_URL = "https://huggingface.co/datasets/SEU_USUARIO/SEU_DATASET/resolve/main/nucleo.db"`,
+   `HF_TOKEN = "..."` (o token de leitura), `TIL_MODO_PUBLICO = "1"` e, para contas, a seção `[auth]` do Google
+   (a mesma que `python -m src.tools.configurar_login` gera, trocando o endereço pelo do Streamlit).
+5. Na 1ª abertura o app baixa o núcleo sozinho (`src/tools/baixar_nucleo.py`) e mostra uma barra de progresso.
+6. Atualização: rode os passos 1–2 de novo quando quiser (ou automatize com GitHub Actions — exige guardar o token do
+   Hugging Face nos *Secrets* do GitHub; desenho pronto para quando decidir).
+
+Fontes da pesquisa: limites do Streamlit Community Cloud (docs.streamlit.io/knowledge-base/deploy/resource-limits),
+armazenamento do Hugging Face (huggingface.co/docs/hub/storage-limits), leitura remota parcial do DuckDB
+(duckdb.org/docs/current/core_extensions/httpfs/https), limites de Releases do GitHub (2 GiB por arquivo,
+docs.github.com/en/repositories/releasing-projects-on-github/about-releases).
+
 ## 7. Depois deste mês (opcional, ainda grátis quando possível)
 
 1. **Link fixo grátis com Tailscale Funnel** (conta grátis do plano Personal, uso não comercial): o endereço

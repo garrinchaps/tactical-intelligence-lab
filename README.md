@@ -1,5 +1,13 @@
 # ⚽ Tactical Intelligence Lab
 
+> **Para quem chega agora (pessoa ou outra IA):** o histórico completo do projeto — o que existe, onde está cada coisa,
+> regras de segurança, o que já foi baixado no PC do usuário e o estado de cada pedido, rodada a rodada — está em
+> **[`CLAUDE.md`](CLAUDE.md)** (leia as seções 1–8 antes de mexer). Documentos de apoio em `docs/`:
+> `PLANO_PUBLICACAO.md` (link público, contas, 24 h), `IDENTIDADE_TATICA.md` (modelo de jogo, com matriz do que existe),
+> `FONTES_ANALISE.md` (cada fonte de dados), `DIAGNOSTICO_AVALIACAO.md` (avaliação de jogadores), `COBERTURA.md`.
+> Rodar: `streamlit run app.py` · testes: `python -m pytest -q` · branch de trabalho: `claude/gifted-knuth-q93cbz`.
+> Os dados (`data/`, `database/*.db`) e o `.env` NUNCA vão para o Git — só o código.
+
 Plataforma de **ciência de dados aplicada ao futebol**: análise tática de partidas com redes de passes, Expected Threat (xT), machine learning, comparação contextual de atletas e um **analista de IA que responde exatamente ao recorte perguntado**, sempre auditado contra os dados.
 
 > **Autores:** Matheus Pimenta Silva (Engenharia Elétrica, CEFET-MG) em colaboração com Pedro Magnani.

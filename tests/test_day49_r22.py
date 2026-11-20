@@ -360,3 +360,33 @@ def test_coach_periods_split(tmp_path):
     per = TI.coach_periods(db, ["Bahia"])
     assert [p["treinador"] for p in per] == ["Técnico B", "Técnico A"]
     assert per[0]["desenho_mais_usado"] == "3-5-2" and per[1]["jogos"] == 3
+
+
+def test_publish_core_db_without_events(tmp_path):
+    import sqlite3
+
+    from src.data_hub.db import DataHubDB
+    from src.tools import publicar_nucleo as P
+
+    src = tmp_path / "full.db"
+    db = DataHubDB(src)
+    _mk_matches(db, [(500000301, "Série A", "2026-05-01", "Bahia", "Sport", "BOXSCORE"),
+                     (500000302, "Série A", "2015-05-01", "Bahia", "Vitória", "BOXSCORE")])
+    with db.connect() as c:
+        c.executemany("INSERT INTO match_player_stats (match_id, team_name, player_name) VALUES (?,?,?)",
+                      [(500000301, "Bahia", "A"), (500000302, "Bahia", "B")])
+    out = tmp_path / "pub" / "nucleo.db"
+    r = P.build(src, out, years=3, progress=lambda m: None)
+    with sqlite3.connect(out) as c:
+        names = {x[0] for x in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        assert "events" not in names                                             # lances ficam de fora
+        assert c.execute("SELECT COUNT(*) FROM matches WHERE match_id IN (500000301, 500000302)").fetchone()[0] == 2
+        assert c.execute("SELECT player_name FROM match_player_stats").fetchall() == [("A",)]   # só os últimos anos
+    assert r["bytes"] > 0
+
+
+def test_core_download_only_when_configured(monkeypatch, tmp_path):
+    from src.tools import baixar_nucleo as B
+
+    monkeypatch.delenv("TIL_NUCLEO_URL", raising=False)
+    assert B.ensure_database() is None                                            # PC do usuário: nada acontece

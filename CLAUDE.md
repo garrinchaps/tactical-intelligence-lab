@@ -549,6 +549,43 @@ Rodada 21 (19/11/2026, 475 testes verdes):
   cookie assinado 30 dias, Google via `st.login` quando `.streamlit/secrets.toml` tem [auth] + Authlib —
   `python -m src.tools.configurar_login`); Bastidores › 👥 Contas (só dono: PC ou e-mail `TIL_DONO_EMAIL`); "Sair da conta".
 
+Rodada 22 (20/11/2026, 499 testes verdes):
+- ✅ Correções: Comparar mostrava "4 jogos" quando eram 40 (`components.fmt_num` cortava zeros de inteiros); recorte
+  "Temporada mais recente" = todos os jogos desde o início da temporada (antes últimos 40); rótulos `rec_p90/disp_p90`
+  com nome de futebol; tela de carregamento sem nomes de times/jogos (passos agrupados).
+- ✅ Jogos de ontem: `FotmobProvider.sync_dates` (1 pedido por dia, `/api/data/matches?date=`) a cada 20 min no processo de
+  fundo (`autosync._results_loop`) + botão "🔄 Atualizar resultados agora" nos Bastidores (só dono); ESPN ao vivo olha
+  também ontem; modo congelado renova o catálogo a cada 3 h (`FROZEN_SETTLE_S`); `apresentar.ps1` agora deixa a
+  atualização LIGADA (só `-Congelado` desliga). Causa provável no PC: o script de link desligava AUTO_SYNC.
+- ✅ Janela de cmd: tarefa agendada antiga (`cmd /c`, a cada 3 h). `scripts/agendar_atualizacao.ps1` recria com
+  `pythonw` (sem janela) + `src/tools/sync_silencioso.py` (pula com o app aberto) e `-Remover` apaga; `src/tools/proc.py`
+  roda git/tasklist sem janela; `apresentacao` avisa se a tarefa antiga existe.
+- ✅ Scout: mesmos filtros (idade, qualidade, valor, nacionalidade) no Top 5 e nos Três melhores (`_ai_filter_form`);
+  "bom senso de patamar" (`engine.star_gap`: maior valor da carreira × jogador mais valioso do comprador, qualidade × melhor
+  do elenco) — estrela fora do patamar vira "Fora da realidade do clube" e some da lista (interruptor mostra).
+- ✅ Visão conjunta como padrão: todos os níveis de jogo na busca (`DEFAULT_LEVELS`), Rankings em todas as competições
+  com "🌍 Geral entre ligas", Comparar na temporada, Escalação com 20 jogos.
+- ✅ Velocidade (medida numa base SIMULADA de 301 mil jogos): catálogo único em memória por processo
+  (`DataHubDB.catalog_memo/catalog_view`, incremental por `last_synced`, cópia em `data/processed/catalogo_*.parquet`);
+  busca 4,5–9 s → 0,1–0,3 s; elenco da Escalação 15 s → ~4 s (`gender.women_only_players` e `clubs._name_countries`).
+- ✅ Scout: dribles e desarmes da FotMob NUNCA entravam (chaves `dribbles_succeeded`, `matchstats.headers.tackles`);
+  `engine.derived_rates` calcula % de passe/duelo/aéreo/drible/cruzamento/bola longa/chute pelas somas.
+- ✅ Overall: `REFERENCE_TARGETS` (~130 notas-alvo de consenso, editáveis) + correção ridge dos vieses (idade, liga,
+  minutos, posição) validada fora da amostra, distribuição mantida; tabela "nossa nota × referência" no Scout.
+- ✅ Potencial (`src/scout/potential.py`) ao lado do overall: idade × talento (produção por posição, nota, minutos ×
+  nível, valor para a idade, toques, seleção de base com percentil na competição, físico), com porquê e confiança.
+  Fotografia do Scout v10.
+- ✅ Seleções de base pelo id da FotMob: clube atual pelo elenco FotMob/último jogo por clube; homônimo resolvido pelo
+  clube; quem só tem base entra com qualidade ESTIMADA (`youth_only_players`); elencos Brasil/América do Sul 1×/semana.
+- ✅ Identidade tática (`src/analytics/tactical_identity.py`, `src/ui/identity_view.py`, `docs/IDENTIDADE_TATICA.md`):
+  desenho por fase, saída com 3, PPDA real/aproximado, altura do bloco, transições, corredores, consistência, recortes,
+  treinadores, contratação por função, plano contra o rival; aba no time, no pré-jogo, no Scout e no Assistente.
+- ✅ Interface: `kpi_cards` (ícone + barra) e `versus_hero` (Comparar); faixa nos indicadores.
+- ✅ Publicação 24 h: pesquisa no `PLANO_PUBLICACAO.md` §6.7 (app no Streamlit Cloud + núcleo privado no Hugging Face +
+  lances das fontes públicas + Google login; pagamento único = mini PC); `python -m src.tools.publicar_nucleo` gera
+  `data/publicacao/nucleo.db`; `src/tools/baixar_nucleo.py` baixa no servidor quando `TIL_NUCLEO_URL` existe.
+- Não verificável daqui: notas de jogadores reais na base do PC (ajustar `REFERENCE_TARGETS` se algum nome ficar longe).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
