@@ -559,3 +559,33 @@ def form_html(results) -> str:
 def steps_html(items) -> str:
     return "".join(f'<div class="til-step"><div class="n">{i}</div><div><div class="t">{_esc(t)}</div>'
                    f'<div class="b">{b}</div></div></div>' for i, (t, b) in enumerate(items, 1))
+
+
+
+def kpi_cards(items: List[dict], cols: int = 4) -> None:
+    """Rodada 22: cartões de indicador com ícone, valor, linha de apoio e barra opcional (0–100), no estilo de painel.
+    items: [{"icone": "⚽", "rotulo": "Gols", "valor": "39", "sub": "1,1 por jogo", "barra": 62}]"""
+    if not items:
+        return
+    columns = st.columns(min(cols, len(items)))
+    for i, it in enumerate(items):
+        bar = it.get("barra")
+        bar_html = (f'<div class="bar"><div style="width:{max(0, min(100, float(bar))):.0f}%"></div></div>'
+                    if bar is not None else "")
+        columns[i % len(columns)].markdown(
+            f'<div class="til-kpi"><div class="ic">{_esc(str(it.get("icone", "•")))}</div><div style="flex:1;min-width:0">'
+            f'<div class="lb">{_esc(t(str(it.get("rotulo", ""))))}</div><div class="vl">{_esc(str(it.get("valor", "—")))}</div>'
+            f'<div class="sb">{_esc(str(it.get("sub", "")))}</div>{bar_html}</div></div>', unsafe_allow_html=True)
+
+
+def versus_hero(a: dict, b: dict, mid: str = "VS") -> None:
+    """Cabeçalho lado a lado (jogador × jogador ou time × time) com iniciais, clube, idade e selos (overall, potencial)."""
+    def side(x: dict, color: str, right: bool) -> str:
+        nm = str(x.get("nome") or "—")
+        ini = "".join(w[0] for w in nm.split()[:2]).upper() or "?"
+        badges = "".join(f'<span class="badge">{_esc(str(k))} {_esc(str(v))}</span>' for k, v in (x.get("selos") or {}).items()
+                         if v not in (None, "", "—"))
+        return (f'<div class="side{" r" if right else ""}"><div class="av" style="background:{color}">{_esc(ini)}</div>'
+                f'<div><div class="nm">{_esc(nm)}</div><div class="meta">{_esc(str(x.get("meta") or ""))}</div>{badges}</div></div>')
+    st.markdown(f'<div class="til-vs">{side(a, "#22D3EE", False)}<div class="mid">{_esc(mid)}</div>{side(b, "#EF4444", True)}</div>',
+                unsafe_allow_html=True)

@@ -301,12 +301,23 @@ def render(_ctx=None) -> None:
     if scout_a.button("🎯 Planejar elenco", key=f"team_scout_{name}", type="primary", use_container_width=True):
         nav.open_view("scout", club=name)
     scout_b.caption("Diagnóstico de necessidades, alvos realistas e simulação de transferências.")
-    k = st.columns(5)
-    k[0].metric("Jogos (todos)", r.get("jogos", 0))
-    k[1].metric("V / E / D", f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}")
-    k[2].metric("Gols pró / contra", f"{r.get('gp', 0)} / {r.get('gc', 0)}")
-    k[3].metric("Aproveitamento", f"{r.get('aprov', 0)}%")
-    k[4].metric("Com todos os lances (✅)", int((allm["data_level"] == "EVENTS").sum()) if not allm.empty else 0)
+    from src.ui.components import kpi_cards           # rodada 22: indicadores com ícone e barra (estilo painel)
+
+    jg = int(r.get("jogos", 0) or 0)
+    ev_n = int((allm["data_level"] == "EVENTS").sum()) if not allm.empty else 0
+    rich = int(allm["data_level"].isin(["EVENTS", "BOXSCORE"]).sum()) if not allm.empty else 0
+    kpi_cards([
+        {"icone": "🗓️", "rotulo": "Jogos (todos)", "valor": jg, "sub": f"{rich} com estatísticas ou lances",
+         "barra": 100 * rich / jg if jg else None},
+        {"icone": "🏁", "rotulo": "V / E / D", "valor": f"{r.get('V', 0)} / {r.get('E', 0)} / {r.get('D', 0)}",
+         "sub": f"{100 * (r.get('V', 0) or 0) / jg:.0f}% de vitórias" if jg else "", "barra": 100 * (r.get('V', 0) or 0) / jg if jg else None},
+        {"icone": "⚽", "rotulo": "Gols pró / contra", "valor": f"{r.get('gp', 0)} / {r.get('gc', 0)}",
+         "sub": f"{(r.get('gp', 0) or 0) / jg:.2f} × {(r.get('gc', 0) or 0) / jg:.2f} por jogo" if jg else ""},
+        {"icone": "📈", "rotulo": "Aproveitamento", "valor": f"{r.get('aprov', 0)}%", "sub": "pontos ganhos ÷ disputados",
+         "barra": float(r.get("aprov", 0) or 0)},
+        {"icone": "🎯", "rotulo": "Com todos os lances", "valor": ev_n, "sub": "jogos com coordenadas (✅)",
+         "barra": 100 * ev_n / jg if jg else None},
+    ], cols=5)
 
     nxt = upcoming(names)
     if not nxt.empty:

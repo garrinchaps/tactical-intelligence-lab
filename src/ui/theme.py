@@ -90,7 +90,32 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .fm-card ul {{ margin: 0; padding-left: 1.1rem; }} .fm-card li {{ margin: 3px 0; color: {P['text']}; }}
 [data-testid="stMetricValue"] {{ font-family: 'Space Grotesk', sans-serif; }}
 [data-testid="stMetric"] {{ background: linear-gradient(135deg, rgba(18,23,32,0.95), rgba(13,17,23,0.98)); border: 1px solid {P['border']};
-  border-radius: 16px; padding: 12px 14px; }}
+  border-radius: 16px; padding: 12px 14px; position: relative; overflow: hidden; }}
+/* rodada 22: faixa de destaque no topo dos indicadores (estilo painel) */
+[data-testid="stMetric"]::before {{ content: ""; position: absolute; left: 0; top: 0; right: 0; height: 3px; background: var(--til-grad); opacity: .85; }}
+[data-testid="stMetricLabel"] {{ color: #94A3B8 !important; text-transform: uppercase; letter-spacing: .04em; font-size: .72rem !important; }}
+.til-kpi {{ background: linear-gradient(135deg, rgba(18,23,32,0.96), rgba(13,17,23,0.99)); border: 1px solid {P['border']};
+  border-radius: 16px; padding: 12px 14px; display: flex; gap: 12px; align-items: center; min-height: 84px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.35); margin-bottom: 10px; text-align: left; }}
+.til-kpi .ic {{ width: 42px; height: 42px; border-radius: 12px; display: flex; align-items: center; justify-content: center;
+  font-size: 1.3rem; background: rgba(34,211,238,.12); border: 1px solid rgba(34,211,238,.35); flex: none; }}
+.til-kpi .lb {{ color: #94A3B8; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; }}
+.til-kpi .vl {{ font-family: 'Space Grotesk', sans-serif; font-size: 1.45rem; font-weight: 800; color: #E2E8F0; line-height: 1.15; }}
+.til-kpi .sb {{ color: #94A3B8; font-size: .75rem; }}
+.til-kpi .bar {{ height: 5px; border-radius: 4px; background: #1E2A44; margin-top: 6px; overflow: hidden; }}
+.til-kpi .bar > div {{ height: 100%; border-radius: 4px; background: var(--til-grad); }}
+.til-vs {{ display: grid; grid-template-columns: 1fr 70px 1fr; gap: 10px; align-items: center; background: linear-gradient(90deg,
+  rgba(34,211,238,.10), rgba(9,13,22,.95) 40%, rgba(9,13,22,.95) 60%, rgba(239,68,68,.10)); border: 1px solid {P['border']};
+  border-radius: 18px; padding: 14px 18px; margin: 6px 0 14px 0; }}
+.til-vs .side {{ display: flex; gap: 12px; align-items: center; }} .til-vs .side.r {{ flex-direction: row-reverse; text-align: right; }}
+.til-vs .av {{ width: 58px; height: 58px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.2rem; color: #090D16; flex: none; }}
+.til-vs .nm {{ font-family: 'Space Grotesk', sans-serif; font-weight: 800; font-size: 1.15rem; color: #E2E8F0; }}
+.til-vs .meta {{ color: #94A3B8; font-size: .8rem; }}
+.til-vs .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; margin: 4px 4px 0 0;
+  background: #0B1120; border: 1px solid {P['border']}; color: #E2E8F0; }}
+.til-vs .mid {{ text-align: center; font-family: 'Space Grotesk', sans-serif; font-weight: 800; color: #94A3B8; font-size: 1.3rem; }}
+@media (max-width: 640px) {{ .til-vs {{ grid-template-columns: 1fr; }} .til-vs .side.r {{ flex-direction: row; text-align: left; }} }}
 .stButton button[kind="primary"], [data-testid="stBaseButton-primary"] {{ background: var(--til-grad); border: none; color: white; }}
 .stTextInput input, .stNumberInput input, .stTextArea textarea, [data-baseweb="select"] > div {{
   background: #0B1120 !important; border-radius: 12px !important; border-color: {P['border']} !important; color: {P['text']} !important; }}

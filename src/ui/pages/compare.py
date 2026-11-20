@@ -587,6 +587,12 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
         st.caption(f"📊 Sem números da FotMob para: {', '.join(missing)} (a base ainda está sendo abastecida).")
         return
     n1, n2 = pa["nome"], pb["nome"]
+    from src.ui.components import versus_hero          # rodada 22: cabeçalho lado a lado
+
+    def _sel(X):
+        return {"Jogos": X.get("jogos"), "Min": X.get("minutos"), "Nota FotMob": X.get("nota_fotmob")}
+    versus_hero({"nome": n1, "meta": f"{A.get('time') or ''} · último jogo {str(A.get('ultimo') or '')[:10]}", "selos": _sel(A)},
+                {"nome": n2, "meta": f"{B.get('time') or ''} · último jogo {str(B.get('ultimo') or '')[:10]}", "selos": _sel(B)})
     st.markdown("#### 📊 Pelos números por jogador da FotMob (muito mais jogos)")
     single = int(n_games) == 1 or (A["jogos"] == 1 and B["jogos"] == 1)
     unit = "no jogo (total)" if single else "por 90 minutos"
