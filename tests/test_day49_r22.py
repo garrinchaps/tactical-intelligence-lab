@@ -147,3 +147,58 @@ def test_joint_view_defaults():
     from src.ui import context as C
 
     assert C.DEFAULT_LEVELS == ("EVENTS", "BOXSCORE", "RESULT")
+
+
+def _mk_matches(db, rows):
+    db.upsert_matches([{"match_id": mid, "competition_name": comp, "season_name": "2026", "match_date": d,
+                        "home_team_name": h, "away_team_name": a, "home_score": 1, "away_score": 0,
+                        "data_source": "espn", "data_level": lv} for mid, comp, d, h, a, lv in rows])
+
+
+def test_women_only_players_fast_path(tmp_path):
+    from src.data_hub import gender as G
+    from src.data_hub.db import DataHubDB
+    from src.data_lake.ids import player_core
+
+    db = DataHubDB(tmp_path / "w.db")
+    _mk_matches(db, [(500000001, "Brasileirão Feminino", "2026-05-01", "Cruzeiro", "Corinthians", "BOXSCORE"),
+                     (500000002, "Série A", "2026-05-02", "Cruzeiro", "Bahia", "BOXSCORE")])
+    with db.connect() as c:
+        c.executemany("INSERT INTO match_player_stats (match_id, team_name, player_name) VALUES (?,?,?)",
+                      [(500000001, "Cruzeiro", "Ana Souza"), (500000001, "Cruzeiro", "Gabi Lima"),
+                       (500000002, "Cruzeiro", "Gabi Lima"), (500000002, "Cruzeiro", "João Silva")])
+    G._WOMEN_PLAYERS.clear()
+    assert G.women_only_players(db) == {player_core("Ana Souza")}      # Gabi aparece nos dois: homônimo fica
+
+
+def test_catalog_memo_incremental_and_views(tmp_path):
+    from src.data_hub.db import DataHubDB
+
+    db = DataHubDB(tmp_path / "c.db")
+    _mk_matches(db, [(500000010, "Série A", "2026-05-01", "Bahia", "Vitória", "RESULT"),
+                     (500000011, "Série A", "2026-05-08", "Bahia", "Sport", "BOXSCORE")])
+    v1 = db.stable_version(force=True)
+    df = db.catalog_memo(v1)
+    mine = lambda d: [m for m in d["match_id"] if m >= 500000000]
+    assert mine(df) == [500000011, 500000010] and "genero" in df
+    view = db.catalog_view(v1, "rich", lambda d: d[d["data_level"] != "RESULT"])
+    view["x"] = 1                                                        # quem recebe pode mexer sem estragar o original
+    assert "x" not in db.catalog_view(v1, "rich", lambda d: d[d["data_level"] != "RESULT"])
+    _mk_matches(db, [(500000012, "Série A", "2026-05-15", "Bahia", "Ceará", "RESULT")])
+    with db.connect() as c:                                              # promoção de nível sem last_synced
+        c.execute("UPDATE matches SET data_level = 'EVENTS' WHERE match_id = 500000010")
+    v2 = db.stable_version(force=True)
+    assert v2 != v1
+    df2 = db.catalog_memo(v2)
+    assert mine(df2) == [500000012, 500000011, 500000010]
+    assert df2.loc[df2["match_id"] == 500000010, "data_level"].iloc[0] == "EVENTS"
+
+
+def test_cached_catalog_where_parser():
+    from src.ui.context import _parse_where
+
+    assert _parse_where("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')", ()) == [
+        ("data_level", "in", ("EVENTS",)), ("data_source", "in", ("statsbomb", "wyscout"))]
+    assert _parse_where("competition_name = ?", ("Série A",)) == [("competition_name", "in", ("Série A",))]
+    assert _parse_where("match_date > ?", ("2020",)) is None                  # vai ao SQLite como antes
+    assert _parse_where("", ()) == []

@@ -472,6 +472,129 @@ class DataHubDB:
         df["genero"] = gender_series(df)
         return df
 
+    # ------------------------------------------------------------------ rodada 22: catálogo único em memória
+    _CAT: Dict[str, Dict[str, Any]] = {}
+    CAT_FULL_RELOAD_S = 6 * 3600
+
+    def catalog_memo(self, version: str) -> pd.DataFrame:
+        """
+        O catálogo inteiro (todas as partidas, com `genero`) UMA vez por processo. Antes cada filtro diferente relia as
+        ~300–440 mil partidas do SQLite (2–3 s) e o cache do Streamlit copiava o DataFrame inteiro (100+ MB) a cada uso.
+        Quando a versão muda (jogos novos), lê só as linhas gravadas depois da última leitura (`last_synced`) e confere o
+        nível de dado de todas (2 colunas) — releitura completa no máximo a cada 6 h ou se algo não fechar.
+        NÃO altere o DataFrame devolvido (use `catalog_view`, que devolve uma cópia rasa).
+        """
+        import threading
+        import time as _t
+
+        key = str(self.db_path)
+        lock = DataHubDB._CAT.setdefault("__lock__", {"l": threading.Lock()})["l"]
+        with lock:
+            m = DataHubDB._CAT.get(key)
+            if m is not None and m["version"] == version:
+                return m["df"]
+            now = _t.time()
+            df = None
+            if m is None:                                     # app abrindo: cópia em disco (parquet) + o que mudou
+                m = self._catalog_from_disk()
+            if m is not None and now - m["full_at"] < self.CAT_FULL_RELOAD_S:
+                try:
+                    df = self._catalog_incremental(m["df"], m["synced"])
+                except Exception:
+                    df = None
+            if df is None:
+                df = self.catalog()
+                full_at = now
+            else:
+                full_at = m["full_at"]
+            synced = str(df["last_synced"].dropna().max() or "") if "last_synced" in df and len(df) else ""
+            DataHubDB._CAT[key] = {"version": version, "df": df, "synced": synced, "full_at": full_at, "views": {}}
+            if full_at == now:
+                self._catalog_to_disk(df, synced, full_at)
+            return df
+
+    def _catalog_disk_path(self) -> Path:
+        import hashlib
+
+        tag = hashlib.sha1(str(Path(self.db_path).resolve()).encode()).hexdigest()[:10]
+        return Path("data/processed") / f"catalogo_{tag}.parquet"
+
+    def _catalog_from_disk(self) -> Optional[Dict[str, Any]]:
+        """Rodada 22: ler 440 mil partidas do SQLite custa ~5–8 s no PC; do parquet, < 1 s. Depois só o que mudou."""
+        import time as _t
+
+        if os.getenv("TIL_CATALOGO_DISCO", "1").strip() in ("0", "false"):
+            return None
+        p = self._catalog_disk_path()
+        try:
+            age = _t.time() - p.stat().st_mtime
+            if age > self.CAT_FULL_RELOAD_S:
+                return None
+            df = pd.read_parquet(p)
+            synced = str(df["last_synced"].dropna().max() or "") if len(df) else ""
+            return {"version": None, "df": df, "synced": synced, "full_at": _t.time() - age, "views": {}}
+        except Exception:
+            return None
+
+    def _catalog_to_disk(self, df: pd.DataFrame, synced: str, full_at: float) -> None:
+        if os.getenv("TIL_CATALOGO_DISCO", "1").strip() in ("0", "false"):
+            return
+        import threading
+
+        def _save():
+            try:
+                p = self._catalog_disk_path()
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp = p.with_suffix(".tmp")
+                df.to_parquet(tmp, index=False)
+                os.replace(tmp, p)
+            except Exception:
+                pass
+        threading.Thread(target=_save, name="til-catalogo-disco", daemon=True).start()
+
+    def _catalog_incremental(self, old: pd.DataFrame, synced: str) -> Optional[pd.DataFrame]:
+        from src.data_hub.gender import gender_series
+
+        with self.connect() as conn:
+            new = pd.read_sql_query("SELECT * FROM matches WHERE last_synced >= ?", conn, params=(synced or "",))
+            lv = pd.read_sql_query("SELECT match_id, data_level FROM matches", conn)
+        df = old
+        need_sort = False
+        if len(new):
+            new["genero"] = gender_series(new)
+            new = new.sort_values(["match_date", "match_id"], ascending=False)
+            rest = df[~df["match_id"].isin(new["match_id"])]
+            # jogos novos costumam ser os mais recentes: basta empilhar por cima (ordenar 300 mil linhas custa ~0,5 s)
+            need_sort = bool(len(rest)) and str(new["match_date"].iloc[-1]) < str(rest["match_date"].iloc[0])
+            df = pd.concat([new, rest], ignore_index=True)
+        if len(df) != len(lv):
+            df = df[df["match_id"].isin(lv["match_id"])]
+            if len(df) != len(lv):
+                return None                                   # algo não fechou: releitura completa
+        want = lv.set_index("match_id")["data_level"]
+        now_lv = df["match_id"].map(want)
+        diff = now_lv.notna() & (now_lv.values != df["data_level"].values)
+        if diff.any():                                        # nível promovido por outra gravação (sem last_synced)
+            df = df.copy()
+            df.loc[diff, "data_level"] = now_lv[diff]
+        if need_sort:
+            df = df.sort_values(["match_date", "match_id"], ascending=False, ignore_index=True)
+        return df.reset_index(drop=True)
+
+    def catalog_view(self, version: str, key: Any, build) -> pd.DataFrame:
+        """Recorte memorizado do catálogo (por versão + `key`); `build(df_completo)` devolve o recorte. Cópia rasa:
+        com o pandas 3 (copy-on-write) quem recebe pode criar/alterar colunas sem estragar o original."""
+        base = self.catalog_memo(version)
+        m = DataHubDB._CAT.get(str(self.db_path)) or {}
+        views = m.setdefault("views", {})
+        hit = views.get(key)
+        if hit is None:
+            hit = build(base)
+            if len(views) >= 24:
+                views.pop(next(iter(views)))
+            views[key] = hit
+        return hit.copy(deep=False)
+
     def catalog_version(self) -> str:
         """
         Chave de cache da interface: muda SÓ quando o catálogo muda de verdade (partidas novas ou nível de dado

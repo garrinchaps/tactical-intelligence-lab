@@ -56,12 +56,15 @@ def _name_countries(version: str) -> dict:
     if c.empty:
         return {}
     comp_c = {k: _comp_country(k) for k in c["competition_name"].dropna().unique()}
+    # rodada 22: pares (time, competição) distintos primeiro — antes um laço Python por linha (600 mil, ~5 s)
+    pairs = pd.concat([c[["home_team_name", "competition_name"]].set_axis(["n", "comp"], axis=1),
+                       c[["away_team_name", "competition_name"]].set_axis(["n", "comp"], axis=1)]).dropna().drop_duplicates()
+    pairs["cc"] = pairs["comp"].map(comp_c)
+    pairs = pairs.dropna(subset=["cc"])
     out: dict = {}
-    for col in ("home_team_name", "away_team_name"):
-        for n, comp in zip(c[col], c["competition_name"]):
-            cc = comp_c.get(comp)
-            if cc and isinstance(n, str):
-                out.setdefault(n, set()).add(cc)
+    for n, cc in zip(pairs["n"].tolist(), pairs["cc"].tolist()):
+        if isinstance(n, str):
+            out.setdefault(n, set()).add(cc)
     return out
 
 

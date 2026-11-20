@@ -34,12 +34,25 @@ def gender_series(df):
 
     if df is None or df.empty:
         return pd.Series(dtype=str)
-    ex = df["extra_json"].fillna("") if "extra_json" in df.columns else pd.Series("", index=df.index)
-    female_src = ex.str.contains(r'"gender":\s*"(?:female|feminino)"', regex=True)
-    male_src = ex.str.contains(r'"gender":\s*"(?:male|masculino)"', regex=True)
-    text = (df.get("competition_name", "").fillna("").astype(str) + " " + df.get("home_team_name", "").fillna("").astype(str)
-            + " " + df.get("away_team_name", "").fillna("").astype(str))
-    by_name = text.str.contains(FEMALE_RX.pattern, flags=re.I, regex=True)
+    ex = df["extra_json"].fillna("").astype(str) if "extra_json" in df.columns else pd.Series("", index=df.index)
+    # rodada 22: a expressão regular só roda nas linhas que falam de "gender" e nos NOMES distintos (milhares), não em
+    # cada uma das ~300 mil linhas (era 1,6 s por leitura do catálogo)
+    female_src = pd.Series(False, index=df.index)
+    male_src = pd.Series(False, index=df.index)
+    has_g = ex.str.contains('"gender"', regex=False)
+    if has_g.any():
+        female_src[has_g] = ex[has_g].str.contains(r'"gender":\s*"(?:female|feminino)"', regex=True)
+        male_src[has_g] = ex[has_g].str.contains(r'"gender":\s*"(?:male|masculino)"', regex=True)
+    rx = re.compile(FEMALE_RX.pattern, re.I)
+    by_name = pd.Series(False, index=df.index)
+    for col in ("competition_name", "home_team_name", "away_team_name"):
+        if col not in df.columns:
+            continue
+        v = df[col].fillna("").astype(str)
+        uniq = pd.unique(v)
+        hit = {u for u in uniq if rx.search(" " + u + " ")}
+        if hit:
+            by_name |= v.isin(hit)
     out = pd.Series(MALE, index=df.index)
     out[(female_src) | (~male_src & by_name)] = FEMALE
     return out
@@ -97,21 +110,40 @@ def women_only_players(db, ttl_s: float = 3600.0) -> set:
         return hit[0]
     from src.data_lake.ids import player_core
 
-    col = "LOWER(COALESCE(m.competition_name, ''))"
-    flag = "(" + " OR ".join(f"{col} LIKE '{p}'" for p in WOMEN_LIKE) + ")"
     out: set = set()
     try:
+        # rodada 22: antes um GROUP BY juntando TODAS as linhas de jogadores com as partidas (3 s por tabela na base
+        # grande). Agora: (1) os poucos jogos femininos; (2) quem jogou neles; (3) desses nomes, quem também aparece em
+        # outro jogo (pelo índice de nome) — mesmo resultado, em frações de segundo.
         with db.connect() as conn:
-            rows = []
+            conn.execute("CREATE TEMP TABLE IF NOT EXISTS _w_ids (match_id INTEGER PRIMARY KEY)")
+            conn.execute("DELETE FROM _w_ids")
+            # nomes de competição distintos (centenas) em vez de LIKE em cada uma das ~440 mil partidas
+            comps = [c for (c,) in conn.execute("SELECT DISTINCT competition_name FROM matches")
+                     if c and _WOMEN_RE.search(str(c).lower())]
+            if comps:
+                conn.executemany("INSERT OR IGNORE INTO _w_ids SELECT match_id FROM matches WHERE competition_name = ?",
+                                 [(c,) for c in comps])
+            women_names: set = set()
+            men_names: set = set()
             for table in ("match_player_stats", "match_lineups"):
                 try:
-                    rows += conn.execute(f"SELECT t.player_name, MAX(CASE WHEN {flag} THEN 1 ELSE 0 END), "
-                                         f"MIN(CASE WHEN {flag} THEN 1 ELSE 0 END) FROM {table} t JOIN matches m "
-                                         f"ON m.match_id = t.match_id GROUP BY t.player_name").fetchall()
+                    names = {r[0] for r in conn.execute(
+                        f"SELECT DISTINCT player_name FROM {table} WHERE match_id IN (SELECT match_id FROM _w_ids)")
+                        if r[0]}
                 except Exception:
                     continue
-        men = {player_core(n) for n, mx, mn in rows if n and not (mx == 1 and mn == 1)}
-        women = {player_core(n) for n, mx, mn in rows if n and mx == 1 and mn == 1}
+                women_names |= names
+                if not names:
+                    continue
+                conn.execute("CREATE TEMP TABLE IF NOT EXISTS _w_names (n TEXT PRIMARY KEY)")
+                conn.execute("DELETE FROM _w_names")
+                conn.executemany("INSERT OR IGNORE INTO _w_names VALUES (?)", [(n,) for n in names])
+                men_names |= {r[0] for r in conn.execute(
+                    f"SELECT DISTINCT t.player_name FROM {table} t JOIN _w_names w ON w.n = t.player_name "
+                    f"WHERE t.match_id NOT IN (SELECT match_id FROM _w_ids)")}
+        men = {player_core(n) for n in men_names}
+        women = {player_core(n) for n in women_names - men_names}
         out = {c for c in women - men if c}
     except Exception:
         out = set()

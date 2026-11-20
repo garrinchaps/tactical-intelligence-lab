@@ -111,10 +111,71 @@ def cached_catalog(where: str = "", params: tuple = (), include_score_only: Opti
         cond = "data_level IN (" + ",".join(f"'{l}'" for l in lv) + ",'SIMULATED','UPLOAD')"
     else:                                               # tela que precisa de tudo (campanha, retrospecto) ou só analisáveis
         cond = None if include_score_only else ANALYZABLE_SQL
+    version = svc.db.stable_version()
+    # rodada 22: catálogo único em memória (sem reler o banco nem copiar 100 MB a cada uso); filtros em pandas
+    levels = None
+    if include_score_only is None:
+        levels = tuple(lv) + ("SIMULATED", "UPLOAD")
+    elif not include_score_only:
+        levels = ("EVENTS", "BOXSCORE", "SIMULATED", "UPLOAD")
+    clauses = _parse_where(where, tuple(params))
+    if clauses is not None:
+        key = ("cc", levels, real, tuple(clauses))
+
+        def build(df: pd.DataFrame) -> pd.DataFrame:
+            mask = pd.Series(True, index=df.index)
+            if levels is not None:
+                mask &= df["data_level"].isin(levels)
+            if real:
+                mask &= ~df["data_level"].isin(("SIMULATED", "UPLOAD"))
+            for col, op, vals in clauses:
+                if col not in df:
+                    continue
+                if op == "in":
+                    mask &= df[col].isin(vals)
+                else:
+                    mask &= ~df[col].isin(vals)
+            return df[mask]
+        try:
+            return svc.db.catalog_view(version, key, build)
+        except Exception:
+            pass
     for c, on in ((cond, bool(cond)), (REAL_SQL, real)):
         if on:
             where = f"({where}) AND {c}" if where else c
-    return _catalog_cached(svc.db.stable_version(), where, tuple(params))
+    return _catalog_cached(version, where, tuple(params))
+
+
+_CLAUSE_EQ = __import__("re").compile(r"^\s*(\w+)\s*=\s*(?:'([^']*)'|(\?))\s*$")
+_CLAUSE_IN = __import__("re").compile(r"^\s*(\w+)\s+(NOT\s+IN|IN)\s*\(([^)]*)\)\s*$", __import__("re").I)
+
+
+def _parse_where(where: str, params: tuple):
+    """Filtros simples do catálogo (col = 'x', col = ?, col IN ('a','b'), col NOT IN (...)) → lista para pandas.
+    Qualquer outra coisa devolve None e a consulta vai ao SQLite como antes."""
+    if not where:
+        return []
+    out, pi = [], 0
+    for part in where.split(" AND "):
+        m = _CLAUSE_EQ.match(part)
+        if m:
+            if m.group(3):
+                if pi >= len(params):
+                    return None
+                out.append((m.group(1), "in", (params[pi],)))
+                pi += 1
+            else:
+                out.append((m.group(1), "in", (m.group(2),)))
+            continue
+        m = _CLAUSE_IN.match(part)
+        if m:
+            vals = tuple(v.strip().strip("'") for v in m.group(3).split(",") if v.strip())
+            if any("?" in v for v in vals):
+                return None
+            out.append((m.group(1), "notin" if m.group(2).upper().startswith("NOT") else "in", vals))
+            continue
+        return None
+    return out if pi == len(params) else None
 
 
 def filter_by_team(cat: pd.DataFrame, team: str, threshold: float = 0.86) -> pd.DataFrame:

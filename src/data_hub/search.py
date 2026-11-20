@@ -204,7 +204,41 @@ class UniversalMatchFinder:
     only_real: bool = True           # esconde simulações e uploads (alternável ao lado da busca)
     levels: Optional[Tuple[str, ...]] = None   # níveis escolhidos no topo (EVENTS/BOXSCORE/RESULT); None = regra acima
 
+    def _catalog_pandas(self, q: ParsedQuery) -> Optional[pd.DataFrame]:
+        """Rodada 22: o mesmo catálogo em memória das telas (db.catalog_memo), filtrado em pandas — antes cada busca
+        relia as ~300 mil partidas do SQLite com SELECT * (2–5 s na base grande)."""
+        try:
+            ver = self.db.stable_version()
+        except Exception:
+            return None
+        levels = tuple(self.levels) if self.levels else None
+        key = ("busca", levels, self.only_analyzable, self.only_real,
+               q.date_from.isoformat() if q.date_from else None, q.date_to.isoformat() if q.date_to else None, q.year)
+
+        def build(df: pd.DataFrame) -> pd.DataFrame:
+            mask = pd.Series(True, index=df.index)
+            if levels:
+                mask &= df["data_level"].isin(tuple(levels) + ("SIMULATED", "UPLOAD"))
+            elif self.only_analyzable:
+                mask &= df["data_level"].isin(("EVENTS", "BOXSCORE", "SIMULATED", "UPLOAD"))
+            if self.only_real:
+                mask &= ~df["data_level"].isin(("SIMULATED", "UPLOAD"))
+            d = df["match_date"].astype(str)
+            if q.date_from and q.date_to:
+                mask &= (d >= q.date_from.isoformat()) & (d <= q.date_to.isoformat())
+            elif q.year:
+                y = str(q.year)
+                mask &= (d.str[:4] == y) | df["season_name"].fillna("").astype(str).str.contains(y, regex=False)
+            return df[mask]
+        try:
+            return self.db.catalog_view(ver, key, build)
+        except Exception:
+            return None
+
     def search_local(self, q: ParsedQuery, limit: int = 60) -> pd.DataFrame:
+        cat = self._catalog_pandas(q) if hasattr(self.db, "catalog_view") else None
+        if cat is not None:
+            return self._rank_local(cat, q, limit)
         where, params = [], []
         if self.levels:
             where.append("data_level IN (" + ",".join(f"'{l}'" for l in self.levels if l.isalpha() or "_" in l)
@@ -220,6 +254,9 @@ class UniversalMatchFinder:
             where.append("(substr(match_date,1,4) = ? OR season_name LIKE ?)")
             params += [str(q.year), f"%{q.year}%"]
         cat = self._catalog(" AND ".join(where), tuple(params))
+        return self._rank_local(cat, q, limit)
+
+    def _rank_local(self, cat: pd.DataFrame, q: ParsedQuery, limit: int) -> pd.DataFrame:
         if cat.empty or not q.teams:
             return cat.head(limit) if not q.teams else cat.iloc[0:0]
         # semelhança calculada UMA vez por nome distinto (milhares), e não por linha (centenas de milhares)
