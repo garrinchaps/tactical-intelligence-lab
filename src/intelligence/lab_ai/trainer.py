@@ -297,3 +297,175 @@ def auto_search(epochs: int = 150, use_weak: bool = True, shown_path: Optional[P
                 rows.append({"η": lr, "λ": l2, **cv})
     rows.sort(key=lambda r: (-(r.get("acerto_medio") or 0), r.get("perda_media") or 9))
     return rows
+
+
+# ------------------------------------------------------------------ rodada 25b: rede com camadas ocultas + experimentos
+EXPERIMENTS: Dict[str, Dict[str, Any]] = {
+    "A": {"rotulo": "1 neurônio (regressão logística, a de hoje)", "hidden": []},
+    "B": {"rotulo": "1 camada de 8 neurônios", "hidden": [8]},
+    "C": {"rotulo": "2 camadas (16 → 8)", "hidden": [16, 8]},
+    "D": {"rotulo": "2 camadas (32 → 16)", "hidden": [32, 16]},
+}
+NET_HELP = {
+    "hidden": ("Neurônios por camada oculta",
+               "Quantas 'peças de raciocínio' a IA tem entre os sinais do fato e a decisão. Vazio = 1 neurônio só "
+               "(regressão logística). MAIS neurônios: aprende combinações (ex.: 'número forte' E 'time citado'), mas "
+               "precisa de muito mais exemplos e decora fácil. MENOS: aprende só regras simples, porém estáveis."),
+    "batch": ("Tamanho do lote", "Quantos exemplos a IA olha antes de cada correção dos pesos. GRANDE: correções "
+              "estáveis e lentas. PEQUENO: mais correções por época, mais barulho."),
+    "experiments": ("Experimentos a rodar (na ordem)",
+                    "Cada letra é uma arquitetura testada com os MESMOS dados e a mesma prova (Adam, parada antecipada). "
+                    "A campeã só é trocada se errar menos na prova e não acertar menos o 1º fato."),
+    "attempts": ("Tentativas por clique",
+                 "Quantas vezes cada experimento é repetido com sementes diferentes. Mais tentativas = mais chance de "
+                 "achar uma versão melhor, e mostra se o ganho é real ou sorte."),
+}
+
+
+def recommend_net(n_questions: int, n_rated: int) -> Dict[str, str]:
+    few = n_questions < 80
+    return {
+        "hidden": ("Recomendo vazio (1 neurônio) ou no máximo 8: com menos de 80 perguntas com rótulo, redes maiores "
+                   "decoram." if few else "Com 80+ perguntas, vale testar 8 ou 16 → 8 (experimentos B e C)."),
+        "batch": "Use 16–64 com poucos exemplos; 128–256 quando passar de alguns milhares." if few else "64–256.",
+        "experiments": ("Comece por A e B: mostram se camadas ocultas ajudam com os dados que você tem." if few else
+                        "Rode A, B e C; D só com muitos exemplos."),
+        "attempts": "2–3 tentativas: a prova é pequena e a sorte da divisão pesa." if few else "1–2 tentativas.",
+    }
+
+
+def _champion_p(sel: Selector, X: np.ndarray) -> np.ndarray:
+    return sel.score(X)
+
+
+def evaluate_p(p: np.ndarray, y: np.ndarray, g: np.ndarray, w: Optional[np.ndarray] = None) -> Dict[str, Any]:
+    from src.intelligence.course import confusion
+
+    w = np.ones(len(y)) if w is None else w
+    hits, total = 0, 0
+    for q in np.unique(g):
+        m = g == q
+        if y[m].sum() >= 1 and (1 - y[m]).sum() >= 1:
+            total += 1
+            hits += int(y[m][int(np.argmax(p[m]))] == 1)
+    pp = np.clip(p, 1e-6, 1 - 1e-6)
+    ll = float(np.sum(w * -(y * np.log(pp) + (1 - y) * np.log(1 - pp))) / max(w.sum(), 1e-9))
+    c = confusion(y.astype(int), p, 0.5)
+    return {"acerto_1o_fato": round(hits / total, 4) if total else None, "perguntas_avaliadas": total,
+            "precisao": c["precisao"], "revocacao": c["revocacao"], "f1": c["f1"], "logloss": round(ll, 5)}
+
+
+def train_network(hidden: List[int], learning_rate: float = .01, epochs: int = 100, l2: float = 1e-3, batch: int = 64,
+                  patience: int = 10, val_fraction: float = .25, seed: int = 7, use_weak: bool = True,
+                  feedback_weight: float = 3.0, weak_weight: float = 1.0, label: str = "",
+                  sel: Optional[Selector] = None, shown_path: Optional[Path] = None,
+                  feedback_path: Optional[Path] = None) -> Dict[str, Any]:
+    """Treina uma rede (camadas ocultas = `hidden`; vazio = 1 neurônio) com Adam e parada antecipada, compara com a
+    versão em uso NA MESMA prova (perguntas separadas) e promove só se errar menos sem acertar menos o 1º fato."""
+    from src.machine_learning.neural_net import NeuralNetwork
+
+    sel = sel or Selector()
+    X, y, w, g, src = build_dataset(shown_path, feedback_path, use_weak=use_weak, feedback_weight=feedback_weight,
+                                    weak_weight=weak_weight)
+    ug = np.unique(g)
+    if len(ug) < 8 or len(np.unique(y)) < 2:
+        return {"promoted": False, "reason": f"poucos exemplos com rótulo ({len(ug)} perguntas) para treinar uma rede",
+                "n_perguntas": int(len(ug)), "n_exemplos": int(len(y))}
+    rng = np.random.default_rng(seed)
+    val_g = set(rng.choice(ug, size=max(2, int(round(len(ug) * val_fraction))), replace=False))
+    va = np.isin(g, list(val_g))
+    tr_g = [q for q in ug if q not in val_g]
+    stop_g = set(rng.choice(tr_g, size=max(1, int(round(len(tr_g) * .15))), replace=False))
+    st = np.isin(g, list(stop_g)) & ~va
+    fit = ~va & ~st
+    net = NeuralNetwork([X.shape[1]] + [int(h) for h in hidden] + [1], learning_rate=learning_rate, l2=l2, seed=seed)
+    # exemplos com peso: repete as avaliações 👍/👎 (peso inteiro) — a rede NumPy não tem peso por exemplo
+    rep = np.maximum(1, np.round(w[fit]).astype(int))
+    Xf, yf = np.repeat(X[fit], rep, axis=0), np.repeat(y[fit], rep)
+    net.fit(Xf, yf, epochs=int(epochs), batch_size=int(batch), optimizer="adam", X_val=X[va], y_val=y[va],
+            X_stop=X[st] if st.any() else None, y_stop=y[st] if st.any() else None, patience=int(patience))
+    p_new, p_old = net.predict_proba(X[va]), _champion_p(sel, X[va])
+    ev_new, ev_old = evaluate_p(p_new, y[va], g[va], w[va]), evaluate_p(p_old, y[va], g[va], w[va])
+    a_new, a_old = ev_new.get("acerto_1o_fato"), ev_old.get("acerto_1o_fato")
+    promoted = ev_new["logloss"] < ev_old["logloss"] - 1e-4 and (a_new is None or a_old is None or a_new >= a_old - 1e-9)
+    v = max(x["version"] for x in sel.meta["versions"]) + 1
+    rec = {"version": v, "created": time.strftime("%Y-%m-%d %H:%M"), "weights": sel.weights.tolist(),
+           "mlp": {"layers": net.layer_sizes, "weights": [W.tolist() for W in net.weights],
+                   "biases": [b.tolist() for b in net.biases], "mu": np.asarray(net.mu).tolist(),
+                   "sigma": np.asarray(net.sigma).tolist()},
+           "origin": f"rede {label or ('→'.join(map(str, hidden)) or '1 neurônio')}", "learning_rate": learning_rate,
+           "l2": l2, "epochs": int(epochs), "epochs_run": len(net.history["train_loss"]),
+           "params": {"hidden": list(map(int, hidden)), "batch": int(batch), "patience": int(patience), "seed": int(seed)},
+           "n_perguntas": int(len(ug)), "n_exemplos": int(len(y)), "val_logloss": ev_new["logloss"],
+           "champion_logloss": ev_old["logloss"], "promoted": bool(promoted),
+           "history": {"train_loss": [round(float(x), 5) for x in net.history["train_loss"]],
+                       "val_loss": [round(float(x), 5) for x in net.history["val_loss"]]},
+           "hidden": list(map(int, hidden)), "test_logloss": ev_new["logloss"], "metricas": ev_new, "metricas_campea": ev_old}
+    sel.meta["versions"].append(rec)
+    if promoted:
+        sel.meta["champion"] = v
+    sel._write()
+    return {"version": v, "promoted": bool(promoted), "metricas": ev_new, "metricas_campea": ev_old,
+            "n_perguntas": int(len(ug)), "n_exemplos": int(len(y)), "epochs_run": rec["epochs_run"], "rotulo": label,
+            "reason": ("PROMOVIDA: errou menos que a versão atual na prova" if promoted else
+                       "rejeitada: não errou menos que a versão atual na prova (a atual continua)")}
+
+
+def run_experiments(names: List[str], attempts: int = 1, learning_rate: float = .01, epochs: int = 100,
+                    l2: float = 1e-3, batch: int = 64, custom_hidden: Optional[List[int]] = None,
+                    use_weak: bool = True, progress=None) -> List[Dict[str, Any]]:
+    """Roda os experimentos na ordem (e a arquitetura digitada, se houver), cada um `attempts` vezes."""
+    say = progress or (lambda m: None)
+    plan = []
+    if custom_hidden is not None:
+        plan.append(("Sua rede", custom_hidden))
+    plan += [(f"{k} — {EXPERIMENTS[k]['rotulo']}", EXPERIMENTS[k]["hidden"]) for k in names if k in EXPERIMENTS]
+    out = []
+    for label, hidden in plan:
+        for a in range(max(1, int(attempts))):
+            say(f"{label} · tentativa {a + 1}/{attempts}")
+            r = train_network(hidden, learning_rate, epochs, l2, batch, seed=7 + 13 * a, use_weak=use_weak, label=label)
+            out.append({"experimento": label, "tentativa": a + 1, **{k: r.get(k) for k in ("version", "promoted", "reason")},
+                        "acerto_1o_fato": (r.get("metricas") or {}).get("acerto_1o_fato"),
+                        "perda_validacao": (r.get("metricas") or {}).get("logloss")})
+    return out
+
+
+# treino em segundo plano (a tela não trava): uma thread grava o andamento num arquivo
+STATUS_PATH = Path("data/learning/assistant_train_status.json")
+
+
+def start_background(**kw) -> bool:
+    import json as _j
+    import threading
+
+    try:
+        cur = _j.loads(STATUS_PATH.read_text(encoding="utf-8")) if STATUS_PATH.exists() else {}
+        if cur.get("estado") == "rodando" and time.time() - float(cur.get("t", 0)) < 1800:
+            return False
+    except Exception:
+        pass
+
+    def write(d):
+        STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATUS_PATH.write_text(_j.dumps({**d, "t": time.time()}, ensure_ascii=False, default=str), encoding="utf-8")
+
+    def job():
+        try:
+            write({"estado": "rodando", "passo": "começando"})
+            res = run_experiments(progress=lambda m: write({"estado": "rodando", "passo": m}), **kw)
+            write({"estado": "pronto", "resultado": res})
+        except Exception as exc:                                   # noqa: BLE001
+            write({"estado": "erro", "erro": f"{type(exc).__name__}: {exc}"})
+
+    threading.Thread(target=job, name="til-assistant-train", daemon=True).start()
+    return True
+
+
+def background_status() -> Dict[str, Any]:
+    import json as _j
+
+    try:
+        return _j.loads(STATUS_PATH.read_text(encoding="utf-8")) if STATUS_PATH.exists() else {}
+    except Exception:
+        return {}

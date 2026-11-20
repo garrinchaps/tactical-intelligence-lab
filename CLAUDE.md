@@ -666,7 +666,27 @@ Rodada 25 (20/11/2026, 523 testes verdes) — lista "melhores do mundo" absurda,
 - ✅ Base: FotMob com 9 competições novas (Ásia Sub-20/23, CONCACAF Sub-20, Eliminatórias Euro Sub-21, Intercontinental
   Sub-20, Amistosos Sub-21, Toulon, Olimpíadas, UEFA Youth League); `atualizar_tudo.ps1` baixa calendário + detalhes de
   5 anos (`--ligas base --temporadas 5`). Sul-Americano Sub-17 e torneios africanos de base não existem na FotMob.
-- Não verificável daqui: notas reais no PC depois do snapshot v13.
+- ❌ Resultado na base real (lista do usuário): o motor por atributos colocou jogadores com 0–40 minutos (Luuk de Jong,
+  Ratão, Tissoudali), goleiros bolivianos e a Série B no topo; Mbappé 88, Haaland 84. REVERTIDO na rodada 25b.
+
+Rodada 25b (20/11/2026, 526 testes verdes) — correções depois da reclamação ("estragou o app"):
+- ✅ Nota volta ao modelo anterior (reputação + desempenho + nota FotMob + nível, calibrado) — `rating_engine` fica só como
+  LEITURA (atributos medidos e estilo na visão geral do jogador, sem dizer que é a fórmula da nota). Correções do que
+  inflou a rodada 24: temporada anterior só conta para quem já voltou a jogar (≥ 300 min no ano); teto pela minutagem
+  (`overall.minutes_cap`: até 300 min → 72, cresce até 1.800 min); 0 min no ano continua sem nota. Fotografia v14.
+- ✅ Nome de uma palavra (Saúl, Fred, Gerson, Otávio) só junta cadastro × jogos com clube ou nascimento conferindo (o Saúl de
+  41 anos era outro Saúl).
+- ✅ Comparar: todas as grafias do mesmo nome ("Gerson" × "Gérson", `compare.name_variants`) e o homônimo do CLUBE escolhido;
+  limite de linhas maior (Gerson do Cruzeiro aparecia com 1 jogo).
+- ✅ IA única voltou a ser como era (sem a sub-aba da rede de perigo). O treino da IA do Assistente ganhou os controles no molde
+  da rede de perigo: neurônios por camada oculta (vazio = 1 neurônio), η, épocas, L2, lote, experimentos A–D (1 neurônio, 8,
+  16→8, 32→16), tentativas por clique, treino em segundo plano (thread + `data/learning/assistant_train_status.json`), cada
+  um com (i) e recomendação pelo estado (`trainer.NET_HELP/recommend_net/train_network/run_experiments`); a versão campeã
+  pode ser uma rede (`selector.mlp_from_record`).
+- ✅ Probabilidades do jogo no pré-jogo (`src/analytics/score_probs.py`): placares (mapa como o do Sofascore), vitória/empate/
+  derrota, mais de 2,5 e ambos marcam; mata-mata jogo único (prorrogação 1/3 dos gols + pênaltis 50%), jogo de volta com a
+  ida achada na base e final (= título). Força pelos últimos 20 jogos (70% xG + 30% gols), Poisson + Dixon-Coles, mando ±10%.
+- Não verificável daqui: notas reais no PC depois do snapshot v14.
 
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).

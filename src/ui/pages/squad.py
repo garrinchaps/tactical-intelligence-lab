@@ -9,6 +9,7 @@ from src.data_hub.gender import comp_sql
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
+import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
@@ -551,6 +552,69 @@ def _grouped(rows, field: str) -> str:
     return " · ".join(f"**{k}**: {', '.join(v)}" for k, v in g.items())
 
 
+@st.cache_data(show_spinner=False, max_entries=64, persist="disk")
+def _predict_cached(home, away, home_names, away_names, comp, kickoff, kind, version):
+    from src.analytics import score_probs as SP
+    from src.ui.context import get_service
+
+    return SP.predict(get_service().db, home, away, list(home_names), list(away_names), comp, kickoff, kind)
+
+
+def _probabilities(team, rival, my_names, rv_names, f, version, w) -> None:
+    """Rodada 25b: placares mais prováveis (estilo Sofascore), vitória/empate/derrota e classificação/título."""
+    import plotly.graph_objects as go
+
+    home_is_me = f is None or str(f["home"]) in my_names
+    home, away = (team, rival) if home_is_me else (rival, team)
+    hn, an = (my_names, rv_names) if home_is_me else (rv_names, my_names)
+    comp = str(f["competition"]) if f is not None else ""
+    kick = str(f["kickoff"]) if f is not None else ""
+    kinds = {"auto": "Detectar sozinho", "pontos": "Campeonato (pontos)", "unico": "Mata-mata (jogo único)",
+             "volta": "Mata-mata (jogo de volta)", "final": "Final"}
+    with st.expander("🎲 Probabilidades do jogo — placares, resultado e classificação", expanded=True):
+        kind = st.selectbox("Tipo de jogo", list(kinds), format_func=kinds.get, key=f"{w}_kind_{team}",
+                            help="Em mata-mata o empate vai para prorrogação/pênaltis; no jogo de volta o placar da ida "
+                                 "(achado na base) entra na conta; na final a classificação é o título.")
+        r = _predict_cached(home, away, tuple(hn), tuple(an), comp, kick, kind, version)
+        if not r.get("ok"):
+            st.caption(f"Sem probabilidades: {r.get('motivo')}.")
+            return
+        res, xg = r["resultado"], r["gols_esperados"]
+        c = st.columns(3)
+        c[0].metric(f"Vitória {home}", f"{100 * res['mandante']:.0f}%")
+        c[1].metric("Empate", f"{100 * res['empate']:.0f}%")
+        c[2].metric(f"Vitória {away}", f"{100 * res['visitante']:.0f}%")
+        if r.get("classificacao"):
+            cl = r["classificacao"]
+            word = "título" if r.get("titulo") else "classificação"
+            ida = r.get("ida")
+            st.markdown(f"**Chance de {word}:** {home} **{100 * cl['mandante']:.0f}%** × {away} "
+                        f"**{100 * cl['visitante']:.0f}%** — {100 * cl['prorrogacao_ou_penaltis']:.0f}% de ir para "
+                        "prorrogação/pênaltis" + (f" · ida em {ida['data']}: {home} {ida['gols_mandante_hoje']} x "
+                                                   f"{ida['gols_visitante_hoje']} {away}" if ida else ""))
+        m = np.array(r["matriz"])[:6, :6]
+        fig = go.Figure(go.Heatmap(z=100 * m, x=[str(j) for j in range(6)], y=[str(i) for i in range(6)],
+                                   colorscale=[[0, "#0B1120"], [.5, "#1D4ED8"], [1, "#22D3EE"]], showscale=False,
+                                   text=[[f"{100 * v:.1f}%" for v in row] for row in m], texttemplate="%{text}",
+                                   hovertemplate=f"{home} %{{y}} x %{{x}} {away}: %{{text}}<extra></extra>"))
+        fig.update_layout(height=330, paper_bgcolor="#090D16", plot_bgcolor="#090D16", font=dict(color="#F5F7FB"),
+                          margin=dict(l=50, r=10, t=30, b=40), title=dict(text="Probabilidade de cada placar", font=dict(size=13)),
+                          xaxis=dict(title=f"gols {away}"), yaxis=dict(title=f"gols {home}", autorange="reversed"))
+        a, b = st.columns([1.5, 1])
+        a.plotly_chart(fig, use_container_width=True, key=f"{w}_probmap_{team}")
+        b.markdown("**Placares mais prováveis**")
+        b.markdown("\n".join(f"- {home} {p['placar'].split(' x ')[0]} x {p['placar'].split(' x ')[1]} {away}: "
+                              f"**{100 * p['prob']:.1f}%**" for p in r["placares"][:6]))
+        b.caption(f"Gols esperados: {home} {xg['mandante']:.2f} × {xg['visitante']:.2f} {away} · mais de 2,5 gols "
+                  f"{100 * r['over_2_5']:.0f}% · ambos marcam {100 * r['ambos_marcam']:.0f}%")
+        bs = r.get("base") or {}
+        st.caption("ESTIMATIVA: força de cada time nos últimos 20 jogos com estatísticas (70% gols esperados + 30% gols, "
+                   "puxada para a média com poucos jogos), mando de campo ±10%, placares por Poisson com correção de "
+                   "Dixon-Coles para placares baixos. Base: " + " · ".join(
+                       f"{k}: {v.get('jogos', 0)} jogos ({v.get('com_xg', 0)} com xG)" for k, v in bs.items()) +
+                   ". Não considera desfalques nem a escalação do dia.")
+
+
 def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None:
     """Rodada 10: 'prox' = próximo jogo do calendário (sem perguntar o adversário); 'hyp' = jogo hipotético."""
     from src.squad import matchday as M
@@ -637,6 +701,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
     comp_txt = str(f["competition"]) if f is not None else ""
     st.markdown(MV.hero(team, rival, when, comp_txt, "✅ escalações OFICIAIS publicadas" if off else
                         "escalações prováveis (a oficial sai ~1 h antes)"), unsafe_allow_html=True)
+    _probabilities(team, rival, me["names"], rv["names"], f, version, w)       # rodada 25b
     mode = st.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key=f"{w}_mode")
     if off_me and mode == "Provável":
         xm, fm = M.official_xi(a, off_me)

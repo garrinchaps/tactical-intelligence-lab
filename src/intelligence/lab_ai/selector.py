@@ -48,6 +48,19 @@ def _read_jsonl(p: Path) -> List[Dict[str, Any]]:
     return out
 
 
+def mlp_from_record(rec: Optional[Dict[str, Any]]):
+    """Reconstrói a rede (pesos, vieses e padronização) guardada no histórico de versões."""
+    if not rec:
+        return None
+    from src.machine_learning.neural_net import NeuralNetwork
+
+    net = NeuralNetwork(rec["layers"], learning_rate=.01, l2=0.0, seed=0)
+    net.weights = [np.asarray(W, float) for W in rec["weights"]]
+    net.biases = [np.asarray(b, float) for b in rec["biases"]]
+    net.mu, net.sigma = np.asarray(rec["mu"], float), np.asarray(rec["sigma"], float)
+    return net
+
+
 class Selector:
     def __init__(self, root: Optional[Path] = None):
         self.root = Path(root) if root else ROOT
@@ -69,6 +82,14 @@ class Selector:
         return int(self.meta["champion"])
 
     def score(self, X: np.ndarray) -> np.ndarray:
+        # rodada 25b: a versão campeã pode ser uma rede com camadas ocultas (treinada como a rede de perigo)
+        v = next((x for x in self.meta["versions"] if x["version"] == self.meta["champion"]), {})
+        net = mlp_from_record(v.get("mlp")) if v.get("mlp") else None
+        if net is not None:
+            try:
+                return net.predict_proba(np.asarray(X, float))
+            except Exception:
+                pass
         return 1.0 / (1.0 + np.exp(-np.clip(X @ self.weights, -30, 30)))
 
     def pick_template(self, slot: str, options: List[str], rng: np.random.Generator) -> int:

@@ -127,3 +127,68 @@ def test_same_defender_cards_are_merged():
              {"tipo": "duelo", "defensor": "Outro", "titulo": "Aéreo", "evidencia": "c", "nivel": "claro", "score": 30}]
     out = merge_same_defender(items)
     assert len(out) == 2 and out[0]["nivel"] == "escancarado" and any("Outra fraqueza" in p for p in out[0]["passos"])
+
+
+def test_mononym_needs_club_or_birth_and_minutes_cap():
+    from src.data_lake.ids import player_core
+    from src.scout import engine as E
+    from src.scout.overall import minutes_cap
+
+    p = pd.DataFrame([{"nome": "Saúl", "clube": "Real Oviedo", "posicao": "Midfield", "funcao": "Central Midfield",
+                       "nacionalidade": "Spain", "nascimento": "1985-03-01"}])
+    p["_core"] = p["nome"].map(player_core)
+    hist = pd.DataFrame([{"core": "saul", "core_nome": "saul", "ultimo_time": "Flamengo", "posicao_observada": "CM",
+                          "nascimento_fm": None, "nacionalidade_fm": "Spain"}])
+    assert E.match_market_to_history(p, hist).isna().all()                 # outro Saúl: não junta
+    hist2 = hist.assign(ultimo_time="Real Oviedo")
+    assert E.match_market_to_history(p, hist2).tolist() == ["saul"]        # mesmo clube: junta
+    cap = minutes_cap(pd.DataFrame({"minutos_12m": [39, 0, 900, 2500]}))
+    assert cap.iloc[0] == 72 and cap.iloc[1] == 72 and 72 < cap.iloc[2] < 99 and cap.iloc[3] == 99
+
+
+def test_assistant_network_training_and_champion_scoring(tmp_path):
+    import json
+
+    from src.intelligence.lab_ai import trainer as TR
+    from src.intelligence.lab_ai.facts import N_FEATURES
+    from src.intelligence.lab_ai.selector import Selector
+
+    rng = np.random.default_rng(0)
+    key = TR._label_key("quem errou mais passes?")
+    assert key
+    shown = tmp_path / "shown.jsonl"
+    with shown.open("w", encoding="utf-8") as fh:
+        for q in range(60):
+            facts = []
+            for k in range(5):
+                f = rng.normal(size=N_FEATURES).tolist()
+                if k == 0:
+                    f[0] = 3.0                                   # o fato certo tem um sinal forte
+                facts.append({"key": key if k == 0 else f"k{k}", "features": f})
+            fh.write(json.dumps({"interaction_id": f"q{q}", "question": "quem errou mais passes?", "facts": facts}) + "\n")
+    fb = tmp_path / "fb.jsonl"
+    fb.write_text("", encoding="utf-8")
+    sel = Selector(root=tmp_path)
+    r = TR.train_network([8], epochs=10, batch=16, sel=sel, shown_path=shown, feedback_path=fb)
+    assert "reason" in r and r.get("n_perguntas") == 60
+    v = [x for x in sel.meta["versions"] if x.get("mlp")]
+    assert v and v[-1]["mlp"]["layers"] == [N_FEATURES, 8, 1]
+    if v:
+        sel.meta["champion"] = v[-1]["version"]
+        p = sel.score(rng.normal(size=(4, N_FEATURES)))
+        assert p.shape == (4,) and np.all((p > 0) & (p < 1))
+
+
+def test_score_probabilities_and_knockout():
+    from src.analytics import score_probs as SP
+
+    m = SP.score_matrix(1.8, 0.9)
+    assert abs(m.sum() - 1) < 1e-9
+    o = SP.outcome(m)
+    assert o["mandante"] > o["visitante"] and abs(sum(o.values()) - 1) < 1e-9
+    xg = SP.expected_goals({"jogos": 20, "ataque": 2.0, "defesa": .8}, {"jogos": 20, "ataque": 1.0, "defesa": 1.6})
+    assert xg["mandante"] > xg["visitante"]
+    adv = SP.advance(m, 1.8, .9, agg_home=0)
+    assert adv["mandante"] > o["mandante"] and abs(adv["mandante"] + adv["visitante"] - 1) < 1e-9
+    adv2 = SP.advance(m, 1.8, .9, agg_home=-3)                 # perdeu a ida por 3: chance cai muito
+    assert adv2["mandante"] < adv["mandante"]

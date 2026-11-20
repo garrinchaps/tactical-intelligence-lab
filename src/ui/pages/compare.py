@@ -490,8 +490,34 @@ FM_GROUPS = {
 }
 
 
+_NAME_VARIANTS: Dict[str, Any] = {}
+
+
+def name_variants(db, names) -> list:
+    """Rodada 25b: todas as grafias do banco com o mesmo núcleo de nome ("Gerson" × "Gérson"). Antes a consulta
+    buscava só a grafia exata e o Gerson do Cruzeiro aparecia com 1 jogo."""
+    from src.data_lake.ids import player_core
+
+    if "map" not in _NAME_VARIANTS:
+        try:
+            with db.connect() as conn:
+                allnames = [r[0] for r in conn.execute("SELECT DISTINCT player_name FROM match_player_stats "
+                                                       "WHERE player_name IS NOT NULL")]
+        except Exception:
+            allnames = []
+        m: Dict[str, list] = {}
+        for n in allnames:
+            m.setdefault(player_core(n), []).append(n)
+        _NAME_VARIANTS["map"] = m
+    m = _NAME_VARIANTS["map"]
+    out = list(names)
+    for n in names:
+        out += m.get(player_core(n), [])
+    return list(dict.fromkeys(out))
+
+
 @st.cache_data(show_spinner=False, ttl=1800, max_entries=64)
-def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
+def _fotmob_player(names: tuple, n_games: int, version: str, club: str = "") -> Dict[str, Any]:
     """Números da FotMob do jogador (identidade pelo id do atleta da FotMob), somados nos últimos `n_games` jogos."""
     import json as _j
 
@@ -499,6 +525,7 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
 
     if not names:
         return {}
+    names = tuple(name_variants(get_service().db, names))
     # rodada 12: também as grafias parecidas ("Lucas Romero" ⊂ "Lucas Daniel Romero"): primeiro e último nome
     import unicodedata as _u
 
@@ -515,7 +542,7 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
         d = pd.read_sql_query(f"SELECT s.match_id, s.player_name, s.team_name, s.rating, s.stats_json, m.match_date, m.season_name "
                               f"FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
                               f"WHERE (s.player_name IN ({ph}){' OR ' + extra if extra else ''}) AND m.data_source = 'fotmob' "
-                              f"ORDER BY m.match_date DESC LIMIT 600", conn,
+                              f"ORDER BY m.match_date DESC LIMIT 4000", conn,
                               params=list(names) + [lk for lk, _ in likes])
     if d.empty:
         return {}
@@ -529,6 +556,18 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
     recent = pd.to_datetime(d["match_date"], errors="coerce") >= pd.Timestamp.today() - pd.Timedelta(days=365)
     counts = d[recent].groupby("fid").size() if recent.any() else d.groupby("fid").size()
     best = counts.idxmax()
+    if club:                                             # rodada 25b: homônimo → o atleta que jogou pelo clube escolhido
+        from src.data_lake.ids import team_core
+
+        try:
+            from src.ui.pages.clubs import same_team_names
+
+            cores = {team_core(x) for x in same_team_names(club)} | {team_core(club)}
+        except Exception:
+            cores = {team_core(club)}
+        at_club = d[d["team_name"].map(lambda t: team_core(str(t)) in cores)]
+        if not at_club.empty:
+            best = at_club.groupby("fid").size().idxmax()
     others = [f"{g['player_name'].iloc[0]} ({g['team_name'].iloc[0]}, {len(g)} jogos)"
               for fid, g in d.groupby("fid") if fid != best][:3]
     d = d[d["fid"] == best]
@@ -580,8 +619,8 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
         return
     n_games = RECORTES.get(recorte) or 0                # 0 = temporada inteira (rodada 22)
     v = get_service().db.stable_version()
-    A = _fotmob_player(tuple(dict.fromkeys((na or []) + [pa["nome"]])), n_games, v)
-    B = _fotmob_player(tuple(dict.fromkeys((nb or []) + [pb["nome"]])), n_games, v)
+    A = _fotmob_player(tuple(dict.fromkeys((na or []) + [pa["nome"]])), n_games, v, str(pa.get("clube") or ""))
+    B = _fotmob_player(tuple(dict.fromkeys((nb or []) + [pb["nome"]])), n_games, v, str(pb.get("clube") or ""))
     if not (A and B):
         missing = [p["nome"] for p, X in ((pa, A), (pb, B)) if not X]
         st.caption(f"📊 Sem números da FotMob para: {', '.join(missing)} (a base ainda está sendo abastecida).")

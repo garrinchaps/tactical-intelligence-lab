@@ -229,6 +229,28 @@ def _brain_panel() -> None:
             st.caption("Ainda sem votos. Dê 👍/👎 nas respostas do Assistente e nos confrontos do pré-jogo.")
 
 
+@st.fragment(run_every=3)
+def _assistant_train_status() -> None:
+    from src.intelligence.lab_ai import trainer as TR
+    import pandas as pd
+
+    stt = TR.background_status()
+    if not stt:
+        return
+    if stt.get("estado") == "rodando":
+        st.info(f"⏳ Treinando: {stt.get('passo', '')}")
+    elif stt.get("estado") == "erro":
+        st.error(f"Treino parou com erro: {stt.get('erro')}")
+    elif stt.get("estado") == "pronto" and stt.get("resultado"):
+        res = pd.DataFrame(stt["resultado"])
+        st.success("Experimentos concluídos." + (" Uma versão nova foi promovida." if res["promoted"].any() else
+                                                " Nenhuma superou a versão em uso (ela continua)."))
+        styled_dataframe(res.rename(columns={"experimento": "Experimento", "tentativa": "Tentativa", "version": "Versão",
+                                             "promoted": "Promovida", "acerto_1o_fato": "Acerto do 1º fato",
+                                             "perda_validacao": "Perda (prova)", "reason": "Resultado"}),
+                         hide_index=True, use_container_width=True)
+
+
 def _lab_ai_panel() -> None:
     """Rodada 9: a IA do laboratório (o assistente) — versão, o que ela olha, treino com as avaliações."""
     import pandas as pd
@@ -257,14 +279,54 @@ def _lab_ai_panel() -> None:
     last = sel.meta["versions"][-1] if sel.meta.get("versions") else {}
     sug = TR.suggest(last)
     st.caption("Sugestão da própria IA a partir do último treino: " + " · ".join(sug["porque"]))
+    # rodada 25b: cada controle com o (i) — o que é, alto × baixo e a recomendação para o estado atual
+    try:
+        n_q = len(set(TR.build_dataset()[3].tolist()))
+    except Exception:
+        n_q = 0
+    rec = TR.recommend(last, n_q, n_rated)
+    rec_n = TR.recommend_net(n_q, n_rated)
+
+    def _h(key):
+        lab, _lo, _hi, _d, expl = TR.PARAMS[key]
+        return f"{expl}\n\n👉 {rec.get(key, '')}"
+
     h1, h2, h3, h4 = st.columns(4)
-    lr = h1.select_slider("Taxa de aprendizado (η)", [0.01, 0.03, 0.05, 0.1, 0.2, 0.5], value=min(
-        [0.01, 0.03, 0.05, 0.1, 0.2, 0.5], key=lambda v: abs(v - sug["sugerido"]["learning_rate"])), key="as_lr")
+    lr = h1.select_slider("Taxa de aprendizado (η)", [0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5], value=min(
+        [0.001, 0.003, 0.01, 0.03, 0.05, 0.1, 0.2, 0.5], key=lambda v: abs(v - sug["sugerido"]["learning_rate"])),
+        key="as_lr", help=_h("learning_rate"))
     l2 = h2.select_slider("Regularização L2 (λ)", [0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], value=min(
-        [0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], key=lambda v: abs(v - sug["sugerido"]["l2"])), key="as_l2")
-    ep = h3.slider("Épocas (máximo)", 20, 1000, int(min(max(sug["sugerido"]["epochs"], 20), 1000)), 20, key="as_ep")
+        [0.0, 0.001, 0.01, 0.05, 0.1, 0.5, 1.0], key=lambda v: abs(v - sug["sugerido"]["l2"])), key="as_l2",
+        help=_h("l2"))
+    ep = h3.slider("Épocas (máximo)", 5, 1000, int(min(max(sug["sugerido"]["epochs"], 5), 1000)), 5, key="as_ep",
+                   help=_h("epochs"))
     weak = h4.toggle("Usar rótulo automático", value=True, key="as_weak",
                      help="Perguntas que pedem um número reconhecível viram exemplos de treino sozinhas.")
+    a1, a2, a3, a4 = st.columns(4)
+    hidden_txt = a1.text_input("Neurônios por camada oculta", "", placeholder="vazio = 1 neurônio · ex.: 8  ou  16, 8",
+                               key="as_hidden", help=f"{TR.NET_HELP['hidden'][1]}\n\n👉 {rec_n['hidden']}")
+    batch = a2.select_slider("Tamanho do lote", [16, 32, 64, 128, 256, 512], value=64 if n_q < 80 else 128,
+                             key="as_batch", help=f"{TR.NET_HELP['batch'][1]}\n\n👉 {rec_n['batch']}")
+    exps = a3.multiselect("Experimentos a rodar (na ordem)", list(TR.EXPERIMENTS), default=["A", "B"],
+                          format_func=lambda k: f"{k} — {TR.EXPERIMENTS[k]['rotulo']}", key="as_exps",
+                          help=f"{TR.NET_HELP['experiments'][1]}\n\n👉 {rec_n['experiments']}")
+    tries = a4.number_input("Tentativas por clique", 1, 5, 2 if n_q < 80 else 1, key="as_tries",
+                            help=f"{TR.NET_HELP['attempts'][1]}\n\n👉 {rec_n['attempts']}")
+    try:
+        custom = [int(x) for x in hidden_txt.replace(";", ",").split(",") if x.strip()] if hidden_txt.strip() else None
+        assert custom is None or all(0 < h <= 128 for h in custom)
+    except Exception:
+        custom = None
+        st.warning("Neurônios: números inteiros de 1 a 128 separados por vírgula (ex.: 16, 8).")
+    if st.button("🧪 Rodar experimentos (em segundo plano)", use_container_width=True, key="as_exp_go") and not _vb("O treino"):
+        ok = TR.start_background(names=exps, attempts=int(tries), learning_rate=float(lr), epochs=int(ep), l2=float(l2),
+                                 batch=int(batch), custom_hidden=custom, use_weak=weak)
+        st.toast("Treino iniciado em segundo plano — pode continuar usando o app." if ok else
+                 "Já existe um treino rodando; espere terminar.")
+    st.caption("O treino roda em segundo plano (a tela não trava). Cada experimento usa Adam, parada antecipada e a "
+               "MESMA prova (perguntas separadas); a versão em uso só é trocada se errar menos e não acertar menos o 1º "
+               "fato. Vazio em 'Neurônios' = 1 neurônio (regressão logística, o modelo de hoje).")
+    _assistant_train_status()
     b1, b2 = st.columns(2)
     if b1.button("🧠 Treinar a IA do Assistente", type="primary", use_container_width=True) and not _vb("O treino"):
         with st.spinner("Treinando (descida do gradiente com parada antecipada)…"):
@@ -352,18 +414,9 @@ def render(ctx=None) -> None:
     if view == "🧠 IA única (treinar tudo)":
         _brain_panel()
         st.markdown("---")
-        # rodada 25: o painel completo da rede neural (hiperparâmetros, experimentos, histórico) também fica aqui
-        sub = st.segmented_control("Modelo", ["🎯 Rede neural de perigo (painel completo)", "💬 IA do Assistente",
-                                              "📋 Atividade e perguntas sem alvo"],
-                                   default="🎯 Rede neural de perigo (painel completo)", key="brain_sub",
-                                   label_visibility="collapsed")
-        if sub == "💬 IA do Assistente":
-            _lab_ai_panel()
-        elif sub == "📋 Atividade e perguntas sem alvo":
-            _assistant_misses()
-            _learning_activity_panel()
-        else:
-            _danger_section(ctx)
+        _lab_ai_panel()
+        _assistant_misses()
+        _learning_activity_panel()
         return
     if view != "🎯 Rede de perigo (treino)":
         from src.ui.pages.course_view import render_course

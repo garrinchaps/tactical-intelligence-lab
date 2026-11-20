@@ -231,7 +231,9 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     # rodada 24: craque que passou meses lesionado (Rodrygo, Militão, Alisson) não "some": a disponibilidade usa o
     # maior entre o último ano e 85% da temporada anterior — lesão longa ainda pesa, mas não apaga a qualidade
     prev = _col(u, "minutos_temporada_anterior").fillna(0)
-    m_eff = pd.concat([m12, .6 * prev], axis=1).max(axis=1)
+    # rodada 25b: a temporada anterior só ajuda quem JÁ VOLTOU a jogar (300+ min no ano). Antes ela fazia Benzema (160
+    # min) e Luuk de Jong (39 min) parecerem titulares e irem para o topo da lista.
+    m_eff = m12.where(m12 < 300, pd.concat([m12, .5 * prev], axis=1).max(axis=1))
     d["_m"] = .35 + .65 * (m_eff / 1350).clip(0, 1)
     d["_avail"] = (m_eff / 1800).clip(0, 1)
     d["_elig"] = raw.notna() | rep_val.notna()
@@ -466,27 +468,27 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     comps = components(out, reference)
     report: Dict[str, Any] = {}
     corr = None
-    # rodada 25: a nota nasce dos ATRIBUTOS por posição (src/scout/rating_engine.py) — valor de mercado e fama = 0%
-    from src.scout import rating_engine as RE
+    # rodada 25b: o motor por atributos (rating_engine) ficou MUITO pior na base real (jogadores com 0–40 minutos e
+    # ligas fracas no topo). A nota volta ao modelo anterior; os atributos/estilo do motor ficam só como LEITURA.
+    try:
+        from src.scout import rating_engine as RE
 
-    eng = RE.compute(out)
-    for c in eng.columns:
-        out[c] = eng[c]
-    z = pd.to_numeric(eng["ovr2_bruto"], errors="coerce")
-    # sem números por posição suficientes (fonte só com nota/gols): desempenho geral + nota + nível, SEM reputação
-    z_old = zscore(comps.assign(R=np.nan), {"wR": 0.0, "wP": .6, "wT": .25, "wL": .15})
-    out["ovr_motor"] = np.where(z.notna(), "atributos", np.where(z_old.notna(), "desempenho geral (poucos números)", ""))
-    z = z.combine_first(z_old)
-    comps["R"] = np.nan                                   # reputação fora da nota (fica só no mercado)
-    comps["P"] = pd.to_numeric(eng["ovr2_W"], errors="coerce").combine_first(comps["P"])
-    comps["_elig"] = z.notna()
-    weights = {"motor": "atributos por posição", "wR": 0.0, "wP": .75, "wT": .05, "wL": 0.0}
+        eng = RE.compute(out)
+        for c in eng.columns:
+            if c.startswith("atr2_") or c in ("estilo", "dificuldade_ajuste"):
+                out[c] = eng[c]
+    except Exception:
+        pass
+    if weights is None:
+        if calibrate_now and reference is None:
+            report = calibrate(out, comps)
+            weights = report["pesos"]
+            corr = report.get("correcao")
+        else:
+            weights = load_weights()
+            corr = load_correction()
     age = _col(out, "idade")
-    if calibrate_now and reference is None:
-        report = calibrate_v2(out, comps, z)
-        corr = report.get("correcao")
-    elif reference is not None:
-        corr = load_correction()
+    z = zscore(comps, weights)
     if reference is not None and "_ovr_s" in reference and "_ovr_z" in reference:
         rz = pd.to_numeric(reference["_ovr_z"], errors="coerce")
         g = rz.groupby(reference["_fam"])
@@ -499,7 +501,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         s = apply_correction(s, comps, age, corr)
         ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
-    out["qualidade"] = ovr.clip(upper=cap).round(0)
+    out["qualidade"] = ovr.clip(upper=cap).clip(upper=minutes_cap(out)).round(0)
     if "so_base" in out:                     # rodada 22: só jogos de base → fica a ESTIMADA pelo nível de base
         base_only = out["so_base"].fillna(False).astype(bool)
         out.loc[base_only, "qualidade"] = pd.to_numeric(out.loc[base_only, "qualidade_base"], errors="coerce")
@@ -516,13 +518,20 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     src = out.get("fonte_qualidade", pd.Series("", index=out.index)).fillna("").astype(str)
     out["fonte_qualidade"] = np.where(
         out["qualidade"].notna() & ~out.get("so_base", pd.Series(False, index=out.index)).fillna(False).astype(bool),
-        "overall: 9 atributos medidos com pesos da posição (75%) + excelência nas 2 maiores qualidades (15%) + "
-        "consistência — minutos e nota FotMob (10%, a nota vale no máximo 5%) + polivalência − deficiência relevante; "
-        "dificuldade do nível limitada; valor de mercado NÃO entra", src)
+        f"overall: reputação ajustada pela idade ({weights.get('wR', 0):.0%}) + desempenho na função "
+        f"({weights.get('wP', 0):.0%}) + nota FotMob ajustada pela liga ({weights.get('wT', 0):.0%}) + nível "
+        f"({weights.get('wL', 0):.0%}), padronizado por posição e pelos minutos do ano; teto pela minutagem", src)
     out = _recompute_potential(out)
     if report:
         save_report(out, report)
     return out
+
+
+def minutes_cap(u: pd.DataFrame) -> pd.Series:
+    """Rodada 25b: teto pela minutagem do último ano — "não pode receber 91 com 120 minutos". 0–300 min → 72;
+    cresce até 1.800 min, onde o teto some (99)."""
+    m12 = _col(u, "minutos_12m").fillna(0)
+    return (72 + 27 * ((m12 - 300) / 1500).clip(0, 1)).where(m12 < 1800, 99.0)
 
 
 def calibrate_v2(u: pd.DataFrame, comps: pd.DataFrame, z: pd.Series) -> Dict[str, Any]:

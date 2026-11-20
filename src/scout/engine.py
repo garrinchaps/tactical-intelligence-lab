@@ -950,6 +950,11 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
         options.sort(key=lambda t: -t[0])
         best = options[0]
         tie = len(options) > 1 and options[1][0] == best[0]
+        # rodada 25b: nome de UMA palavra (Saúl, Fred, Gerson, Otávio) é homônimo em potencial mesmo quando só aparece
+        # uma vez no cadastro — juntar só com clube ou nascimento conferindo (Saúl de 41 anos era outro Saúl)
+        mononym = len(core.split()) == 1
+        if mononym and best[0] < 2:
+            continue
         if dup or len(cands) > 1:
             if best[0] < 2 or tie:
                 continue                                        # homônimo sem confirmação: fica separado

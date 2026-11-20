@@ -78,8 +78,7 @@ def header(row: Dict[str, Any]) -> None:
 
 
 def overall_breakdown(row: Dict[str, Any]) -> None:
-    """Rodada 25: de onde vem o overall — os 9 atributos da posição, excelência, consistência, polivalência,
-    deficiência, ajuste de dificuldade, confiança e o estilo medido."""
+    """Rodada 25: os 9 atributos medidos da posição e o estilo (leitura dos números; a nota segue o modelo do Scout)."""
     from src.scout import rating_engine as RE
 
     keys = RE.ATTR_KEYS + ["GKS", "GKD", "GKE"]
@@ -89,23 +88,13 @@ def overall_breakdown(row: Dict[str, Any]) -> None:
         return
     fam = RE.FAMILY_OF.get(str(row.get("papel") or "").upper(), "")
     w = RE.POS_WEIGHTS.get(fam, {})
-    fm.panel("De onde vem o overall", fm.CYAN,
-             f"pesos da posição · confiança {int(_num(row.get('confianca_nota')) or 0)}% · valor de mercado não entra")
+    fm.panel("Atributos da posição (medidos)", fm.CYAN,
+             "leitura dos números por 90 contra a mesma posição — entre parênteses, o peso de cada um para a função")
     cells = "".join(
         f'<div class="fm-attr"><span>{RE.ATTR_PT.get(k, k)} <small style="color:#64748B">({100 * w.get(k, 0):.0f}%)</small>'
         f'</span><b style="color:{fm.attr_color(v)}">{int(v)}</b></div>'
         for k, v in sorted(vals.items(), key=lambda kv: -w.get(kv[0], 0)))
     st.markdown(f'<div class="fm-attrs"><div class="fm-attr-col">{cells}</div></div>', unsafe_allow_html=True)
-    parts = []
-    for lab, k, fmt in (("média da posição", "ovr2_W", "{:.0f}"), ("excelência", "ovr2_E", "{:.0f}"),
-                        ("consistência", "ovr2_C", "{:.0f}"), ("polivalência", "ovr2_bonus_polivalencia", "+{:.1f}"),
-                        ("deficiência", "ovr2_penal_deficiencia", "−{:.1f}"), ("ajuste de dificuldade", "dificuldade_ajuste", "{:+.1f}")):
-        v = _num(row.get(k))
-        if v is not None and not (k in ("ovr2_bonus_polivalencia", "ovr2_penal_deficiencia") and v == 0):
-            parts.append(f"{lab} {fmt.format(v)}")
-    if parts:
-        st.caption(" · ".join(parts) + ". Overall = 75% média da posição + 15% excelência + 10% consistência + "
-                   "polivalência − deficiência, levado à escala global (só ~10 jogadores do mundo com 90+).")
     if row.get("estilo"):
         st.markdown(f"**Estilo medido:** {row['estilo']}")
 
