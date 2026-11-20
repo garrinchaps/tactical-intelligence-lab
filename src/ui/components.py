@@ -432,17 +432,25 @@ def metric_bars(items: List[dict], kind: str = "forte", empty_text: str = "") ->
     st.markdown("".join(html_rows), unsafe_allow_html=True)
 
 
+def fmt_num(v, fm: str | None = "{:.2f}") -> str:
+    """Número para os cartões de comparação: '—' sem dado; zeros só são tirados DEPOIS da vírgula (rodada 22: antes
+    "40" virava "4" e "100" virava "1" — era o "4 jogos" do Comparar quando eram 40)."""
+    if v is None:
+        return "—"
+    try:
+        out = (fm or "{:.2f}").format(float(v))
+    except Exception:
+        return str(v)
+    return out.rstrip("0").rstrip(".") if "." in out else out
+
+
 def duel_bars(rows: List[dict], name_a: str, name_b: str, title: str = "") -> None:
     """
     Comparação lado a lado em cartões (sem cara de planilha): cada linha = indicador, com a barra de A (azul) para a
     esquerda e a de B (vermelho) para a direita, proporcionais ao maior dos dois; quem é melhor fica em destaque.
     rows: [{"label", "a", "b", "fmt": "{:.2f}", "lower_is_better": bool}]
     """
-    def f(v, fm):
-        try:
-            return (fm or "{:.2f}").format(float(v)).rstrip("0").rstrip(".") if v is not None else "—"
-        except Exception:
-            return str(v)
+    f = fmt_num
     html_rows = []
     for r in rows:
         a, b = r.get("a"), r.get("b")

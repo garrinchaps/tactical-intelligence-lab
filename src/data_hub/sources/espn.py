@@ -475,14 +475,19 @@ class EspnProvider:
 
         out = {"ao_vivo": 0, "encerrados": 0, "errors": 0, "ligas_ao_vivo": []}
         today = date.today()
+        # rodada 22: na varredura completa (a cada 15 min) olha também ONTEM — jogo da noite no Brasil termina depois da
+        # meia-noite em UTC/ET e a ESPN o lista no dia anterior; antes ele só entrava na leitura da temporada (3 h)
+        days = [today] if leagues else [today - timedelta(days=1), today]
         for lg in leagues or list(LEAGUES):
-            try:
-                data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{today:%Y%m%d}"}, max_age_s=50)
-            except Exception:
-                out["errors"] += 1
-                continue
-            recs = [r for r in (self.parse_scoreboard_event(ev, lg, include_live=True)
-                                for ev in data.get("events", []) or []) if r]
+            evs: List[Dict[str, Any]] = []
+            for d in days:
+                try:
+                    data = self._get(f"{BASE}/{lg}/scoreboard", {"dates": f"{d:%Y%m%d}"},
+                                     max_age_s=50 if d == today else 900)
+                    evs += data.get("events", []) or []
+                except Exception:
+                    out["errors"] += 1
+            recs = [r for r in (self.parse_scoreboard_event(ev, lg, include_live=True) for ev in evs) if r]
             if not recs:
                 continue
             self.db.upsert_matches(recs)

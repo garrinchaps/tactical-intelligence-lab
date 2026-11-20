@@ -7,6 +7,8 @@ Página Comparações:
 
 from __future__ import annotations
 
+import re
+
 from typing import Any, Dict, List
 
 import pandas as pd
@@ -510,7 +512,7 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
     ph = ",".join("?" * len(names))
     extra = " OR ".join("LOWER(s.player_name) LIKE ?" for _ in likes)
     with get_service().db.connect() as conn:
-        d = pd.read_sql_query(f"SELECT s.match_id, s.player_name, s.team_name, s.rating, s.stats_json, m.match_date "
+        d = pd.read_sql_query(f"SELECT s.match_id, s.player_name, s.team_name, s.rating, s.stats_json, m.match_date, m.season_name "
                               f"FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
                               f"WHERE (s.player_name IN ({ph}){' OR ' + extra if extra else ''}) AND m.data_source = 'fotmob' "
                               f"ORDER BY m.match_date DESC LIMIT 600", conn,
@@ -531,7 +533,21 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
               for fid, g in d.groupby("fid") if fid != best][:3]
     d = d[d["fid"] == best]
     top = d.iloc[0]
-    d = d[[bool(s.get("minutes")) for s in d["st"]]].head(int(n_games))
+    d = d[[bool(s.get("minutes")) for s in d["st"]]]
+    season_label = None
+    if int(n_games or 0) <= 0 and not d.empty:
+        # rodada 22: "Temporada mais recente" = todos os jogos (todas as competições) desde o início da temporada do jogo
+        # mais recente — antes caía em "últimos 40 jogos". Temporada "2026-2027" começa em 1º/7; "2026", em 1º/1.
+        sn = str(d["season_name"].iloc[0] or "")
+        y0 = re.match(r"(\d{4})", sn)
+        if y0:
+            start = f"{y0.group(1)}-07-01" if re.match(r"\d{4}\s*[-/]\s*\d{2,4}", sn) else f"{y0.group(1)}-01-01"
+            d = d[d["match_date"].astype(str) >= start]
+            season_label = f"temporada {sn.replace('-', '/')} (desde {start[8:10]}/{start[5:7]}/{start[:4]}, todas as competições)"
+        else:
+            d = d.head(40)
+    else:
+        d = d.head(int(n_games))
     if d.empty:
         return {}
     tot: Dict[str, float] = {}
@@ -553,7 +569,7 @@ def _fotmob_player(names: tuple, n_games: int, version: str) -> Dict[str, Any]:
             "minutos_por_numero": {k: int(v) for k, v in mins_k.items()},
             "nota_fotmob": round(float(rat.mean()), 2) if len(rat) else None,
             "time": top["team_name"], "ultimo": str(d["match_date"].iloc[0]), "nome_fonte": top["player_name"],
-            "homonimos": others, "totais": tot}
+            "homonimos": others, "totais": tot, "recorte_txt": season_label}
 
 
 def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
@@ -562,7 +578,7 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
 
     if not (pa and pb):
         return
-    n_games = RECORTES.get(recorte) or 40
+    n_games = RECORTES.get(recorte) or 0                # 0 = temporada inteira (rodada 22)
     v = get_service().db.stable_version()
     A = _fotmob_player(tuple(dict.fromkeys((na or []) + [pa["nome"]])), n_games, v)
     B = _fotmob_player(tuple(dict.fromkeys((nb or []) + [pb["nome"]])), n_games, v)
@@ -576,7 +592,8 @@ def _fotmob_compare(pa, na, pb, nb, recorte: str) -> None:
     unit = "no jogo (total)" if single else "por 90 minutos"
     st.markdown(f'<div style="color:#98A6BF;font-size:.8rem">{n1}: {A["jogos"]} jogo(s), {A["minutos"]} min '
                 f'({A["time"]}, último {A["ultimo"]}) · {n2}: {B["jogos"]} jogo(s), {B["minutos"]} min '
-                f'({B["time"]}, último {B["ultimo"]}) · {unit}. Minutagem é critério de desempate.</div>',
+                f'({B["time"]}, último {B["ultimo"]}) · {unit}. Minutagem é critério de desempate.'
+                + (f' Recorte: {A["recorte_txt"]}.' if A.get("recorte_txt") else "") + '</div>',
                 unsafe_allow_html=True)
     for who, X in ((n1, A), (n2, B)):
         if X.get("homonimos"):
@@ -651,7 +668,8 @@ def _any_players() -> None:
         pb, nb = _player_pick("Jogador B", "cmpB")
     from src.ui.i18n import t
 
-    recorte = st.radio(t("Recorte"), list(RECORTES), horizontal=True, key="cmp_any_cut", index=1, format_func=t)
+    recorte = st.radio(t("Recorte"), list(RECORTES), horizontal=True, key="cmp_any_cut",
+                       index=list(RECORTES).index("Temporada mais recente"), format_func=t)   # rodada 22: visão conjunta
     depth = st.radio("Camada de dados", ["Dados estatísticos (FotMob/boxscore)", "Dados detalhados (eventos)",
                                          "Visão conjunta"], horizontal=True, key="cmp_any_depth")
     if not (pa and pb):

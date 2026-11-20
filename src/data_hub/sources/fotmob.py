@@ -26,7 +26,7 @@ from __future__ import annotations
 import os
 import time
 import re
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from src.data_hub.boxscore import stat_row
@@ -270,6 +270,65 @@ class FotmobProvider:
                 tot["proximos"] += len(fut) if i == 0 else 0
                 tot["temporadas"] += 1
                 say(f"  {LEAGUES.get(lid, lid)} {season}: {len(done)} jogos encerrados, {len(fut) if i == 0 else 0} próximos")
+        return tot
+
+    # ------------------------------------------------------------------ rodada 22: resultados por DIA (2 pedidos)
+    def _season_of(self, comp: str, cache: Dict[str, Optional[str]]) -> Optional[str]:
+        """Temporada mais recente já gravada daquela competição (a FotMob não manda a temporada na lista por dia)."""
+        if comp not in cache:
+            with self.db.connect() as conn:
+                r = conn.execute("SELECT season_name FROM matches WHERE data_source = 'fotmob' AND competition_name = ? "
+                                 "ORDER BY match_date DESC LIMIT 1", (comp,)).fetchone()
+            cache[comp] = r[0] if r and r[0] else None
+        return cache[comp]
+
+    def sync_dates(self, days: Optional[List[date]] = None, progress=None) -> Dict[str, int]:
+        """
+        Resultados de ONTEM e HOJE (ou dos dias pedidos) em 1 pedido por dia (`/api/data/matches?date=AAAAMMDD`).
+        Antes os jogos recém-terminados só entravam quando a liga inteira era relida (a cada 3–6 h). Só competições da
+        lista do laboratório; competição sem temporada conhecida na base fica para a leitura da liga (não chuta).
+        """
+        say = progress or (lambda m: None)
+        from src.data_hub.sources.espn import EspnProvider
+
+        days = days or [date.today() - timedelta(days=1), date.today()]
+        tot = {"partidas": 0, "proximos": 0, "dias": 0, "sem_temporada": 0, "errors": 0}
+        seasons: Dict[str, Optional[str]] = {}
+        for d in days:
+            recent = (date.today() - d).days <= 1
+            try:
+                data = self._get("matches", {"date": d.strftime("%Y%m%d")}, max_age_s=600 if recent else None)
+            except Exception as exc:
+                tot["errors"] += 1
+                say(f"  fotmob {d}: {exc}")
+                continue
+            done, fut = [], []
+            for lg in data.get("leagues") or []:
+                lid = int(lg.get("primaryId") or lg.get("id") or 0)
+                if lid not in LEAGUES:
+                    continue
+                season = self._season_of(LEAGUES[lid], seasons)
+                if not season:
+                    tot["sem_temporada"] += len(lg.get("matches") or [])
+                    continue
+                for m in lg.get("matches") or []:
+                    try:
+                        a, b = self.parse_match(m, lid, season)
+                    except Exception:
+                        continue
+                    if a:
+                        a["season_name"] = season
+                        done.append(a)
+                    if b:
+                        fut.append(b)
+            if done:
+                self.db.upsert_matches(done)
+            if fut:
+                EspnProvider.save_fixtures(self, fut)
+            tot["partidas"] += len(done)
+            tot["proximos"] += len(fut)
+            tot["dias"] += 1
+            say(f"  FotMob {d:%d/%m}: {len(done)} jogos encerrados, {len(fut)} por jogar")
         return tot
 
     # ------------------------------------------------------------------ jogo

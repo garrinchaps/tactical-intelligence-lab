@@ -82,9 +82,10 @@ def _overview(reg: ProvenanceRegistry) -> None:
 
         _bundle_parts.clear()
         st.success("Sincronização concluída.")
-    with st.expander("Atualização automática diária (Agendador de Tarefas do Windows)"):
-        st.code('schtasks /Create /SC DAILY /ST 06:00 /TN "TacticalLabSync" /TR "cmd /c cd /d %CD% && '
-                'venv\\Scripts\\python.exe -m src.data_hub.sync --days 3 --prefetch-events 20"', language="powershell")
+    with st.expander("Atualização com o app fechado (Agendador de Tarefas do Windows, sem janela)"):
+        st.caption("Rodada 22: a versão antiga (cmd /c) abria uma janela preta a cada 3 h. Esta usa pythonw (sem janela) e "
+                   "não faz nada enquanto o app está aberto. Para apagar tudo: o mesmo script com -Remover.")
+        st.code(".\\scripts\\agendar_atualizacao.ps1", language="powershell")
     cov = svc.db.coverage()
     if not cov.empty:
         with st.expander("Cobertura por competição"):

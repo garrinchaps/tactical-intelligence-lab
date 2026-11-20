@@ -104,7 +104,8 @@ def _plan() -> List[Tuple[str, Callable[[], Any]]]:
         player_index(get_service().db.stable_version())
 
     steps.append(("Índice de jogadores", players))
-    for mid in matches:
+    # rodada 22: a tela de carregamento NÃO mostra nomes de times/jogos (só "jogos recentes 1/3")
+    for i, mid in enumerate(matches, 1):
         def one_match(mid=mid):
             from src.ui.context import _bundle_parts, processed_events
 
@@ -113,8 +114,8 @@ def _plan() -> List[Tuple[str, Callable[[], Any]]]:
             if ev is not None and len(ev):
                 processed_events(int(mid), ev)
 
-        steps.append((f"Jogo {mid}", one_match))
-    for team in teams:
+        steps.append((f"Jogos que você abriu por último ({i}/{len(matches)})", one_match))
+    for i, team in enumerate(teams, 1):
         def one_team(team=team):
             from src.ui.context import get_service
             from src.ui.pages import clubs, squad
@@ -128,7 +129,7 @@ def _plan() -> List[Tuple[str, Callable[[], Any]]]:
             clubs._style_data(tuple(names), tv)
             clubs._formation_data(tuple(names), tv)
 
-        steps.append((f"Time: {team}", one_team))
+        steps.append((f"Times que você abriu por último ({i}/{len(teams)})", one_team))
     return steps
 
 

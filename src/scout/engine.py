@@ -1599,9 +1599,14 @@ def buyer_financial_profile(db, club: Optional[Dict[str, Any]], roster: pd.DataF
             (squad_value * .10 if squad_value else None)
     low = proxy * .55 if proxy else None
     high = proxy * 1.65 if proxy else None
+    vals = pd.to_numeric(roster.get("valor_mercado_eur"), errors="coerce").dropna() if not roster.empty else pd.Series(dtype=float)
+    quals = pd.to_numeric(roster.get("qualidade"), errors="coerce").dropna() if not roster.empty else pd.Series(dtype=float)
     return {
         "valor_elenco_eur": float(squad_value) if squad_value else None,
         "valor_xi_eur": float(xi_value) if xi_value else None,
+        # rodada 22: o jogador mais valioso e o melhor do elenco — base do "bom senso" (estrela fora do patamar do clube)
+        "maior_valor_jogador_eur": float(vals.max()) if len(vals) else None,
+        "melhor_qualidade_elenco": float(quals.max()) if len(quals) else None,
         "taxa_mediana_5_anos_eur": median_fee, "maior_taxa_5_anos_eur": max_fee,
         "transferencias_pagas_amostra": len(fees),
         "orcamento_proxy_eur": proxy, "faixa_proxy_eur": [low, high] if low is not None else None,
@@ -1744,6 +1749,38 @@ def _foreign_rule(competition: str, season: int) -> Optional[Dict[str, Any]]:
     return None
 
 
+def star_gap(candidate: Dict[str, Any], buyer: Dict[str, Any]) -> Tuple[Optional[int], str]:
+    """
+    Rodada 22 — BOM SENSO de patamar (o "Neymar no América-MG"). Não temos salários; o melhor sinal aberto de salário e
+    de fama é o MAIOR valor de mercado da carreira (Transfermarkt) comparado com o jogador mais valioso do comprador,
+    mais a distância entre a qualidade do atleta e a do melhor jogador do elenco. Devolve (teto do realismo, porquê) ou
+    (None, '') quando não há sinal. Volta ao clube formador e fim de carreira existem — são EXCEÇÃO, não sugestão.
+    """
+    peak = max([v for v in (_num(candidate.get("maior_valor_eur")), _num(candidate.get("valor_pico_3a_eur")),
+                            _num(candidate.get("valor_mercado_eur"))) if v] or [0.0])
+    top = _num(buyer.get("maior_valor_jogador_eur"))
+    if not top:
+        sv = _num(buyer.get("valor_elenco_eur"))
+        top = sv / 12 if sv else None
+    cap, why = None, ""
+    if peak and top:
+        r = peak / max(top, 1.0)
+        if r >= 8 and peak >= 20e6:
+            cap, why = 18, (f"estrela fora do patamar: já valeu € {peak / 1e6:.0f} mi, {r:.0f}× o jogador mais valioso do "
+                            "clube — salário e fama fora de alcance (só voltaria em exceção, como fim de carreira em casa)")
+        elif r >= 4 and peak >= 10e6:
+            cap, why = 40, (f"patamar muito acima: pico de € {peak / 1e6:.0f} mi, {r:.1f}× o mais valioso do elenco — "
+                            "salário provavelmente fora do teto do clube")
+        elif r >= 2.5 and peak >= 6e6:
+            cap, why = 62, f"acima do patamar salarial do elenco (pico {r:.1f}× o mais valioso) — negociação difícil"
+    q, best = _num(candidate.get("qualidade")), _num(buyer.get("melhor_qualidade_elenco"))
+    if q is not None and best is not None and q - best >= 15:
+        c2 = 35 if q - best >= 20 else 50
+        if cap is None or c2 < cap:
+            cap, why = c2, f"qualidade {q:.0f} contra {best:.0f} do melhor jogador do elenco — muito acima do nível do clube"
+    return cap, why
+
+
 def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_country: str = "",
                      competition: str = "", season: Optional[int] = None, foreign_count: int = 0) -> Dict[str, Any]:
     """Score heurístico 0–100; fator por fator explicado, sem inventar salários ou orçamento."""
@@ -1832,8 +1869,12 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
         score = min(score, 55)
     if career < 30:                                       # titular no auge em clube muito maior
         score = min(score, 45)
+    star_cap, star_note = star_gap(candidate, buyer)
+    if star_cap is not None:
+        score = min(score, star_cap)
     score = int(round(float(np.clip(score, 0, 100))))
-    label = "Viável" if score >= 76 else "Oportunidade de empréstimo" if loan_opportunity and score >= 50 else "Alvo difícil / sonho"
+    label = ("Fora da realidade do clube" if star_cap is not None and star_cap <= 20 else
+             "Viável" if score >= 76 else "Oportunidade de empréstimo" if loan_opportunity and score >= 50 else "Alvo difícil / sonho")
     reasons = [
         f"Financeiro: {finance:.0f}/100 — {price_basis}.",
         (f"Utilização recente: {mins:.0f} minutos nos últimos 12 meses; " +
@@ -1842,11 +1883,12 @@ def transfer_realism(candidate: Dict[str, Any], buyer: Dict[str, Any], buyer_cou
         f"Contrato: {months_left:.1f} mês(es) restante(s)." if months_left is not None else "Prazo contratual indisponível.",
         f"Adaptação ({affinity}/100): {affinity_note}.", f"Contexto de carreira ({career}/100): {career_note}.",
         f"Escada de mercado: {tier_note}.", foreign_note,
-    ]
+    ] + ([f"Bom senso de patamar: {star_note}."] if star_note else [])
     return {"score": score, "rotulo": label, "taxa_estimada_eur": fee, "base_taxa": price_basis,
             "meses_contrato": months_left, "oportunidade_emprestimo": loan_opportunity,
             "financeiro": round(finance), "porte": round(tier), "contrato": round(contract_score),
             "afinidade": affinity, "carreira": career, "penalidade_estrangeiros": foreign_penalty, "regra_estrangeiros": rule,
+            "teto_patamar": star_cap, "patamar": star_note,
             "motivos": reasons}
 
 
@@ -2067,6 +2109,14 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
         aff = nat0.map(lambda n: (nm.get(n) or (50, ""))[0]).astype(float)
         candidates["_scout_pre"] = (.34 * q + .15 * candidates["_scout_role_fit"] * 100 + .12 * usage +
                                      .09 * contract_score + .10 * finance + .20 * aff)
+        # rodada 22: estrela fora do patamar do clube sai do corte inicial (o "Neymar no América-MG")
+        top_v = _num(buyer.get("maior_valor_jogador_eur")) or ((_num(buyer.get("valor_elenco_eur")) or 0) / 12) or None
+        if top_v:
+            peak = pd.concat([pd.to_numeric(candidates.get(k, pd.Series(np.nan, index=candidates.index)), errors="coerce")
+                              for k in ("maior_valor_eur", "valor_pico_3a_eur", "valor_mercado_eur")], axis=1).max(axis=1)
+            gap = peak / max(top_v, 1.0)
+            candidates.loc[(gap >= 8) & (peak >= 20e6), "_scout_pre"] -= 40
+            candidates.loc[(gap >= 4) & (gap < 8) & (peak >= 10e6), "_scout_pre"] -= 15
         # não sugerir quem não melhora o time: abaixo do titular atual da posição só entra jovem promissor ou oportunidade
         starter_q = None
         if roster is not None and not roster.empty and {"papel", "qualidade"} <= set(roster.columns):
@@ -2095,6 +2145,8 @@ def recommend(players: pd.DataFrame, needs: Sequence[Dict[str, Any]], buyer: Dic
             score += _feedback_adjust(feedback_reason, realism, c)
             if quality is None:
                 score -= 8
+            if realism.get("teto_patamar") is not None and realism["teto_patamar"] <= 20:
+                score -= 20                                # estrela fora do patamar: no máximo como "sonho" no fim da lista
             rows.append({
                 **c, "papel_alvo": role, "papel_alvo_label": ROLE_LABELS.get(role, role),
                 "urgencia": need_score, "encaixe_posicao": round(role_fit * 100),

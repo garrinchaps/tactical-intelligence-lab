@@ -83,10 +83,10 @@ class OpenFootballProvider:
         if git:
             try:
                 if (self.local / ".git").exists():
-                    subprocess.run([git, "-C", str(self.local), "pull", "--ff-only", "-q"], check=True, timeout=600)
+                    __import__("src.tools.proc", fromlist=["run"]).run([git, "-C", str(self.local), "pull", "--ff-only", "-q"], check=True, timeout=600)
                     return "git pull"
                 self.local.parent.mkdir(parents=True, exist_ok=True)
-                subprocess.run([git, "clone", "-q", "--depth", "1", REPO, str(self.local)], check=True, timeout=900)
+                __import__("src.tools.proc", fromlist=["run"]).run([git, "clone", "-q", "--depth", "1", REPO, str(self.local)], check=True, timeout=900)
                 return "git clone"
             except Exception as exc:
                 say(f"  openfootball: git falhou ({exc}); tentando o .zip")

@@ -77,7 +77,7 @@ def only_real() -> bool:
 
 
 LEVEL_CHOICES = {"🟢 Lances": "EVENTS", "📊 Estatísticas": "BOXSCORE", "📄 Só placar": "RESULT"}
-DEFAULT_LEVELS = ("EVENTS", "BOXSCORE")
+DEFAULT_LEVELS = ("EVENTS", "BOXSCORE", "RESULT")      # rodada 22: visão conjunta (todos os jogos) é o padrão
 
 
 def chosen_levels() -> Tuple[str, ...]:

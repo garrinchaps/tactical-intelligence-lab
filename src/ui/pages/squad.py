@@ -807,7 +807,7 @@ def render(_ctx=None) -> None:
                    "ou 🧪 Jogo hipotético e clique em 'Analisar este jogo'.")
     c1, c2, c3 = st.columns([1.2, 1.2, 2])
     formation = c1.selectbox("Formação", list(FORMATIONS), key="sq_form")
-    n = c2.select_slider("Últimos jogos", N_OPTIONS, value=5, key="sq_n")
+    n = c2.select_slider("Últimos jogos", N_OPTIONS, value=N_OPTIONS[-1], key="sq_n")      # rodada 22: visão conjunta
     mode = c3.radio("Escalação", ["Provável", "Melhor possível", "Contra o adversário"], horizontal=True, key="sq_mode",
                     help="Provável: quem mais começou jogando nos últimos jogos. Melhor possível: maior nota × encaixe "
                          "na posição. Contra o adversário: a melhor, com ajustes pelo plano de jogo.")

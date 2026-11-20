@@ -322,6 +322,43 @@ def _live_loop(db=None) -> None:
         _live["running"] = False
 
 
+_results: Dict[str, Any] = {"running": False, "ultimo": None, "partidas": 0, "erro": None}
+RESULTS_EVERY_MIN = 20       # rodada 22: resultados de ontem/hoje pela FotMob (2 pedidos) a cada 20 min
+
+
+def refresh_recent_results(db, progress=None) -> Dict[str, int]:
+    """Resultados de ontem e hoje: FotMob por dia (2 pedidos) + ESPN do dia anterior e de hoje em todas as ligas.
+    Leve o bastante para rodar com a tela aberta (só placares e calendário; detalhes ficam para a fila normal)."""
+    from src.data_hub.service import MatchDataService
+
+    svc = MatchDataService(db=db) if db is not None else MatchDataService()
+    out = {"fotmob": 0, "espn": 0}
+    if fotmob_enabled():
+        out["fotmob"] = int(svc.fotmob.sync_dates(progress=progress).get("partidas", 0))
+    if svc.espn.enabled:
+        try:
+            r = svc.espn.live_tick(None)
+            out["espn"] = int(r.get("encerrados", 0))
+        except Exception:
+            pass
+    return out
+
+
+def _results_loop(db=None) -> None:
+    import time
+
+    try:
+        while enabled():
+            try:
+                r = refresh_recent_results(db)
+                _results.update(ultimo=datetime.now(timezone.utc), partidas=sum(r.values()), erro=None)
+            except Exception as exc:             # sem internet: tenta de novo na próxima volta
+                _results["erro"] = f"{type(exc).__name__}: {exc}"
+            time.sleep(RESULTS_EVERY_MIN * 60)
+    finally:
+        _results["running"] = False
+
+
 def process_mode() -> bool:
     """Padrão: o trabalho pesado roda num PROCESSO separado (src/data_hub/worker.py). AUTO_SYNC_MODE=thread volta ao antigo."""
     return os.getenv("AUTO_SYNC_MODE", "process").strip().lower() != "thread" and os.getenv("TIL_IN_WORKER") != "1"
@@ -339,6 +376,9 @@ def start_threads(db) -> None:
         if not _OPENPLAY["running"] and openplay_prefetch_enabled():
             _OPENPLAY["running"] = True
             threading.Thread(target=_openplay_prefetch_loop, args=(db,), daemon=True, name="til-openplay-prefetch").start()
+        if not _results["running"] and enabled():
+            _results["running"] = True
+            threading.Thread(target=_results_loop, args=(db,), daemon=True, name="til-resultados").start()
 
 
 def _worker_view() -> Optional[Dict[str, Any]]:
@@ -393,13 +433,28 @@ def _next(db) -> Optional[datetime]:
     return q + timedelta(hours=interval_hours()) if q else None
 
 
+def results_status() -> str:
+    """'Resultados de ontem e hoje conferidos às 14:20' (rodada 22)."""
+    r = _view("resultados", _results)
+    t = r.get("ultimo")
+    if not t:
+        return ""
+    try:
+        dt = datetime.fromisoformat(t) if isinstance(t, str) else t
+        return f" · resultados de ontem/hoje conferidos às {dt.astimezone().strftime('%H:%M')}"
+    except Exception:
+        return ""
+
+
 def status_text(st_: Dict[str, Any]) -> str:
     if not st_.get("enabled", True):
-        return "Atualização automática desligada (AUTO_SYNC=0)."
+        return ("Atualização automática DESLIGADA (AUTO_SYNC=0 nesta janela ou no .env) — jogos novos não entram sozinhos. "
+                "Bastidores › 🔄 Atualizar resultados agora.")
     if st_.get("running"):
         return "🔄 Atualizando a base em segundo plano (jogos recentes)…" + openplay_status()
     nxt = st_.get("next_quick")
     local = lambda d: d.astimezone().strftime("%d/%m %H:%M")
     if nxt:
-        return f"🔄 Base atualizada automaticamente a cada {interval_hours():g} h · próxima: {local(nxt)}" + openplay_status()
-    return "🔄 Atualização automática ativa." + openplay_status()
+        return (f"🔄 Base atualizada automaticamente a cada {interval_hours():g} h · próxima: {local(nxt)}"
+                + results_status() + openplay_status())
+    return "🔄 Atualização automática ativa." + results_status() + openplay_status()

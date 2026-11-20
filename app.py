@@ -224,7 +224,49 @@ def top_bar(focused: bool = False) -> None:
                 st.caption(fm)
         except Exception:
             pass
+        _refresh_results_button()
     st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
+
+
+_RESULTS_JOB: dict = {"running": False, "msg": ""}
+
+
+def _refresh_results_button() -> None:
+    """Rodada 22: busca na hora os resultados de ontem e hoje (FotMob por dia + ESPN), em segundo plano, e faz a tela
+    adotar o catálogo novo assim que termina. Só para o dono (visitante não dispara downloads)."""
+    from src.ui import gate as _gate
+
+    if not _gate.is_owner():
+        return
+    if _RESULTS_JOB["running"]:
+        st.caption("🔄 Buscando resultados de ontem e hoje…")
+        return
+    if _RESULTS_JOB.get("msg"):
+        st.caption(_RESULTS_JOB["msg"])
+    if st.button("🔄 Atualizar resultados agora", key="til_results_now",
+                 help="Placares de ontem e de hoje (FotMob e ESPN). Leva ~1–2 min e não trava a tela."):
+        import threading
+
+        from src.ui.context import get_service
+
+        db = get_service().db
+
+        def _job():
+            from src.data_hub import autosync as _A
+
+            try:
+                r = _A.refresh_recent_results(db)
+                db.stable_version(force=True)
+                _RESULTS_JOB["msg"] = (f"✅ Resultados conferidos: {r.get('fotmob', 0)} da FotMob e {r.get('espn', 0)} da ESPN "
+                                       "— abra a busca de novo para ver.")
+            except Exception as exc:
+                _RESULTS_JOB["msg"] = f"Não consegui atualizar agora ({type(exc).__name__}). Tente em alguns minutos."
+            finally:
+                _RESULTS_JOB["running"] = False
+
+        _RESULTS_JOB["running"] = True
+        threading.Thread(target=_job, name="til-resultados-agora", daemon=True).start()
+        st.caption("🔄 Buscando resultados de ontem e hoje…")
 
 
 @st.cache_data(show_spinner=False)

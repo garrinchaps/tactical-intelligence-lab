@@ -118,7 +118,9 @@ def test_warmup_remembers_recent(monkeypatch, tmp_path):
     d = warmup._read_recent()
     assert d["jogos"] == [1, 2] and d["times"] == ["Flamengo"]
     names = [n for n, _ in warmup._plan()]
-    assert any("Flamengo" in n for n in names) and any("Jogo 1" == n for n in names)
+    # rodada 22: os passos não mostram nomes de times nem números de jogos (pedido do usuário)
+    assert any(n.startswith("Times que você abriu") for n in names) and any(n.startswith("Jogos que você abriu") for n in names)
+    assert not any("Flamengo" in n for n in names)
 
 
 def test_lock_retry(monkeypatch):

@@ -265,7 +265,16 @@ def _fmt(metric: str, v) -> str:
         return "—"
     names = {"drb_p90": "dribles certos por 90", "drb_past_p90": "vezes driblado por 90", "aer_pct": "% de duelos aéreos ganhos",
              "fouled_p90": "faltas sofridas por 90", "fouls_p90": "faltas cometidas por 90", "duel_pct": "% de duelos ganhos",
-             "tob_p90": "toques na área rival por 90", "int_p90": "interceptações por 90"}
+             "tob_p90": "toques na área rival por 90", "int_p90": "interceptações por 90",
+             # rodada 22: todos os números que aparecem nos cartões têm nome de futebol (antes saía "rec_p90")
+             "rec_p90": "recuperações de bola por 90", "disp_p90": "vezes que perdeu a bola por 90",
+             "drb_pct": "% de dribles certos", "crs_p90": "cruzamentos certos por 90", "crs_t_p90": "cruzamentos tentados por 90",
+             "crs_pct": "% de cruzamentos certos", "cc_p90": "chances criadas por 90", "xg_p90": "xG por 90",
+             "xa_p90": "xA por 90", "def_p90": "ações defensivas por 90", "tkl_p90": "desarmes por 90",
+             "off_p90": "impedimentos por 90", "lb_p90": "bolas longas certas por 90", "lb_t_p90": "bolas longas tentadas por 90",
+             "lb_pct": "% de bolas longas certas", "lbp_p90": "passes que quebram linhas por 90",
+             "pft_p90": "passes no terço final por 90", "hclr_p90": "cortes de cabeça por 90", "clr_p90": "cortes por 90",
+             "aer_p90": "duelos aéreos ganhos por 90"}
     return f"{float(v):.1f} {names.get(metric, metric)}" if metric.endswith("_pct") else f"{float(v):.2f} {names.get(metric, metric)}"
 
 

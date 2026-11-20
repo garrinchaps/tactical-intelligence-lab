@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+
+from src.tools import proc
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,7 +22,7 @@ PID = Path("data/treino.pid")
 def _alive(pid: int) -> bool:
     try:
         if os.name == "nt":
-            out = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True, timeout=5).stdout
+            out = proc.run(["tasklist", "/FI", f"PID eq {pid}"], capture_output=True, text=True, timeout=5).stdout
             return str(pid) in out
         os.kill(pid, 0)
         return True
@@ -58,7 +60,7 @@ def stop() -> bool:
         return False
     try:
         if os.name == "nt":
-            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
+            proc.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, timeout=10)
         else:
             os.kill(pid, 15)
     except Exception:

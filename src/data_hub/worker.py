@@ -76,7 +76,7 @@ def write_status(extra: Optional[Dict[str, Any]] = None) -> None:
 
     data = {"pid": os.getpid(), "heartbeat": datetime.now(timezone.utc).isoformat(),
             "sync": _jsonable(A._state), "fotmob": _jsonable(A._fm), "openplay": _jsonable(A._OPENPLAY),
-            "live": _jsonable(A._live), **(extra or {})}
+            "live": _jsonable(A._live), "resultados": _jsonable(A._results), **(extra or {})}
     STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = STATUS_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")

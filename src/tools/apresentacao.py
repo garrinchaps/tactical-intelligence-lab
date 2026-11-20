@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from typing import List, Tuple
 
+from src.tools import proc
+
 OK, WARN, BAD = "✅", "⚠️ ", "❌"
 
 
@@ -120,9 +122,22 @@ def checks(port: int = 8501) -> List[Tuple[str, str, str]]:
         out.append((OK if free > 5e9 else WARN, "Espaço livre no disco", _gb(free)))
     except OSError:
         pass
+    if os.name == "nt":                                   # rodada 22: tarefa agendada antiga abre janela de cmd
+        old = []
+        for n in ("TacticalLabRapido", "TacticalLabDiario", "TacticalLabSync"):
+            try:
+                o = proc.run(["schtasks", "/Query", "/TN", n, "/V", "/FO", "LIST"], capture_output=True, text=True,
+                             timeout=10).stdout or ""
+            except Exception:
+                o = ""
+            if "cmd /c" in o.lower() or "cmd.exe" in o.lower():
+                old.append(n)
+        out.append((WARN, "Janela de cmd a cada 3 h", f"tarefas antigas {', '.join(old)} abrem janela — rode "
+                    ".\\scripts\\agendar_atualizacao.ps1 (versão silenciosa) ou com -Remover") if old else
+                   (OK, "Tarefas agendadas", "nenhuma abre janela de cmd"))
     try:
-        br = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip()
-        cm = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=short"], capture_output=True, text=True, timeout=5).stdout.strip()
+        br = proc.run(["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, timeout=5).stdout.strip()
+        cm = proc.run(["git", "log", "-1", "--format=%h %cd", "--date=short"], capture_output=True, text=True, timeout=5).stdout.strip()
         out.append((OK if br == "claude/gifted-knuth-q93cbz" else WARN, "Versão do código", f"{br} · {cm}"))
     except Exception:
         pass

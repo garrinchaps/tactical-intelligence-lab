@@ -84,12 +84,13 @@ def render(_ctx=None) -> None:
                 "(`python -m src.data_hub.sync --only fotmob_jogos --limite 3000`).")
         return
     a, b, c = st.columns([1.6, 1.4, 1])
+    st.session_state.setdefault("rk_eval", "🌍 Geral entre ligas")   # rodada 22: visão conjunta (todas as ligas) por padrão
     pick = a.selectbox("Avaliação", list(EVALS), key="rk_eval")
     col, crit = EVALS[pick]
     comps = ev["comp"].value_counts()
-    default = [c_ for c_ in comps.index if "Série A" in c_ or "Serie A" in c_][:1] or list(comps.index[:1])
-    chosen = b.multiselect("Competições", comps.index.tolist(), default=default, key="rk_comps",
-                           format_func=lambda c_: f"{c_} ({comps[c_]})")
+    # rodada 22: visão conjunta é o padrão — vazio = TODAS as competições (antes abria só na Série A)
+    chosen = b.multiselect("Competições", comps.index.tolist(), default=[], key="rk_comps",
+                           format_func=lambda c_: f"{c_} ({comps[c_]})", placeholder="todas as competições")
     fam = c.selectbox("Posição", list(FAM), format_func=FAM.get, key="rk_fam")
     d, e, f = st.columns(3)
     funcs = sorted(ev.loc[ev["family"] == fam, "funcao"].dropna().unique()) if fam else []
@@ -100,6 +101,9 @@ def render(_ctx=None) -> None:
     v = ev.copy()
     if chosen and col != "geral_entre_ligas":
         v = v[v["comp"].isin(chosen)]
+    elif not chosen and col != "geral_entre_ligas":
+        st.caption("Todas as competições juntas: nesta avaliação cada nota é relativa à PRÓPRIA competição (P90 da Série C "
+                   "não é igual a P90 da Premier League). Para comparar ligas de níveis diferentes use 🌍 Geral entre ligas.")
     if fam:
         v = v[v["family"] == fam]
     if func != "Todas":

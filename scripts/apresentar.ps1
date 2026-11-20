@@ -6,7 +6,11 @@
 #   .\scripts\apresentar.ps1 -Tunel cloudflare     # túnel rápido da Cloudflare (sem conta; o link MUDA a cada vez)
 #   .\scripts\apresentar.ps1 -Dono seu@email.com   # entrando pelo link com este e-mail você vê o painel 👥 Contas
 #   .\scripts\apresentar.ps1 -SenhaUnica           # modo antigo: uma senha só para todos (sem contas)
-#   .\scripts\apresentar.ps1 -Porta 8502 -ComAtualizacao
+#   .\scripts\apresentar.ps1 -Congelado           # dia da apresentação: nada é baixado e as telas abertas no ensaio ficam prontas
+#   .\scripts\apresentar.ps1 -Porta 8502
+#
+# Rodada 22: a atualização dos resultados fica LIGADA por padrão (antes o script a desligava e os jogos de ontem não
+# apareciam para quem usava o link no dia a dia). Só -Congelado desliga.
 #
 # Contas: cada pessoa cria a sua (nome, e-mail, senha) usando o CÓDIGO DE CONVITE que você define aqui — ou entra com o
 # Google, se você configurou (python -m src.tools.configurar_login). O código fica SÓ na memória desta janela.
@@ -17,7 +21,8 @@ param(
     [ValidateSet("auto", "tailscale", "ngrok", "cloudflare")][string]$Tunel = "auto",
     [string]$Dono = "",
     [switch]$SenhaUnica,
-    [switch]$ComAtualizacao
+    [switch]$Congelado,
+    [switch]$ComAtualizacao          # mantido por compatibilidade (agora a atualização já vem ligada)
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,9 +75,12 @@ if ($SenhaUnica) {
     if ($Dono) { $env:TIL_DONO_EMAIL = $Dono.Trim().ToLower() }
 }
 
-if (-not $ComAtualizacao) {
-    $env:AUTO_SYNC = "0"          # só nesta janela: o app fica leve para quem visita
-    $env:TIL_CONGELADO = "1"      # dados parados: o que foi aberto no ensaio continua pronto (cache em disco)
+if ($Congelado) {
+    $env:AUTO_SYNC = "0"          # só nesta janela: nada é baixado durante a apresentação
+    $env:TIL_CONGELADO = "1"      # dados parados (no máximo 3 h): o que foi aberto no ensaio continua pronto
+} else {
+    Remove-Item Env:\AUTO_SYNC -ErrorAction SilentlyContinue
+    Remove-Item Env:\TIL_CONGELADO -ErrorAction SilentlyContinue
 }
 
 New-Item -ItemType Directory -Force -Path "data" | Out-Null

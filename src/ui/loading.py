@@ -10,8 +10,9 @@ Rodada 19 — telas de carregamento no visual do laboratório.
 from __future__ import annotations
 
 import html
+import re
 import time
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 _PITCH = """
 <svg viewBox="0 0 120 80" class="til-pitch" aria-hidden="true">
@@ -119,7 +120,20 @@ def splash_html(state: Dict[str, Any]) -> str:
     done = sum(1 for s in steps if s["status"] not in ("fila", "rodando"))
     pct = int(100 * done / len(steps)) if steps else 5
     rows = []
-    for s in steps[:14]:
+    # rodada 22: passos repetidos ("Jogos que você abriu por último (1/3)", "(2/3)"...) viram UMA linha, sem nomes
+    grouped: List[Dict[str, Any]] = []
+    for s in steps:
+        base = re.sub(r"\s*\(\d+/\d+\)$", "", str(s["nome"]))
+        if grouped and grouped[-1]["nome"] == base:
+            g = grouped[-1]
+            g["n"] += 1
+            g["s"] = (g.get("s") or 0) + (s.get("s") or 0)
+            order = {"rodando": 0, "fila": 1}
+            if order.get(s["status"], 2) < order.get(g["status"], 2):
+                g["status"] = s["status"]
+        else:
+            grouped.append({"nome": base, "status": s["status"], "s": s.get("s"), "n": 1})
+    for s in grouped[:14]:
         st_ = s["status"]
         if st_ == "ok":
             icon, cls, tail = "✓", "ok", f" · {s['s']:.1f} s" if s.get("s") is not None else ""

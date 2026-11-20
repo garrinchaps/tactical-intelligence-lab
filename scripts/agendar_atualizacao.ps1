@@ -1,13 +1,34 @@
-# Agenda a atualização automática da base no Windows (roda mesmo com o app fechado).
-#   - a cada 3 horas: jogos recentes (football-data.co.uk, API-Football, football-data.org, ESPN) + boxscores
-#   - todo dia às 6h: sincronização completa (inclui catálogos StatsBomb e Wyscout)
-# Uso (PowerShell, na pasta do projeto):  .\scripts\agendar_atualizacao.ps1
-# Remover:  schtasks /Delete /TN TacticalLabRapido /F ; schtasks /Delete /TN TacticalLabDiario /F
+﻿# Rodada 22 — atualização automática da base com o app FECHADO, SEM abrir janela de cmd.
+#
+#   .\scripts\agendar_atualizacao.ps1            # cria (ou recria) as tarefas silenciosas
+#   .\scripts\agendar_atualizacao.ps1 -Remover   # apaga todas as tarefas do laboratório (antigas e novas)
+#
+# A versão antiga usava "cmd /c ..." e o Windows abria uma janela preta a cada 3 h. Agora a tarefa chama pythonw.exe
+# (Python sem janela). Com o app aberto a tarefa não faz nada: o próprio app já atualiza em segundo plano.
 
-$proj = (Get-Location).Path
-$py = Join-Path $proj "venv\Scripts\python.exe"
-if (-not (Test-Path $py)) { Write-Host "Não achei $py. Rode este script na pasta do projeto, com o venv criado."; exit 1 }
+param([switch]$Remover)
 
-schtasks /Create /F /SC HOURLY /MO 3 /TN "TacticalLabRapido" /TR "cmd /c cd /d `"$proj`" && `"$py`" -m src.data_hub.sync --rapido >> data\sync_log.txt 2>&1"
-schtasks /Create /F /SC DAILY /ST 06:00 /TN "TacticalLabDiario" /TR "cmd /c cd /d `"$proj`" && `"$py`" -m src.data_hub.sync --days 3 --seasons 0 >> data\sync_log.txt 2>&1"
-Write-Host "Pronto. Tarefas criadas: TacticalLabRapido (a cada 3 h) e TacticalLabDiario (6h)."
+$proj = Split-Path -Parent $PSScriptRoot
+$names = @("TacticalLabRapido", "TacticalLabDiario", "TacticalLabSync")
+foreach ($n in $names) {
+    if (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $n -Confirm:$false
+        Write-Host "Removida a tarefa antiga: $n"
+    }
+}
+if ($Remover) { Write-Host "Pronto: nenhuma atualização agendada do laboratório."; exit 0 }
+
+$pyw = Join-Path $proj "venv\Scripts\pythonw.exe"
+if (-not (Test-Path $pyw)) { Write-Host "Não achei $pyw (o venv existe?)." -ForegroundColor Yellow; exit 1 }
+
+$set = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew
+$a1 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --rapido" -WorkingDirectory $proj
+$t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10) -RepetitionInterval (New-TimeSpan -Hours 3)
+Register-ScheduledTask -TaskName "TacticalLabRapido" -Action $a1 -Trigger $t1 -Settings $set `
+        -Description "Tactical Lab: jogos recentes a cada 3 h (sem janela; pula se o app estiver aberto)" | Out-Null
+$a2 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --diario" -WorkingDirectory $proj
+$t2 = New-ScheduledTaskTrigger -Daily -At 6am
+Register-ScheduledTask -TaskName "TacticalLabDiario" -Action $a2 -Trigger $t2 -Settings $set `
+        -Description "Tactical Lab: atualização diária às 6h (sem janela)" | Out-Null
+Write-Host "Pronto. Tarefas silenciosas: TacticalLabRapido (a cada 3 h) e TacticalLabDiario (6h). Registro: data\sync_log.txt"

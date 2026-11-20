@@ -6,7 +6,7 @@ import html
 import io
 import json
 import re
-from typing import Dict
+from typing import Any, Dict, List, Optional
 from datetime import date
 
 import numpy as np
@@ -649,6 +649,49 @@ def _add_player(player, plan_key):
     st.session_state[plan_key] = current
 
 
+def _ai_filter_form(key: str, nations: List[str], aff: Dict[str, Any], role_choices: Optional[List[str]] = None,
+                    need_roles: Optional[List[str]] = None, defaults: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Rodada 22: os MESMOS filtros nas duas listas da IA (Top 5 e Três melhores): idade, qualidade, valor, nacionalidade
+    e "incluir estrelas fora do patamar". Num formulário: só recalcula ao apertar o botão."""
+    d = {"age": (16, 40), "q": 0, "fee": 0.0, "nation": "Todas", "stars": False, **(defaults or {})}
+    out: Dict[str, Any] = {}
+    with st.form(f"{key}_form", border=False):
+        if role_choices:
+            out["role"] = st.selectbox("Posição", role_choices, key=f"{key}_role",
+                                       format_func=lambda r: _role(r) + ("  · carência" if r in (need_roles or []) else ""))
+        fa, fb, fc = st.columns(3)
+        out["age"] = fa.slider("Faixa etária", 16, 40, d["age"], key=f"{key}_age")
+        out["q"] = fb.slider("Qualidade mínima", 0, 100, d["q"], key=f"{key}_quality")
+        out["fee"] = fc.number_input("Valor máximo (€ mi · 0 = sem limite)", 0.0, 500.0, float(d["fee"]), key=f"{key}_max_value")
+        fd, fe = st.columns([2, 1])
+        out["nation"] = fd.selectbox("Nacionalidade desejada", nations, key=f"{key}_nation",
+                                     format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
+        out["stars"] = fe.toggle("Incluir estrelas fora do patamar", value=d["stars"], key=f"{key}_stars",
+                                 help="Desligado: a IA não sugere quem está muito acima do patamar salarial/fama do clube.")
+        st.form_submit_button("🔎 Aplicar filtros", type="primary")
+    return out
+
+
+def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    out = df.copy()
+    lo, hi = f.get("age") or (16, 40)
+    if (lo > 16 or hi < 40) and "idade" in out:
+        ages = np.floor(pd.to_numeric(out["idade"], errors="coerce"))        # 23,8 anos = 23 (faixa inclusiva)
+        out = out[ages.isna() | ages.between(lo, hi)]
+    if f.get("q") and "qualidade" in out:
+        out = out[pd.to_numeric(out["qualidade"], errors="coerce").fillna(0) >= f["q"]]
+    if f.get("fee") and "valor_mercado_eur" in out:
+        out = out[pd.to_numeric(out["valor_mercado_eur"], errors="coerce").fillna(0) <= float(f["fee"]) * 1e6]
+    if f.get("nation") and f["nation"] != "Todas" and "nacionalidade" in out:
+        out = out[out["nacionalidade"].astype(str) == f["nation"]]
+    if not f.get("stars") and "realismo" in out:
+        out = out[[not (isinstance(r, dict) and r.get("teto_patamar") is not None and r["teto_patamar"] <= 20)
+                   for r in out["realismo"]]]
+    return out
+
+
 def _player_card(player, roster, team, idx, plan_key, rejected_key):
     name = str(player.get("nome") or "Jogador")
     r = player.get("realismo") or {}
@@ -979,31 +1022,33 @@ def render(_ctx=None):
             if feedback.get("amostra"):
                 st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
             st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
+            all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
+            nm = financial.get("nat_market") or {}
+            aff = {n: nm.get(n) or E._affinity(n, country) for n in all_nat}
+            nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
             if ranked.empty:
                 empty_state("Ainda não há candidatos suficientes",
                     "Sincronize jogadores/valores do Transfermarkt e estatísticas individuais. A busca manual continua disponível.", "🎯")
             else:
-                for idx, row in ranked.head(5).iterrows():
+                with st.expander("🎛️ Filtros dos cinco nomes (idade, qualidade, valor, nacionalidade)", expanded=False):
+                    f5 = _ai_filter_form("scout_top5", nations, aff)
+                top5 = _apply_ai_filters(ranked, f5)
+                for idx, row in top5.head(5).iterrows():
                     _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
+                if top5.empty:
+                    st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
+                n_stars = len(_apply_ai_filters(ranked, {**f5, "stars": True})) - len(top5)
+                if n_stars > 0 and not f5.get("stars"):
+                    st.caption(f"Bom senso: {n_stars} estrela(s) acima do patamar salarial/fama do clube ficaram de fora "
+                               "(ligue \"Incluir estrelas fora do patamar\" para ver).")
                 st.markdown("#### Três melhores por posição")
                 # rodada 10: TODAS as posições (não só as carentes) — a IA ranqueia sob demanda a posição escolhida
                 need_roles = list(dict.fromkeys(ranked["papel_alvo"].tolist()))
                 roles = need_roles + [r for r in E.ROLE_LABELS if r not in need_roles]
-                # rodada 11: tudo num formulário — só recalcula ao clicar "Aplicar filtros" (antes cada mexida recalculava)
-                all_nat = sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist()) if "nacionalidade" in pool else []
-                nm = financial.get("nat_market") or {}
-                aff = {n: nm.get(n) or E._affinity(n, country) for n in all_nat}
-                nations = ["Todas"] + sorted(all_nat, key=lambda n: (-aff[n][0], n))
-                with st.form("scout_top3_form", border=False):
-                    role = st.selectbox("Posição", roles, key="scout_top3_role",
-                                        format_func=lambda r: _role(r) + ("  · carência" if r in need_roles else ""))
-                    fa, fb, fc = st.columns(3)
-                    age_band = fa.slider("Faixa etária", 16, 40, (18, 30), key="scout_ai_age")
-                    quality_floor = fb.slider("Qualidade mínima", 0, 100, 55, key="scout_ai_quality")
-                    maximum_fee = fc.number_input("Valor máximo (€ mi)", 0.0, 500.0, 30.0, key="scout_ai_max_value")
-                    nation = st.selectbox("Nacionalidade desejada", nations, key="scout_ai_nation",
-                                          format_func=lambda n: n if n == "Todas" else f"{n} · adaptação {aff[n][0]}%")
-                    st.form_submit_button("🔎 Aplicar filtros", type="primary")
+                # rodada 11/22: tudo num formulário, com os MESMOS filtros do Top 5 + a posição
+                f3 = _ai_filter_form("scout_top3", nations, aff, role_choices=roles, need_roles=need_roles,
+                                     defaults={"age": (18, 30), "q": 55, "fee": 30.0})
+                role, age_band, quality_floor, maximum_fee, nation = f3["role"], f3["age"], f3["q"], f3["fee"], f3["nation"]
                 if False:
                     base_rank = ranked
                 else:
@@ -1019,14 +1064,9 @@ def render(_ctx=None):
                                                      financial, roster, needs_key=("top3", role))
                 base_rank = E.apply_votes(_not_ours(base_rank, team, version, roster), votes)
                 filt3 = base_rank[base_rank["papel_alvo"] == role].copy() if not base_rank.empty else base_rank
-                if not filt3.empty:
-                    ages = np.floor(pd.to_numeric(filt3["idade"], errors="coerce"))      # 23,8 anos = 23 (faixa inclusiva)
-                    filt3 = filt3[ages.isna() | ages.between(*age_band)]
-                    filt3 = filt3[pd.to_numeric(filt3["qualidade"], errors="coerce").fillna(0) >= quality_floor]
-                    filt3 = filt3[pd.to_numeric(filt3["valor_mercado_eur"], errors="coerce").fillna(0) <= maximum_fee * 1e6]
+                filt3 = _apply_ai_filters(filt3, f3)
                 if nation != "Todas":
                     st.caption(f"Contexto: {aff[nation][1]}. Exceções existem, mas a IA pesa a adaptação no índice de realismo.")
-                    filt3 = filt3[filt3["nacionalidade"].astype(str) == nation] if not filt3.empty else filt3
                 for idx, row in filt3.head(3).iterrows():
                     _player_card(row.to_dict(), roster, team, int(idx)+100, plan_key, rejected_key)
                 if filt3.empty:

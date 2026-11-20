@@ -182,6 +182,9 @@ def _thread_conn(db: "DataHubDB") -> sqlite3.Connection:
     return conn
 
 
+FROZEN_SETTLE_S = 3 * 3600
+
+
 def _frozen() -> bool:
     try:
         from src.data_hub.activity import frozen
@@ -500,8 +503,10 @@ class DataHubDB:
         key = str(self.db_path)
         m = DataHubDB._ver_memo.setdefault(key, {"adopted": None, "at": 0.0, "probed": 0.0, "latest": None})
         now = _t.time()
-        if m["adopted"] is not None and not force and _frozen():
-            return m["adopted"]                          # rodada 19: congelado — o catálogo não muda na apresentação
+        if m["adopted"] is not None and not force and _frozen() and now - m["at"] < FROZEN_SETTLE_S:
+            # rodada 19: congelado — o catálogo não muda na apresentação; rodada 22: mas no máximo por 3 h (antes nunca
+            # mudava e os jogos de ontem não apareciam para quem usa o link todo dia)
+            return m["adopted"]
         if force or m["adopted"] is None or now - m["probed"] >= probe_s:
             try:
                 m["latest"] = self.catalog_version()
