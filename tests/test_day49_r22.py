@@ -260,3 +260,34 @@ def test_overall_learned_correction_keeps_distribution(tmp_path, monkeypatch):
     assert rep["correcao"] and rep["correcao"]["n"] >= 25 and rep["erro_medio_alvos"] is not None
     assert (out["qualidade"] >= 90).sum() <= 20 and 55 <= out["qualidade"].median() <= 70
     assert "potencial" in out and (out["potencial"].dropna() >= out.loc[out["potencial"].notna(), "qualidade"]).all()
+
+
+def test_youth_players_mapped_by_fotmob_id(tmp_path):
+    from src.data_hub.db import DataHubDB
+    from src.data_hub.sources.fotmob import YOUTH_NAMES
+    from src.scout import engine as E
+
+    db = DataHubDB(tmp_path / "y.db")
+    comp = sorted(YOUTH_NAMES)[0]
+    _mk_matches(db, [(500000101, comp, "2026-02-01", "Brasil", "Argentina", "BOXSCORE"),
+                     (500000102, comp, "2026-02-04", "Brasil", "Chile", "BOXSCORE"),
+                     (500000103, "Série B", "2026-05-01", "Cuiabá", "Ceará", "BOXSCORE")])
+    with db.connect() as c:
+        rows = [(500000101, "Brasil", "Lucas Silva", 90, 7.8, '{"fotmob_id": 111}'),
+                (500000102, "Brasil", "Lucas Silva", 90, 7.6, '{"fotmob_id": 111}'),
+                (500000101, "Brasil", "Pedro Ramos", 90, 6.4, '{"fotmob_id": 222}'),
+                (500000102, "Brasil", "Pedro Ramos", 90, 6.5, '{"fotmob_id": 222}'),
+                (500000103, "Cuiabá", "Lucas Silva", 90, 7.0, '{"fotmob_id": 111}'),
+                (500000103, "Ceará", "Lucas Silva", 90, 6.6, '{"fotmob_id": 999}')]          # homônimo em outro clube
+        c.executemany("INSERT INTO match_player_stats (match_id, team_name, player_name, minutes, rating, stats_json) "
+                      "VALUES (?,?,?,?,?,?)", rows)
+    caps = E.youth_caps(db)
+    lucas = caps[caps["fotmob_id"] == 111].iloc[0]
+    assert lucas["clube_base"] == "Cuiabá" and lucas["selecao_base_jogos"] == 2 and lucas["selecao_base_pct"] == 100
+    uni = pd.DataFrame({"nome": ["Lucas Silva", "Lucas Silva"], "_core": [lucas["core"]] * 2, "clube": ["Cuiabá", "Ceará"],
+                        "idade": [19, 25]})
+    m = E.merge_youth(uni, caps)
+    assert m.loc[0, "selecao_base_jogos"] == 2 and pd.isna(m.loc[1, "selecao_base_jogos"])   # o clube decide o homônimo
+    extra = E.youth_only_players(uni, caps)
+    assert list(extra["nome"]) == ["Pedro Ramos"] and extra.loc[0, "qualidade"] <= 72
+    assert "ESTIMADA" in extra.loc[0, "fonte_qualidade"]

@@ -2657,12 +2657,16 @@ def youth_caps(db) -> pd.DataFrame:
     try:
         with db.connect() as conn:
             r = pd.read_sql_query(
-                f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos, AVG(nota) AS nota FROM (
-                        SELECT p.player_name, m.competition_name, m.match_id, p.rating AS nota FROM match_player_stats p
+                f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos, AVG(nota) AS nota,
+                           MAX(fid) AS fotmob_id, MAX(selecao) AS selecao FROM (
+                        SELECT p.player_name, m.competition_name, m.match_id, p.rating AS nota,
+                               CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) AS fid, p.team_name AS selecao
+                        FROM match_player_stats p
                         JOIN matches m ON m.match_id = p.match_id
                         WHERE m.competition_name IN ({ph}) AND COALESCE(p.minutes, 0) > 0
                         UNION
-                        SELECT l.player_name, m.competition_name, m.match_id, NULL AS nota FROM match_lineups l
+                        SELECT l.player_name, m.competition_name, m.match_id, NULL AS nota, NULL AS fid, l.team_name
+                        FROM match_lineups l
                         JOIN matches m ON m.match_id = l.match_id
                         WHERE m.competition_name IN ({ph}) AND l.is_starter = 1)
                     GROUP BY player_name, competition_name""", conn, params=[*names, *names])
@@ -2676,8 +2680,60 @@ def youth_caps(db) -> pd.DataFrame:
     r["pct"] = r["nota"].where(r["jogos"] >= 2).groupby(r["competition_name"]).rank(pct=True) * 100
     out = r.groupby("core").agg(selecao_base_jogos=("jogos", "sum"),
                                 selecao_base_comp=("competition_name", lambda x: " · ".join(sorted(set(x)))),
-                                selecao_base_nota=("nota", "mean"), selecao_base_pct=("pct", "max"))
-    return out.reset_index()
+                                selecao_base_nota=("nota", "mean"), selecao_base_pct=("pct", "max"),
+                                fotmob_id=("fotmob_id", "max"), selecao=("selecao", "first"),
+                                sub17=("competition_name", lambda x: any("17" in str(c) for c in x)))
+    out = out.reset_index()
+    # rodada 22: o MESMO atleta no clube — pelo id da FotMob (nunca só pelo nome): elenco atual (fotmob_rosters) e o
+    # último jogo dele por um CLUBE (números por jogador com o mesmo fotmob_id)
+    try:
+        out["player_name"] = out["core"].map(r.drop_duplicates("core").set_index("core")["player_name"])
+        out = out.merge(youth_identities(db, out["fotmob_id"].dropna().astype("int64").tolist(),
+                                         out["player_name"].dropna().tolist()), on="fotmob_id", how="left")
+    except Exception:
+        pass
+    return out
+
+
+def youth_identities(db, ids: List[int], names: Optional[List[str]] = None) -> pd.DataFrame:
+    """fotmob_id → clube atual, nascimento, país, valor, altura e posição (elenco FotMob) ou, sem elenco, o último clube
+    em que ele jogou (números por jogador). Seleção não conta como clube."""
+    cols = ["fotmob_id", "clube_base", "nascimento_base", "pais_base", "valor_base", "altura_base", "posicao_base"]
+    ids = sorted({int(i) for i in ids if pd.notna(i) and int(i) > 0})
+    if not ids:
+        return pd.DataFrame(columns=cols)
+    from src.squad.planner import national_team_key
+
+    with db.connect() as conn:
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS _y_ids (i INTEGER PRIMARY KEY)")
+        conn.execute("DELETE FROM _y_ids")
+        conn.executemany("INSERT OR IGNORE INTO _y_ids VALUES (?)", [(i,) for i in ids])
+        has_ro = conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'fotmob_rosters'").fetchone()
+        try:
+            if not has_ro:                       # (uma consulta que falha desfaz a tabela temporária)
+                raise LookupError("sem elencos da FotMob")
+            ro = pd.read_sql_query("SELECT r.player_id AS fotmob_id, r.team AS clube_base, r.birth AS nascimento_base, "
+                                   "r.country AS pais_base, r.market_value AS valor_base, r.height AS altura_base, "
+                                   "r.position AS posicao_base, r.fetched_at FROM fotmob_rosters r "
+                                   "JOIN _y_ids y ON y.i = r.player_id", conn)
+        except Exception:
+            ro = pd.DataFrame(columns=cols + ["fetched_at"])
+        conn.execute("CREATE TEMP TABLE IF NOT EXISTS _y_names (n TEXT PRIMARY KEY)")
+        conn.execute("DELETE FROM _y_names")
+        conn.executemany("INSERT OR IGNORE INTO _y_names VALUES (?)", [(n,) for n in (names or [])])
+        # pelo índice de nome (só as linhas desses atletas) e conferindo o id da FotMob — homônimo não entra
+        last = pd.read_sql_query(
+            "SELECT CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) AS fotmob_id, p.team_name, m.match_date "
+            "FROM _y_names y JOIN match_player_stats p ON p.player_name = y.n JOIN matches m ON m.match_id = p.match_id "
+            "WHERE CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) IN (SELECT i FROM _y_ids)", conn)
+    ro = ro[[not national_team_key(str(t or "")) for t in ro["clube_base"]]] if not ro.empty else ro
+    ro = ro.sort_values("fetched_at").drop_duplicates("fotmob_id", keep="last").drop(columns=["fetched_at"], errors="ignore")
+    if not last.empty:
+        last = last[[not national_team_key(str(t or "")) for t in last["team_name"]]]
+        last = last.sort_values("match_date").drop_duplicates("fotmob_id", keep="last")
+        miss = last[~last["fotmob_id"].isin(ro["fotmob_id"])].rename(columns={"team_name": "clube_base"})
+        ro = pd.concat([ro, miss[["fotmob_id", "clube_base"]]], ignore_index=True)
+    return ro.reindex(columns=cols)
 
 
 def merge_youth(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
@@ -2688,10 +2744,51 @@ def merge_youth(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
     core = u["_core"].astype(str) if "_core" in u else u["nome"].map(player_core)
     age = pd.to_numeric(u.get("idade"), errors="coerce") if "idade" in u else pd.Series(np.nan, index=u.index)
     ok = ~core.duplicated(keep=False) & (age.isna() | age.le(24))
+    caps = caps.drop_duplicates("core")
     c = caps.set_index("core")
-    u["selecao_base_jogos"] = core.where(ok).map(c["selecao_base_jogos"])
-    u["selecao_base_comp"] = core.where(ok).map(c["selecao_base_comp"])
-    for col in ("selecao_base_nota", "selecao_base_pct"):
+    # rodada 22: nome repetido no universo deixa de ser descartado quando o CLUBE confere (id da FotMob → clube)
+    if "clube_base" in c and "clube" in u:
+        from src.data_lake.ids import team_core
+
+        club_of = c["clube_base"].dropna().map(lambda x: team_core(str(x)))
+        same_club = [bool(cc in club_of.index and team_core(str(cl or "")) == club_of.get(cc)) for cc, cl in zip(core, u["clube"])]
+        ok = ok | (pd.Series(same_club, index=u.index) & (age.isna() | age.le(24)))
+    for col in ("selecao_base_jogos", "selecao_base_comp", "selecao_base_nota", "selecao_base_pct", "selecao"):
         if col in c:
             u[col] = core.where(ok).map(c[col])
     return u
+
+
+YOUTH_LEVEL = {"sub20": (50.0, 72.0), "sub17": (46.0, 66.0)}
+
+
+def youth_only_players(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 22: atletas de seleção de base que NÃO estão no universo (não têm jogos de clube na base). Entram com o
+    clube pelo id da FotMob e uma QUALIDADE ESTIMADA pelo nível de base — a nota na competição de base vira um overall
+    num intervalo baixo (Sub-20: 50–72 · Sub-17: 46–66), porque jogar bem na base não é jogar bem entre profissionais.
+    Sempre marcado como estimativa; sem nota na base, sem qualidade (lacuna)."""
+    if caps is None or caps.empty:
+        return pd.DataFrame()
+    have = set(universe["_core"].astype(str)) if universe is not None and "_core" in universe else set()
+    y = caps[~caps["core"].astype(str).isin(have)].copy()
+    if y.empty:
+        return pd.DataFrame()
+    birth = pd.to_datetime(y.get("nascimento_base"), errors="coerce") if "nascimento_base" in y else pd.Series(pd.NaT, index=y.index)
+    age = ((pd.Timestamp.today() - birth).dt.days / 365.25).round(1)
+    lo_hi = np.where(y["sub17"].fillna(False), "sub17", "sub20")
+    lo = np.array([YOUTH_LEVEL[k][0] for k in lo_hi])
+    hi = np.array([YOUTH_LEVEL[k][1] for k in lo_hi])
+    pct = pd.to_numeric(y.get("selecao_base_pct"), errors="coerce")
+    q = pd.Series(lo + (hi - lo) * (pct / 100), index=y.index).where(pct.notna())
+    out = pd.DataFrame({
+        "nome": y["player_name"].values if "player_name" in y else y["core"].values, "_core": y["core"].values,
+        "clube": y.get("clube_base"), "idade": age.values, "nacionalidade": y.get("pais_base"),
+        "valor_mercado_eur": pd.to_numeric(y.get("valor_base"), errors="coerce"),
+        "altura_cm": pd.to_numeric(y.get("altura_base"), errors="coerce"),
+        "papel": [_role(p) if isinstance(p, str) and p else "" for p in y.get("posicao_base", pd.Series("", index=y.index))],
+        "qualidade": q.round(0).values, "selecao_base_jogos": y["selecao_base_jogos"].values,
+        "selecao_base_comp": y["selecao_base_comp"].values, "selecao_base_pct": pct.values,
+        "selecao": y.get("selecao"),
+        "fonte_qualidade": "ESTIMADA pela seleção de base (nota na competição de base levada ao nível de base)",
+        "so_base": True}, index=y.index)
+    return out.reset_index(drop=True)

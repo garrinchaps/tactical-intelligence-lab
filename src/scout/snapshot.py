@@ -74,7 +74,14 @@ def build_universe(db) -> Dict[str, Any]:
     universe = E.merge_external_ratings(universe, D.external_ratings())
     universe = E.merge_rankings(universe, _evaluations())
     universe = E.canonical_clubs(universe)               # rodada 20: um nome por clube ("Cruzeiro" × "Cruzeiro EC")
-    universe = E.merge_youth(universe, E.youth_caps(db))  # rodada 20: seleções de base → potencial e característica
+    caps = E.youth_caps(db)
+    universe = E.merge_youth(universe, caps)  # rodada 20: seleções de base → potencial e característica
+    try:                                       # rodada 22: quem só tem jogos de base entra com qualidade ESTIMADA
+        extra = E.youth_only_players(universe, caps)
+        if not extra.empty:
+            universe = pd.concat([universe, extra], ignore_index=True, sort=False)
+    except Exception:
+        pass
     try:                                                 # rodada 20: o mercado é masculino (jogadoras de mesmo clube fora)
         from src.data_hub.gender import drop_women_players
 

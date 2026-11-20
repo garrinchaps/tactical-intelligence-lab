@@ -23,7 +23,7 @@ import os
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -204,6 +204,22 @@ def _baselines_loop(db) -> None:
                         WD.enrich(db, names)
                 except Exception:
                     pass
+        except Exception:
+            pass
+        try:                                         # rodada 22: elencos FotMob (idade, país, valor) do Brasil,
+            # América do Sul e seleções de base, 1x por semana e só com a tela parada (~300 pedidos, poucos minutos)
+            from src.data_hub import autosync as _A
+            from src.data_hub import sync_policy as _P
+
+            last = _P.last_synced(db, "fotmob", "_elencos_semana")
+            if _A.fotmob_enabled() and _A.enabled() and (last is None or
+                                                         datetime.now(timezone.utc) - last > timedelta(days=7)):
+                from src.data_hub.service import MatchDataService
+                from src.data_hub.sources.fotmob import REGIONS
+
+                lgs = REGIONS["brasil"] + REGIONS["sulamericanas"]
+                MatchDataService(db=db).fotmob.sync_rosters(lgs)
+                _P.mark_synced(db, "fotmob", "_elencos_semana")
         except Exception:
             pass
         try:                                         # rodada 13: régua dos confrontos do pré-jogo, 1x por dia

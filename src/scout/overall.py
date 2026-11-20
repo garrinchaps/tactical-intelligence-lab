@@ -411,6 +411,9 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
     out["qualidade"] = ovr.clip(upper=cap).round(0)
+    if "so_base" in out:                     # rodada 22: só jogos de base → fica a ESTIMADA pelo nível de base
+        base_only = out["so_base"].fillna(False).astype(bool)
+        out.loc[base_only, "qualidade"] = pd.to_numeric(out.loc[base_only, "qualidade_base"], errors="coerce")
     out["ovr_reputacao"] = comps["R"].round(0)
     out["ovr_desempenho"] = comps["P"].round(0)
     out["ovr_nota_fotmob"] = comps["T"].round(0)
@@ -423,7 +426,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         out[c] = comps[c]
     src = out.get("fonte_qualidade", pd.Series("", index=out.index)).fillna("").astype(str)
     out["fonte_qualidade"] = np.where(
-        out["qualidade"].notna(),
+        out["qualidade"].notna() & ~out.get("so_base", pd.Series(False, index=out.index)).fillna(False).astype(bool),
         f"overall: reputação ajustada pela idade ({weights.get('wR', 0):.0%}) + desempenho na função "
         f"({weights.get('wP', 0):.0%}) + nota FotMob ajustada pela liga ({weights.get('wT', 0):.0%}) + nível "
         f"({weights.get('wL', 0):.0%}), padronizado por posição e pelos minutos do ano", src)
