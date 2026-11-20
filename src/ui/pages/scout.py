@@ -448,7 +448,13 @@ def _merge_roster(roster, _universe, team=None, version=""):
     r = roster.copy()
     r["_core"] = r["nome"].map(player_core)
     if universe is not None and not universe.empty:
-        lookup = universe.drop_duplicates("_core").set_index("_core")
+        # rodada 24: homônimo → a linha do universo DESTE clube vem primeiro (dois "Matheus Pereira" não trocam de nota)
+        if team and "clube" in universe:
+            tc0 = team_core(team)
+            own = universe[universe["clube"].map(lambda c: team_core(str(c)) == tc0)]
+            lookup = pd.concat([own, universe]).drop_duplicates("_core").set_index("_core")
+        else:
+            lookup = universe.drop_duplicates("_core").set_index("_core")
         # rodada 11: nome do elenco ≠ nome do mercado ("Lucas Romero" × "Lucas Daniel Romero") — liga pela mesma regra
         # da Escalação, só entre atletas do PRÓPRIO clube (nunca junta dois jogadores diferentes por palpite)
         miss = ~r["_core"].isin(lookup.index)
@@ -469,7 +475,14 @@ def _merge_roster(roster, _universe, team=None, version=""):
                 if x in lookup]
         for col in cols:
             mapped = r["_core"].map(lookup[col])
-            r[col] = r[col].combine_first(mapped) if col in r else mapped
+            if col in ("qualidade", "confianca_pct", "fonte_qualidade"):     # UMA qualidade: a do universo manda
+                r[col] = mapped.combine_first(r[col]) if col in r else mapped
+            else:
+                r[col] = r[col].combine_first(mapped) if col in r else mapped
+        for col in ("potencial", "potencial_porque", "pid", "idade"):
+            if col in lookup:
+                mapped = r["_core"].map(lookup[col])
+                r[col] = r[col].combine_first(mapped) if col in r else mapped
     r = _fill_from_club_games(r, universe, team)
     if "qualidade" not in r:
         r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
@@ -770,7 +783,8 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
              type="secondary" if in_plan else "primary", use_container_width=True, disabled=in_plan,
              on_click=_add_player, args=(player, plan_key))
     if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
-        open_view("jogador", name=name, core=player.get("_core"))
+        open_view("jogador", name=name, core=player.get("_core"), club=str(player.get("clube") or ""),
+                  pid=str(player.get("pid") or ""))
     # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
     # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
     _vote_box(team, name, idx, player.get("votos_scout") or (0, 0),
@@ -1197,7 +1211,7 @@ def render(_ctx=None):
                 selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
                                         key="scout_roster_select")
                 if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
-                    open_view("jogador", name=selected)
+                    open_view("jogador", name=selected, club=str(team or ""))
             else:
                 st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
             st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")

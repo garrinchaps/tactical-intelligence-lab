@@ -249,12 +249,18 @@ def cached_data() -> Optional[Dict[str, Any]]:
     return _MEMO.get("data")
 
 
-def find_player(core: str, names: Optional[list] = None, club: str = "") -> Optional[Dict[str, Any]]:
-    """Linha do universo do atleta (núcleo de nome; homônimo → o do clube informado, senão o de mais minutos)."""
+def find_player(core: str, names: Optional[list] = None, club: str = "", pid: str = "") -> Optional[Dict[str, Any]]:
+    """Linha do universo do atleta. Rodada 24: pelo identificador único (pid) quando vier; senão núcleo de nome e,
+    havendo homônimo, SÓ o do clube informado (sem clube que confira → nenhum, para não mostrar a nota de outro)."""
     u = cached_universe()
     if u is None or u.empty:
         return None
     from src.data_lake.ids import player_core
+
+    if pid and "pid" in u:
+        one = u[u["pid"].astype(str) == pid]
+        if not one.empty:
+            return one.iloc[0].to_dict()
 
     cores = {core} | {player_core(n) for n in (names or [])}
     hit = u[u["_core"].astype(str).isin(cores)] if "_core" in u else u.iloc[0:0]
@@ -264,7 +270,11 @@ def find_player(core: str, names: Optional[list] = None, club: str = "") -> Opti
         from src.data_lake.ids import team_core
 
         same = hit[hit["clube"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
-        hit = same if not same.empty else hit
+        if same.empty and "clube_tm" in hit:
+            same = hit[hit["clube_tm"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
+        if same.empty:
+            return None
+        hit = same
     m = pd.to_numeric(hit.get("minutos_12m"), errors="coerce").fillna(0) if "minutos_12m" in hit else pd.Series(0, index=hit.index)
     return hit.loc[m.idxmax()].to_dict()
 

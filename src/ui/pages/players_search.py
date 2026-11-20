@@ -202,12 +202,28 @@ def _ratings_block(pm: pd.DataFrame, names: List[str]) -> Dict[int, Dict]:
     return got
 
 
+def _same_club_rows(hit: pd.DataFrame, club: str) -> pd.DataFrame:
+    """Linhas do índice desse atleta no clube pedido (nomes do clube entre fontes). Transfermarkt só entra se o
+    cadastro também for desse clube — senão o "Otávio" do Cruzeiro herdaria os 132 jogos de outro Otávio."""
+    from src.data_lake.ids import team_core
+
+    try:
+        from src.ui.pages.clubs import same_team_names
+
+        cores = {team_core(n) for n in same_team_names(club)} | {team_core(club)}
+    except Exception:
+        cores = {team_core(club)}
+    same = hit[hit["clube"].fillna("").map(lambda c: team_core(str(c)) in cores)]
+    return same
+
+
 def render(_ctx=None) -> None:
     from src.ui import nav
     from src.ui.context import get_service
 
     nav.back_button(key="player_back")
     core, given = nav.param("core"), nav.param("name")
+    want_club, want_pid = str(nav.param("club") or ""), str(nav.param("pid") or "")
     if not (core or given):
         empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
@@ -218,12 +234,18 @@ def render(_ctx=None) -> None:
         hit = idx[idx["pessoa"] == person]
     else:
         hit = idx
+    if want_club and not hit.empty:
+        # rodada 24: aberto a partir de um elenco/tabela → só o atleta DESSE clube (homônimo de outro clube não entra)
+        hit = _same_club_rows(hit, want_club)
+    if hit.empty and want_club:
+        hit = pd.DataFrame([{"nome": given or core, "clube": want_club, "fonte": "elenco do clube", "jogos": None,
+                             "core": core, "pessoa": core}])
     if hit.empty:
         empty_state("Jogador sem dados na base", "", "👤", "Abra partidas com eventos ou sincronize Transfermarkt/Understat.")
         return
     p = {"core": core, "nome": min(hit["nome"], key=len), "nome_longo": max(hit["nome"], key=len),
-         "clube": next((x for x in list(hit.loc[hit["fonte"] == "Transfermarkt", "clube"]) + list(hit["clube"])
-                        if isinstance(x, str) and x), ""),
+         "clube": want_club or next((x for x in list(hit.loc[hit["fonte"] == "Transfermarkt", "clube"]) + list(hit["clube"])
+                                     if isinstance(x, str) and x), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
@@ -250,7 +272,7 @@ def render(_ctx=None) -> None:
             from src.scout import snapshot as S
             from src.ui import player_fm
 
-            row = S.find_player(p["core"], names, p["clube"])
+            row = S.find_player(p["core"], names, p["clube"], pid=want_pid)
             if row:
                 from src.analytics.rating_v2 import RATING_ENGINE_VERSION
 
@@ -270,6 +292,8 @@ def render(_ctx=None) -> None:
             from src.data_hub.player_resolver import merge_match_rows
 
             pm = merge_match_rows(pm)
+        if want_club and not pm.empty and "team_name" in pm:     # rodada 24: homônimo de outro clube fica de fora
+            pm = _same_club_rows(pm.rename(columns={"team_name": "clube"}), want_club).rename(columns={"clube": "team_name"})
         if pm.empty:
             empty_state("Nenhum jogo com lances deste atleta na base", "", "🗓️",
                         "Os jogos com todos os lances vêm da StatsBomb/Wyscout.")
@@ -304,6 +328,8 @@ def render(_ctx=None) -> None:
         except Exception:
             tm = pd.DataFrame()
         r = tm[tm["nome"].map(_norm) == p["core"]] if not tm.empty else tm
+        if want_club and len(r) > 1 and "clube" in r:           # rodada 24: homônimo → só o cadastro do clube certo
+            r = _same_club_rows(r, want_club)
         if r.empty:
             empty_state("Sem perfil do Transfermarkt", "", "💶", "python -m src.data_hub.sync --only transfermarkt lake")
         else:

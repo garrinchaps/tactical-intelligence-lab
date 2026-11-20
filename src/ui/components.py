@@ -379,7 +379,7 @@ def comparison_table(df: pd.DataFrame, caption: str = "") -> None:
 
 
 def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "jogador", caption: str = "",
-                    team_col: Optional[str] = None) -> None:
+                    team_col: Optional[str] = None, club: str = "") -> None:
     """
     Tabela em que clicar numa linha abre a página da entidade (jogador ou time) — v36: "clicar no nome abre a página".
     A seleção é limpa ao abrir, para o "← Voltar" não reabrir a mesma página.
@@ -400,7 +400,9 @@ def clickable_table(df: pd.DataFrame, key: str, name_col: str, kind: str = "joga
             if kind == "jogador":
                 from src.data_lake.ids import player_core
 
-                nav.open_view("jogador", name=name, core=player_core(name))
+                # rodada 24: o clube vai junto — homônimo (dois "Otávio") abre o perfil do clube certo
+                team = str(r.get(team_col) or "") if team_col and team_col in view.columns else club
+                nav.open_view("jogador", name=name, core=player_core(name), club=team)
             else:
                 nav.open_view("time", name=name)
 

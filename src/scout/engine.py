@@ -464,6 +464,10 @@ def fill_positions_from_lineups(db, raw: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+ACTIVE_DAYS = 365          # rodada 24: janela para "atleta ativo" (entra no universo mesmo sem cadastro de mercado)
+ACTIVE_MIN_MINUTES = 90    # basta um jogo inteiro no último ano
+
+
 def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str]] = None,
                         progress: Optional[Callable[[str], None]] = None) -> pd.DataFrame:
     """Resume histórico completo dos atletas relevantes sem carregar todo o universo de aparições.
@@ -508,8 +512,10 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                 # Descobre jogadores sem cadastro Transfermarkt por jogos/minutos recentes.
                 # CROSS JOIN fixa matches como tabela externa: usa o índice de data e consulta
                 # as estatísticas pelo match_id, em vez de varrer o índice de todos os atletas.
-                report("Identificando atletas ativos nos últimos 180 dias...")
-                active_since = (date.today() - timedelta(days=180)).isoformat()
+                report("Identificando atletas ativos nos últimos 365 dias...")
+                # rodada 24: todo atleta com minutos no último ano entra (antes 450 min e 4 jogos em 180 dias — a
+                # Série B e as ligas sul-americanas ficavam com poucas centenas de jogadores)
+                active_since = (date.today() - timedelta(days=ACTIVE_DAYS)).isoformat()
                 has_covering_index = conn.execute(
                     "SELECT 1 FROM sqlite_master WHERE type='index' AND name=?",
                     ("idx_pstats_match_player_minutes",),
@@ -548,7 +554,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
                         jogos=("match_id", "nunique"),
                     )
                     active_cores = set(active_totals.index[
-                        (active_totals["minutos"] >= 450) & (active_totals["jogos"] >= 4)
+                        (active_totals["minutos"] >= ACTIVE_MIN_MINUTES) & (active_totals["jogos"] >= 1)
                     ])
                 report(f"Atletas ativos elegíveis: {len(active_cores):,}")
                 relevant_cores = target_cores | active_cores
@@ -611,6 +617,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     ).dropna().drop_duplicates().tolist()
     club_map = {name: team_core(name) for name in club_values}
     raw["_club_core"] = raw["team_name"].map(club_map)
+    raw = assign_person_ids(raw)
 
     # A chave do confronto depende só dos metadados da partida; calculá-la no nível de match_id
     # elimina um apply(axis=1) sobre centenas de milhares de aparições.
@@ -624,7 +631,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     fixture_map = fixtures.set_index("match_id")["_fixture"]
     raw["_fixture"] = raw["match_id"].map(fixture_map)
 
-    duplicate_mask = raw.duplicated(["_core", "_fixture", "_club_core"], keep=False)
+    duplicate_mask = raw.duplicated(["_pid", "_fixture", "_club_core"], keep=False)
     raw["_richness"] = 0
     if duplicate_mask.any():
         # Riqueza só é necessária para escolher entre duplicatas do mesmo jogo real.
@@ -632,7 +639,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
             lambda value: len(_json_obj(value))
         )
     raw = raw.sort_values(["_richness", "minutes"], ascending=False).drop_duplicates(
-        ["_core", "_fixture", "_club_core"], keep="first"
+        ["_pid", "_fixture", "_club_core"], keep="first"
     )
 
     # Decodifica cada JSON uma única vez e transforma as métricas em colunas numéricas.
@@ -696,24 +703,24 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     raw["_opponent_adjustment_weight"] = pd.to_numeric(raw["_opponent_adjustment"], errors="coerce").fillna(0) * raw["_opponent_minutes"]
 
     report("Calculando totais da carreira por jogador...")
-    career = _history_group_totals(raw, ["_core"])
+    career = _history_group_totals(raw, ["_pid"])
 
     report("Calculando totais por temporada...")
     raw["_season_group"] = raw["season_name"].where(
         raw["season_name"].notna(), "__SEASON_NOT_IDENTIFIED__"
     )
-    season_totals = _history_group_totals(raw, ["_core", "_season_group"])
+    season_totals = _history_group_totals(raw, ["_pid", "_season_group"])
     if not season_totals.empty:
         season_rows = season_totals.reset_index()
         season_rows["temporada"] = season_rows["_season_group"].replace(
             {"__SEASON_NOT_IDENTIFIED__": "não identificada"}
         )
         season_rows = season_rows.sort_values(
-            ["_core", "temporada"], ascending=True, kind="stable"
+            ["_pid", "temporada"], ascending=True, kind="stable"
         )
         season_by_core = {
-            core: group.drop(columns=["_core", "_season_group"]).to_dict("records")
-            for core, group in season_rows.groupby("_core", sort=False)
+            core: group.drop(columns=["_pid", "_season_group"]).to_dict("records")
+            for core, group in season_rows.groupby("_pid", sort=False)
         }
     else:
         season_by_core = {}
@@ -721,21 +728,21 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     report("Calculando janela dos últimos 12 meses...")
     recent_cutoff = (pd.Timestamp.today().normalize() - pd.Timedelta(days=365)).strftime("%Y-%m-%d")
     recent_rows = raw.loc[raw["match_date"].astype(str) >= recent_cutoff]
-    recent_totals = _history_group_totals(recent_rows, ["_core"]) if not recent_rows.empty else pd.DataFrame()
+    recent_totals = _history_group_totals(recent_rows, ["_pid"]) if not recent_rows.empty else pd.DataFrame()
 
     ordered = raw.sort_values("match_date", ascending=False, kind="stable")
-    latest = ordered.drop_duplicates("_core", keep="first").set_index("_core")
-    recent_games = ordered.groupby("_core", sort=False, group_keys=False).head(15)
+    latest = ordered.drop_duplicates("_pid", keep="first").set_index("_pid")
+    recent_games = ordered.groupby("_pid", sort=False, group_keys=False).head(15)
     games_by_core = {
         core: group[["match_date", "team_name", "competition_name", "minutes", "rating",
                      "rating_ajustada", "_opponent_level", "_opponent_adjustment", "stats_json"]]
         .to_dict("records")
-        for core, group in recent_games.groupby("_core", sort=False)
+        for core, group in recent_games.groupby("_pid", sort=False)
     }
     # rodada 19: registro sem posição (FotMob só marca o goleiro nos números por jogador) não vota na posição
     _pos = raw["position"].fillna("").astype(str).str.strip()
     _pos = _pos[~_pos.isin(["", "SUB", "Sub", "sub", "?"])]
-    positions = (_pos.groupby(raw.loc[_pos.index, "_core"], sort=False).agg(lambda v: v.mode().iloc[0])
+    positions = (_pos.groupby(raw.loc[_pos.index, "_pid"], sort=False).agg(lambda v: v.mode().iloc[0])
                  if len(_pos) else pd.Series(dtype=str))
 
     recent_by_core = recent_totals.to_dict("index") if not recent_totals.empty else {}
@@ -747,6 +754,9 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         all_data["nome_observado"] = _safe_str(latest.at[core, "player_name"])
         all_data["posicao_observada"] = _safe_str(positions.get(core, ""))
         all_data["nacionalidade_observada"] = None
+        all_data["pid"] = core
+        all_data["core_nome"] = _safe_str(latest.at[core, "_core"])
+        all_data["fotmob_id"] = latest.at[core, "_fid"] if "_fid" in latest else None
         all_data.update({
             "minutos_12m": int(recent.get("minutos", 0) or 0),
             "jogos_12m": int(recent.get("jogos", 0) or 0),
@@ -763,14 +773,164 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
         summaries.append({"core": core, **all_data})
 
     result = pd.DataFrame(summaries)
+    if not result.empty:
+        # rodada 24: "core" continua sendo o núcleo do nome quando só existe UMA pessoa com ele; homônimos (dois
+        # "Otávio" com ids diferentes na FotMob, ou o mesmo nome em clubes diferentes sem id) ficam separados
+        dup = result["core_nome"].duplicated(keep=False)
+        result["core"] = result["core_nome"].where(~dup, result["core_nome"] + "#" + result["pid"].astype(str))
+        result["homonimo"] = dup
+        result = attach_roster_identity(db, result)
     report(f"Histórico agregado: {len(result):,} jogadores")
     return result
+
+
+def assign_person_ids(raw: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 24 — identidade da PESSOA em cada registro de jogo, nunca só pelo nome.
+
+    1) registro com id do atleta na FotMob → "fm<id>" (o mesmo id junta grafias diferentes);
+    2) registro sem id (ESPN, API-Football…) → o id FotMob do MESMO nome no MESMO clube, se houver um só;
+    3) sem id e sem casamento pelo clube, mas o nome tem id em outro clube → pessoa separada "nm:<nome>|<clube>"
+       (pode ser homônimo; só se junta quando nome, clube e época batem);
+    4) nome que nunca aparece com id → "nm:<nome>" (comportamento antigo das bases sem id)."""
+    r = raw
+    sj = r["stats_json"].astype(str) if "stats_json" in r else pd.Series("", index=r.index)
+    fid = pd.to_numeric(sj.str.extract(r'"fotmob_id"\s*:\s*"?(\d+)', expand=False), errors="coerce")
+    r["_fid"] = fid
+    has = fid.notna()
+    pid = pd.Series("fm" + fid.astype("Int64").astype(str), index=r.index).where(has, "")
+    if has.any():
+        w = r.loc[has, ["_core", "_club_core", "_fid"]]
+        g = w.groupby(["_core", "_club_core"])["_fid"].agg(["first", "nunique"])
+        by_club = g["first"].where(g["nunique"] == 1)
+        club_key = list(zip(r["_core"], r["_club_core"].fillna("")))
+        hit = pd.Series([by_club.get(k, np.nan) for k in club_key], index=r.index)
+        cores_with_id = set(w["_core"])
+        none = ~has
+        ok = none & hit.notna()
+        pid[ok] = "fm" + hit[ok].astype("int64").astype(str)
+        r.loc[ok, "_fid"] = hit[ok]
+        other = none & ~ok & r["_core"].isin(cores_with_id)
+        pid[other] = "nm:" + r.loc[other, "_core"].astype(str) + "|" + r.loc[other, "_club_core"].fillna("").astype(str)
+    rest = pid.eq("")
+    pid[rest] = "nm:" + r.loc[rest, "_core"].astype(str)
+    r["_pid"] = pid
+    # o núcleo de nome exibido de cada pessoa = o mais comum entre os registros dela (grafias diferentes, mesma pessoa)
+    cnt = r.groupby(["_pid", "_core"]).size().reset_index(name="n").sort_values("n", kind="stable")
+    mode_core = cnt.drop_duplicates("_pid", keep="last").set_index("_pid")["_core"]
+    r["_core"] = r["_pid"].map(mode_core)
+    return r
+
+
+def attach_roster_identity(db, hist: pd.DataFrame) -> pd.DataFrame:
+    """Nascimento, país, valor, altura, posição e clube inscrito pelo elenco da FotMob (mesmo id do atleta)."""
+    cols = {"birth": "nascimento_fm", "country": "nacionalidade_fm", "market_value": "valor_fm",
+            "height": "altura_fm", "position": "posicao_fm", "team": "clube_fm"}
+    for c in cols.values():
+        if c not in hist:
+            hist[c] = None
+    ids = pd.to_numeric(hist.get("fotmob_id"), errors="coerce")
+    if ids.notna().sum() == 0:
+        return hist
+    try:
+        with db.connect() as conn:
+            if not conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'fotmob_rosters'").fetchone():
+                return hist
+            ro = pd.read_sql_query("SELECT player_id, team, birth, country, market_value, height, position, fetched_at "
+                                   "FROM fotmob_rosters", conn)
+    except Exception:
+        return hist
+    if ro.empty:
+        return hist
+    try:
+        from src.squad.planner import national_team_key
+
+        ro = ro[[not national_team_key(str(t or "")) for t in ro["team"]]]
+    except Exception:
+        pass
+    ro = ro.sort_values("fetched_at").drop_duplicates("player_id", keep="last").set_index("player_id")
+    key = ids.astype("Int64")
+    for src_col, dst in cols.items():
+        hist[dst] = key.map(ro[src_col]).where(key.notna(), None)
+    return hist
 
 
 def _history_map(history: Optional[pd.DataFrame]) -> Dict[str, Dict[str, Any]]:
     if history is None or history.empty or "core" not in history:
         return {}
     return {str(r["core"]): r.to_dict() for _, r in history.iterrows()}
+
+
+def _fam_of(pos: Any) -> str:
+    r = _role(pos, "") if _safe_str(pos) else ""
+    return "GK" if r == "GK" else ("" if not r else "OUT")
+
+
+def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
+    """Rodada 24 — cadastro (Transfermarkt) × pessoas do histórico. Nunca só pelo nome:
+    nascimento diferente (> 13 meses) ou goleiro × jogador de linha = pessoas diferentes; clube igual, nascimento igual
+    e nacionalidade igual somam confiança. Nome repetido no cadastro só casa com confiança (clube ou nascimento) e
+    cada pessoa do histórico vai para no máximo uma linha do cadastro. Sem casamento seguro, os dois ficam separados."""
+    out = pd.Series([None] * len(p), index=p.index, dtype=object)
+    if hist is None or hist.empty or "core" not in hist:
+        return out
+    h = hist.copy()
+    if "core_nome" not in h:
+        h["core_nome"] = h["core"]
+    h["core_nome"] = h["core_nome"].fillna(h["core"]).astype(str)
+    cand_by_name: Dict[str, List[Dict[str, Any]]] = {}
+    for rec in h[[c for c in ("core", "core_nome", "ultimo_time", "clube_fm", "posicao_observada", "posicao_fm",
+                              "nascimento_fm", "nacionalidade_fm", "minutos_12m") if c in h]].to_dict("records"):
+        cand_by_name.setdefault(rec["core_nome"], []).append(rec)
+    tm_dup = p["_core"].duplicated(keep=False)
+    births = pd.to_datetime(p.get("nascimento"), errors="coerce")
+    scored: List[Tuple[float, Any, str]] = []
+    for i, core, club, pos, fun, nat, dup in zip(p.index, p["_core"].astype(str), p["clube"], p["posicao"], p["funcao"],
+                                                 p["nacionalidade"], tm_dup):
+        cands = cand_by_name.get(core)
+        if not cands:
+            continue
+        club_c = team_core(_safe_str(club)) if _safe_str(club) else ""
+        fam = "GK" if _role(pos, fun) == "GK" else "OUT"
+        b0 = births.get(i)
+        nat_c = _country_core(nat) if _safe_str(nat) else ""
+        options = []
+        for c in cands:
+            score = 0.0
+            b1 = pd.to_datetime(c.get("nascimento_fm"), errors="coerce")
+            if pd.notna(b0) and pd.notna(b1):
+                if abs((b0 - b1).days) > 400:
+                    continue                                    # outra pessoa
+                score += 3
+            cf = _fam_of(c.get("posicao_fm")) or _fam_of(c.get("posicao_observada"))
+            if cf and cf != fam:
+                continue                                        # goleiro × linha
+            clubs = {team_core(_safe_str(c.get(k))) for k in ("ultimo_time", "clube_fm") if _safe_str(c.get(k))}
+            same_club = bool(club_c) and club_c in clubs
+            if same_club:
+                score += 2
+            n1 = _country_core(c.get("nacionalidade_fm")) if _safe_str(c.get("nacionalidade_fm")) else ""
+            if nat_c and n1:
+                if nat_c == n1 or n1 in nat_c or nat_c in n1:
+                    score += 1
+                elif not same_club and score < 3:
+                    continue                                    # país e clube diferentes, sem nascimento: não junta
+            options.append((score, c["core"]))
+        if not options:
+            continue
+        options.sort(key=lambda t: -t[0])
+        best = options[0]
+        tie = len(options) > 1 and options[1][0] == best[0]
+        if dup or len(cands) > 1:
+            if best[0] < 2 or tie:
+                continue                                        # homônimo sem confirmação: fica separado
+        scored.append((best[0], i, best[1]))
+    taken: set = set()
+    for score, i, key in sorted(scored, key=lambda t: -t[0]):
+        if key in taken:
+            continue
+        taken.add(key)
+        out.at[i] = key
+    return out
 
 
 def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[pd.DataFrame] = None,
@@ -807,20 +967,20 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
             if col not in p:
                 p[col] = None
 
-    # Homônimos no catálogo Transfermarkt continuam sem receber estatísticas ambíguas.
-    duplicated_core = p["_core"].duplicated(keep=False)
-    history_cores = set(history_frame["core"].astype(str)) if not history_frame.empty else set()
-    has_history = p["_core"].astype(str).isin(history_cores)
-    attach_mask = has_history & ~duplicated_core
-
-    if history_columns and attach_mask.any():
+    # rodada 24: cada linha do cadastro só recebe o histórico de UMA pessoa e só quando a identidade confere —
+    # mesmo nome + (clube, nascimento, posição de goleiro × linha, nacionalidade). Homônimo vira perfil próprio.
+    p["_hkey"] = None
+    p["historico_ambiguo"] = False
+    if history_columns:
+        p["_hkey"] = match_market_to_history(p, history_frame)
+    matched = p["_hkey"].notna()
+    if history_columns and matched.any():
         base_columns = set(p.columns)
-        attach = history_frame[history_frame["core"].isin(p.loc[attach_mask, "_core"])].copy()
+        attach = history_frame[history_frame["core"].isin(set(p.loc[matched, "_hkey"]))].copy()
         attach["__history_present"] = True
         rename = {col: f"__history_{col}" for col in history_columns}
         attach = attach.rename(columns=rename)
-        p = p.merge(attach, left_on="_core", right_on="core", how="left",
-                    sort=False, validate="many_to_one")
+        p = p.merge(attach, left_on="_hkey", right_on="core", how="left", sort=False, validate="many_to_one")
         matched = p["__history_present"].fillna(False).astype(bool)
         for col in history_columns:
             hist_col = f"__history_{col}"
@@ -844,31 +1004,9 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                 lambda value: json.dumps(value if isinstance(value, (list, dict)) else [],
                                          ensure_ascii=False, default=str)
             )
-
-    # rodada 13: homônimo no cadastro (dois "Zé Lucas") não fica mais sem números — o histórico vai para o atleta cujo
-    # clube no cadastro é o MESMO clube dos jogos recentes; sem um único casamento pelo clube, continua bloqueado.
-    if history_columns and duplicated_core.any() and "ultimo_time" in history_frame:
-        hmap = history_frame.set_index("core")
-        cand = p[duplicated_core & p["_core"].astype(str).isin(history_cores)]
-        for core, grp in cand.groupby("_core"):
-            last_team = team_core(_safe_str(hmap.at[core, "ultimo_time"])) if core in hmap.index else ""
-            if not last_team:
-                continue
-            hits = grp[grp["clube"].map(lambda c: team_core(_safe_str(c)) == last_team)]
-            if len(hits) != 1:
-                continue
-            i = hits.index[0]
-            for col in history_columns:
-                v = hmap.at[core, col]
-                if col in ("historico_temporadas", "ultimos_jogos"):
-                    v = json.dumps(v if isinstance(v, (list, dict)) else [], ensure_ascii=False, default=str)
-                p.at[i, col] = v
-            matched.loc[i] = True
-            p.loc[grp.index.difference([i]), "historico_ambiguo"] = True
-            p.at[i, "historico_ambiguo"] = False
-    duplicated_after_merge = p["_core"].duplicated(keep=False)
-    ambiguous = duplicated_after_merge & p["_core"].astype(str).isin(history_cores) & \
-        ~p.get("historico_ambiguo", pd.Series(False, index=p.index)).eq(False)
+    history_names = set(history_frame["core_nome"].astype(str)) if "core_nome" in history_frame else \
+        (set(history_frame["core"].astype(str)) if not history_frame.empty else set())
+    ambiguous = ~matched & p["_core"].astype(str).isin(history_names) & p["_core"].duplicated(keep=False)
     p.loc[ambiguous, "historico_ambiguo"] = True
     no_history = ~matched & ~ambiguous
     p.loc[no_history, "clube_observado"] = False
@@ -932,7 +1070,7 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     # Amplia o universo com atletas ausentes do cadastro TM, mas observados recentemente em escalações
     # e com exposição mínima. Sem idade, contrato ou valor publicados, esses campos ficam vazios.
     if history is not None and not history.empty and "core" in history:
-        known = set(p["_core"].dropna().astype(str))
+        known = set(p["_hkey"].dropna().astype(str)) if "_hkey" in p else set(p["_core"].dropna().astype(str))
         # Filtra vetorialmente o histórico antes de montar os atletas sem cadastro de mercado.
         extra_history = history.copy()
         extra_history["_scout_core"] = extra_history["core"].map(_safe_str)
@@ -950,24 +1088,26 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
             extra_history["_scout_core"].ne("")
             & ~extra_history["_scout_core"].isin(known)
             & extra_last_game.notna()
-            & (extra_last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=180))
-            & (extra_minutes >= 450)
-            & (extra_games >= 4)
+            & (extra_last_game >= pd.Timestamp.today().normalize() - pd.Timedelta(days=ACTIVE_DAYS + 35))
+            & (extra_minutes >= ACTIVE_MIN_MINUTES)
+            & (extra_games >= 1)
         )
         observed = []
         for item in extra_history.loc[extra_mask].drop(columns=["_scout_core"]).to_dict("records"):
             core = _safe_str(item.get("core"))
             name = _safe_str(item.get("nome_observado"))
-            role = _role(item.get("posicao_observada"), "")
+            pos_obs = _safe_str(item.get("posicao_observada")) or _safe_str(item.get("posicao_fm"))
+            role = _role(pos_obs, "") if pos_obs else ""
             if not name or not role:
                 continue
+            item["posicao_observada"] = pos_obs
             record = {col: None for col in p.columns}
-            record.update({"nome": name, "clube": _safe_str(item.get("ultimo_time")),
+            record.update({"nome": name, "clube": _safe_str(item.get("clube_fm")) or _safe_str(item.get("ultimo_time")),
                            "posicao": _safe_str(item.get("posicao_observada")), "funcao": _safe_str(item.get("posicao_observada")),
                            "nacionalidade": None, "nascimento": None, "idade": np.nan,
                            "valor_mercado_eur": np.nan, "fim_contrato": pd.NaT,
                            "transfermarkt_id": None, "clube_id": None, "papel": role, "_role": role,
-                           "_core": core, "clube_observado": True,
+                           "_core": _safe_str(item.get("core_nome")) or core, "_hkey": core, "clube_observado": True,
                            "fonte_clube_observado": "últimas partidas disponíveis; sem cadastro TM",
                            "sem_cadastro_mercado": True})
             for key, value in item.items():
@@ -975,8 +1115,18 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
                     record[key] = value
             record["historico_temporadas"] = json.dumps(item.get("historico_temporadas", []), ensure_ascii=False, default=str)
             record["ultimos_jogos"] = json.dumps(item.get("ultimos_jogos", []), ensure_ascii=False, default=str)
-            record["idade"] = np.nan
-            record["valor_mercado_eur"] = np.nan
+            # rodada 24: idade, país, valor e altura pelo elenco da FotMob (mesmo id do atleta), quando existir
+            born = pd.to_datetime(item.get("nascimento_fm"), errors="coerce")
+            record["nascimento"] = born.date().isoformat() if pd.notna(born) else None
+            record["idade"] = round((pd.Timestamp.today() - born).days / 365.25, 1) if pd.notna(born) else np.nan
+            record["nacionalidade"] = _safe_str(item.get("nacionalidade_fm")) or None
+            vfm = pd.to_numeric(item.get("valor_fm"), errors="coerce")
+            record["valor_mercado_eur"] = float(vfm) if pd.notna(vfm) and vfm > 0 else np.nan
+            hfm = pd.to_numeric(item.get("altura_fm"), errors="coerce")
+            if pd.notna(hfm) and hfm > 0:
+                record["altura_cm"] = float(hfm)
+            if record["nacionalidade"] or pd.notna(born):
+                record["fonte_identidade"] = "elenco FotMob (id do atleta)"
             record["fim_contrato"] = pd.NaT
             record["clube_valor_total_eur"] = np.nan
             observed.append(record)
@@ -986,6 +1136,13 @@ def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[
     for col in ("minutos", "jogos", "rating_media", "minutos_12m", "jogos_12m", "rating_12m"):
         if col not in p:
             p[col] = np.nan
+    # rodada 24: identificador único de cada perfil (id FotMob, nome+clube, ou o id do Transfermarkt)
+    if "pid" not in p:
+        p["pid"] = None
+    tm_pid = "tm" + p["transfermarkt_id"].astype(str)
+    p["pid"] = p["pid"].where(p["pid"].notna() & p["pid"].astype(str).ne("") & p["pid"].astype(str).ne("nan"),
+                              tm_pid.where(p["transfermarkt_id"].notna(), "nm:" + p["_core"].astype(str) + "|"
+                                           + p["clube"].map(lambda c: team_core(_safe_str(c)))))
     p["minutos"] = pd.to_numeric(p["minutos"], errors="coerce")
     p["minutos_12m"] = pd.to_numeric(p["minutos_12m"], errors="coerce")
     p["jogos"] = pd.to_numeric(p["jogos"], errors="coerce")
@@ -2567,7 +2724,11 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     liga = u.get("clube_liga", pd.Series("", index=u.index)).fillna("").astype(str)
     last_comp = u.get("ultima_competicao", pd.Series("", index=u.index)).fillna("").astype(str)
     main_comp = u["competicao_principal"].fillna("").astype(str)
-    u["clube_liga"] = liga.where(liga.str.strip() != "", main_comp.where(main_comp != "", last_comp))
+    # rodada 24: clube trocado pelo da última partida (Casemiro no Inter Miami) → a liga é a do jogo recente, não a
+    # liga do clube antigo ("Premier League" ao lado do Inter Miami)
+    observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
+    fallback = np.where(observed & (last_comp != ""), last_comp, np.where(main_comp != "", main_comp, last_comp))
+    u["clube_liga"] = liga.where(liga.str.strip() != "", pd.Series(fallback, index=u.index))
     u["origem"] = u["clube_liga"].map(origin_group)
     return u
 

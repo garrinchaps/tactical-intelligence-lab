@@ -191,7 +191,7 @@ def _stats_table(ctx: MatchContext) -> None:
     from src.ui.components import clickable_table
 
     clickable_table(view.rename(columns={"jogador": "Jogador", "equipe": "Equipe", "posicao": "Posição", **labels}),
-                    f"ps_click_{cat}", "Jogador", "jogador",
+                    f"ps_click_{cat}", "Jogador", "jogador", team_col="Equipe", caption=
                     "Contagens diretas dos eventos da partida. Assistência = último passe certo para o autor do gol.")
     st.download_button("Baixar tabela (.csv)", view.to_csv(index=False).encode("utf-8-sig"),
                        file_name=f"atletas_{ctx.match_id}.csv", mime="text/csv")

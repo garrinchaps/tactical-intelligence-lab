@@ -69,6 +69,29 @@ def _card(title: str, items, color: str) -> str:
             f'<ul style="margin:0 0 0 1rem;padding:0;font-size:.86rem">{li}</ul></div>')
 
 
+def with_scout_quality(df: pd.DataFrame, name_col: str = "player_name", team_col: str = "team_name") -> pd.DataFrame:
+    """Rodada 24: qualidade e potencial vêm do universo do Scout (nome + clube; homônimo sem clube que confira = vazio)."""
+    out = df.copy()
+    out["qualidade_scout"], out["potencial_scout"] = np.nan, np.nan
+    try:
+        from src.data_lake.ids import player_core, team_core
+        from src.scout import snapshot as S
+
+        u = S.cached_universe()
+        if u is None or u.empty:
+            return out
+        key = u["_core"].astype(str) + "|" + u["clube"].fillna("").map(lambda c: team_core(str(c)))
+        pot = u["potencial"] if "potencial" in u else u.get("potencial_teto")
+        q = dict(zip(key, pd.to_numeric(u.get("qualidade"), errors="coerce")))
+        pp = dict(zip(key, pd.to_numeric(pot, errors="coerce"))) if pot is not None else {}
+        k = out[name_col].map(lambda n: player_core(str(n))) + "|" + out[team_col].fillna("").map(lambda c: team_core(str(c)))
+        out["qualidade_scout"] = k.map(q).round(0)
+        out["potencial_scout"] = k.map(pp).round(0)
+    except Exception:
+        pass
+    return out
+
+
 def render(_ctx=None) -> None:
     hero("Scout · avaliação", "Rankings que respondem perguntas diferentes",
          "Melhor da temporada não é o mesmo que maior potencial, nem o mesmo que quem rende contra os fortes. Cada "
@@ -123,8 +146,10 @@ def render(_ctx=None) -> None:
         return
     show = v.head(100).assign(**{"% min. do time": (100 * v["min_share"]).round(0),
                                  "idade": pd.to_numeric(v["idade"], errors="coerce").round(0)})
-    table = show[["player_name", "team_name", "comp", "funcao", "idade", "games", "minutes", "starts", "subs",
-                  "% min. do time", col, "desempenho_90", "confianca_amostra"]].rename(columns={
+    show = with_scout_quality(show)          # rodada 24: a MESMA qualidade do Scout/elenco/página do jogador
+    table = show[["player_name", "team_name", "comp", "funcao", "idade", "qualidade_scout", "potencial_scout", "games",
+                  "minutes", "starts", "subs", "% min. do time", col, "desempenho_90", "confianca_amostra"]].rename(columns={
+        "qualidade_scout": "Qualidade", "potencial_scout": "Potencial",
         "player_name": "Jogador", "team_name": "Time", "comp": "Competição", "funcao": "Função", "idade": "Idade",
         "games": "Jogos", "minutes": "Minutos", "starts": "Titular", "subs": "Entrou", col: pick.split(" ", 1)[1],
         "desempenho_90": "Desempenho/90", "confianca_amostra": "Amostra"})

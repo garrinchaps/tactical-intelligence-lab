@@ -373,7 +373,7 @@ def test_load_player_history_filters_names_but_keeps_full_history_and_active_unl
     by_core = history.set_index("core")
     assert "alpha target" in by_core.index
     assert "beta unlisted" in by_core.index
-    assert "gamma legacy" not in by_core.index
+    assert "gamma legacy" in by_core.index          # rodada 24: um jogo inteiro no último ano já entra
     assert by_core.loc["alpha target", "jogos"] == 2
     assert by_core.loc["alpha target", "minutos"] == 180
     assert by_core.loc["alpha target", "rating_media"] == 7.0

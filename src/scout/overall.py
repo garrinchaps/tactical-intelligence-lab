@@ -88,11 +88,35 @@ REFERENCE_TARGETS: Dict[str, int] = {
     "Santiago Giménez": 81, "Christopher Nkunku": 81, "Gabriel Jesus": 80, "Vitor Roque": 79,
 }
 
+# rodada 24: alvos acrescentados pela lista do usuário — quem estava ALTO demais (goleiros e laterais de times médios,
+# veteranos) e brasileiros/sul-americanos. Mesmo papel dos anteriores: calibrar a régua, não substituir a medição.
+REFERENCE_TARGETS.update({
+    # goleiros que estavam inflados
+    "Uğurcan Çakır": 84, "Joan García": 83, "Mile Svilar": 84, "Gregor Kobel": 84, "Caoimhín Kelleher": 82,
+    "Marco Carnesecchi": 82, "Senne Lammens": 80, "Lukáš Horníček": 76, "Konstantinos Tzolakis": 74, "Hugo Souza": 76,
+    "Bento": 76, "Rafael": 75, "Weverton": 76, "Fábio": 74,
+    # laterais e zagueiros de clubes médios
+    "Federico Dimarco": 86, "Alejandro Grimaldo": 84, "Matheus Nunes": 83, "João Cancelo": 83, "Luke Shaw": 79,
+    "Maximilian Mittelstädt": 80, "David Raum": 81, "Waldemar Anton": 80, "Marcos Senesi": 79, "Jan Paul van Hecke": 80,
+    "Nico Schlotterbeck": 85, "Cristian Romero": 85, "Gleison Bremer": 84, "Wesley": 80, "Vitor Reis": 76,
+    "Alex Sandro": 76, "Guilherme Arana": 77, "Léo Ortiz": 78, "Fabrício Bruno": 76,
+    # meias e atacantes de times médios
+    "Ollie Watkins": 83, "Jarrod Bowen": 82, "Serhou Guirassy": 83, "Kiernan Dewsbury-Hall": 78, "James Garner": 79,
+    "Deniz Undav": 80, "Leandro Trossard": 81,
+    # veteranos (a idade não pode inflar)
+    "Mohamed Salah": 87, "Casemiro": 79, "Robert Lewandowski": 84, "Luka Modrić": 81, "Neymar": 80,
+    # Brasil e América do Sul
+    "Matheus Pereira": 82, "Kaio Jorge": 79, "Gerson": 80, "Lucas Paquetá": 82, "Endrick": 78, "Gabriel Martinelli": 84,
+    "João Pedro": 84, "Igor Thiago": 81, "Pedro": 79, "Giorgian de Arrascaeta": 81, "Estêvão": 80,
+    "Bruno Henrique": 76, "Everton Ribeiro": 74, "Philippe Coutinho": 76, "Lucas Moura": 75, "Hulk": 75,
+    "Gabriel Barbosa": 75, "Luiz Henrique": 79, "Savinho": 81, "Vitor Roque": 79,
+})
+
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
 
 # teto por família (no FC os melhores laterais ficam abaixo dos melhores atacantes)
-FAMILY_CAP = {"ST": 94, "WIDE": 93, "AM": 92, "MID": 92, "CB": 92, "GK": 91, "FB": 90}
+FAMILY_CAP = {"ST": 94, "WIDE": 93, "AM": 92, "MID": 92, "CB": 91, "GK": 90, "FB": 89}
 
 # colocação GLOBAL (régua padronizada por posição) → overall. Calibrada para um universo de ~20 mil jogadores; em
 # universos menores a colocação é reescalada (o 1º de uma base pequena não vira 94 automaticamente).
@@ -118,7 +142,8 @@ def age_factor(age: pd.Series) -> pd.Series:
     """Corrige o valor de mercado pela idade: ≥ 28 anos o mercado desconta a idade (×1 a ×2,1 aos 37); ≤ 22 o preço
     embute projeção (×0,75 aos 18)."""
     a = pd.to_numeric(age, errors="coerce")
-    up = 1 + .12 * (a - 27).clip(lower=0, upper=10)
+    # rodada 24: o desconto de veterano era generoso demais (Salah 89, Casemiro 86 com 34 anos); ×1,49 no máximo
+    up = 1 + .07 * (a - 27).clip(lower=0, upper=7)
     down = 1 - .05 * (23 - a).clip(lower=0, upper=5)
     return (up * down).fillna(1.0)
 
@@ -136,6 +161,25 @@ def _pct(values: pd.Series, groups: pd.Series, reference: Optional[pd.DataFrame]
         x = v.loc[idx]
         out.loc[idx] = np.searchsorted(ref, x.values, side="right") / len(ref) * 100
         out.loc[idx[x.isna()]] = np.nan
+    return out
+
+
+def previous_season_minutes(u: pd.DataFrame) -> pd.Series:
+    """Maior minutagem entre as 3 temporadas mais recentes do histórico (só para quem jogou pouco no último ano)."""
+    out = pd.Series(np.nan, index=u.index)
+    if "historico_temporadas" not in u:
+        return out
+    m12 = _col(u, "minutos_12m").fillna(0)
+    for i in u.index[m12 < 1350]:
+        v = u.at[i, "historico_temporadas"]
+        try:
+            seasons = json.loads(v) if isinstance(v, str) else (v if isinstance(v, list) else [])
+        except Exception:
+            continue
+        mins = [pd.to_numeric(x.get("minutos"), errors="coerce") for x in seasons[-3:] if isinstance(x, dict)]
+        mins = [m for m in mins if pd.notna(m)]
+        if mins:
+            out.at[i] = float(max(mins))
     return out
 
 
@@ -161,8 +205,12 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     # nota FotMob ajustada pela liga: 0,9 ponto entre a liga mais forte e a mais fraca (7,3 na Premier ≈ 7,8 abaixo)
     d["_rating_adj"] = (rating + .9 * (lvl - .7)).where(m12 >= 450)
     d["L"] = (lvl * 100).round(1)
-    d["_m"] = .35 + .65 * (m12 / 1350).clip(0, 1)
-    d["_avail"] = (m12 / 1800).clip(0, 1)
+    # rodada 24: craque que passou meses lesionado (Rodrygo, Militão, Alisson) não "some": a disponibilidade usa o
+    # maior entre o último ano e 85% da temporada anterior — lesão longa ainda pesa, mas não apaga a qualidade
+    prev = _col(u, "minutos_temporada_anterior").fillna(0)
+    m_eff = pd.concat([m12, .85 * prev], axis=1).max(axis=1)
+    d["_m"] = .35 + .65 * (m_eff / 1350).clip(0, 1)
+    d["_avail"] = (m_eff / 1800).clip(0, 1)
     d["_elig"] = raw.notna() | rep_val.notna()
     if "qualidade" in u:                                  # quem a régua antiga deixou sem nota (0 min no ano, sem dado)
         d["_elig"] &= pd.to_numeric(u["qualidade"], errors="coerce").notna()
@@ -199,6 +247,7 @@ def standardize(z: pd.Series, comps: pd.DataFrame, fam_stats: Optional[Dict[str,
     mu = comps["_fam"].map(lambda f: fam_stats.get(f, (50.0, 15.0))[0])
     sd = comps["_fam"].map(lambda f: fam_stats.get(f, (50.0, 15.0))[1])
     s = (z - mu) / sd
+    s = s * comps["_fam"].map(FAMILY_SPREAD).fillna(1.0)
     avail = comps["_avail"] ** .7
     s = s * (.45 + .55 * avail)                          # quem jogou pouco no ano não chega ao topo
     return s, fam_stats
@@ -247,8 +296,12 @@ def _resolve(u: pd.DataFrame, names: Sequence[str]) -> Dict[str, int]:
 
 FAMS = ("GK", "CB", "FB", "MID", "AM", "WIDE", "ST")
 CORR_RIDGE = 3.0
-CORR_SHRINK = .7
-CORR_CLIP = .8
+CORR_SHRINK = .85
+CORR_CLIP = 1.2
+# rodada 24: goleiros e laterais tinham a mesma "largura" de régua que atacantes — com ~1 goleiro em cada 11 atletas,
+# o topo ficava cheio de goleiros e laterais de times médios (Çakır 91, Dimarco 88). A régua dessas famílias é
+# estreitada (o melhor goleiro ainda chega ao topo da posição, mas o 15º goleiro não vira 88).
+FAMILY_SPREAD = {"GK": .78, "FB": .86, "CB": .93, "MID": 1.0, "AM": 1.0, "WIDE": 1.0, "ST": 1.0}
 
 
 def corr_features(comps: pd.DataFrame, age: pd.Series) -> pd.DataFrame:
@@ -383,6 +436,8 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     if u is None or u.empty:
         return u
     out = u.copy()
+    if "minutos_temporada_anterior" not in out:
+        out["minutos_temporada_anterior"] = previous_season_minutes(out)
     if "qualidade_base" not in out:
         out["qualidade_base"] = pd.to_numeric(out.get("qualidade"), errors="coerce")
     comps = components(out, reference)

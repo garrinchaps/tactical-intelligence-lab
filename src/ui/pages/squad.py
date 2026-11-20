@@ -1057,14 +1057,14 @@ def render(_ctx=None) -> None:
                 from src.ui.components import clickable_table
 
                 clickable_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
-                                .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador",
+                                .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador", club=str(team or ""), caption=
                                  "Nota do laboratório (0–100): valor de mercado comparado com a mesma posição + minutos e "
                                  "participação em gols nos últimos 12 meses + nota externa quando houver. É uma estimativa: "
                                  "a base de cada nota aparece ao lado.")
                 pick = st.selectbox("Ver a carreira de", squad["nome"].tolist(), key="sq_career")
                 from src.ui import nav
 
-                nav.link(f"👤 Abrir {pick}", "jogador", key="sq_open_player", name=pick)
+                nav.link(f"👤 Abrir {pick}", "jogador", key="sq_open_player", name=pick, club=str(team or ""))
     with t4:
         if t4.open is not False:          # rodada 21: só a aba aberta é montada
             st.caption("O atleta fica salvo na sua base local (data/lake) e entra no elenco do clube informado, no "
