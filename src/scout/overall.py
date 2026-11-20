@@ -112,6 +112,29 @@ REFERENCE_TARGETS.update({
     "Gabriel Barbosa": 75, "Luiz Henrique": 79, "Savinho": 81, "Vitor Roque": 79,
 })
 
+# rodada 25: âncoras da lista do usuário (motor por atributos). Corrigem a ESCALA; não forçam a nota de ninguém.
+REFERENCE_TARGETS.update({
+    "Kylian Mbappé": 92, "Harry Kane": 92, "Ousmane Dembélé": 90, "Lamine Yamal": 90, "Pedri": 90,
+    "Jude Bellingham": 90, "Khvicha Kvaratskhelia": 90, "Michael Olise": 89, "Luis Díaz": 89, "Nico Paz": 86,
+    "Julián Álvarez": 88, "Ferran Torres": 84, "Bradley Barcola": 84, "Matheus Pereira": 82,
+    "Giorgian de Arrascaeta": 82, "Neymar": 82, "Lionel Messi": 85, "Luiz Araújo": 76, "Keny Arroyo": 78,
+    "Fermín López": 85, "Achraf Hakimi": 89, "Nuno Mendes": 88, "Gabriel Magalhães": 88, "Virgil van Dijk": 87,
+    "Maxence Lacroix": 85, "Joshua Kimmich": 87, "Rodri": 89, "Marc Cucurella": 87, "Renan Lodi": 81,
+    "Kaiki Bruno": 79, "Natanael": 71, "Gabriel Rojas": 72, "Lucas Daniel Romero": 77, "Lucas Romero": 77,
+    "Thibaut Courtois": 90, "Manuel Neuer": 85, "David Raya": 88, "Zé Lucas": 70, "Kauã Moraes": 69, "Melk": 70,
+    "Néiser Villarreal": 65,
+    # a lista "melhores do mundo" com poucos minutos ou fora do auge não pode ficar no topo
+    "Karim Benzema": 80, "Artem Dovbyk": 79, "James Maddison": 80, "Raheem Sterling": 76, "Dejan Kulusevski": 80,
+    "Christian Nørgaard": 77, "Tim Kleindienst": 77, "Riyad Mahrez": 77, "Kingsley Coman": 80,
+    "Kepa Arrizabalaga": 77, "Oleksandr Zinchenko": 76, "Gaëtan Laborde": 75, "Simon Banza": 76,
+})
+
+# potencial-alvo (mesma ideia: calibrar a escala do potencial dos jovens)
+POTENTIAL_TARGETS: Dict[str, int] = {
+    "Lamine Yamal": 95, "Nico Paz": 90, "Zé Lucas": 86, "Kaiki Bruno": 85, "Natanael": 76, "Kauã Moraes": 77,
+    "Melk": 83, "Néiser Villarreal": 80,
+}
+
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
 
@@ -176,7 +199,7 @@ def previous_season_minutes(u: pd.DataFrame) -> pd.Series:
             seasons = json.loads(v) if isinstance(v, str) else (v if isinstance(v, list) else [])
         except Exception:
             continue
-        mins = [pd.to_numeric(x.get("minutos"), errors="coerce") for x in seasons[-3:] if isinstance(x, dict)]
+        mins = [pd.to_numeric(x.get("minutos"), errors="coerce") for x in seasons[-2:] if isinstance(x, dict)]
         mins = [m for m in mins if pd.notna(m)]
         if mins:
             out.at[i] = float(max(mins))
@@ -208,7 +231,7 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     # rodada 24: craque que passou meses lesionado (Rodrygo, Militão, Alisson) não "some": a disponibilidade usa o
     # maior entre o último ano e 85% da temporada anterior — lesão longa ainda pesa, mas não apaga a qualidade
     prev = _col(u, "minutos_temporada_anterior").fillna(0)
-    m_eff = pd.concat([m12, .85 * prev], axis=1).max(axis=1)
+    m_eff = pd.concat([m12, .6 * prev], axis=1).max(axis=1)
     d["_m"] = .35 + .65 * (m_eff / 1350).clip(0, 1)
     d["_avail"] = (m_eff / 1800).clip(0, 1)
     d["_elig"] = raw.notna() | rep_val.notna()
@@ -443,16 +466,27 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     comps = components(out, reference)
     report: Dict[str, Any] = {}
     corr = None
-    if weights is None:
-        if calibrate_now and reference is None:
-            report = calibrate(out, comps)
-            weights = report["pesos"]
-            corr = report.get("correcao")
-        else:
-            weights = load_weights()
-            corr = load_correction()
+    # rodada 25: a nota nasce dos ATRIBUTOS por posição (src/scout/rating_engine.py) — valor de mercado e fama = 0%
+    from src.scout import rating_engine as RE
+
+    eng = RE.compute(out)
+    for c in eng.columns:
+        out[c] = eng[c]
+    z = pd.to_numeric(eng["ovr2_bruto"], errors="coerce")
+    # sem números por posição suficientes (fonte só com nota/gols): desempenho geral + nota + nível, SEM reputação
+    z_old = zscore(comps.assign(R=np.nan), {"wR": 0.0, "wP": .6, "wT": .25, "wL": .15})
+    out["ovr_motor"] = np.where(z.notna(), "atributos", np.where(z_old.notna(), "desempenho geral (poucos números)", ""))
+    z = z.combine_first(z_old)
+    comps["R"] = np.nan                                   # reputação fora da nota (fica só no mercado)
+    comps["P"] = pd.to_numeric(eng["ovr2_W"], errors="coerce").combine_first(comps["P"])
+    comps["_elig"] = z.notna()
+    weights = {"motor": "atributos por posição", "wR": 0.0, "wP": .75, "wT": .05, "wL": 0.0}
     age = _col(out, "idade")
-    z = zscore(comps, weights)
+    if calibrate_now and reference is None:
+        report = calibrate_v2(out, comps, z)
+        corr = report.get("correcao")
+    elif reference is not None:
+        corr = load_correction()
     if reference is not None and "_ovr_s" in reference and "_ovr_z" in reference:
         rz = pd.to_numeric(reference["_ovr_z"], errors="coerce")
         g = rz.groupby(reference["_fam"])
@@ -482,13 +516,41 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     src = out.get("fonte_qualidade", pd.Series("", index=out.index)).fillna("").astype(str)
     out["fonte_qualidade"] = np.where(
         out["qualidade"].notna() & ~out.get("so_base", pd.Series(False, index=out.index)).fillna(False).astype(bool),
-        f"overall: reputação ajustada pela idade ({weights.get('wR', 0):.0%}) + desempenho na função "
-        f"({weights.get('wP', 0):.0%}) + nota FotMob ajustada pela liga ({weights.get('wT', 0):.0%}) + nível "
-        f"({weights.get('wL', 0):.0%}), padronizado por posição e pelos minutos do ano", src)
+        "overall: 9 atributos medidos com pesos da posição (75%) + excelência nas 2 maiores qualidades (15%) + "
+        "consistência — minutos e nota FotMob (10%, a nota vale no máximo 5%) + polivalência − deficiência relevante; "
+        "dificuldade do nível limitada; valor de mercado NÃO entra", src)
     out = _recompute_potential(out)
     if report:
         save_report(out, report)
     return out
+
+
+def calibrate_v2(u: pd.DataFrame, comps: pd.DataFrame, z: pd.Series) -> Dict[str, Any]:
+    """Calibração do motor por atributos: aprende a correção de vieses (idade, nível, minutos, posição) nos jogadores
+    de referência, medindo o erro FORA da amostra (aprende numa metade, mede na outra). Corrige a escala, não força
+    nomes: cada jogador fica com a nota dos números dele + a correção sistemática do seu grupo."""
+    targets = all_targets()
+    tidx = _resolve(u, list(targets))
+    age = _col(u, "idade")
+    s0, _ = standardize(z, comps)
+    o0 = ladder(s0)
+    names = sorted(tidx)
+    half_a, half_b = set(names[0::2]), set(names[1::2])
+    errs = []
+    cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
+    for fit_on, test_on in ((half_a, half_b), (half_b, half_a)):
+        c_half = fit_correction(s0, o0, comps, age, targets, {n: tidx[n] for n in fit_on})
+        o_half = ladder(apply_correction(s0, comps, age, c_half)).clip(upper=cap).round(0)
+        errs += [abs(float(o_half.loc[tidx[n]]) - targets[n]) for n in test_on if pd.notna(o_half.loc[tidx[n]])]
+    corr = fit_correction(s0, o0, comps, age, targets, tidx)
+    raw_err = [abs(float(o0.loc[tidx[n]]) - targets[n]) for n in names if pd.notna(o0.loc[tidx[n]])]
+    mae = float(np.mean(errs)) if errs else None
+    return {"pesos": {"motor": "atributos por posição", "wR": 0.0, "wP": .75, "wT": .05, "wL": 0.0},
+            "correcao": corr, "encontrados": _resolve(u, REFERENCE_STARS), "tetos": _resolve(u, list(REFERENCE_CEILINGS)),
+            "alvos": tidx,
+            "grade": [{"motor": "atributos", "erro_medio_alvos": round(mae, 2) if mae is not None else None,
+                       "erro_sem_correcao": round(float(np.mean(raw_err)), 2) if raw_err else None,
+                       "aceito": True}]}
 
 
 def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
@@ -498,9 +560,27 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
 
         fam = d["_fam"] if "_fam" in d else None
         p = POT.compute(d, fam)
+        # rodada 25: calibra o tamanho do crescimento pelos potenciais-alvo dos jovens (k entre 0,8 e 1,6)
+        idx = _resolve(d, list(POTENTIAL_TARGETS))
+        q = _col(d, "qualidade")
+        best_k, best_e = 1.0, None
+        if len(idx) >= 3:
+            for k in np.arange(.8, 1.65, .05):
+                errs = [abs(min(POT.POT_CAP, float(q.loc[i]) + k * float(p.at[i, "potencial_crescimento"])) - POTENTIAL_TARGETS[n])
+                        for n, i in idx.items() if pd.notna(q.loc[i]) and pd.notna(p.at[i, "potencial_crescimento"])]
+                e = float(np.mean(errs)) if errs else None
+                if e is not None and (best_e is None or e < best_e - 1e-9):
+                    best_k, best_e = float(k), e
+        if best_k != 1.0:
+            g = p["potencial_crescimento"] * best_k
+            p["potencial"] = (q + g).clip(upper=POT.POT_CAP).where(q.notna(), p["potencial"]).round(0)
+            p["potencial_crescimento"] = g.round(1)
+        d.attrs["potencial_k"] = best_k
         for c in p.columns:
             d[c] = p[c]
-        d["potencial_teto"] = p["potencial"]
+        # potencial nunca abaixo do overall de hoje
+        d["potencial"] = pd.concat([_col(d, "potencial"), q], axis=1).max(axis=1).where(_col(d, "potencial").notna())
+        d["potencial_teto"] = d["potencial"]
         return d
     except Exception:
         pass

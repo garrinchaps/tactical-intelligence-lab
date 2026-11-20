@@ -50,7 +50,55 @@ def _team_options_cached(q: str, limit: int, version: str) -> List[str]:
         top = t.sort_values("jogos", ascending=False)["nome"].head(limit).tolist() if not t.empty else []
         return top
     sc = fast_scores(q, list(names))
-    return [n for n, v in sorted(sc.items(), key=lambda kv: -kv[1]) if v >= 0.6][:limit]
+    ranked = [n for n, v in sorted(sc.items(), key=lambda kv: -kv[1]) if v >= 0.6]
+    games = dict(zip(t["nome"], t["jogos"])) if not t.empty else {}
+    country = dict(zip(t["nome"], t["pais"])) if not t.empty and "pais" in t else {}
+    return clean_team_options(q, ranked, games, country)[:limit]
+
+
+def clean_team_options(q: str, ranked: List[str], games: dict, country: Optional[dict] = None) -> List[str]:
+    """Rodada 25: um nome por clube na busca. Antes "cruzeiro" trazia Cruzeiro, Cruzeiro (W), Cruzeiro EC, Cruzeiro
+    Esporte Clube e até o Lokomotiv. Regras (conferidas, não chute):
+      * time feminino/base sai, salvo se a pergunta pedir (o mesmo nome do clube masculino com "(W)", "Feminino"…);
+      * grafias do MESMO clube (mesmo núcleo do nome e mesmo país dos jogos) viram uma — fica a com mais jogos;
+        núcleo igual em país diferente (Barcelona × Barcelona SC do Equador) continua separado;
+      * nome sem nenhuma palavra que comece como a busca sai (o Lokomotiv vinha por semelhança de letras);
+      * nome do cadastro sem nenhum jogo na base, quando já existe o clube com jogos, sai (é só um apelido)."""
+    from src.data_hub.gender import is_women_team
+    from src.data_lake.ids import team_core
+    import re as _re
+    import unicodedata as _ud
+
+    country = country or {}
+
+    def norm(x):
+        return "".join(c for c in _ud.normalize("NFKD", str(x).lower()) if not _ud.combining(c))
+    qn = norm(q).strip()
+    want_w = bool(_re.search(r"femin|women|\(w\)|sub|u2|u1", qn))
+    q_tokens = [w for w in _re.split(r"[^a-z0-9]+", qn) if len(w) >= 3]
+    out, seen_core = [], {}
+    # quem tem jogos (e país conhecido) vem primeiro: apelidos sem jogos só se juntam depois, sem apagar o país
+    ranked = sorted(ranked, key=lambda n: (games.get(n, 0) <= 0, not country.get(n)))
+    for n in ranked:
+        if not want_w and is_women_team([n]):
+            continue
+        if not want_w and _re.search(r"\b(u-?1\d|u-?2[0-3]|sub-?\d\d|youth|reserves?|ii|b team)\b", norm(n)):
+            continue
+        toks = [w for w in _re.split(r"[^a-z0-9]+", norm(n)) if w]
+        if q_tokens and not any(any(t.startswith(qt) or qt.startswith(t) and len(t) >= 3 for t in toks) for qt in q_tokens):
+            continue
+        core = team_core(n)
+        key = (core, country.get(n) or "")
+        prev = next((k for k in seen_core if k[0] == core and (not k[1] or not key[1] or k[1] == key[1])), None)
+        if prev is not None:
+            i = seen_core[prev]
+            if games.get(n, 0) > games.get(out[i], 0):
+                out[i] = n
+            continue
+        seen_core[key] = len(out)
+        out.append(n)
+    with_games = {team_core(n) for n in out if games.get(n, 0) > 0}
+    return [n for n in out if games.get(n, 0) > 0 or team_core(n) not in with_games]  # relevância já veio do ranking
 
 
 def _picker(label: str, key: str, default: str = "") -> Optional[str]:

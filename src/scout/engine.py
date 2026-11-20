@@ -704,6 +704,36 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
 
     report("Calculando totais da carreira por jogador...")
     career = _history_group_totals(raw, ["_pid"])
+    # rodada 25: números por 90 com PESO NO TEMPO — último ano vale 1, de 1 a 2 anos 0,6, de 2 a 5 anos 0,25 (por
+    # minuto). Lesão longa não apaga o jogador (os anos anteriores ainda contam) e a temporada atual manda.
+    try:
+        age_days = (pd.Timestamp.today().normalize() - pd.to_datetime(raw["match_date"], errors="coerce")).dt.days
+        tw = np.where(age_days <= 365, 1.0, np.where(age_days <= 730, .6, .25))
+        mins_w = (raw["_minutes_num"] * tw).groupby(raw["_pid"]).sum()
+        career["minutos_ponderados"] = mins_w.reindex(career.index).round(0)
+        rate_pairs = {"pass_rate_pct": ("passes_acc", "passes_tot"), "duel_rate_pct": ("duel_won", "_dt"),
+                      "aerial_pct": ("aerials_won", "aerials_tot"), "dribble_pct": ("dribbles", "dribbles_tot"),
+                      "cross_pct": ("crosses_acc", "crosses_tot"), "long_ball_pct": ("long_balls", "long_balls_tot"),
+                      "shot_acc_pct": ("shots_on_target", "shots")}
+        tmp = pd.DataFrame({"_pid": raw["_pid"]})
+        tmp["_dt"] = (raw["duel_won"].fillna(0) + raw["duel_lost"].fillna(0)) * tw
+        for k in set(P90_KEYS) | {"passes_acc", "passes_tot", "duel_won", "aerials_tot", "dribbles_tot", "crosses_tot",
+                                  "long_balls_tot"}:
+            if k in raw:
+                tmp[k] = pd.to_numeric(raw[k], errors="coerce") * tw
+        sums = tmp.groupby("_pid").sum(min_count=1)
+        for k in P90_KEYS:
+            if k in sums:
+                career[f"{k}_p90w"] = (sums[k] * 90 / mins_w.replace(0, np.nan)).reindex(career.index).round(3)
+        if "passes_acc" in sums:
+            career["passes_acc_p90w"] = (sums["passes_acc"] * 90 / mins_w.replace(0, np.nan)).reindex(career.index).round(2)
+        if "duel_won" in sums:
+            career["duel_won_p90w"] = (sums["duel_won"] * 90 / mins_w.replace(0, np.nan)).reindex(career.index).round(2)
+        for out_k, (a, b) in rate_pairs.items():
+            if a in sums and b in sums:
+                career[f"{out_k}_w"] = (100 * sums[a] / sums[b].where(sums[b] >= 6)).reindex(career.index).round(1)
+    except Exception as exc:
+        report(f"Peso no tempo indisponível ({type(exc).__name__}); usando os totais do período: {exc}")
 
     report("Calculando totais por temporada...")
     raw["_season_group"] = raw["season_name"].where(
@@ -2780,6 +2810,17 @@ def canonical_clubs(universe: pd.DataFrame) -> pd.DataFrame:
     u = universe.copy()
     club = u["clube"].fillna("").astype(str)
     core = club.map(lambda c: team_core(c) if c else "")
+    # rodada 25: núcleo igual em REGIÕES diferentes não é o mesmo clube ("Barcelona" da Espanha × "Barcelona SC" do
+    # Equador — Raphinha e Pedri apareciam no Barcelona SC)
+    liga = u.get("clube_liga", pd.Series("", index=u.index))
+    pais = u.get("clube_pais", pd.Series(None, index=u.index))
+    region = pd.Series([origin_group_full(l, p).split(" · ")[0] for l, p in zip(liga, pais)], index=u.index)
+    base = core.copy()
+    unk = region.eq("Sem liga identificada")
+    if (~unk).any():                       # sem liga: fica com a região mais comum desse nome
+        dom = pd.DataFrame({"c": base[~unk], "r": region[~unk]}).value_counts().reset_index().drop_duplicates("c")
+        region = region.where(~unk, base.map(dict(zip(dom["c"], dom["r"]))).fillna("Sem liga identificada"))
+    core = core.where(core == "", core + "|" + region)
     observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
     pref = pd.DataFrame({"core": core, "club": club, "obs": observed.astype(int)})
     pref = pref[pref["core"] != ""]

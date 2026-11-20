@@ -18,11 +18,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v12.pkl")   # v12: identidade por id FotMob + clube, atributos 1–100
+SNAP_PATH = Path("data/processed/scout_universe_v13.pkl")   # v13: nota por atributos da posição (sem valor de mercado)
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -249,6 +250,43 @@ def cached_data() -> Optional[Dict[str, Any]]:
     return _MEMO.get("data")
 
 
+def _index() -> Dict[str, Any]:
+    """Rodada 25: índices núcleo-do-nome → linhas e pid → linha, montados UMA vez por fotografia. Antes cada busca de
+    jogador varria o universo inteiro (60 mil+ linhas) — o campinho com 22 nomes fazia 22 varreduras."""
+    u = cached_universe()
+    if u is None or u.empty:
+        return {}
+    if _MEMO.get("idx_for") is u:
+        return _MEMO["idx"]
+    by_core: Dict[str, list] = {}
+    if "_core" in u:
+        for i, c in zip(u.index, u["_core"].astype(str)):
+            by_core.setdefault(c, []).append(i)
+    by_pid = dict(zip(u["pid"].astype(str), u.index)) if "pid" in u else {}
+    _MEMO["idx"] = {"core": by_core, "pid": by_pid}
+    _MEMO["idx_for"] = u
+    return _MEMO["idx"]
+
+
+def quality_map() -> Dict[str, Dict[str, float]]:
+    """"núcleo|clube" → qualidade e potencial (uma vez por fotografia; Rankings e campinho leem daqui)."""
+    u = cached_universe()
+    if u is None or u.empty:
+        return {"q": {}, "p": {}}
+    if _MEMO.get("qmap_for") is u:
+        return _MEMO["qmap"]
+    from src.data_lake.ids import team_core
+
+    clubs = u["clube"].fillna("").astype(str)
+    cmap = {c: team_core(c) for c in clubs.unique()}
+    key = u["_core"].astype(str) + "|" + clubs.map(cmap)
+    pot = u["potencial"] if "potencial" in u else u.get("potencial_teto", pd.Series(np.nan, index=u.index))
+    out = {"q": dict(zip(key, pd.to_numeric(u.get("qualidade"), errors="coerce"))),
+           "p": dict(zip(key, pd.to_numeric(pot, errors="coerce")))}
+    _MEMO["qmap"], _MEMO["qmap_for"] = out, u
+    return out
+
+
 def find_player(core: str, names: Optional[list] = None, club: str = "", pid: str = "") -> Optional[Dict[str, Any]]:
     """Linha do universo do atleta. Rodada 24: pelo identificador único (pid) quando vier; senão núcleo de nome e,
     havendo homônimo, SÓ o do clube informado (sem clube que confira → nenhum, para não mostrar a nota de outro)."""
@@ -257,15 +295,15 @@ def find_player(core: str, names: Optional[list] = None, club: str = "", pid: st
         return None
     from src.data_lake.ids import player_core
 
-    if pid and "pid" in u:
-        one = u[u["pid"].astype(str) == pid]
-        if not one.empty:
-            return one.iloc[0].to_dict()
+    idx = _index()
+    if pid and pid in idx.get("pid", {}):
+        return u.loc[idx["pid"][pid]].to_dict()
 
     cores = {core} | {player_core(n) for n in (names or [])}
-    hit = u[u["_core"].astype(str).isin(cores)] if "_core" in u else u.iloc[0:0]
-    if hit.empty:
+    rows = [i for c in cores for i in idx.get("core", {}).get(str(c), [])]
+    if not rows:
         return None
+    hit = u.loc[sorted(set(rows))]
     if len(hit) > 1 and club and "clube" in hit:
         from src.data_lake.ids import team_core
 

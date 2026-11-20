@@ -77,13 +77,8 @@ def with_scout_quality(df: pd.DataFrame, name_col: str = "player_name", team_col
         from src.data_lake.ids import player_core, team_core
         from src.scout import snapshot as S
 
-        u = S.cached_universe()
-        if u is None or u.empty:
-            return out
-        key = u["_core"].astype(str) + "|" + u["clube"].fillna("").map(lambda c: team_core(str(c)))
-        pot = u["potencial"] if "potencial" in u else u.get("potencial_teto")
-        q = dict(zip(key, pd.to_numeric(u.get("qualidade"), errors="coerce")))
-        pp = dict(zip(key, pd.to_numeric(pot, errors="coerce"))) if pot is not None else {}
+        qm = S.quality_map()
+        q, pp = qm["q"], qm["p"]
         k = out[name_col].map(lambda n: player_core(str(n))) + "|" + out[team_col].fillna("").map(lambda c: team_core(str(c)))
         out["qualidade_scout"] = k.map(q).round(0)
         out["potencial_scout"] = k.map(pp).round(0)

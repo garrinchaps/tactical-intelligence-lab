@@ -502,6 +502,28 @@ def shot_findings(db, my_names: Sequence[str], rv_names: Sequence[str], me: str,
     return out
 
 
+def merge_same_defender(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rodada 25: vários duelos contra o MESMO defensor viram um cartão só, com as evidências somadas — duas fraquezas
+    independentes do mesmo jogador = "escancarado" (cruzar evidências em vez de repetir 3 cartões do mesmo lateral)."""
+    out, seen = [], {}
+    for x in items:
+        key = (x.get("tipo"), x.get("defensor")) if x.get("tipo") == "duelo" and x.get("defensor") else None
+        if key is None:
+            out.append(x)
+            continue
+        if key in seen:
+            base = out[seen[key]]
+            base.setdefault("evidencias_extra", []).append(f"{x.get('titulo')}: {x.get('evidencia')}")
+            base["passos"] = list(base.get("passos") or []) + [f"Outra fraqueza dele: {x.get('titulo', '').lower()} — "
+                                                               f"{x.get('evidencia')}"]
+            base["nivel"] = "escancarado"
+            base["score"] = round(float(base.get("score") or 0) + .5 * float(x.get("score") or 0), 1)
+            continue
+        seen[key] = len(out)
+        out.append(dict(x))
+    return out
+
+
 def _diverse(items: List[Dict[str, Any]], per_kind: int = 2) -> List[Dict[str, Any]]:
     """No máximo `per_kind` dicas do MESMO tipo (antes eram 4 de drible seguidas)."""
     seen: Dict[str, int] = {}
@@ -515,6 +537,25 @@ def _diverse(items: List[Dict[str, Any]], per_kind: int = 2) -> List[Dict[str, A
     return out
 
 
+_ID_MEMO: Dict[Any, Any] = {}
+
+
+def _identity_memo(db, names, n: int = 15) -> Dict[str, Any]:
+    """Rodada 25: modelo de jogo do time (estatísticas por jogo) uma vez por time e versão dos dados do time."""
+    from src.analytics.tactical_identity import stats_identity
+
+    try:
+        ver = db.team_version(list(names))
+    except Exception:
+        ver = ""
+    key = (tuple(sorted(names)), n, ver)
+    if key not in _ID_MEMO:
+        if len(_ID_MEMO) > 64:
+            _ID_MEMO.clear()
+        _ID_MEMO[key] = stats_identity(db, list(names), n=n)
+    return _ID_MEMO[key]
+
+
 def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi, formation: str = "",
             rival_formation: str = "") -> Dict[str, Any]:
     ref = reference(db)
@@ -523,23 +564,31 @@ def analyze(db, me: str, rival: str, my_names, rv_names, my_xi, rv_xi, formation
     protect = duel_findings(my_xi, rv_xi, ms, rs, ref, me, rival, attack=False)
     # rodada 24: cada confronto vira uma dica PRÓPRIA (perfil dos dois, lado, quem apoia, nosso desenho, modelo do rival)
     try:
-        from src.analytics.tactical_identity import stats_identity
         from src.squad import advice as AD
 
+        stats_identity = _identity_memo
         rv_id = stats_identity(db, list(rv_names), n=15)
         rv_ctx = AD.rival_context(rv_id.get("perfil") or {}, rv_id.get("referencia") or {})
         me_id = stats_identity(db, list(my_names), n=15)
         me_ctx = AD.rival_context(me_id.get("perfil") or {}, me_id.get("referencia") or {})
         force = AD.individualize_all(force, my_xi, rv_xi, ms, rs, ref, formation, rv_ctx, attack=True)
         protect = AD.individualize_all(protect, my_xi, rv_xi, ms, rs, ref, rival_formation, me_ctx, attack=False)
+        # rodada 25: mecanismos de time (transição, bloco baixo, lados, pressão, segunda bola, área, bola parada) com
+        # evidências cruzadas — aplicam-se a qualquer jogo com estatísticas
+        from src.squad import patterns as PT
+
+        refd = rv_id.get("referencia") or me_id.get("referencia") or {}
+        team_force = PT.mechanisms(me, rival, me_id, rv_id, refd, attack=True)
+        team_protect = PT.mechanisms(me, rival, me_id, rv_id, refd, attack=False)
     except Exception:
-        pass
+        team_force, team_protect = [], []
+    force, protect = merge_same_defender(force), merge_same_defender(protect)
     combos = combo_findings(my_xi, rv_xi, ms, rs, ref, me, rival)
     shots = shot_findings(db, my_names, rv_names, me, rival)
     # rodada 21: mistura os tipos — combinações e "de onde saem os gols" entram entre os duelos
     force = _diverse(sorted(force, key=lambda x: (x["nivel"] != "escancarado", -x.get("score", 0)))
-                     [:2] + combos["forcar"] + shots["forcar"] + force[2:])
-    protect = _diverse(combos["proteger"] + protect)
+                     [:2] + team_force[:2] + combos["forcar"] + shots["forcar"] + force[2:] + team_force[2:])
+    protect = _diverse(team_protect[:2] + combos["proteger"] + protect + team_protect[2:])
     style = style_findings(db, my_names, rv_names, me, rival)
     style += [x for x in shots["proteger"]]
     return {"forcar": force, "proteger": protect, "estilo": [s for s in style if s["tipo"] == "estilo"],

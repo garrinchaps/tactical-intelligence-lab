@@ -156,12 +156,20 @@ def compute(u: pd.DataFrame, fam: Optional[pd.Series] = None) -> pd.DataFrame:
     room = (1 - (q - 80).clip(lower=0) / 40).clip(lower=.4)
     growth = age_growth(_col(u, "idade")) * mult * room.fillna(1.0)
     pot = (q + growth).clip(upper=POT_CAP)
-    out["potencial"] = pot.where(q.notna()).round(0)
-    out["potencial_crescimento"] = growth.where(q.notna()).round(1)
+    # rodada 25: potencial para TODOS os jovens — sem nota atual (quase sem minutos), o potencial é ESTIMADO só pelos
+    # sinais (seleção de base, minutos e nível, valor para a idade), partindo de um patamar de base e marcado como tal
+    age = _col(u, "idade")
+    no_q = q.isna() & age.notna() & (age <= 23)
+    est = (48 + .22 * (talent - 50) + growth * .9).clip(35, 86)
+    pot = pot.where(~no_q, est)
+    out["potencial"] = pot.where(q.notna() | no_q).round(0)
+    out["potencial_estimado_sem_nota"] = no_q
+    out["potencial_crescimento"] = growth.where(q.notna() | no_q).round(1)
     out["potencial_talento"] = talent.round(0)
     m12 = _col(u, "minutos_12m").fillna(_col(u, "minutos")).fillna(0)
     out["potencial_confianca_pct"] = (100 * (.5 * (m12 / 1800).clip(0, 1) + .5 * evidence)).round(0)
-    out["potencial_porque"] = [_why(sig.loc[i], talent.loc[i], growth.loc[i], _col(u, "idade").get(i))
+    out["potencial_porque"] = [("ESTIMADO sem nota atual (poucos minutos): " if no_q.get(i) else "")
+                               + _why(sig.loc[i], talent.loc[i], growth.loc[i], _col(u, "idade").get(i))
                                for i in u.index]
     return out
 

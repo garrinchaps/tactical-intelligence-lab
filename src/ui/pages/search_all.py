@@ -137,6 +137,15 @@ def team_table(version: str, only, real: bool = True) -> pd.DataFrame:
     s = pd.concat([c["home_team_name"], c["away_team_name"]]).dropna().value_counts()
     t = pd.DataFrame({"nome": s.index, "jogos": s.values})
     t["core"] = t["nome"].map(team_core)
+    if "country_name" in c:               # rodada 25: país mais comum dos jogos (separa Barcelona × Barcelona SC)
+        both = pd.concat([c[["home_team_name", "country_name"]].set_axis(["nome", "pais"], axis=1),
+                          c[["away_team_name", "country_name"]].set_axis(["nome", "pais"], axis=1)])
+        both = both[both["pais"].fillna("").astype(str).str.len() > 0]
+        if not both.empty:
+            mode = both.groupby(["nome", "pais"]).size().reset_index(name="n").sort_values("n").drop_duplicates("nome", keep="last")
+            t["pais"] = t["nome"].map(dict(zip(mode["nome"], mode["pais"]))).fillna("")
+    if "pais" not in t:
+        t["pais"] = ""
     return t
 
 
@@ -153,6 +162,12 @@ def competition_table(version: str, only, real: bool = True) -> pd.DataFrame:
                         ).reset_index().rename(columns={"competition_name": "competicao"})
 
 
+def team_core_(n):
+    from src.data_lake.ids import team_core
+
+    return team_core(n)
+
+
 def find_teams(q: str, version: str, only: bool, n: int = 8) -> pd.DataFrame:
     from src.data_hub.search import fast_scores
 
@@ -164,8 +179,18 @@ def find_teams(q: str, version: str, only: bool, n: int = 8) -> pd.DataFrame:
     sc = fast_scores(q, t["nome"].tolist())
     t = t.assign(score=t["nome"].map(sc))
     t = t[t["score"] >= 0.86]
+    # rodada 25: feminino/base e nomes sem palavra parecida saem; grafias do mesmo clube (núcleo + país) viram uma
+    from src.ui.pages.squad import clean_team_options
+
+    keep = set(clean_team_options(q, t.sort_values("score", ascending=False)["nome"].tolist(),
+                                  dict(zip(t["nome"], t["jogos"])), dict(zip(t["nome"], t.get("pais", "")))))
+    t = t[t["nome"].isin(keep) | t["core"].isin({team_core_(n) for n in keep})] if keep else t.iloc[0:0]
+    pais = t.get("pais", pd.Series("", index=t.index)).fillna("").astype(str)
+    known = t.assign(_p=pais)[pais != ""].sort_values("jogos").drop_duplicates("core", keep="last")
+    pais = pais.where(pais != "", t["core"].map(dict(zip(known["core"], known["_p"]))).fillna(""))   # fonte sem país
+    t = t.assign(_key=t["core"] + "|" + pais)
     # agrupa variações do mesmo time ("Man United" / "Manchester United FC") somando os jogos
-    g = t.sort_values("jogos", ascending=False).groupby("core").agg(nome=("nome", "first"), jogos=("jogos", "sum"),
+    g = t.sort_values("jogos", ascending=False).groupby("_key").agg(nome=("nome", "first"), jogos=("jogos", "sum"),
                                                                     score=("score", "max")).reset_index()
     return g.sort_values(["score", "jogos"], ascending=False).head(n)
 

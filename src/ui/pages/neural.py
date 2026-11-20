@@ -352,15 +352,30 @@ def render(ctx=None) -> None:
     if view == "🧠 IA única (treinar tudo)":
         _brain_panel()
         st.markdown("---")
-        _lab_ai_panel()
-        _assistant_misses()
-        _learning_activity_panel()
+        # rodada 25: o painel completo da rede neural (hiperparâmetros, experimentos, histórico) também fica aqui
+        sub = st.segmented_control("Modelo", ["🎯 Rede neural de perigo (painel completo)", "💬 IA do Assistente",
+                                              "📋 Atividade e perguntas sem alvo"],
+                                   default="🎯 Rede neural de perigo (painel completo)", key="brain_sub",
+                                   label_visibility="collapsed")
+        if sub == "💬 IA do Assistente":
+            _lab_ai_panel()
+        elif sub == "📋 Atividade e perguntas sem alvo":
+            _assistant_misses()
+            _learning_activity_panel()
+        else:
+            _danger_section(ctx)
         return
     if view != "🎯 Rede de perigo (treino)":
         from src.ui.pages.course_view import render_course
 
         render_course()
         return
+    _danger_section(ctx)
+
+
+def _danger_section(ctx=None) -> None:
+    """Rodada 25: o painel COMPLETO da rede de perigo (didática, simulador, comparação, hiperparâmetros,
+    experimentos, histórico) — aparece na aba própria e também dentro de "IA única (treinar tudo)"."""
     _didactic()
     _simulator()
     st.markdown("---")

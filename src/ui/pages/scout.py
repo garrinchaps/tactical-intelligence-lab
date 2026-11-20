@@ -479,7 +479,7 @@ def _merge_roster(roster, _universe, team=None, version=""):
                 r[col] = mapped.combine_first(r[col]) if col in r else mapped
             else:
                 r[col] = r[col].combine_first(mapped) if col in r else mapped
-        for col in ("potencial", "potencial_porque", "pid", "idade"):
+        for col in ("potencial", "potencial_teto", "potencial_porque", "pid", "idade", "estilo", "confianca_nota"):
             if col in lookup:
                 mapped = r["_core"].map(lookup[col])
                 r[col] = r[col].combine_first(mapped) if col in r else mapped
@@ -1199,10 +1199,17 @@ def render(_ctx=None):
                 st.markdown("#### Elenco e notas")
                 show = roster.copy()
                 show["Posição"] = show["papel"].map(E.ROLE_LABELS).fillna("—")
-                cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","caracteristicas_top",
-                                    "potencial_teto","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
+                # rodada 25: potencial em TODOS (o do universo; sem ele, o teto antigo) + estilo de jogo medido
+                show["potencial_show"] = pd.to_numeric(show.get("potencial"), errors="coerce").combine_first(
+                    pd.to_numeric(show.get("potencial_teto"), errors="coerce"))
+                if "confianca_nota" in show:
+                    show["confianca_pct"] = pd.to_numeric(show["confianca_nota"], errors="coerce").combine_first(
+                        pd.to_numeric(show.get("confianca_pct"), errors="coerce"))
+                cols = [x for x in ("nome","Posição","idade","qualidade","potencial_show","confianca_pct","estilo",
+                                    "caracteristicas_top","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
                 display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
-                    "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Potencial",
+                    "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_show":"Potencial",
+                    "estilo":"Estilo (medido)",
                     "valor_mercado_eur":"Valor de mercado","jogos_12m":"Jogos (12m)","minutos_12m":"Minutos (últimos 12 meses)",
                     "rating_12m":"Nota média 12m"})
                 st.caption("Números de cada atleta pelos jogos do PRÓPRIO clube nos últimos 12 meses (nomes comuns não se "

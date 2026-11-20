@@ -638,6 +638,36 @@ Rodada 24 (20/11/2026, 515 testes verdes) — lista do usuário com overall, hom
 - ✅ Treino da IA: 10 parâmetros (taxa, L2, épocas, paciência, lote, validação, peso 👍/👎, peso automático, redução do
   passo, semente) com (i) e recomendação pelo estado (`trainer.PARAMS/recommend`); abas "Em palavras simples" × "Parte técnica".
 
+Rodada 25 (20/11/2026, 523 testes verdes) — lista "melhores do mundo" absurda, lentidão, busca de clubes:
+- ✅ Nota v2 (`src/scout/rating_engine.py`): 9 atributos medidos (SHO/CRE/DRI/PAS/DEF/PHY/AIR/SEC/MOB; goleiro GKS/GKD/GKE)
+  em percentil na família, pesos POR POSIÇÃO (volante: DEF 30%/PHY 20%/PAS 20%…), OVR bruto = 0,75·W + 0,15·E (2 maiores
+  qualidades importantes) + 0,10·C (minutos + nota FotMob ≤ 5%) + polivalência (+0,5 a +1,5) − deficiência relevante;
+  VALOR DE MERCADO E FAMA = 0%; números por 90 com peso no tempo (`*_p90w`: último ano 1 · 1–2 anos 0,6 · 2–5 anos 0,25);
+  amostra pequena puxada ao meio (min/(min+450)) + `confianca_nota`; dificuldade limitada (−8 a +5, nível + adversários);
+  estilos com % (destruidor/organizador/box-to-box, lateral ofensivo/equilibrado/defensivo, ponta driblador/finalizador…).
+  Sem números por posição suficientes → desempenho geral + nota + nível (sem reputação), marcado em `ovr_motor`.
+  Escala global (escada) e correção ridge mantidas; calibração `calibrate_v2` com erro fora da amostra; âncoras novas da
+  lista do usuário (Mbappé/Kane 92, Romero 77, Rojas 72, Zé Lucas 70, M. Pereira 82, Benzema/Dovbyk/Maddison rebaixados…)
+  e `POTENTIAL_TARGETS` (Yamal 95, Zé Lucas 86, Kaiki 85…) calibrando o crescimento (k 0,8–1,6). Ficha "De onde vem o
+  overall" na visão geral do jogador. Fotografia v13 (`python -m src.scout.snapshot`).
+- ✅ Potencial para todos os jovens ≤ 23 (sem nota atual = ESTIMADO pelos sinais, marcado); potencial ≥ overall; coluna
+  Potencial e Estilo no elenco do Scout.
+- ✅ Busca de clubes (`squad.clean_team_options`, usada no Scout/Escalação e no 🔎 Buscar): feminino/base fora, grafias do
+  mesmo clube viram uma (núcleo + país dos jogos), nome sem palavra parecida sai (Lokomotiv em "cruzeiro"); `team_table`
+  com país. `canonical_clubs` por região — acabou Raphinha/Pedri no "Barcelona SC".
+- ✅ Velocidade: índice núcleo/pid no `find_player` (`snapshot._index`), `quality_map` para Rankings/campinho, identidade
+  do rival memorizada (`matchups._identity_memo`).
+- ✅ Rede neural: MemoryError (2,2 mi de lances) corrigido — float32 sem cópia, perda por época numa amostra de 200 mil e em
+  blocos (`_out`), previsões em blocos; painel completo da rede também dentro de "IA única (treinar tudo)".
+- ✅ Mecanismos táticos com evidências cruzadas (`src/squad/patterns.py`): transição, bloco baixo, lados/cruzamento,
+  pressão na saída, segunda bola, presença na área, bola parada — só com evidência nos números dos dois times; 2+
+  evidências = escancarado; confiança pela amostra; espelho defensivo. Duelos contra o mesmo defensor viram 1 cartão
+  (`merge_same_defender`).
+- ✅ Base: FotMob com 9 competições novas (Ásia Sub-20/23, CONCACAF Sub-20, Eliminatórias Euro Sub-21, Intercontinental
+  Sub-20, Amistosos Sub-21, Toulon, Olimpíadas, UEFA Youth League); `atualizar_tudo.ps1` baixa calendário + detalhes de
+  5 anos (`--ligas base --temporadas 5`). Sul-Americano Sub-17 e torneios africanos de base não existem na FotMob.
+- Não verificável daqui: notas reais no PC depois do snapshot v13.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

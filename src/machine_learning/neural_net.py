@@ -121,9 +121,12 @@ class NeuralNetwork:
     # -------------------------------------------------------------- treino
     def _standardize(self, X: np.ndarray, fit: bool = False) -> np.ndarray:
         if fit or self.mu is None:
-            self.mu = X.mean(axis=0, keepdims=True)
-            self.sigma = X.std(axis=0, keepdims=True) + 1e-8
-        return (X - self.mu) / self.sigma
+            self.mu = X.mean(axis=0, keepdims=True, dtype=np.float64)
+            self.sigma = X.std(axis=0, keepdims=True, dtype=np.float64) + 1e-8
+        mu, sg = np.asarray(self.mu), np.asarray(self.sigma)
+        if X.dtype == np.float32:                       # sem cópia em float64 do conjunto inteiro
+            return (X - mu.astype(np.float32)) / sg.astype(np.float32)
+        return (X - mu) / sg
 
     def fit(self, X: np.ndarray, y: np.ndarray, epochs: int = 60, batch_size: int = 256,
             X_val: Optional[np.ndarray] = None, y_val: Optional[np.ndarray] = None,
@@ -139,7 +142,9 @@ class NeuralNetwork:
         # v36: conjuntos grandes treinam em float32 (≈2× mais rápido no NumPy, mesma qualidade para esta rede);
         # conjuntos pequenos (testes, verificação de gradiente) seguem em float64
         dt = np.float32 if len(X) > 20_000 else np.float64
-        X = self._standardize(np.asarray(X, dtype=float), fit=refit_scaler or self.mu is None).astype(dt)
+        # rodada 25: conjunto grande padronizado direto em float32 (antes: cópia float64 + ativações de 2,2 mi de
+        # lances de uma vez → "MemoryError: Unable to allocate 271 MiB")
+        X = self._standardize(np.asarray(X, dtype=dt), fit=refit_scaler or self.mu is None).astype(dt, copy=False)
         y = np.asarray(y, dtype=dt).reshape(-1)
         Xv = self._standardize(np.asarray(X_val, dtype=float)).astype(dt) if X_val is not None else None
         Xs = self._standardize(np.asarray(X_stop, dtype=float)).astype(dt) if X_stop is not None else None
@@ -182,13 +187,17 @@ class NeuralNetwork:
                     for l in range(len(self.weights)):
                         self.weights[l] -= self.learning_rate * dW[l]
                         self.biases[l] -= self.learning_rate * db[l]
-            self.history["train_loss"].append(self.loss(self.forward(X)[0], y))
+            # perda do treino numa amostra fixa (até 200 mil lances) e em blocos — mesma curva, sem estourar a memória
+            if epoch == 0:
+                mon = rng.choice(len(X), size=min(len(X), 200_000), replace=False) if len(X) > 200_000 else None
+            Xm, ym = (X, y) if mon is None else (X[mon], y[mon])
+            self.history["train_loss"].append(self.loss(self._out(Xm), ym))
             if Xv is not None and y_val is not None:
-                self.history["val_loss"].append(self.loss(self.forward(Xv)[0], np.asarray(y_val, dtype=float)))
+                self.history["val_loss"].append(self.loss(self._out(Xv), np.asarray(y_val, dtype=float)))
             if verbose:
                 print(f"época {epoch + 1}: perda treino {self.history['train_loss'][-1]:.4f}")
             if Xs is not None and patience:
-                cur = self.loss(self.forward(Xs)[0], ys)
+                cur = self.loss(self._out(Xs), ys)
                 if cur < best - 1e-6:
                     best, wait = cur, 0
                     best_w = ([W.copy() for W in self.weights], [b.copy() for b in self.biases])
@@ -222,8 +231,16 @@ class NeuralNetwork:
                 dZ = (dZ @ self.weights[l].T) * self.relu_grad(Zs[l - 1])
         return dW, db
 
+    def _out(self, X: np.ndarray, chunk: int = 65_536) -> np.ndarray:
+        """Só a saída da rede, em blocos (não guarda as ativações de todas as camadas)."""
+        if len(X) <= chunk:
+            return self.forward(X)[0]
+        return np.concatenate([self.forward(X[i:i + chunk])[0] for i in range(0, len(X), chunk)], axis=0)
+
     def predict_proba(self, X: np.ndarray) -> np.ndarray:
-        return self.forward(self._standardize(np.asarray(X, dtype=float)))[0].reshape(-1)
+        X = np.asarray(X)
+        dt = np.float32 if len(X) > 20_000 else float
+        return self._out(self._standardize(np.asarray(X, dtype=dt)).astype(dt, copy=False)).reshape(-1)
 
     # ---------------------------------------------------- checagem de gradiente
     def gradient_check(self, X: np.ndarray, y: np.ndarray, eps: float = 1e-5, n_checks: int = 20,

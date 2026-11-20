@@ -207,7 +207,7 @@ class DangerModelRegistry:
             ms = []
             for sd in seeds:
                 net = NeuralNetwork([len(FEATURES), *hidden, 1], 0.05, 1e-3, seed=sd)
-                net.fit(sub[FEATURES].to_numpy(float), sub["target"].to_numpy(int), epochs=epochs, batch_size=256)
+                net.fit(sub[FEATURES].to_numpy(np.float32), sub["target"].to_numpy(int), epochs=epochs, batch_size=256)
                 ms.append(self._evaluate(net, val))
             rows.append({"partidas_de_treino": int(sub["match_id"].nunique()), "acoes_de_treino": int(len(sub)),
                          "auc_validacao": round(float(np.mean([m["auc"] for m in ms])), 4),
@@ -221,11 +221,11 @@ class DangerModelRegistry:
         n_in = int(net.layer_sizes[0])
         names = list(getattr(net, "feature_names", []) or [])
         if len(names) == n_in and all(name in rows.columns for name in names):
-            return rows[names].to_numpy(float)
+            return rows[names].to_numpy(np.float32)
         if n_in == len(FEATURES):
-            return rows[FEATURES].to_numpy(float)
+            return rows[FEATURES].to_numpy(np.float32)
         if n_in == len(LEGACY_FEATURES):
-            return rows[LEGACY_FEATURES].to_numpy(float)
+            return rows[LEGACY_FEATURES].to_numpy(np.float32)
         raise ValueError(f"modelo espera {n_in} variáveis, mas não há adaptador de compatibilidade")
 
     @staticmethod
@@ -258,7 +258,7 @@ class DangerModelRegistry:
         if k < 2:
             return {"folds": 0, "seeds": 0, "logloss": [], "auc": []}
         feats = list(features or FEATURES)
-        X, y = train[feats].to_numpy(float), train["target"].to_numpy(int)
+        X, y = train[feats].to_numpy(np.float32), train["target"].to_numpy(int)
         ll, auc = [], []
         for sd in seeds:
             for tr, va in GroupKFold(n_splits=k).split(X, y, groups):
@@ -350,10 +350,10 @@ class DangerModelRegistry:
         if warm:
             net.warm_start_from(champ_net)
         say("treino final" + (" (ajuste fino a partir do campeão)" if warm else "") + "…")
-        net.fit(fit_part[feats].to_numpy(float), fit_part["target"].to_numpy(int), epochs=epochs,
-                batch_size=batch_size, X_val=val[feats].to_numpy(float), y_val=val["target"].to_numpy(int),
+        net.fit(fit_part[feats].to_numpy(np.float32), fit_part["target"].to_numpy(int), epochs=epochs,
+                batch_size=batch_size, X_val=val[feats].to_numpy(np.float32), y_val=val["target"].to_numpy(int),
                 optimizer=optimizer, refit_scaler=not warm, class_weight_balanced=class_weight_balanced,
-                X_stop=stop_part[feats].to_numpy(float) if stop_part is not None else None,
+                X_stop=stop_part[feats].to_numpy(np.float32) if stop_part is not None else None,
                 y_stop=stop_part["target"].to_numpy(int) if stop_part is not None else None,
                 patience=patience if stop_part is not None else 0)
         m = self._evaluate(net, val)
