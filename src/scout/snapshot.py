@@ -20,9 +20,9 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v10.pkl")   # v10: dribles/desarmes FotMob, %, correção do overall, potencial
+SNAP_PATH = Path("data/processed/scout_universe_v11.pkl")   # v11: atributos 1–20 estilo FM
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -92,6 +92,7 @@ def build_universe(db) -> Dict[str, Any]:
     from src.scout.traits import add_traits
 
     universe = add_traits(finalize_overall(universe))   # rodada 20: overall 0–100 calibrado com craques de referência
+    universe = with_attributes(universe)                # rodada 23: atributos 1–20 estilo FM (medidos)
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
     return {"universe": universe, "clubs": clubs, "status": "carregado",
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
@@ -190,13 +191,25 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 u2 = drop_women_players(u2, DataHubDB())
             except Exception:
                 pass
-            data["universe"] = add_traits(finalize_overall(u2))
+            data["universe"] = with_attributes(add_traits(finalize_overall(u2)))
             data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
             save(data)
             return data
         except Exception:
             continue
     return None
+
+
+def with_attributes(u: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 23: junta os atributos 1–20 (src/scout/attributes.py). Falha aqui nunca derruba a fotografia."""
+    try:
+        from src.scout import attributes as AT
+
+        a = AT.compute(u)
+        u = u.drop(columns=[c for c in a.columns if c in u], errors="ignore")
+        return pd.concat([u, a], axis=1)
+    except Exception:
+        return u
 
 
 def add_peak(u: pd.DataFrame, vals: pd.DataFrame) -> pd.DataFrame:
@@ -211,6 +224,49 @@ def add_peak(u: pd.DataFrame, vals: pd.DataFrame) -> pd.DataFrame:
     u = u.copy()
     u["valor_pico_3a_eur"] = u["transfermarkt_id"].astype(str).map(peak)
     return u
+
+
+_MEMO: Dict[str, Any] = {}
+
+
+def cached_universe() -> Optional[pd.DataFrame]:
+    """Rodada 23: o universo do Scout UMA vez por processo (relido só quando a fotografia muda no disco). Antes cada tela
+    passava pelo cache do Streamlit, que copia o DataFrame inteiro a cada uso. NÃO altere o DataFrame devolvido."""
+    try:
+        stamp = SNAP_PATH.stat().st_mtime if SNAP_PATH.exists() else None
+    except OSError:
+        stamp = None
+    if _MEMO.get("stamp") == stamp and "u" in _MEMO:
+        return _MEMO["u"]
+    data = load()
+    u = data.get("universe") if isinstance(data, dict) else None
+    _MEMO.update(stamp=stamp, u=u, data=data)
+    return u
+
+
+def cached_data() -> Optional[Dict[str, Any]]:
+    cached_universe()
+    return _MEMO.get("data")
+
+
+def find_player(core: str, names: Optional[list] = None, club: str = "") -> Optional[Dict[str, Any]]:
+    """Linha do universo do atleta (núcleo de nome; homônimo → o do clube informado, senão o de mais minutos)."""
+    u = cached_universe()
+    if u is None or u.empty:
+        return None
+    from src.data_lake.ids import player_core
+
+    cores = {core} | {player_core(n) for n in (names or [])}
+    hit = u[u["_core"].astype(str).isin(cores)] if "_core" in u else u.iloc[0:0]
+    if hit.empty:
+        return None
+    if len(hit) > 1 and club and "clube" in hit:
+        from src.data_lake.ids import team_core
+
+        same = hit[hit["clube"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
+        hit = same if not same.empty else hit
+    m = pd.to_numeric(hit.get("minutos_12m"), errors="coerce").fillna(0) if "minutos_12m" in hit else pd.Series(0, index=hit.index)
+    return hit.loc[m.idxmax()].to_dict()
 
 
 def version() -> str:

@@ -15,7 +15,7 @@ from __future__ import annotations
 import os
 import shutil
 import threading
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 _lock = threading.Lock()
@@ -326,15 +326,36 @@ _results: Dict[str, Any] = {"running": False, "ultimo": None, "partidas": 0, "er
 RESULTS_EVERY_MIN = 20       # rodada 22: resultados de ontem/hoje pela FotMob (2 pedidos) a cada 20 min
 
 
+CATCHUP_MAX_DAYS = 30
+
+
+def missing_days(db, today: Optional[date] = None, max_days: int = CATCHUP_MAX_DAYS) -> List[date]:
+    """Rodada 23: dias desde a última conferência de resultados (PC desligado/app fechado) até hoje — no máximo 30.
+    Sempre inclui ontem e hoje (jogo da noite termina depois da meia-noite)."""
+    from src.data_hub import sync_policy as P
+
+    today = today or date.today()
+    last = P.last_synced(db, "fotmob", "_resultados_dia")
+    start = today - timedelta(days=1)
+    if last is not None:
+        start = min(start, last.astimezone().date() - timedelta(days=1))
+    start = max(start, today - timedelta(days=max_days))
+    return [start + timedelta(days=i) for i in range((today - start).days + 1)]
+
+
 def refresh_recent_results(db, progress=None) -> Dict[str, int]:
-    """Resultados de ontem e hoje: FotMob por dia (2 pedidos) + ESPN do dia anterior e de hoje em todas as ligas.
-    Leve o bastante para rodar com a tela aberta (só placares e calendário; detalhes ficam para a fila normal)."""
+    """Resultados de TODOS os dias desde a última conferência (rodada 23: recupera os dias com o PC desligado, 1 pedido
+    por dia na FotMob) + ESPN do dia anterior e de hoje. Leve: só placares e calendário; detalhes vão para a fila normal."""
+    from src.data_hub import sync_policy as P
     from src.data_hub.service import MatchDataService
 
     svc = MatchDataService(db=db) if db is not None else MatchDataService()
-    out = {"fotmob": 0, "espn": 0}
+    out = {"fotmob": 0, "espn": 0, "dias": 0}
     if fotmob_enabled():
-        out["fotmob"] = int(svc.fotmob.sync_dates(progress=progress).get("partidas", 0))
+        days = missing_days(svc.db)
+        out["dias"] = len(days)
+        out["fotmob"] = int(svc.fotmob.sync_dates(days, progress=progress).get("partidas", 0))
+        P.mark_synced(svc.db, "fotmob", "_resultados_dia")
     if svc.espn.enabled:
         try:
             r = svc.espn.live_tick(None)
@@ -351,7 +372,8 @@ def _results_loop(db=None) -> None:
         while enabled():
             try:
                 r = refresh_recent_results(db)
-                _results.update(ultimo=datetime.now(timezone.utc), partidas=sum(r.values()), erro=None)
+                _results.update(ultimo=datetime.now(timezone.utc), partidas=r.get("fotmob", 0) + r.get("espn", 0),
+                                dias=r.get("dias", 0), erro=None)
             except Exception as exc:             # sem internet: tenta de novo na próxima volta
                 _results["erro"] = f"{type(exc).__name__}: {exc}"
             time.sleep(RESULTS_EVERY_MIN * 60)

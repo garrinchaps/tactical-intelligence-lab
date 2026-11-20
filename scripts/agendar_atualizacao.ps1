@@ -9,7 +9,7 @@
 param([switch]$Remover)
 
 $proj = Split-Path -Parent $PSScriptRoot
-$names = @("TacticalLabRapido", "TacticalLabDiario", "TacticalLabSync")
+$names = @("TacticalLabRapido", "TacticalLabDiario", "TacticalLabSync", "TacticalLabAoLigar")
 foreach ($n in $names) {
     if (Get-ScheduledTask -TaskName $n -ErrorAction SilentlyContinue) {
         Unregister-ScheduledTask -TaskName $n -Confirm:$false
@@ -27,8 +27,18 @@ $a1 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silenci
 $t1 = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(10) -RepetitionInterval (New-TimeSpan -Hours 3)
 Register-ScheduledTask -TaskName "TacticalLabRapido" -Action $a1 -Trigger $t1 -Settings $set `
         -Description "Tactical Lab: jogos recentes a cada 3 h (sem janela; pula se o app estiver aberto)" | Out-Null
+# rodada 23: às 6h a tarefa ACORDA o PC se ele estiver em suspensão/hibernação (desligado de vez, nada roda)
+$setWake = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries `
+        -ExecutionTimeLimit (New-TimeSpan -Hours 2) -MultipleInstances IgnoreNew -WakeToRun
 $a2 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --diario" -WorkingDirectory $proj
 $t2 = New-ScheduledTaskTrigger -Daily -At 6am
-Register-ScheduledTask -TaskName "TacticalLabDiario" -Action $a2 -Trigger $t2 -Settings $set `
-        -Description "Tactical Lab: atualização diária às 6h (sem janela)" | Out-Null
-Write-Host "Pronto. Tarefas silenciosas: TacticalLabRapido (a cada 3 h) e TacticalLabDiario (6h). Registro: data\sync_log.txt"
+Register-ScheduledTask -TaskName "TacticalLabDiario" -Action $a2 -Trigger $t2 -Settings $setWake `
+        -Description "Tactical Lab: atualização diária às 6h (sem janela; acorda o PC da suspensão)" | Out-Null
+# rodada 23: 2 min depois de entrar no Windows recupera os dias em que o PC ficou desligado (antes de você abrir o app)
+$a3 = New-ScheduledTaskAction -Execute $pyw -Argument "-m src.tools.sync_silencioso --ao-ligar" -WorkingDirectory $proj
+$t3 = New-ScheduledTaskTrigger -AtLogOn
+$t3.Delay = "PT2M"
+Register-ScheduledTask -TaskName "TacticalLabAoLigar" -Action $a3 -Trigger $t3 -Settings $set `
+        -Description "Tactical Lab: ao entrar no Windows, busca os resultados dos dias com o PC desligado" | Out-Null
+Write-Host "Pronto. Tarefas silenciosas: TacticalLabRapido (3 h), TacticalLabDiario (6h, acorda o PC) e TacticalLabAoLigar."
+Write-Host "Com o app aberto elas não fazem nada (o próprio app atualiza). Registro: data\sync_log.txt"

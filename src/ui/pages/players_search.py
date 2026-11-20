@@ -241,9 +241,24 @@ def render(_ctx=None) -> None:
         st.rerun()
     if p["clube"]:
         nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
-    _player_card(p["nome"], tuple(names), p["clube"])
-    t1, t5, t4, t2, t3 = st.tabs(["🗓️ Jogos com todos os lances", "📊 Scout por 90 min", "📚 Carreira (Transfermarkt)",
-                                  "💶 Perfil e valor", "📈 Temporada (Understat)"])
+    t0, t1, t5, t4, t2, t3 = st.tabs(["📋 Visão geral (olheiro)", "🗓️ Jogos com todos os lances", "📊 Scout por 90 min",
+                                      "📚 Carreira (Transfermarkt)", "💶 Perfil e valor", "📈 Temporada (Understat)"],
+                                     key=f"player_tabs_{p['core']}", on_change="rerun")
+    with t0:
+        if t0.open is not False:          # rodada 23: visão geral estilo FM com números medidos
+            _player_card(p["nome"], tuple(names), p["clube"])
+            from src.scout import snapshot as S
+            from src.ui import player_fm
+
+            row = S.find_player(p["core"], names, p["clube"])
+            if row:
+                from src.analytics.rating_v2 import RATING_ENGINE_VERSION
+
+                form = _form_data(tuple(names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, p["clube"] or "")
+                player_fm.overview(row, key=f"pfm_{p['core']}", form=form)
+            else:
+                st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
+                           "minutos medidos pela FotMob/ESPN no último ano).")
     with t5:
         _scout_tab(names)
     with t4:

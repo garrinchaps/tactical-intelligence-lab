@@ -115,6 +115,40 @@ div[role="radiogroup"] > label:has(input:checked) {{ background: rgba(59,130,246
 .til-vs .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; margin: 4px 4px 0 0;
   background: #0B1120; border: 1px solid {P['border']}; color: #E2E8F0; }}
 .til-vs .mid {{ text-align: center; font-family: 'Space Grotesk', sans-serif; font-weight: 800; color: #94A3B8; font-size: 1.3rem; }}
+/* rodada 23: componentes estilo FM (src/ui/fm.py) com as cores do laboratório */
+.fm-panel-h {{ background: #0B1120; border: 1px solid #1E2A44; border-left: 4px solid; border-radius: 10px; padding: 7px 12px;
+  margin: 10px 0 8px 0; display: flex; justify-content: space-between; align-items: center; font-family: 'Space Grotesk', sans-serif;
+  font-weight: 700; letter-spacing: .02em; color: #E2E8F0; }}
+.fm-panel-h small {{ color: #94A3B8; font-weight: 500; }}
+.fm-list {{ background: #0F1626; border: 1px solid #1E2A44; border-radius: 12px; overflow: hidden; margin-bottom: 10px; }}
+.fm-list-h {{ color: #0B1120; font-weight: 800; padding: 6px 12px; letter-spacing: .03em; text-transform: uppercase; font-size: .8rem; }}
+.fm-row {{ display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-bottom: 1px solid #141C2E; }}
+.fm-row:last-child {{ border-bottom: none; }}
+.fm-ic {{ width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; flex: none;
+  background: #111A2C; border: 1px solid #1E2A44; font-size: .95rem; }}
+.fm-tx {{ color: #E2E8F0; font-size: .86rem; line-height: 1.3; text-align: left; }} .fm-sub {{ color: #94A3B8; font-size: .78rem; }}
+.fm-attrs {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }}
+.fm-attr-col {{ background: #0F1626; border: 1px solid #1E2A44; border-radius: 12px; padding: 8px 10px; }}
+.fm-attr-h {{ color: #94A3B8; font-size: .72rem; letter-spacing: .06em; margin-bottom: 4px; text-align: left; }}
+.fm-attr {{ display: flex; justify-content: space-between; padding: 3px 4px; border-bottom: 1px solid #141C2E; font-size: .86rem; color: #E2E8F0; }}
+.fm-attr b {{ font-family: 'Space Grotesk', sans-serif; }} .fm-attr.na span, .fm-attr.na b {{ color: #475569; font-weight: 500; }}
+.fm-stars {{ background: #0F1626; border: 1px solid #1E2A44; border-radius: 12px; padding: 8px 12px; margin-bottom: 8px; text-align: left; }}
+.fm-stars .lb {{ color: #94A3B8; font-size: .72rem; letter-spacing: .05em; text-transform: uppercase; }}
+.fm-stars .st {{ font-size: 1.35rem; letter-spacing: 2px; }} .fm-stars .tx {{ color: #CBD5E1; font-size: .8rem; }}
+.fm-verdict {{ display: flex; gap: 12px; align-items: center; border: 1px solid; border-radius: 12px; padding: 10px 14px; margin-bottom: 10px; }}
+.fm-verdict .n {{ width: 44px; height: 44px; border-radius: 50%; border: 2px solid; display: flex; align-items: center;
+  justify-content: center; font-weight: 800; font-size: 1.2rem; font-family: 'Space Grotesk', sans-serif; flex: none; }}
+.fm-verdict .t {{ color: #E2E8F0; font-weight: 700; }}
+.fm-person {{ background: #0F1626; border: 1px solid #1E2A44; border-radius: 12px; padding: 8px; text-align: center; margin-bottom: 8px; }}
+.fm-person .r {{ color: #94A3B8; font-size: .68rem; letter-spacing: .05em; text-transform: uppercase; }}
+.fm-person .av {{ width: 46px; height: 46px; border-radius: 50%; margin: 6px auto; background: linear-gradient(135deg, #22D3EE, #3B82F6);
+  color: #090D16; font-weight: 800; display: flex; align-items: center; justify-content: center; }}
+.fm-person .n {{ color: #E2E8F0; font-weight: 700; font-size: .86rem; }} .fm-person .d {{ color: #94A3B8; font-size: .74rem; }}
+table.fm-facts {{ width: 100%; border-collapse: collapse; background: #0F1626; border: 1px solid #1E2A44; border-radius: 12px; overflow: hidden; }}
+table.fm-facts th {{ color: #94A3B8; font-weight: 600; font-size: .78rem; text-align: left; padding: 7px 10px; border-bottom: 1px solid #1E2A44; }}
+table.fm-facts td {{ padding: 6px 10px; border-bottom: 1px solid #141C2E; font-size: .85rem; }}
+table.fm-facts td.f {{ color: #94A3B8; text-transform: uppercase; font-size: .74rem; letter-spacing: .03em; }}
+@media (max-width: 640px) {{ .fm-attrs {{ grid-template-columns: 1fr; }} }}
 @media (max-width: 640px) {{ .til-vs {{ grid-template-columns: 1fr; }} .til-vs .side.r {{ flex-direction: row; text-align: left; }} }}
 .stButton button[kind="primary"], [data-testid="stBaseButton-primary"] {{ background: var(--til-grad); border: none; color: white; }}
 .stTextInput input, .stNumberInput input, .stTextArea textarea, [data-baseweb="select"] > div {{

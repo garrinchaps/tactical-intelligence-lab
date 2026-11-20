@@ -113,10 +113,15 @@ def _team_canon():
 
     tr = {}
     for pt, ens in TEAM_ALIASES.items():
-        target = team_core(ens[0])
-        tr[team_core(pt)] = target
+        cores = {team_core(e) for e in ens}
+        # rodada 23: apelido AMBÍGUO ("tricolor" = Fluminense OU São Paulo) não pode traduzir nome nenhum — antes
+        # "São Paulo" virava "fluminense" e jogos dos dois times se juntavam na busca e na tabela
+        if len(cores) != 1:
+            continue
+        target = cores.pop()
+        tr.setdefault(team_core(pt), target)
         for e in ens:
-            tr[team_core(e)] = target
+            tr.setdefault(team_core(e), target)
     return lambda name: (lambda c: tr.get(c, c))(team_core(name))
 
 

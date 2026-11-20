@@ -576,6 +576,16 @@ def _dossier(player, roster):
         except Exception:
             return []
     hist, recent = unpack(player.get("historico_temporadas")), unpack(player.get("ultimos_jogos"))
+    try:                                   # rodada 23: relatório do olheiro estilo FM (veredito, estrelas, atributos)
+        from src.scout import attributes as AT
+        from src.ui import fm, player_fm
+
+        v, txt = AT.verdict(player.get("score_scout"))
+        fm.verdict_card(v, txt)
+        player_fm.overview(player, key=f"dos_{_slug(player.get('nome'))}_{_slug(player.get('papel_alvo'))}")
+        player_fm.squad_compare(player, roster, key=f"dosc_{_slug(player.get('nome'))}")
+    except Exception:
+        pass
     # rodada 13: o porquê vem primeiro, em cartões verdes/vermelhos; números detalhados ficam abaixo
     from src.scout.traits import traits_html
 

@@ -9,7 +9,8 @@ console) com este módulo, que:
   * não roda duas vezes ao mesmo tempo (trava em data/sync_silencioso.lock).
 
     pythonw -m src.tools.sync_silencioso --rapido          # o que o agendamento de 3 h chama
-    pythonw -m src.tools.sync_silencioso --diario          # o de 6 h da manhã
+    pythonw -m src.tools.sync_silencioso --diario          # o de 6 h da manhã (acorda o PC se estiver em suspensão)
+    pythonw -m src.tools.sync_silencioso --ao-ligar        # 2 min depois de entrar no Windows: recupera os dias perdidos
 """
 
 from __future__ import annotations
@@ -32,6 +33,23 @@ def _locked() -> bool:
     return False
 
 
+def catch_up(detail_limit: int = 400) -> dict:
+    """Resultados de cada dia perdido (FotMob, 1 pedido por dia, até 30 dias) e os detalhes desses jogos (estatísticas,
+    escalações, números por jogador) — o que acontece "enquanto o PC estava desligado" entra assim que ele liga."""
+    from datetime import timedelta
+
+    from src.data_hub import autosync as A
+    from src.data_hub.service import MatchDataService
+
+    svc = MatchDataService()
+    days = A.missing_days(svc.db)
+    r = A.refresh_recent_results(svc.db)
+    det = {}
+    if A.fotmob_enabled() and days:
+        det = svc.fotmob.fetch_details(None, since=(days[0] - timedelta(days=1)).isoformat(), limit=detail_limit)
+    return {"dias": len(days), "resultados": r.get("fotmob", 0) + r.get("espn", 0), "detalhes": det.get("detalhes", 0)}
+
+
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     LOG.parent.mkdir(parents=True, exist_ok=True)
@@ -50,10 +68,15 @@ def main(argv=None) -> int:
             print(f"[{stamp}] outra atualização agendada ainda está rodando — pulado.")
             return 0
         LOCK.write_text(str(os.getpid()), encoding="utf-8")
+        try:                                   # rodada 23: recupera os dias em que o PC ficou desligado
+            r = catch_up()
+            print(f"[{stamp}] recuperação: {r}")
+        except Exception as exc:
+            print(f"[{stamp}] recuperação falhou: {type(exc).__name__}: {exc}")
         try:
             from src.data_hub import sync
 
-            args = ["--rapido"] if "--rapido" in argv or not argv else ["--days", "3", "--seasons", "0"]
+            args = ["--rapido"] if "--rapido" in argv or "--ao-ligar" in argv or not argv else ["--days", "3", "--seasons", "0"]
             print(f"[{stamp}] atualização agendada: {' '.join(args)}")
             sys.argv = ["src.data_hub.sync", *args]
             sync.main()
