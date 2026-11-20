@@ -374,7 +374,24 @@ def _overall_explainer():
             "- **Escala pela colocação no mundo**: só ~10 jogadores passam de 90, ~40 de 87, ~80 de 85, ~400 de 80; "
             "mediana ≈ 62. As posições são padronizadas (competem em pé de igualdade) e têm teto (lateral ≤ 90, goleiro ≤ 91).",
             "- **Calibração**: os pesos são escolhidos para pôr os craques de referência no alto e respeitar os TETOS que "
-            "você apontou (ex.: Maddison, Isak, Gnabry, Ekitiké ≤ 85; Lacroix ≤ 87), sem perder a ligação com o desempenho."]))
+            "você apontou (ex.: Maddison, Isak, Gnabry, Ekitiké ≤ 85; Lacroix ≤ 87), sem perder a ligação com o desempenho.",
+            "- **Correção aprendida (rodada 22)**: ~130 jogadores com nota-alvo de REFERÊNCIA (aproximação de consenso, "
+            "editável em `REFERENCE_TARGETS`) ensinam onde a régua erra de forma sistemática — idade, liga, minutos, "
+            "posição. A correção vale para TODOS (não é ajuste nome a nome) e é testada fora da amostra (aprende numa "
+            "metade, mede na outra).",
+            "- **Potencial (ao lado)**: overall de hoje + espaço de crescimento da idade × talento medido (produção na "
+            "função com pesos por posição, nota, minutos × nível do time, valor para a idade, toques, seleção de base, "
+            "físico). É projeção, não fato."]))
+        if rep and rep.get("erro_medio_alvos") is not None:
+            st.caption(f"Erro médio contra as notas-alvo de referência: {rep['erro_medio_alvos']} ponto(s).")
+        if rep and rep.get("alvos"):
+            ta = pd.DataFrame(rep["alvos"]).rename(columns={"craque": "Jogador", "posicao": "Posição", "overall": "Nossa nota",
+                                                             "alvo": "Referência", "diferenca": "Diferença",
+                                                             "minutos_12m": "Min. 12 meses"})
+            ta = ta.sort_values("Diferença", key=lambda x: -x.abs(), na_position="last")
+            st.markdown("**Nossa nota × referência (maiores diferenças primeiro)**")
+            styled_dataframe(ta[[c for c in ("Jogador", "Posição", "Nossa nota", "Referência", "Diferença", "Min. 12 meses")
+                                 if c in ta]].head(40), hide_index=True, use_container_width=True)
         if rep and rep.get("distribuicao"):
             d = rep["distribuicao"]
             st.caption(f"No universo atual: {d.get('90+')} jogadores com 90+ · {d.get('87+')} com 87+ · {d.get('85+')} com "
@@ -576,9 +593,23 @@ def _dossier(player, roster):
         for x in w["atencao"] or ["Nenhum alerta forte nos números disponíveis."]:
             st.markdown(f'<div style="border-left:4px solid #EF4444;background:#0B1120;border-radius:10px;'
                         f'padding:.45rem .7rem;margin-bottom:.35rem">{html.escape(x)}</div>', unsafe_allow_html=True)
+    pot = player.get("potencial", player.get("potencial_teto"))
+    if pot is not None and pd.notna(pot):
+        st.markdown(f'<div style="border-left:4px solid #22D3EE;background:#0B1120;border-radius:10px;padding:.5rem .8rem;'
+                    f'margin:.4rem 0">🌱 <b>Potencial {float(pot):.0f}</b> (overall hoje {player.get("qualidade", "—")}) · '
+                    f'{html.escape(str(player.get("potencial_porque") or ""))}'
+                    + (f' · confiança {float(player.get("potencial_confianca_pct")):.0f}%'
+                       if pd.notna(player.get("potencial_confianca_pct")) else "")
+                    + '<br><small style="color:#94A3B8">Potencial é projeção: idade × talento medido (produção na '
+                      'função, nota, minutos × nível do time, valor para a idade, toques, base, físico).</small></div>',
+                    unsafe_allow_html=True)
     st.markdown("**Números detalhados**")
     metrics = [
         ("Qualidade calculada por função", player.get("qualidade_estatistica", player.get("qualidade"))),
+        ("Acerto de passe (%)", player.get("pass_accuracy_pct")), ("Duelos ganhos (%)", player.get("duels_won_pct")),
+        ("Aéreos ganhos (%)", player.get("aerial_pct")), ("Dribles certos (%)", player.get("dribble_pct")),
+        ("Finalizações no alvo (%)", player.get("shot_acc_pct")), ("Toques na bola/90", player.get("touches_p90")),
+        ("Dribles/90", player.get("dribbles_p90")), ("Desarmes/90", player.get("tackles_p90")),
         ("Nota externa 0–100", player.get("nota_externa")),
         ("Valor TM no cadastro (€)", player.get("valor_tm_atual", player.get("valor_mercado_eur"))),
         ("Média de avaliação TM em 12m (€)", player.get("valor_tm_media_12m")),
@@ -714,7 +745,10 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
         f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
         f'<span class="scout-tag neutral">Compatibilidade {(player.get("compatibilidade") or {}).get("score","—")}%</span>'
-        f'<span class="scout-tag neutral">Qualidade {quality}</span></div>'
+        f'<span class="scout-tag neutral">Overall {quality}</span>'
+        + (f'<span class="scout-tag neutral" title="{html.escape(str(player.get("potencial_porque") or ""))}">'
+           f'Potencial {float(player.get("potencial") if pd.notna(player.get("potencial")) else player.get("potencial_teto")):.0f}</span>'
+           if pd.notna(player.get("potencial", player.get("potencial_teto"))) else "") + '</div>'
         f'<div style="margin-top:4px">{_traits_short(player)}</div></div>'
         f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>'
     )
@@ -1119,7 +1153,7 @@ def render(_ctx=None):
                 cols = [x for x in ("nome","Posição","idade","qualidade","confianca_pct","caracteristicas_top",
                                     "potencial_teto","valor_mercado_eur","jogos_12m","minutos_12m","rating_12m") if x in show]
                 display = show[cols].rename(columns={"nome":"Jogador","idade":"Idade","qualidade":"Qualidade",
-                    "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Teto",
+                    "confianca_pct":"Confiança (%)","caracteristicas_top":"Características","potencial_teto":"Potencial",
                     "valor_mercado_eur":"Valor de mercado","jogos_12m":"Jogos (12m)","minutos_12m":"Minutos (últimos 12 meses)",
                     "rating_12m":"Nota média 12m"})
                 st.caption("Números de cada atleta pelos jogos do PRÓPRIO clube nos últimos 12 meses (nomes comuns não se "
@@ -1304,10 +1338,10 @@ def render(_ctx=None):
                 empty_state("Nenhuma joia com amostra mínima", "Só aparecem jovens com dados estatísticos suficientes.", "💎")
             else:
                 table=gems.rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
-                    "nacionalidade":"Nacionalidade","qualidade":"Qualidade hoje","potencial_teto":"Teto projetado",
+                    "nacionalidade":"Nacionalidade","qualidade":"Overall hoje","potencial_teto":"Potencial",
                     "confianca_pct":"Confiança (%)","_aff":"Adaptação (%)",
                     "projecao_valorizacao_24m_pct":"Valorização possível 24m (%)","valor_mercado_eur":"Valor (€)"})
-                keep=[x for x in ("Jogador","Posição","Idade","Clube","Nacionalidade","Qualidade hoje","Teto projetado",
+                keep=[x for x in ("Jogador","Posição","Idade","Clube","Nacionalidade","Overall hoje","Potencial",
                                   "Confiança (%)","Adaptação (%)","Valorização possível 24m (%)","Valor (€)") if x in table]
                 table=table[keep].copy()
                 if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])

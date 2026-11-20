@@ -1,6 +1,7 @@
 """Rodada 22: correções rápidas (contagem de jogos, rótulos, tela de carregamento, janela cmd, resultados de ontem)."""
 from datetime import date
 
+import numpy as np
 import pandas as pd
 
 
@@ -202,3 +203,60 @@ def test_cached_catalog_where_parser():
     assert _parse_where("competition_name = ?", ("Série A",)) == [("competition_name", "in", ("Série A",))]
     assert _parse_where("match_date > ?", ("2020",)) is None                  # vai ao SQLite como antes
     assert _parse_where("", ()) == []
+
+
+def test_fotmob_dribbles_tackles_and_rates_reach_scout():
+    from src.scout import engine as E
+
+    assert "dribbles_succeeded" in E._raw_keys(E.COUNT_KEYS["dribbles"])          # nome da FotMob
+    assert "matchstats.headers.tackles" in E._raw_keys(E.COUNT_KEYS["tackles"])
+    d = {"passes_acc": 80, "passes_tot": 100, "duel_won": 6, "duel_lost": 10, "aerials_won": 3, "aerials_tot": 4,
+         "dribbles": 4, "dribbles_tot": 8, "shots_on_target": 5, "shots": 10, "crosses_acc": 1, "crosses_tot": 3}
+    E.derived_rates(d)
+    assert d["pass_accuracy_pct"] == 80.0 and d["duels_won_pct"] == 37.5 and d["dribble_pct"] == 50.0
+    assert d["aerial_pct"] is None and d["cross_pct"] is None                      # amostra pequena: vazio, não zero
+    df = pd.DataFrame([d, {"passes_acc": None, "passes_tot": None}])
+    E.derived_rates(df)
+    assert df["pass_accuracy_pct"].iloc[0] == 80.0 and pd.isna(df["pass_accuracy_pct"].iloc[1])
+
+
+def test_potential_by_age_and_talent():
+    from src.scout import potential as P
+
+    u = pd.DataFrame({"papel": ["ST", "ST", "ST", "CB"], "idade": [18, 18, 31, None], "qualidade": [77, 62, 85, 70],
+                      "minutos_12m": [2600, 300, 3000, 2000], "_lvl": [.9, .3, .9, .5],
+                      "valor_mercado_eur": [60e6, 1e6, 50e6, 5e6], "rating_12m": [7.4, 6.4, 7.5, 6.9]})
+    out = P.compute(u)
+    assert out.loc[2, "potencial"] == 85                                   # 31 anos: potencial = overall
+    assert out.loc[0, "potencial"] > out.loc[1, "potencial"] + 10          # jovem que joga muito em time forte
+    assert 84 <= out.loc[0, "potencial"] <= 95
+    assert out.loc[3, "potencial"] == 70 and "idade desconhecida" in out.loc[3, "potencial_porque"]
+    assert all(out["potencial"] >= u["qualidade"])
+
+
+def test_overall_learned_correction_keeps_distribution(tmp_path, monkeypatch):
+    from src.scout import overall as O
+
+    monkeypatch.setattr(O, "CALIB_PATH", tmp_path / "c.json")
+    rng = np.random.default_rng(3)
+    n = 6000
+    q = rng.normal(0, 1, n)
+    u = pd.DataFrame({"nome": [f"P{i}" for i in range(n)], "_core": [f"p{i}" for i in range(n)],
+                      "papel": rng.choice(["ST", "CB", "GK", "CM", "LW", "RB"], n),
+                      "valor_mercado_eur": np.exp(14 + q), "idade": rng.integers(18, 35, n),
+                      "_perf_raw": np.clip(50 + 14 * q, 1, 99), "_conf": .8, "_lvl": np.clip(.5 + .15 * q, .1, 1),
+                      "minutos_12m": rng.integers(500, 4000, n), "rating_12m": 6.8 + .3 * q, "qualidade": 50.0})
+    from src.data_lake.ids import player_core
+
+    rows = []
+    for k, (nm, t) in enumerate(list(O.all_targets().items())[:60]):
+        z = (t - 75) / 6
+        rows.append({"nome": nm, "_core": player_core(nm), "papel": "ST", "valor_mercado_eur": np.exp(15.5 + z),
+                     "idade": 25, "_perf_raw": float(np.clip(70 + 8 * z, 1, 99)), "_conf": .9, "_lvl": .85,
+                     "minutos_12m": 3000, "rating_12m": 7.2 + .15 * z, "qualidade": 50.0})
+    u = pd.concat([u, pd.DataFrame(rows)], ignore_index=True)
+    out = O.finalize_overall(u)
+    rep = O.load_report()
+    assert rep["correcao"] and rep["correcao"]["n"] >= 25 and rep["erro_medio_alvos"] is not None
+    assert (out["qualidade"] >= 90).sum() <= 20 and 55 <= out["qualidade"].median() <= 70
+    assert "potencial" in out and (out["potencial"].dropna() >= out.loc[out["potencial"].notna(), "qualidade"]).all()

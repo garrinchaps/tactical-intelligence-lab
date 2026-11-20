@@ -48,6 +48,46 @@ REFERENCE_CEILINGS: Dict[str, int] = {
     "Marcus Rashford": 85, "Christopher Nkunku": 85, "Hugo Ekitiké": 85, "Maxence Lacroix": 87,
 }
 
+# rodada 22: NOTAS-ALVO de referência (aproximação de consenso — jogos de futebol/imprensa — feita para CALIBRAR, não
+# é dado medido). Servem para (1) escolher os pesos e (2) aprender a CORREÇÃO dos vieses sistemáticos da régua
+# (idade, liga, minutos, posição): a correção vale para TODOS os jogadores, não só para estes. Edite à vontade.
+REFERENCE_TARGETS: Dict[str, int] = {
+    # goleiros
+    "Thibaut Courtois": 89, "Alisson": 88, "Gianluigi Donnarumma": 88, "Jan Oblak": 87, "Mike Maignan": 87,
+    "David Raya": 86, "Emiliano Martínez": 86, "Gregor Kobel": 85, "Diogo Costa": 85, "Marc-André ter Stegen": 85,
+    "Joan García": 84, "Unai Simón": 84, "Yann Sommer": 84, "Guglielmo Vicario": 84, "André Onana": 81,
+    # zagueiros
+    "Virgil van Dijk": 89, "William Saliba": 87, "Gabriel Magalhães": 87, "Rúben Dias": 87, "Antonio Rüdiger": 86,
+    "Alessandro Bastoni": 86, "Marquinhos": 85, "Willian Pacho": 85, "Ibrahima Konaté": 85, "Jonathan Tah": 85,
+    "Dayot Upamecano": 85, "Éder Militão": 85, "Joško Gvardiol": 85, "Pau Cubarsí": 84, "Kim Min-jae": 84,
+    "Ronald Araújo": 84, "Dean Huijsen": 83, "Piero Hincapié": 83, "Maxence Lacroix": 82, "Riccardo Calafiori": 82,
+    "Jarrad Branthwaite": 81, "Murillo": 81, "Luka Vušković": 77, "Mario Vušković": 75,
+    # laterais
+    "Achraf Hakimi": 89, "Nuno Mendes": 87, "Trent Alexander-Arnold": 86, "Marc Cucurella": 85, "Jules Koundé": 85,
+    "Alejandro Grimaldo": 85, "Reece James": 85, "Jeremie Frimpong": 84, "Theo Hernández": 84, "Pedro Porro": 84,
+    "Denzel Dumfries": 84, "Alphonso Davies": 84, "Alejandro Balde": 82, "Diogo Dalot": 81,
+    # volantes e meias
+    "Rodri": 90, "Vitinha": 89, "Pedri": 89, "Federico Valverde": 88, "Joshua Kimmich": 88, "Declan Rice": 87,
+    "Moisés Caicedo": 87, "Bruno Guimarães": 86, "Nicolò Barella": 86, "João Neves": 86, "Ryan Gravenberch": 86,
+    "Alexis Mac Allister": 86, "Martín Zubimendi": 86, "Enzo Fernández": 85, "Aurélien Tchouaméni": 85,
+    "Scott McTominay": 85, "Frenkie de Jong": 84, "Sandro Tonali": 84, "Fermín López": 84, "Eduardo Camavinga": 83,
+    "Teun Koopmeiners": 82, "Elliot Anderson": 82, "Luka Modrić": 82, "Casemiro": 80, "Kobbie Mainoo": 80,
+    "Gerson": 80, "Andrey Santos": 79, "Jorginho": 79,
+    # meias ofensivos
+    "Jude Bellingham": 89, "Martin Ødegaard": 87, "Bruno Fernandes": 87, "Florian Wirtz": 87, "Jamal Musiala": 85,
+    "Kevin De Bruyne": 85, "James Maddison": 83, "Isco": 83, "Nico Paz": 82, "Giorgian de Arrascaeta": 80,
+    # pontas
+    "Lamine Yamal": 90, "Ousmane Dembélé": 90, "Mohamed Salah": 89, "Raphinha": 89, "Vinicius Junior": 89,
+    "Michael Olise": 88, "Bukayo Saka": 88, "Khvicha Kvaratskhelia": 87, "Luis Díaz": 86, "Désiré Doué": 85,
+    "Rafael Leão": 85, "Nico Williams": 85, "Rodrygo": 84, "Bradley Barcola": 84, "Serge Gnabry": 82,
+    "Marcus Rashford": 82, "Takefusa Kubo": 82, "Yan Diomande": 80, "Estêvão": 80,
+    # centroavantes
+    "Kylian Mbappé": 92, "Erling Haaland": 92, "Harry Kane": 91, "Lautaro Martínez": 89, "Julián Álvarez": 87,
+    "Lionel Messi": 87, "Victor Osimhen": 86, "Viktor Gyökeres": 86, "Alexander Isak": 85, "Robert Lewandowski": 85,
+    "Marcus Thuram": 85, "Dušan Vlahović": 83, "Hugo Ekitiké": 83, "Benjamin Šeško": 82, "Mateo Retegui": 82,
+    "Santiago Giménez": 81, "Christopher Nkunku": 81, "Gabriel Jesus": 80, "Vitor Roque": 79,
+}
+
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
 
@@ -205,23 +245,100 @@ def _resolve(u: pd.DataFrame, names: Sequence[str]) -> Dict[str, int]:
     return out
 
 
-def _overall(comps: pd.DataFrame, w: Dict[str, float]) -> pd.Series:
+FAMS = ("GK", "CB", "FB", "MID", "AM", "WIDE", "ST")
+CORR_RIDGE = 3.0
+CORR_SHRINK = .7
+CORR_CLIP = .8
+
+
+def corr_features(comps: pd.DataFrame, age: pd.Series) -> pd.DataFrame:
+    """Variáveis da correção: idade (e idade²), nível, disponibilidade, reputação, desempenho, nota e posição."""
+    a = (pd.to_numeric(age, errors="coerce").fillna(26) - 26) / 5
+    X = pd.DataFrame({"idade": a, "idade2": a ** 2, "nivel": comps["L"].fillna(45) / 100 - .5,
+                      "disp": comps["_avail"].fillna(0) - .7, "R": comps["R"].fillna(50) / 100 - .5,
+                      "P": comps["P"].fillna(50) / 100 - .5, "T": comps["T"].fillna(50) / 100 - .5,
+                      "semT": comps["T"].isna().astype(float)}, index=comps.index)
+    for f in FAMS:
+        X[f"f_{f}"] = (comps["_fam"] == f).astype(float)
+    return X
+
+
+def fit_correction(s: pd.Series, ovr: pd.Series, comps: pd.DataFrame, age: pd.Series,
+                   targets: Dict[str, int], idx: Dict[str, int]) -> Optional[Dict[str, Any]]:
+    """Aprende, nos jogadores de referência, quanto a régua erra em função de idade/liga/minutos/posição (em unidades
+    da régua padronizada `s`, para manter a distribuição: só ~10 jogadores com 90+). Regressão ridge; None se < 25."""
+    pool = pd.DataFrame({"s": s, "o": ovr}).dropna().sort_values("s")
+    if len(pool) < 50:
+        return None
+    o_sorted, s_sorted = np.maximum.accumulate(pool["o"].values), pool["s"].values
+    rows, ys = [], []
+    X_all = corr_features(comps, age)
+    for name, i in idx.items():
+        if i not in s.index or pd.isna(s.loc[i]) or name not in targets:
+            continue
+        t = float(targets[name])
+        s_t = float(np.interp(t, o_sorted + np.arange(len(o_sorted)) * 1e-9, s_sorted))   # régua que daria o alvo
+        rows.append(X_all.loc[i].values)
+        ys.append(s_t - float(s.loc[i]))
+    if len(rows) < 25:
+        return None
+    X, y = np.asarray(rows, float), np.asarray(ys, float)
+    Xb = np.column_stack([np.ones(len(X)), X])
+    reg = np.eye(Xb.shape[1]) * CORR_RIDGE
+    reg[0, 0] = 0
+    beta = np.linalg.solve(Xb.T @ Xb + reg, Xb.T @ y)
+    return {"beta": [float(b) for b in beta], "cols": ["const"] + list(X_all.columns), "n": int(len(rows)),
+            "encolhimento": CORR_SHRINK, "limite": CORR_CLIP}
+
+
+def apply_correction(s: pd.Series, comps: pd.DataFrame, age: pd.Series, corr: Optional[Dict[str, Any]]) -> pd.Series:
+    if not corr:
+        return s
+    X = corr_features(comps, age)
+    cols = corr.get("cols") or []
+    beta = np.asarray(corr.get("beta") or [], float)
+    if len(beta) != len(cols):
+        return s
+    Xm = np.column_stack([np.ones(len(X))] + [X[c].values if c in X else np.zeros(len(X)) for c in cols[1:]])
+    c = np.clip(Xm @ beta * float(corr.get("encolhimento", CORR_SHRINK)), -float(corr.get("limite", CORR_CLIP)),
+                float(corr.get("limite", CORR_CLIP)))
+    return s + pd.Series(c, index=s.index).where(s.notna())
+
+
+def _overall(comps: pd.DataFrame, w: Dict[str, float], corr: Optional[Dict[str, Any]] = None,
+             age: Optional[pd.Series] = None) -> pd.Series:
     s, _ = standardize(zscore(comps, w), comps)
+    if corr and age is not None:
+        s = apply_correction(s, comps, age, corr)
     ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
     return ovr.clip(upper=cap).round(0)
 
 
+def all_targets() -> Dict[str, int]:
+    """Alvos + tetos do usuário (teto vira alvo = teto − 1 quando o nome não tem alvo próprio)."""
+    t = dict(REFERENCE_TARGETS)
+    for n, cap in REFERENCE_CEILINGS.items():
+        t[n] = min(t.get(n, cap - 1), cap)
+    return t
+
+
 def calibrate(u: pd.DataFrame, comps: pd.DataFrame, anchors: Sequence[str] = REFERENCE_STARS,
-              ceilings: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
-    """Grade de pesos: craques no alto (média do overall, contado até 92) − 3 × o quanto os nomes com TETO passam do
-    teto; exige correlação ≥ 0,55 com o desempenho entre quem jogou 1.800+ min no ano."""
+              ceilings: Optional[Dict[str, int]] = None, targets: Optional[Dict[str, int]] = None) -> Dict[str, Any]:
+    """Grade de pesos (rodada 22): para cada combinação, aprende a correção nos jogadores de referência e mede o ERRO
+    MÉDIO contra as notas-alvo (com validação: a correção é aprendida em metade e medida na outra, e vice-versa) +
+    3 × o quanto os nomes com TETO passam do teto; exige correlação ≥ 0,55 com o desempenho de quem joga muito."""
     ceilings = REFERENCE_CEILINGS if ceilings is None else ceilings
+    targets = all_targets() if targets is None else targets
     found = _resolve(u, anchors)
     capped = _resolve(u, list(ceilings))
+    tidx = _resolve(u, list(targets))
+    age = _col(u, "idade")
     m12 = _col(u, "minutos_12m").fillna(0)
     regulars = comps.index[(m12 >= 1800) & comps["P"].notna()]
-    best, best_obj, grid = dict(DEFAULT_WEIGHTS), -1e9, []
+    names = sorted(tidx)
+    half_a, half_b = set(names[0::2]), set(names[1::2])
+    best, best_obj, grid, best_corr = dict(DEFAULT_WEIGHTS), -1e9, [], None
     for wR in (.2, .3, .4, .5):
         for wT in (.15, .25, .35):
             for wL in (.10, .15):
@@ -229,19 +346,35 @@ def calibrate(u: pd.DataFrame, comps: pd.DataFrame, anchors: Sequence[str] = REF
                 if wP < .1:
                     continue
                 w = {"wR": wR, "wP": wP, "wT": wT, "wL": wL}
-                ovr = _overall(comps, w)
+                z = zscore(comps, w)
+                s0, _ = standardize(z, comps)
+                o0 = ladder(s0)
+                corr_full = fit_correction(s0, o0, comps, age, targets, tidx)
+                # erro fora da amostra: aprende numa metade, mede na outra
+                errs = []
+                for fit_on, test_on in ((half_a, half_b), (half_b, half_a)):
+                    c_half = fit_correction(s0, o0, comps, age, targets, {n: tidx[n] for n in fit_on})
+                    o_half = ladder(apply_correction(s0, comps, age, c_half)).clip(
+                        upper=comps["_fam"].map(FAMILY_CAP).fillna(92)).round(0)
+                    errs += [abs(float(o_half.loc[tidx[n]]) - targets[n]) for n in test_on if pd.notna(o_half.loc[tidx[n]])]
+                ovr = ladder(apply_correction(s0, comps, age, corr_full)).clip(
+                    upper=comps["_fam"].map(FAMILY_CAP).fillna(92)).round(0)
                 stars = [min(float(ovr.loc[i]), 92.0) for i in found.values() if pd.notna(ovr.loc[i])]
                 excess = [max(0.0, float(ovr.loc[i]) - ceilings[n]) for n, i in capped.items() if pd.notna(ovr.loc[i])]
-                z = zscore(comps, w)
                 corr = float(z.loc[regulars].corr(comps.loc[regulars, "P"], method="spearman")) if len(regulars) > 20 else 1.0
                 ok = corr >= .55 or not np.isfinite(corr)
-                obj = (np.mean(stars) if stars else 0.0) - 3 * (np.mean(excess) if excess else 0.0) - (0 if ok else 50)
-                grid.append({**w, "craques_overall_medio": round(float(np.mean(stars)), 1) if stars else None,
+                mae = float(np.mean(errs)) if errs else None
+                if mae is not None:
+                    obj = -mae - 3 * (np.mean(excess) if excess else 0.0) - (0 if ok else 50)
+                else:                                 # base sem referências suficientes: critério antigo
+                    obj = (np.mean(stars) if stars else 0.0) - 3 * (np.mean(excess) if excess else 0.0) - (0 if ok else 50)
+                grid.append({**w, "erro_medio_alvos": round(mae, 2) if mae is not None else None,
+                             "craques_overall_medio": round(float(np.mean(stars)), 1) if stars else None,
                              "tetos_estourados_medio": round(float(np.mean(excess)), 2) if excess else 0.0,
                              "correlacao_desempenho": round(corr, 3) if np.isfinite(corr) else None, "aceito": bool(ok)})
                 if obj > best_obj:
-                    best, best_obj = w, obj
-    return {"pesos": best, "grade": grid, "encontrados": found, "tetos": capped}
+                    best, best_obj, best_corr = w, obj, corr_full
+    return {"pesos": best, "correcao": best_corr, "grade": grid, "encontrados": found, "tetos": capped, "alvos": tidx}
 
 
 def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Optional[pd.DataFrame] = None,
@@ -254,21 +387,27 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         out["qualidade_base"] = pd.to_numeric(out.get("qualidade"), errors="coerce")
     comps = components(out, reference)
     report: Dict[str, Any] = {}
+    corr = None
     if weights is None:
         if calibrate_now and reference is None:
             report = calibrate(out, comps)
             weights = report["pesos"]
+            corr = report.get("correcao")
         else:
             weights = load_weights()
+            corr = load_correction()
+    age = _col(out, "idade")
     z = zscore(comps, weights)
     if reference is not None and "_ovr_s" in reference and "_ovr_z" in reference:
         rz = pd.to_numeric(reference["_ovr_z"], errors="coerce")
         g = rz.groupby(reference["_fam"])
         stats = {f: (float(m), float(sd) if sd and sd > 0 else 1.0) for f, m, sd in zip(g.mean().index, g.mean(), g.std())}
         s, _ = standardize(z, comps, stats)
+        s = apply_correction(s, comps, age, corr)
         ovr = ladder(s, np.sort(pd.to_numeric(reference["_ovr_s"], errors="coerce").dropna().values))
     else:
         s, _ = standardize(z, comps)
+        s = apply_correction(s, comps, age, corr)
         ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
     out["qualidade"] = ovr.clip(upper=cap).round(0)
@@ -295,7 +434,23 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
 
 
 def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
-    """Teto = overall de hoje + crescimento esperado até ~26 anos (mesma ideia de antes, na escala nova)."""
+    """Rodada 22: potencial completo (src/scout/potential.py) — idade × talento por posição, ao lado do overall."""
+    try:
+        from src.scout import potential as POT
+
+        fam = d["_fam"] if "_fam" in d else None
+        p = POT.compute(d, fam)
+        for c in p.columns:
+            d[c] = p[c]
+        d["potencial_teto"] = p["potencial"]
+        return d
+    except Exception:
+        pass
+    return _recompute_potential_old(d)
+
+
+def _recompute_potential_old(d: pd.DataFrame) -> pd.DataFrame:
+    """(rodada 20/21) Teto = overall de hoje + crescimento esperado até ~26 anos."""
     age = _col(d, "idade")
     q = _col(d, "qualidade")
     conf = _col(d, "confianca_pct").fillna(0) / 100
@@ -325,8 +480,17 @@ def save_report(u: pd.DataFrame, report: Dict[str, Any]) -> None:
             "80+": int((q >= 80).sum()), "mediana": None if q.dropna().empty else float(q.median())}
     hi = sum(1 for r in rows if (r["overall"] or 0) >= 85)
     over = [r["craque"] for r in caps if r["overall"] is not None and r["overall"] > r["teto"]]
-    doc = {"pesos": report["pesos"], "grade": report["grade"], "craques": rows, "tetos": caps, "distribuicao": dist,
-           "nao_encontrados": missing,
+    tg = all_targets()
+    tgt_rows = []
+    for n, i in (report.get("alvos") or {}).items():
+        r = row(n, i)
+        r["alvo"] = tg.get(n)
+        r["diferenca"] = None if r["overall"] is None or r["alvo"] is None else int(r["overall"] - r["alvo"])
+        tgt_rows.append(r)
+    diffs = [abs(r["diferenca"]) for r in tgt_rows if r["diferenca"] is not None]
+    doc = {"pesos": report["pesos"], "correcao": report.get("correcao"), "grade": report["grade"], "craques": rows,
+           "tetos": caps, "alvos": tgt_rows, "erro_medio_alvos": round(float(np.mean(diffs)), 2) if diffs else None,
+           "distribuicao": dist, "nao_encontrados": missing,
            "resumo": f"{hi} de {len(rows)} craques com 85+ · {dist['90+']} jogadores com 90+ no universo"
                      + (f" · tetos estourados: {', '.join(over)}" if over else " · nenhum teto estourado")}
     try:
@@ -341,6 +505,13 @@ def load_weights() -> Dict[str, float]:
         return dict(json.loads(CALIB_PATH.read_text(encoding="utf-8"))["pesos"])
     except Exception:
         return dict(DEFAULT_WEIGHTS)
+
+
+def load_correction() -> Optional[Dict[str, Any]]:
+    try:
+        return json.loads(CALIB_PATH.read_text(encoding="utf-8")).get("correcao")
+    except Exception:
+        return None
 
 
 def load_report() -> Optional[Dict[str, Any]]:

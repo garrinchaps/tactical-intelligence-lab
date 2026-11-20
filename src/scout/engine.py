@@ -70,14 +70,68 @@ COUNT_KEYS = {
     "shots_on_target": "shotsOnTarget", "xg": "xg", "xa": "xa",
     "chances_created": "chances_created", "def_actions": "defensive_actions",
     "sprints": "sprints", "touches": "touches", "interceptions": "interceptions",
-    "tackles": "tackles", "recoveries": "recoveries", "clearances": "clearances",
-    "aerials_won": "aerials_won", "dribbles": "successful_dribbles",
+    "tackles": ("tackles", "matchstats.headers.tackles"), "recoveries": "recoveries", "clearances": "clearances",
+    # rodada 22: a FotMob grava "dribbles_succeeded" e "matchstats.headers.tackles" — com só o nome antigo, dribles e
+    # desarmes de TODOS os jogos da FotMob ficavam vazios no Scout. Tupla = nomes alternativos (o 1º presente vale).
+    "aerials_won": "aerials_won", "dribbles": ("successful_dribbles", "dribbles_succeeded"),
     "fouls": "foulsCommitted", "errors": "errors_led_to_goal", "saves": "saves",
     "xgot_faced": "xgot_faced", "yellow_cards": "yellow_cards", "red_cards": "red_cards",
     # rodada 13: construção (zagueiro que joga, como Cubarsí, não pode ser medido só por cortes e desarmes)
     "line_breaking": "line_breaking_passes", "final_third_passes": "passes_into_final_third",
     "long_balls": "long_balls_accurate", "dribbled_past": "dribbled_past",
+    # rodada 22: tentativas (para os %), perdas, presença na área — base do potencial por posição
+    "passes_acc": "accurate_passes", "passes_tot": "accurate_passes_total", "duel_won": "duel_won",
+    "duel_lost": "duel_lost", "aerials_tot": "aerials_won_total", "dribbles_tot": "dribbles_succeeded_total",
+    "crosses_acc": "accurate_crosses", "crosses_tot": "accurate_crosses_total", "long_balls_tot": "long_balls_accurate_total",
+    "dispossessed": "dispossessed", "touches_opp_box": "touches_opp_box", "was_fouled": "was_fouled",
 }
+P90_KEYS = ("goals", "assists", "shots", "shots_on_target", "xg", "xa", "chances_created", "def_actions", "sprints",
+            "touches", "interceptions", "tackles", "recoveries", "clearances", "aerials_won", "dribbles", "fouls",
+            "errors", "saves", "xgot_faced", "line_breaking", "final_third_passes", "long_balls", "dribbled_past",
+            "crosses_acc", "dispossessed", "touches_opp_box", "was_fouled")
+
+
+def _raw_keys(raw_key) -> tuple:
+    return tuple(raw_key) if isinstance(raw_key, (tuple, list)) else (raw_key,)
+
+
+def derived_rates(out):
+    """% de acerto a partir das SOMAS (passe, duelo, aéreo, drible, cruzamento, bola longa, chute no alvo). Funciona
+    com dict (um atleta) ou DataFrame (vários). Amostra mínima por taxa; abaixo dela fica vazio (não é zero)."""
+    def rate(ok, tot, mn):
+        a, b = out.get(ok), out.get(tot)
+        if isinstance(out, dict):
+            if a is None or b is None or not b or b < mn:
+                return None
+            return round(100 * float(a) / float(b), 1)
+        a = pd.to_numeric(a, errors="coerce") if a is not None else None
+        b = pd.to_numeric(b, errors="coerce") if b is not None else None
+        if a is None or b is None:
+            return pd.Series(np.nan, index=out.index)
+        return (100 * a / b.where(b >= mn)).round(1)
+    if isinstance(out, dict):
+        dw, dl = out.get("duel_won"), out.get("duel_lost")
+        out["_duel_tot"] = (dw or 0) + (dl or 0) if dw is not None or dl is not None else None
+    else:
+        out["_duel_tot"] = pd.to_numeric(out.get("duel_won"), errors="coerce").fillna(0) + \
+            pd.to_numeric(out.get("duel_lost"), errors="coerce").fillna(0)
+    rates = {"pass_rate_pct": rate("passes_acc", "passes_tot", 40), "duel_rate_pct": rate("duel_won", "_duel_tot", 15),
+             "aerial_pct": rate("aerials_won", "aerials_tot", 8), "dribble_pct": rate("dribbles", "dribbles_tot", 6),
+             "cross_pct": rate("crosses_acc", "crosses_tot", 8), "long_ball_pct": rate("long_balls", "long_balls_tot", 10),
+             "shot_acc_pct": rate("shots_on_target", "shots", 8)}
+    for k, v in rates.items():
+        out[k] = v
+    if isinstance(out, dict):
+        out.pop("_duel_tot", None)
+        if out.get("pass_accuracy_pct") is None:
+            out["pass_accuracy_pct"] = rates["pass_rate_pct"]
+        if out.get("duels_won_pct") is None:
+            out["duels_won_pct"] = rates["duel_rate_pct"]
+    else:
+        out.drop(columns=["_duel_tot"], inplace=True)
+        out["pass_accuracy_pct"] = pd.to_numeric(out.get("pass_accuracy_pct"), errors="coerce").combine_first(rates["pass_rate_pct"])
+        out["duels_won_pct"] = pd.to_numeric(out.get("duels_won_pct"), errors="coerce").combine_first(rates["duel_rate_pct"])
+    return out
 
 
 def history_cache_revision(db: Any) -> str:
@@ -248,13 +302,12 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
         parsed_stats = [_json_obj(x) for x in rows.get("stats_json", pd.Series(dtype=object)).tolist()]
 
     for out_key, raw_key in COUNT_KEYS.items():
-        vals = [_num(item.get(raw_key)) for item in parsed_stats]
+        keys = _raw_keys(raw_key)
+        vals = [next((_num(item.get(k)) for k in keys if _num(item.get(k)) is not None), None) for item in parsed_stats]
         vals = [value for value in vals if value is not None]
         out[out_key] = float(sum(vals)) if vals else None
     if out["minutos"] > 0:
-        for k in ("goals", "assists", "shots", "shots_on_target", "xg", "xa", "chances_created",
-                  "def_actions", "sprints", "touches", "interceptions", "tackles", "recoveries",
-                  "clearances", "aerials_won", "dribbles", "fouls", "errors", "saves", "xgot_faced"):
+        for k in P90_KEYS:
             v = out.get(k)
             out[k + "_p90"] = round(v * 90 / total_minutes, 3) if v is not None else None
     out["pass_accuracy_pct"] = None
@@ -271,6 +324,7 @@ def _player_season_totals(rows: pd.DataFrame) -> Dict[str, Any]:
         if vals:
             out["duels_won_pct"] = round(float(np.mean(vals)), 2)
             break
+    derived_rates(out)
     # O histórico pode chegar sem ordenação global (evita ordenar centenas de milhares de linhas no SQL).
     # A forma deve sempre refletir os cinco jogos mais recentes, independentemente da ordem de entrada.
     if "match_date" in rows:
@@ -323,10 +377,7 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     for name in metric_names:
         out[name] = metric_sums[name]
 
-    for name in ("goals", "assists", "shots", "shots_on_target", "xg", "xa",
-                 "chances_created", "def_actions", "sprints", "touches", "interceptions",
-                 "tackles", "recoveries", "clearances", "aerials_won", "dribbles",
-                 "fouls", "errors", "saves", "xgot_faced"):
+    for name in P90_KEYS:
         out[name + "_p90"] = (
             out[name] * 90 / out["minutos"].replace(0, np.nan)
         ).round(3)
@@ -343,6 +394,7 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
         duel_means["_duels_duelsWonPercentage"]
     )
     out["duels_won_pct"] = duels.round(2)
+    derived_rates(out)
 
     # Uma única ordenação atende forma dos últimos cinco jogos e seleção do registro mais recente.
     chronological = rows.sort_values("match_date", ascending=True, kind="stable")
@@ -586,7 +638,7 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     # Decodifica cada JSON uma única vez e transforma as métricas em colunas numéricas.
     # As somas por carreira, temporada e 12 meses passam a ser feitas pelo groupby vetorizado.
     stat_fields = list(dict.fromkeys(
-        list(COUNT_KEYS.values()) +
+        [k for v in COUNT_KEYS.values() for k in _raw_keys(v)] +
         ["accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct",
          "duels_won_pct", "duelsWonPercentage"]
     ))
@@ -596,7 +648,11 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     )
     report("Convertendo métricas JSON para colunas numéricas...")
     for out_key, raw_key in COUNT_KEYS.items():
-        raw[out_key] = _history_numeric(stat_frame[raw_key]) if raw_key in stat_frame else np.nan
+        col = pd.Series(np.nan, index=raw.index)
+        for k in _raw_keys(raw_key):
+            if k in stat_frame:
+                col = col.combine_first(_history_numeric(stat_frame[k]))
+        raw[out_key] = col
 
     for field in ("accurate_passes_pct", "pass_accuracy", "pass_accuracy_pct"):
         raw[f"_pass_{field}"] = (
@@ -2601,12 +2657,12 @@ def youth_caps(db) -> pd.DataFrame:
     try:
         with db.connect() as conn:
             r = pd.read_sql_query(
-                f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos FROM (
-                        SELECT p.player_name, m.competition_name, m.match_id FROM match_player_stats p
+                f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos, AVG(nota) AS nota FROM (
+                        SELECT p.player_name, m.competition_name, m.match_id, p.rating AS nota FROM match_player_stats p
                         JOIN matches m ON m.match_id = p.match_id
                         WHERE m.competition_name IN ({ph}) AND COALESCE(p.minutes, 0) > 0
                         UNION
-                        SELECT l.player_name, m.competition_name, m.match_id FROM match_lineups l
+                        SELECT l.player_name, m.competition_name, m.match_id, NULL AS nota FROM match_lineups l
                         JOIN matches m ON m.match_id = l.match_id
                         WHERE m.competition_name IN ({ph}) AND l.is_starter = 1)
                     GROUP BY player_name, competition_name""", conn, params=[*names, *names])
@@ -2615,8 +2671,12 @@ def youth_caps(db) -> pd.DataFrame:
     if r.empty:
         return r
     r["core"] = r["player_name"].map(player_core)
+    # rodada 22: "os melhores de cada seleção e competição" — percentil da nota DENTRO da competição de base (≥ 2 jogos)
+    r["nota"] = pd.to_numeric(r["nota"], errors="coerce")
+    r["pct"] = r["nota"].where(r["jogos"] >= 2).groupby(r["competition_name"]).rank(pct=True) * 100
     out = r.groupby("core").agg(selecao_base_jogos=("jogos", "sum"),
-                                selecao_base_comp=("competition_name", lambda x: " · ".join(sorted(set(x)))))
+                                selecao_base_comp=("competition_name", lambda x: " · ".join(sorted(set(x)))),
+                                selecao_base_nota=("nota", "mean"), selecao_base_pct=("pct", "max"))
     return out.reset_index()
 
 
@@ -2631,4 +2691,7 @@ def merge_youth(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
     c = caps.set_index("core")
     u["selecao_base_jogos"] = core.where(ok).map(c["selecao_base_jogos"])
     u["selecao_base_comp"] = core.where(ok).map(c["selecao_base_comp"])
+    for col in ("selecao_base_nota", "selecao_base_pct"):
+        if col in c:
+            u[col] = core.where(ok).map(c[col])
     return u
