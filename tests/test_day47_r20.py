@@ -95,7 +95,9 @@ def test_overall_world_class_is_rare_and_ceilings_hold(tmp_path, monkeypatch):
         _add(u, *x)
     out = O.finalize_overall(u)
     q = dict(zip(out["nome"], out["qualidade"]))
-    assert q["Kylian Mbappé"] >= 90 and q["Erling Haaland"] >= 88 and q["Harry Kane"] >= 87
+    # rodada 26: veterano não sobe mais pela idade (Kane 33) e jovem não é descontado — o universo sintético tem jovens
+    # tão valiosos quanto as estrelas, então a régua de topo ficou 1–4 pontos mais apertada aqui
+    assert q["Kylian Mbappé"] >= 88 and q["Erling Haaland"] >= 88 and q["Harry Kane"] >= 82
     assert q["Achraf Hakimi"] <= O.FAMILY_CAP["FB"]
     assert q["James Maddison"] <= 85 and q["Alexander Isak"] <= 85
     assert (out["qualidade"] >= 90).sum() <= 20                          # craque mundial é raro

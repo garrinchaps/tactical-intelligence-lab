@@ -133,7 +133,20 @@ REFERENCE_TARGETS.update({
 POTENTIAL_TARGETS: Dict[str, int] = {
     "Lamine Yamal": 95, "Nico Paz": 90, "Zé Lucas": 86, "Kaiki Bruno": 85, "Natanael": 76, "Kauã Moraes": 77,
     "Melk": 83, "Néiser Villarreal": 80,
+    # rodada 26: os jovens de maior potencial do Cruzeiro (lista do usuário) e jovens de elite
+    "Eduardo Pape": 84, "Keny Arroyo": 87, "Felipe Morais": 83, "Jonathan Jesus": 82, "Otávio": 85,
+    "Désiré Doué": 92, "Arda Güler": 91, "Kenan Yıldız": 90, "Pau Cubarsí": 91, "Warren Zaïre-Emery": 89,
+    "Lennart Karl": 90, "Franco Mastantuono": 89, "Estêvão": 90, "Endrick": 88,
 }
+
+# rodada 26: jovens de elite estavam baixos (Yamal 81, Doué 82, Güler 82) — âncoras da qualidade ATUAL
+REFERENCE_TARGETS.update({
+    "Désiré Doué": 86, "Arda Güler": 85, "Kenan Yıldız": 85, "Pau Cubarsí": 85, "Dean Huijsen": 83,
+    "Warren Zaïre-Emery": 82, "Luka Vušković": 80, "Lennart Karl": 79, "Franco Mastantuono": 78,
+    "Cristiano Ronaldo": 80, "Rodrigo De Paul": 80, "Sadio Mané": 78, "Riyad Mahrez": 76, "Leon Goretzka": 82,
+    "Hakan Çalhanoğlu": 84, "Granit Xhaka": 81, "Ivan Toney": 80, "Rúben Neves": 80,
+    "Sergej Milinković-Savić": 81, "Yannick Carrasco": 76, "Kingsley Coman": 79,
+})
 
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
@@ -165,10 +178,10 @@ def age_factor(age: pd.Series) -> pd.Series:
     """Corrige o valor de mercado pela idade: ≥ 28 anos o mercado desconta a idade (×1 a ×2,1 aos 37); ≤ 22 o preço
     embute projeção (×0,75 aos 18)."""
     a = pd.to_numeric(age, errors="coerce")
-    # rodada 24: o desconto de veterano era generoso demais (Salah 89, Casemiro 86 com 34 anos); ×1,49 no máximo
-    up = 1 + .07 * (a - 27).clip(lower=0, upper=7)
-    down = 1 - .05 * (23 - a).clip(lower=0, upper=5)
-    return (up * down).fillna(1.0)
+    # rodada 26: a lista parecia de 2022 (Messi 93, Salah 92, De Bruyne 90, Cristiano 87 aos 41) — o "desconto de
+    # veterano" inflava quem já está em queda. Agora ×1,10 no máximo; e o jovem não é mais descontado (Yamal tinha 81)
+    up = 1 + .02 * (a - 27).clip(lower=0, upper=5)
+    return up.fillna(1.0)
 
 
 def _pct(values: pd.Series, groups: pd.Series, reference: Optional[pd.DataFrame] = None, col: str = "") -> pd.Series:
@@ -211,7 +224,8 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     d = pd.DataFrame(index=u.index)
     d["_fam"] = (u["papel"] if "papel" in u else pd.Series("", index=u.index)).map(FAMILY).fillna("")
     val = _col(u, "valor_mercado_eur")
-    peak = _col(u, "valor_pico_3a_eur") * .8
+    # pico de 3 anos vale 80% até 30 anos; depois, 50% (o pico de quem tem 33+ é de outra fase da carreira)
+    peak = _col(u, "valor_pico_3a_eur") * np.where(_col(u, "idade").fillna(25) >= 31, .5, .8)
     rep_val = pd.concat([val, peak], axis=1).max(axis=1, skipna=True)
     rep_val = rep_val.where(rep_val > 0)
     d["_rep_val"] = np.log1p(rep_val * age_factor(_col(u, "idade")))
@@ -226,7 +240,8 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     m12 = _col(u, "minutos_12m").fillna(0)
     rating = _col(u, "rating_12m")
     # nota FotMob ajustada pela liga: 0,9 ponto entre a liga mais forte e a mais fraca (7,3 na Premier ≈ 7,8 abaixo)
-    d["_rating_adj"] = (rating + .9 * (lvl - .7)).where(m12 >= 450)
+    # rodada 26: 1,8 ponto entre a liga mais forte e a mais fraca (antes 0,9): 7,4 na MLS/Arábia ≠ 7,4 na Premier
+    d["_rating_adj"] = (rating + 1.8 * (lvl - .7)).where(m12 >= 450)
     d["L"] = (lvl * 100).round(1)
     # rodada 24: craque que passou meses lesionado (Rodrygo, Militão, Alisson) não "some": a disponibilidade usa o
     # maior entre o último ano e 85% da temporada anterior — lesão longa ainda pesa, mas não apaga a qualidade
@@ -236,6 +251,7 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     m_eff = m12.where(m12 < 300, pd.concat([m12, .5 * prev], axis=1).max(axis=1))
     d["_m"] = .35 + .65 * (m_eff / 1350).clip(0, 1)
     d["_avail"] = (m_eff / 1800).clip(0, 1)
+    d["_age"] = _col(u, "idade")
     d["_elig"] = raw.notna() | rep_val.notna()
     if "qualidade" in u:                                  # quem a régua antiga deixou sem nota (0 min no ano, sem dado)
         d["_elig"] &= pd.to_numeric(u["qualidade"], errors="coerce").notna()
@@ -275,7 +291,21 @@ def standardize(z: pd.Series, comps: pd.DataFrame, fam_stats: Optional[Dict[str,
     s = s * comps["_fam"].map(FAMILY_SPREAD).fillna(1.0)
     avail = comps["_avail"] ** .7
     s = s * (.45 + .55 * avail)                          # quem jogou pouco no ano não chega ao topo
+    if "_age" in comps:
+        s = s + age_prior(comps["_age"], comps["_avail"], comps.get("L"))
     return s, fam_stats
+
+
+def age_prior(age: pd.Series, avail: pd.Series, level: Optional[pd.Series] = None) -> pd.Series:
+    """Rodada 26 — o que os números por jogo não medem (velocidade, explosão, recuperação): depois dos 31 o corpo cai
+    mesmo quando a produção ainda aparece (−0,08 na régua por ano depois dos 31, até −0,48); um jovem de até 22 anos
+    TITULAR num clube/liga forte já prova nível acima do que os números de um ano mostram (+0,035 por ano abaixo de 23).
+    É uma estimativa assumida — está descrita na explicação da nota."""
+    a = pd.to_numeric(age, errors="coerce")
+    old = -(.08 * (a - 31).clip(lower=0, upper=6))
+    lv = level.fillna(45) if level is not None else pd.Series(45.0, index=a.index)
+    young = .035 * (23 - a).clip(lower=0, upper=5) * (avail.fillna(0) >= .75) * (lv >= 60)
+    return (old + young).fillna(0.0)
 
 
 def ladder(s: pd.Series, ref_sorted: Optional[np.ndarray] = None) -> pd.Series:

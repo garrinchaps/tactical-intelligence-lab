@@ -696,6 +696,22 @@ Rodada 25c (22/11/2026, 527 testes verdes) — `atualizar_tudo.ps1` deu "databas
 - ✅ Banco: `DataHubDB._migrate_patiently` (espera e tenta de novo; com as tabelas já existentes, segue sem a migração leve);
   `busy_timeout` de 60 s e ajustes (PRAGMA) que não derrubam a conexão. Passo 11 (`src.scout.evaluation`) mostra andamento.
 
+Rodada 26 (22/11/2026, 528 testes verdes) — velocidade, limpeza e notas desatualizadas:
+- ✅ Notas: veterano não ganha mais bônus de valor (fator idade ×1,10 no máximo; pico de valor de 31+ vale metade), nota FotMob
+  ajustada mais forte pela liga, desconto de idade (−0,08 por ano depois dos 31) e pequeno empurrão para jovem titular em liga
+  forte (`overall.age_prior`); alvos novos (Messi/CR7/De Bruyne e meias 30+ para baixo; Doué, Güler, Yıldız, Cubarsí, Huijsen,
+  Zaïre-Emery para cima). Potencial: sinal "minutos para a idade" mais forte e piso para titular ≤ 21 anos com 900+ min;
+  `POTENTIAL_TARGETS` com Eduardo Pape, Arroyo, Felipe Morais, Jonathan Jesus, Otávio, Zé Lucas. Não verificável daqui.
+- ✅ Identidade sem vídeo: estilo pelos números de cada jogo (PPDA aproximado, bolas longas, onde finaliza e deixa finalizar,
+  toques na área, grandes chances cedidas) — o texto "não há tracking/vídeo" saiu.
+- ✅ Velocidade: fotografia do Scout sem as estatísticas brutas de cada jogo (`snapshot.slim`; a antiga é enxugada 1 vez ao
+  abrir) — carrega mais rápido e usa menos memória.
+- ✅ `python -m src.tools.limpeza` (`--simular`, `--vacuum`, `--sem-computador`): caches do Python/testes, fotografias antigas,
+  catálogos velhos, .tmp, cache de tela 14+ dias, backups além de 2, registros > 5 MB, WAL devolvido + `PRAGMA optimize`,
+  marcas `fotmob_tried` > 30 dias, %TEMP% do usuário com 3+ dias e cache do pip. Nenhum dado do banco é apagado.
+  Passo 3 do `atualizar_tudo.ps1`.
+- Atributos e notas mudam sozinhos com os jogos novos (fotografia refeita a cada 6 h pelo processo de fundo e no passo 12).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

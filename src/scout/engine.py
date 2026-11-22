@@ -764,8 +764,9 @@ def load_player_history(db, days: int = 900, player_names: Optional[Iterable[str
     latest = ordered.drop_duplicates("_pid", keep="first").set_index("_pid")
     recent_games = ordered.groupby("_pid", sort=False, group_keys=False).head(15)
     games_by_core = {
+        # rodada 26: sem o stats_json de cada jogo (nenhuma tela usa e deixava a fotografia do Scout gigante)
         core: group[["match_date", "team_name", "competition_name", "minutes", "rating",
-                     "rating_ajustada", "_opponent_level", "_opponent_adjustment", "stats_json"]]
+                     "rating_ajustada", "_opponent_level", "_opponent_adjustment"]]
         .to_dict("records")
         for core, group in recent_games.groupby("_pid", sort=False)
     }
@@ -1713,7 +1714,8 @@ def diagnose_club(db, aliases: Sequence[str], roster: Optional[pd.DataFrame] = N
                  "limite": "a projeção depende de adaptação, reforços, disponibilidade e mudança de contexto"}
     else:
         style = squad_style
-        style["contexto_tecnico"] = "identidade observada do clube; não há amostra histórica suficiente do treinador para projetar mudanças"
+        style["contexto_tecnico"] = ("identidade observada nos jogos recentes do clube (o treinador atual ainda tem poucos "
+                                     "jogos registrados em outros clubes para comparar)")
     return {
         "partidas_analisadas": sample.get("n", 0), "baseline_competicoes": sample.get("competicoes", []),
         "medias_pro": own, "medias_contra": against, "referencia": baseline, "necessidades": needs,
@@ -1768,10 +1770,41 @@ def _derive_style(own: Dict[str, float], against: Dict[str, float]) -> Dict[str,
         style.append("circulação de passes")
     if against.get("shots_total") is not None and against["shots_total"] <= 10:
         style.append("proteção de área consistente")
+    # rodada 26: mais traços SÓ com os números de cada jogo — a leitura não depende de vídeo
+    def g(d, *keys):
+        for k in keys:
+            v = d.get(k)
+            if v is not None and v == v:
+                return float(v)
+        return None
+    defa = sum(x for x in (g(own, "tackles_won", "tackles"), g(own, "interceptions"), g(own, "fouls")) if x is not None)
+    opp_passes = g(against, "passes_total", "passes")
+    ppda = opp_passes / defa if opp_passes and defa else None
+    if ppda is not None:
+        style.append("pressão alta (deixa o rival trocar poucos passes)" if ppda <= 9 else
+                     "marca mais atrás e espera o rival" if ppda >= 14 else "pressão média")
+    lb, lb_tot = g(own, "long_balls_accurate_total", "long_balls_total"), passes
+    if lb and lb_tot and lb / lb_tot >= .12:
+        style.append("jogo direto (muitas bolas longas)")
+    sib, st_ = g(own, "shots_inside_box"), shots
+    if sib and st_ and sib / st_ >= .7:
+        style.append("finaliza de perto (entra na área antes de chutar)")
+    elif sib and st_ and sib / st_ <= .5:
+        style.append("chuta muito de fora")
+    tob = g(own, "touches_opp_box")
+    if tob is not None and tob >= 28:
+        style.append("presença constante na área rival")
+    soc, sic = g(against, "shots_outside_box"), g(against, "shots_inside_box")
+    if soc and sic and soc / (soc + sic) >= .45:
+        style.append("bloco que protege a área (o rival só chuta de fora)")
+    bc = g(against, "big_chances")
+    if bc is not None and bc >= 2.5:
+        style.append("cede chances claras com frequência")
     return {"tracos": style or ["identidade ainda sem amostra estatística suficiente"],
             "posse_media": poss, "precisao_passe": pass_acc, "passes_jogo": passes,
-            "cruzamentos_jogo": crosses, "finalizacoes_jogo": shots,
-            "limite": "não há tracking/vídeo; estilo é inferido apenas por estatísticas disponíveis"}
+            "cruzamentos_jogo": crosses, "finalizacoes_jogo": shots, "ppda_aprox": round(ppda, 1) if ppda else None,
+            "limite": ("leitura feita só com os números de cada jogo (posse, passes, pressão aproximada pelo PPDA, bolas "
+                       "longas, cruzamentos, onde finaliza e onde deixa finalizar) — não depende de vídeo")}
 
 
 def current_roster(db, club: Optional[Dict[str, Any]], aliases: Sequence[str],

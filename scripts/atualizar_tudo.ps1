@@ -42,6 +42,7 @@ function Step($title, [scriptblock]$cmd) {
 try {
     Step "1. Código novo do GitHub" { git pull --ff-only }
     Step "2. Dependências (só instala o que faltar)" { & $py -m pip install -q -r requirements.txt }
+    Step "3. Limpeza (caches, fotografias antigas, registros grandes, temporários; banco otimizado sem apagar dados)" { & $py -m src.tools.limpeza }
     Step "4. Índices de velocidade do banco (só cria os que faltam)" { & $py -m src.tools.criar_indices }
     Step "5. Resultados dos dias que faltam + detalhes desses jogos" { & $py -c "from src.tools.sync_silencioso import catch_up; print(catch_up())" }
     if (-not $Rapido) {

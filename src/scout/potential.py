@@ -53,11 +53,11 @@ POS_WEIGHTS: Dict[str, Dict[str, float]] = {
     "GK": {"saves_p90": .6, "pass_accuracy_pct": .4, "long_ball_pct": .3},
 }
 SIGNAL_WEIGHTS = {"producao": 1.3, "nota": 1.0, "minutos_nivel": 1.4, "valor_idade": 1.1, "toques": .8,
-                  "base": .7, "fisico": .4, "precocidade": .6}
+                  "base": .9, "fisico": .4, "precocidade": .6, "minutos_idade": 1.8}
 SIGNAL_LABELS = {"producao": "produção na função", "nota": "nota média (ajustada pela liga)",
                  "minutos_nivel": "minutos no ano × nível do time", "valor_idade": "valor de mercado para a idade",
                  "toques": "ações com a bola por 90", "base": "seleção de base", "fisico": "prospecto físico",
-                 "precocidade": "precocidade"}
+                 "precocidade": "precocidade", "minutos_idade": "minutos para a idade (titular cedo)"}
 TALL_MATTERS = {"CB": 186.0, "GK": 188.0, "ST": 183.0}      # mediana aproximada de quem joga na posição
 
 
@@ -129,6 +129,11 @@ def signals(u: pd.DataFrame, fam: pd.Series) -> pd.DataFrame:
     med = fam.map(TALL_MATTERS)
     s["fisico"] = (50 + 6 * (h - med)).clip(5, 95).where(med.notna() & h.notna())
     s["precocidade"] = _col(u, "precocidade")
+    # rodada 26: jogar MUITO cedo é o sinal mais forte de potencial (Zé Lucas titular na Série A aos 17/18) — minutos do
+    # ano × nível, comparados com quem tem a MESMA idade (faixas ≤ 18, 19–20, 21–22, 23+), não com adultos
+    band2 = pd.cut(age, [0, 18.99, 20.99, 22.99, 99], labels=False)
+    mi = (m12.fillna(0) * (.35 + .65 * lvl.fillna(.45).clip(0, 1))).where(age.notna())
+    s["minutos_idade"] = (mi.groupby(band2).rank(pct=True) * 100).where(m12.fillna(0) > 0)
     return s
 
 
@@ -156,6 +161,13 @@ def compute(u: pd.DataFrame, fam: Optional[pd.Series] = None) -> pd.DataFrame:
     room = (1 - (q - 80).clip(lower=0) / 40).clip(lower=.4)
     growth = age_growth(_col(u, "idade")) * mult * room.fillna(1.0)
     pot = (q + growth).clip(upper=POT_CAP)
+    # rodada 26: piso para o jovem TITULAR (≤ 21 anos, 900+ min no ano): pelo menos 75% do crescimento típico da idade,
+    # mesmo que os números de um ano ainda sejam de quem está aprendendo (a produção de um garoto não é a de um adulto)
+    m12_ = _col(u, "minutos_12m").fillna(0)
+    starter_kid = (_col(u, "idade") <= 21) & (m12_ >= 900)
+    floor = q + .75 * age_growth(_col(u, "idade"))
+    pot = pot.where(~starter_kid, pd.concat([pot, floor], axis=1).max(axis=1)).clip(upper=POT_CAP)
+    growth = growth.where(~starter_kid, pot - q)
     # rodada 25: potencial para TODOS os jovens — sem nota atual (quase sem minutos), o potencial é ESTIMADO só pelos
     # sinais (seleção de base, minutos e nível, valor para a idade), partindo de um patamar de base e marcado como tal
     age = _col(u, "idade")

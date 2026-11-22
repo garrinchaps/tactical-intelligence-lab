@@ -110,8 +110,35 @@ def _evaluations():
         return None
 
 
+def slim(u: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 26: fotografia mais leve (abre e cabe na memória muito mais rápido) sem tirar nada que alguma tela usa:
+    os últimos jogos perdem o stats_json de cada partida (não é exibido em lugar nenhum), colunas internas de cálculo
+    que nenhuma tela lê saem (tipos dos números não mudam: nada quebra)."""
+    if u is None or u.empty:
+        return u
+    u = u.copy()
+    if "ultimos_jogos" in u:
+        def _strip(v):
+            if not isinstance(v, str) or "stats_json" not in v:
+                return v
+            try:
+                games = json.loads(v)
+                for g in games if isinstance(games, list) else []:
+                    if isinstance(g, dict):
+                        g.pop("stats_json", None)
+                return json.dumps(games, ensure_ascii=False, default=str)
+            except Exception:
+                return v
+        u["ultimos_jogos"] = u["ultimos_jogos"].map(_strip)
+    drop = [c for c in u.columns if c.startswith("__history_") or c in ("_raw_stats", "stats_json")]
+    u = u.drop(columns=drop, errors="ignore")
+    return u
+
+
 def save(data: Dict[str, Any]) -> Dict[str, Any]:
     SNAP_PATH.parent.mkdir(parents=True, exist_ok=True)
+    if isinstance(data.get("universe"), pd.DataFrame):
+        data = {**data, "universe": slim(data["universe"])}
     tmp = SNAP_PATH.with_suffix(".tmp")
     pd.to_pickle(data, tmp)
     os.replace(tmp, SNAP_PATH)
@@ -143,9 +170,20 @@ def load() -> Optional[Dict[str, Any]]:
     if not SNAP_PATH.exists():
         return _upgrade_old()
     try:
-        return pd.read_pickle(SNAP_PATH)
+        data = pd.read_pickle(SNAP_PATH)
     except Exception:
         return None
+    try:                                   # rodada 26: fotografia antiga (com stats_json dos jogos) → enxuga UMA vez
+        u = data.get("universe") if isinstance(data, dict) else None
+        if isinstance(u, pd.DataFrame) and "ultimos_jogos" in u and \
+                u["ultimos_jogos"].head(200).astype(str).str.contains("stats_json", regex=False).any():
+            data["universe"] = slim(u)
+            tmp = SNAP_PATH.with_suffix(".tmp")
+            pd.to_pickle(data, tmp)
+            os.replace(tmp, SNAP_PATH)
+    except Exception:
+        pass
+    return data
 
 
 def _upgrade_old() -> Optional[Dict[str, Any]]:
