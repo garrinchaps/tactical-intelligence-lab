@@ -24,10 +24,14 @@ LOG = Path("data/sync_log.txt")
 LOCK = Path("data/sync_silencioso.lock")
 
 
+MANUAL = Path("data/atualizacao_manual.lock")      # rodada 25c: o atualizar_tudo.ps1 está rodando
+
+
 def _locked() -> bool:
     try:
-        if LOCK.exists() and time.time() - LOCK.stat().st_mtime < 6 * 3600:
-            return True
+        for p in (LOCK, MANUAL):
+            if p.exists() and time.time() - p.stat().st_mtime < 6 * 3600:
+                return True
     except OSError:
         pass
     return False

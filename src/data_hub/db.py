@@ -204,7 +204,33 @@ class DataHubDB:
         self.db_path = Path(configured_path)
         self.schema_path = Path(schema_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.migrate()
+        self._migrate_patiently()
+
+    def _migrate_patiently(self, tries: int = 4, wait_s: float = 15.0) -> None:
+        """Rodada 25c: outro processo do laboratório gravando (atualização automática, processo de fundo) fazia TODA
+        ferramenta morrer com "database is locked" logo ao abrir o banco. Agora espera e tenta de novo; se o banco já
+        tem as tabelas, segue sem migrar (as tabelas novas entram na próxima abertura livre)."""
+        import time as _t
+
+        for i in range(tries):
+            try:
+                self.migrate()
+                return
+            except sqlite3.OperationalError as exc:
+                if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
+                    raise
+                if i < tries - 1:
+                    print(f"  banco ocupado por outro processo do laboratório — nova tentativa em {wait_s:.0f} s "
+                          f"({i + 1}/{tries - 1})", flush=True)
+                    _t.sleep(wait_s)
+        try:
+            with sqlite3.connect(str(self.db_path), timeout=5) as c:
+                ok = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").fetchone()
+        except sqlite3.Error:
+            ok = None
+        if not ok:
+            raise sqlite3.OperationalError("database is locked (e o banco ainda não tem as tabelas)")
+        print("  banco continua ocupado: sigo sem a migração leve (só leitura das tabelas que já existem)", flush=True)
 
     # ------------------------------------------------------------------ infra
     @contextmanager
@@ -232,14 +258,19 @@ class DataHubDB:
             conn.close()
 
     def _open(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=30)
-        conn.execute("PRAGMA foreign_keys = ON;")
-        # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê)
-        conn.execute("PRAGMA synchronous = NORMAL;")
-        conn.execute("PRAGMA cache_size = -64000;")         # 64 MB de cache por conexão (o PC tem 16 GB)
-        conn.execute("PRAGMA temp_store = MEMORY;")
-        conn.execute("PRAGMA mmap_size = 268435456;")      # 256 MB mapeados: leituras grandes sem copiar
-        conn.execute("PRAGMA journal_size_limit = 67108864;")   # rodada 11: o arquivo de escrita volta a ≤ 64 MB
+        conn = sqlite3.connect(str(self.db_path), timeout=60)
+        conn.execute("PRAGMA busy_timeout = 60000;")
+        # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê). Rodada 25c: um
+        # ajuste que falha por banco ocupado não derruba mais a conexão inteira.
+        for pragma in ("PRAGMA foreign_keys = ON;", "PRAGMA synchronous = NORMAL;",
+                       "PRAGMA cache_size = -64000;",            # 64 MB de cache por conexão (o PC tem 16 GB)
+                       "PRAGMA temp_store = MEMORY;",
+                       "PRAGMA mmap_size = 268435456;",          # 256 MB mapeados: leituras grandes sem copiar
+                       "PRAGMA journal_size_limit = 67108864;"):  # rodada 11: o arquivo de escrita volta a ≤ 64 MB
+            try:
+                conn.execute(pragma)
+            except sqlite3.OperationalError:
+                pass
         return conn
 
     def missing_speed_indexes(self) -> list:

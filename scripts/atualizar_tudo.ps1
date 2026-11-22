@@ -14,6 +14,22 @@ if (-not (Test-Path $py)) { $py = "python" }
 $busy = Get-NetTCPConnection -LocalPort 8501 -State Listen -ErrorAction SilentlyContinue
 if ($busy) { Write-Host "Feche o app (porta 8501 ocupada) e rode de novo: o banco aceita um gravador por vez." -ForegroundColor Yellow; exit 1 }
 
+# rodada 25c: "database is locked" em todas as etapas = outro processo DO LABORATÓRIO gravando ao mesmo tempo (processo
+# de fundo que sobrou do app, ou a atualização automática agendada). 1) marca que a atualização manual está rodando
+# (as tarefas automáticas e o processo de fundo saem do caminho); 2) encerra só os Python DESTA pasta; 3) espera o
+# banco ficar livre.
+New-Item -ItemType Directory -Force -Path data | Out-Null
+Set-Content -Path data\atualizacao_manual.lock -Value $PID
+$proj = (Get-Location).Path
+$mine = Get-CimInstance Win32_Process -Filter "Name like 'python%'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and ($_.CommandLine -like "*$proj*" -or $_.CommandLine -match "src\.(data_hub|tools|scout)\.") }
+foreach ($p in $mine) {
+    Write-Host ("Encerrando processo de fundo do laboratório (PID {0})" -f $p.ProcessId) -ForegroundColor DarkYellow
+    Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+}
+& $py -m src.tools.esperar_banco --max 300
+if ($LASTEXITCODE -ne 0) { Remove-Item data\atualizacao_manual.lock -ErrorAction SilentlyContinue; exit 1 }
+
 function Step($title, [scriptblock]$cmd) {
     $t = Get-Date
     Write-Host ""
@@ -23,22 +39,26 @@ function Step($title, [scriptblock]$cmd) {
     Write-Host ("    feito em {0:N0} s" -f ((Get-Date) - $t).TotalSeconds)
 }
 
-Step "1. Código novo do GitHub" { git pull --ff-only }
-Step "2. Dependências (só instala o que faltar)" { & $py -m pip install -q -r requirements.txt }
-Step "3. Atualização automática sem janela (ao ligar, a cada 3 h e às 6h)" { powershell -ExecutionPolicy Bypass -File .\scripts\agendar_atualizacao.ps1 }
-Step "4. Índices de velocidade do banco (só cria os que faltam)" { & $py -m src.tools.criar_indices }
-Step "5. Resultados dos dias que faltam + detalhes desses jogos" { & $py -c "from src.tools.sync_silencioso import catch_up; print(catch_up())" }
-if (-not $Rapido) {
-    Step "6. Elencos (idade, país, valor) do Brasil e da América do Sul" { & $py -m src.data_hub.sync --only fotmob_elencos --ligas brasil sulamericanas }
-    Step "7. Estatísticas dos jogos das Séries A, B e C" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas brasil --limite 3000 }
-    Step "8. Estatísticas das ligas sul-americanas" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas sulamericanas --limite 2000 }
-    Step "9a. Calendário das seleções de base (Mundiais, Sul-Americano, Euros, Ásia, CONCACAF, Toulon, Olimpíadas; 5 anos)" { & $py -m src.data_hub.sync --only fotmob_temporada --ligas base --temporadas 5 }
-    Step "9b. Detalhes dos jogos de base (números por jogador de cada jogo; retomável)" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas base --temporadas 5 --limite 5000 }
-    Step "10. Apelidos de times entre fontes" { & $py -m src.data_hub.team_alias }
-    Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation }
+try {
+    Step "1. Código novo do GitHub" { git pull --ff-only }
+    Step "2. Dependências (só instala o que faltar)" { & $py -m pip install -q -r requirements.txt }
+    Step "4. Índices de velocidade do banco (só cria os que faltam)" { & $py -m src.tools.criar_indices }
+    Step "5. Resultados dos dias que faltam + detalhes desses jogos" { & $py -c "from src.tools.sync_silencioso import catch_up; print(catch_up())" }
+    if (-not $Rapido) {
+        Step "6. Elencos (idade, país, valor) do Brasil e da América do Sul" { & $py -m src.data_hub.sync --only fotmob_elencos --ligas brasil sulamericanas }
+        Step "7. Estatísticas dos jogos das Séries A, B e C" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas brasil --limite 3000 }
+        Step "8. Estatísticas das ligas sul-americanas" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas sulamericanas --limite 2000 }
+        Step "9a. Calendário das seleções de base (Mundiais, Sul-Americano, Euros, Ásia, CONCACAF, Toulon, Olimpíadas; 5 anos)" { & $py -m src.data_hub.sync --only fotmob_temporada --ligas base --temporadas 5 }
+        Step "9b. Detalhes dos jogos de base (números por jogador de cada jogo; retomável)" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas base --temporadas 5 --limite 5000 }
+        Step "10. Apelidos de times entre fontes" { & $py -m src.data_hub.team_alias }
+        Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation }
+    }
+    Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot }
+    Step "13. Cobertura do Scout por liga (docs\COBERTURA_SCOUT.md)" { & $py -m src.tools.cobertura_scout }
+    Step "14. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho }
+    Step "15. Atualização automática sem janela (ao ligar, a cada 3 h e às 6h) — agendada no fim para não disputar o banco" { powershell -ExecutionPolicy Bypass -File .\scripts\agendar_atualizacao.ps1 }
+} finally {
+    Remove-Item data\atualizacao_manual.lock -ErrorAction SilentlyContinue   # libera as tarefas automáticas
 }
-Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot }
-Step "13. Cobertura do Scout por liga (docs\COBERTURA_SCOUT.md)" { & $py -m src.tools.cobertura_scout }
-Step "14. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho }
 Write-Host ""
 Write-Host "Tudo pronto. Abra o app: streamlit run app.py" -ForegroundColor Green

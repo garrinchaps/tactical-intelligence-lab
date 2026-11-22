@@ -192,3 +192,26 @@ def test_score_probabilities_and_knockout():
     assert adv["mandante"] > o["mandante"] and abs(adv["mandante"] + adv["visitante"] - 1) < 1e-9
     adv2 = SP.advance(m, 1.8, .9, agg_home=-3)                 # perdeu a ida por 3: chance cai muito
     assert adv2["mandante"] < adv["mandante"]
+
+
+def test_db_waits_when_another_process_is_writing(tmp_path, monkeypatch):
+    import sqlite3
+
+    from src.data_hub import db as DB
+
+    calls = {"n": 0}
+    real = DB.DataHubDB.migrate
+
+    def flaky(self):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(self)
+    monkeypatch.setattr(DB.DataHubDB, "migrate", flaky)
+    d = DB.DataHubDB.__new__(DB.DataHubDB)
+    d.db_path, d.schema_path = tmp_path / "t.db", tmp_path / "nao_existe.sql"
+    try:
+        DB.DataHubDB._migrate_patiently(d, tries=3, wait_s=0.01)
+    except Exception:
+        pass                                   # o que importa: tentou de novo em vez de morrer na primeira
+    assert calls["n"] >= 2

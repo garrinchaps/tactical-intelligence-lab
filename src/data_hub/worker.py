@@ -279,6 +279,9 @@ def main(argv=None) -> int:
                 activity.checkpoint(db)
             if a.pai and not pid_alive(a.pai):
                 break                                    # o app fechou: encerra junto
+            manual = Path("data/atualizacao_manual.lock")   # rodada 25c: atualizar_tudo.ps1 rodando → sai do caminho
+            if manual.exists() and time.time() - manual.stat().st_mtime < 6 * 3600:
+                break
             time.sleep(HEARTBEAT_S)
     except KeyboardInterrupt:
         pass

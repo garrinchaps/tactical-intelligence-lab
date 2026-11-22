@@ -688,6 +688,14 @@ Rodada 25b (20/11/2026, 526 testes verdes) — correções depois da reclamaçã
   ida achada na base e final (= título). Força pelos últimos 20 jogos (70% xG + 30% gols), Poisson + Dixon-Coles, mando ±10%.
 - Não verificável daqui: notas reais no PC depois do snapshot v14.
 
+Rodada 25c (22/11/2026, 527 testes verdes) — `atualizar_tudo.ps1` deu "database is locked" em todas as etapas e parou no 11:
+- Causa: outro processo DO LABORATÓRIO gravando ao mesmo tempo (processo de fundo que sobrou do app e/ou tarefa agendada).
+- ✅ Script: cria `data/atualizacao_manual.lock`, encerra só os Python desta pasta, espera o banco livre
+  (`python -m src.tools.esperar_banco`), roda as etapas num try/finally e agenda as tarefas automáticas NO FIM (passo 15).
+  `sync_silencioso` e o processo de fundo (`worker.py`) saem do caminho enquanto o marcador existir.
+- ✅ Banco: `DataHubDB._migrate_patiently` (espera e tenta de novo; com as tabelas já existentes, segue sem a migração leve);
+  `busy_timeout` de 60 s e ajustes (PRAGMA) que não derrubam a conexão. Passo 11 (`src.scout.evaluation`) mostra andamento.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

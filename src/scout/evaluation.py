@@ -629,11 +629,17 @@ def league_model(db, years: int = 3, prior_weight: float = 15.0) -> pd.DataFrame
 
 def build(db, days: int = 400) -> Dict[str, Any]:
     t0 = time.time()
+    say = lambda m: print(f"  [{time.time() - t0:5.0f} s] {m}", flush=True)   # rodada 25c: andamento visível
+    say("lendo os jogos de cada jogador (último ano)…")
     g = player_games(db, days)
+    say(f"{len(g):,} atuações em {g['match_id'].nunique() if not g.empty else 0:,} jogos".replace(",", "."))
     if g.empty:
         return {"jogadores": pd.DataFrame(), "niveis": pd.DataFrame(), "validacao": {}, "segundos": 0}
+    say("força dos adversários por competição…")
     st = opponent_strength(db, g["comp"].unique().tolist(), days)
+    say("somando por jogador e competição…")
     agg = aggregate(g, st)
+    say("idade e valor (Transfermarkt, FotMob, Wikidata)…")
     ages, values, roles = _ages_values()
     fa, fv = _fotmob_ages_values(db)                      # quem não está no Transfermarkt: elenco da FotMob
     try:                                                  # e, por último, a Wikidata (nome único de jogador)
@@ -649,7 +655,9 @@ def build(db, days: int = 400) -> Dict[str, Any]:
     for k, v in fv.items():
         if pd.notna(v) and v > 0 and pd.isna(values.get(k, np.nan)):
             values[k] = v
+    say("nível das ligas (aprendido pelos jogadores que atuaram em duas)…")
     model = league_model(db)
+    say("avaliando…")
     miss = agg["family"] == ""                            # sem posição nos jogos: cadastro do Transfermarkt
     agg.loc[miss, "role"] = agg.loc[miss, "core"].map(roles).fillna("")
     agg.loc[miss, "family"] = agg.loc[miss, "role"].map(FAMILY_OF).fillna("")
