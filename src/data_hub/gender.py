@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import json
 import re
 from typing import Any, Iterable, Mapping, Sequence
@@ -80,10 +82,83 @@ def is_women_team(names: Iterable[str]) -> bool:
 
 
 def comp_sql(names: Sequence[str], alias: str = "m") -> str:
-    """Trecho SQL ' AND ...' que deixa só as competições do mesmo gênero do time (pela coluna competition_name)."""
+    """Trecho SQL ' AND ...' que deixa só as competições do mesmo gênero do time (pela coluna competition_name).
+    Rodada 27: também tira as ligas NACIONAIS de outro país (Santos × Santos Laguna, Barcelona × Barcelona SC) —
+    quando alguma fonte dá o mesmo nome a dois clubes, os jogos do outro não entram (ver `foreign_competitions`)."""
     col = f"LOWER(COALESCE({alias}.competition_name, ''))" if alias else "LOWER(COALESCE(competition_name, ''))"
     any_women = "(" + " OR ".join(f"{col} LIKE '{p}'" for p in WOMEN_LIKE) + ")"
-    return f" AND {any_women}" if is_women_team(names) else f" AND NOT {any_women}"
+    out = f" AND {any_women}" if is_women_team(names) else f" AND NOT {any_women}"
+    foreign = foreign_competitions(names)
+    if foreign:
+        raw = f"COALESCE({alias}.competition_name, '')" if alias else "COALESCE(competition_name, '')"
+        out += f" AND {raw} NOT IN (" + ", ".join("'" + str(c).replace("'", "''") + "'" for c in foreign) + ")"
+    return out
+
+
+COUNTRY_KEYS = [
+    ("ec", ("equador", "ecuador", "ligapro")), ("uy", ("uruguai", "uruguay")), ("ar", ("argentina", "primera nacional")),
+    ("cl", ("chile",)), ("co", ("colômbia", "colombia")), ("pe", ("peru", "liga 1")), ("py", ("paraguai", "paraguay")),
+    ("bo", ("bolívia", "bolivia")), ("ve", ("venezuela",)), ("mx", ("liga mx", "méxico", "mexico")),
+    ("us", ("mls", "usa", "estados unidos")), ("br", ("brasil", "brasileir", "copa do brasil", "paulist", "carioca",
+                                                     "mineiro", "gaúcho", "serie a brazil")),
+    ("es", ("la liga", "laliga", "copa del rey", "espanha", "spain", "segunda división", "la liga 2")),
+    ("en", ("premier league", "championship", "fa cup", "efl", "england", "inglaterra")),
+    ("it", ("serie a", "serie b", "coppa italia", "itália", "italy")), ("de", ("bundesliga", "dfb", "alemanha", "germany")),
+    ("fr", ("ligue 1", "ligue 2", "coupe de france", "frança", "france")), ("pt", ("primeira liga", "liga portugal",
+                                                                                 "taça de portugal", "portugal")),
+    ("nl", ("eredivisie", "eerste divisie", "knvb")), ("tr", ("süper lig", "super lig", "turquia", "turkey")),
+]
+
+
+def comp_country(comp: str):
+    c = str(comp or "").lower()
+    if any(k in c for k in ("champions", "europa", "conference", "libertadores", "sul-americana", "sudamericana",
+                            "mundial", "world", "amistoso", "friendl", "recopa", "supercopa da uefa", "super cup")):
+        return None                                      # competição internacional: não diz o país
+    return next((code for code, keys in COUNTRY_KEYS if any(k in c for k in keys)), None)
+
+
+_FOREIGN_MEMO: dict = {}
+
+
+def foreign_competitions(names: Sequence[str], db=None, ttl_s: float = 6 * 3600) -> list:
+    """Ligas NACIONAIS de outro país em que um time com este nome aparece. O país do clube é o da MAIORIA dos seus
+    jogos de liga nacional (≥ 60%; sem maioria clara, nada é tirado). Competição internacional (Libertadores,
+    Champions, amistosos) nunca é tirada. Uma consulta por time, guardada 6 h no processo."""
+    import time
+
+    key = tuple(sorted({str(n) for n in names if n}))
+    if not key or os.getenv("TIL_FILTRO_PAIS", "1") == "0":
+        return []
+    hit = _FOREIGN_MEMO.get(key)
+    if hit and time.time() - hit[0] < ttl_s:
+        return hit[1]
+    out: list = []
+    try:
+        if db is None:
+            from src.data_hub.db import DataHubDB
+
+            db = DataHubDB()
+        ph = ",".join("?" * len(key))
+        with db.connect() as conn:
+            rows = conn.execute(f"SELECT competition_name, COUNT(*) FROM matches WHERE home_team_name IN ({ph}) OR "
+                                f"away_team_name IN ({ph}) GROUP BY competition_name", list(key) * 2).fetchall()
+        by_c: dict = {}
+        comp_cc = {}
+        for comp, n in rows:
+            cc = comp_country(comp)
+            comp_cc[comp] = cc
+            if cc:
+                by_c[cc] = by_c.get(cc, 0) + int(n)
+        tot = sum(by_c.values())
+        if tot >= 10:
+            home, n_home = max(by_c.items(), key=lambda t: t[1])
+            if n_home / tot >= .6:
+                out = sorted(c for c, cc in comp_cc.items() if c and cc and cc != home)
+    except Exception:
+        out = []
+    _FOREIGN_MEMO[key] = (time.time(), out)
+    return out
 
 
 def keep_same_gender(df, names: Sequence[str], col: str = "competition_name"):

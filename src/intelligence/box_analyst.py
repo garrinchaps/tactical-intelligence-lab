@@ -251,7 +251,8 @@ def build(db, sc, meta: Dict[str, Any], target_team: str, opp: str) -> Optional[
                               "por_lado": side, "corredores_do_atacante_pct": az,
                               "quem_finalizou": {k: int(v) for k, v in sh["player_name"].value_counts().head(3).items()}}
         return out
-    if ask == "result" or re.search(r"por que|como (ganh|venc)|o que .* fez", q):
+    # rodada 27: "o que o Bernard fez no jogo?" é pergunta do JOGADOR (antes virava a história do jogo)
+    if ask == "result" or (not sc.players and re.search(r"por que|como (ganh|venc)|o que .* fez", q)):
         mom = d["extra"].get("momentum") or []
         h1 = [v for m, v in mom if m <= 45]
         h2 = [v for m, v in mom if m > 45]

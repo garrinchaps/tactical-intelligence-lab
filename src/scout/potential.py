@@ -117,16 +117,22 @@ def youth_elite(u: pd.DataFrame) -> pd.Series:
 
 
 def youth_floor(u: pd.DataFrame) -> pd.Series:
-    """Rodada 27 — piso do POTENCIAL de quem é da seleção de base (≤ 21 anos): convocado com frequência (3+ jogos)
-    por seleção de elite → 80; 1–2 jogos → 76; outras seleções 74/70. Os MELHORES da competição de base (nota)
-    sobem até +6. É uma projeção (o mercado e os clubes tratam esses atletas como as maiores promessas do país)."""
+    """Rodada 27 — piso do POTENCIAL de quem é da seleção de base (≤ 21 anos). É uma projeção (o mercado e os clubes
+    tratam esses atletas como as maiores promessas do país), sempre explicada no 'porquê'."""
+    # rodada 27: sem faixas fixas — contínuo pela força da seleção, pelos jogos (titular frequente) e pela colocação
+    # da nota dentro da competição de base: 1 jogo por seleção pequena ≈ 62; titular frequente e dos melhores do
+    # Brasil/Argentina/França ≈ 90+. Também conta o que existe fora da base: minutos de profissional cedo e o valor de
+    # mercado para a idade (o mercado vê capitania, propostas, convocações que não estão nos números abertos).
     age = _col(u, "idade")
     yj = _col(u, "selecao_base_jogos").fillna(0)
     pct = _col(u, "selecao_base_pct")
     el = youth_elite(u).fillna(0)
-    base = np.where(yj >= 3, 74 + 6 * el, 70 + 6 * el)
-    f = pd.Series(base, index=u.index, dtype=float) + (.12 * (pct - 50)).clip(-4, 6).fillna(0)
-    return f.where((yj > 0) & (age.isna() | (age <= 21)))
+    f = 60 + 12 * el + 1.8 * yj.clip(upper=8) + (.22 * (pct - 50)).fillna(0)
+    m12 = _col(u, "minutos_12m").fillna(0)
+    f = f + 3 * (m12 / 1800).clip(0, 1)                         # já titular no profissional
+    val = _col(u, "valor_mercado_eur")
+    f = f + (2.2 * np.log10(val.where(val > 0) / 2e6)).clip(-2, 5).fillna(0)   # valor para a idade
+    return f.clip(55, 93).where((yj > 0) & (age.isna() | (age <= 21)))
 
 
 def signals(u: pd.DataFrame, fam: pd.Series) -> pd.DataFrame:

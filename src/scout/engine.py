@@ -2848,6 +2848,13 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
     fallback = np.where(observed & (last_comp != ""), last_comp, np.where(main_comp != "", main_comp, last_comp))
     u["clube_liga"] = liga.where(liga.str.strip() != "", pd.Series(fallback, index=u.index))
+    try:                                                   # rodada 27: um nome por liga
+        from src.scout.evaluation import canonical_league
+
+        _m = {x: canonical_league(x) for x in u["clube_liga"].dropna().unique()}
+        u["clube_liga"] = u["clube_liga"].map(lambda x: _m.get(x, x))
+    except Exception:
+        pass
     pais = u.get("clube_pais", pd.Series(None, index=u.index))
     u["origem"] = [origin_group_full(l, c) for l, c in zip(u["clube_liga"], pais)]
     return u

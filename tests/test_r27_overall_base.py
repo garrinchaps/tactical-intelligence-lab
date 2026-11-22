@@ -43,7 +43,9 @@ def test_selecao_de_base_da_piso_de_potencial_e_qualidade_estimada():
     q = O.youth_quality(u)
     assert 52 <= float(q["qualidade"].iloc[0]) <= 70
     f = POT.youth_floor(u)
-    assert float(f.iloc[0]) >= 80
+    assert float(f.iloc[0]) >= 80          # titular frequente do Brasil Sub-17 e dos melhores na nota
+    u2 = u.assign(selecao="Malta U17", selecao_base_jogos=1, selecao_base_pct=np.nan)
+    assert float(POT.youth_floor(u2).iloc[0]) < 70   # 1 jogo por seleção pequena: piso baixo (sem faixa fixa)
 
 
 def test_desenho_estimado_pela_escalacao_sem_lances(tmp_path):
@@ -69,3 +71,48 @@ def test_desenho_estimado_pela_escalacao_sem_lances(tmp_path):
     # com a bola o lateral fica mais alto do que sem a bola
     lb = next(n for n, (x, y) in ph["com_bola"]["posicoes"].items() if n == "J1")
     assert ph["com_bola"]["posicoes"][lb][0] > ph["sem_bola"]["posicoes"][lb][0]
+
+
+def test_entrosamento_prefere_dupla_que_vence_junta():
+    import numpy as np
+
+    from src.squad.matchday import chemistry_refine
+
+    rows = []
+    for g in range(15):                       # A+B começam juntos e vencem; C joga com A nos outros e perde
+        win = g < 12
+        partner = "B" if win else "C"
+        for pl in ("A", partner, "X"):
+            rows.append(dict(match_id=g, data=f"2026-10-{g + 1:02d}", home_team_name="T", away_team_name="R",
+                             team_name="T", home_score=2 if win else 0, away_score=0 if win else 2, jogador=pl, titular=1))
+    lu = pd.DataFrame(rows)
+    slots = [("CB", 24, 30), ("CB", 24, 50)]
+    names = ["A", "C", "B"]
+    val = np.array([7.0, 7.4, 7.0])
+    score = np.array([[7.0, 7.4, 7.0], [7.0, 7.4, 7.0]])
+    best, notes = chemistry_refine({0: 0, 1: 1}, score, val, slots, names, lu)
+    assert {names[j] for j in best.values()} == {"A", "B"}
+    assert any("entrosamento" in t for t in notes.values())
+
+
+def test_liga_de_outro_pais_sai_dos_jogos_do_time(tmp_path):
+    from src.data_hub.db import DataHubDB
+    from src.data_hub.gender import foreign_competitions
+
+    db = DataHubDB(tmp_path / "t.db")
+    with db.connect() as c:
+        req = [r[1] for r in c.execute("PRAGMA table_info(matches)").fetchall() if r[3] and r[4] is None and not r[5]]
+        for i in range(15):
+            comp = "Brasileirão Série A" if i < 12 else "Liga MX"
+            row = {"match_id": 100 + i, "match_date": f"2026-10-{i + 1:02d}", "home_team_name": "Santos Teste",
+                   "away_team_name": f"Rival {i}", "competition_name": comp}
+            for k in req:
+                row.setdefault(k, "x")
+            c.execute(f"INSERT INTO matches ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+    assert foreign_competitions(["Santos Teste"], db=db) == ["Liga MX"]
+
+
+def test_nome_unico_de_liga():
+    from src.scout.evaluation import canonical_league
+
+    assert canonical_league("campeonato-brasileiro-serie-a") == canonical_league("Brasileirão Série A")

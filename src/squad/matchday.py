@@ -19,6 +19,7 @@ from collections import Counter
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+import numpy as np
 import pandas as pd
 
 ESPN_ROLE = {"G": "GK", "GK": "GK", "CD": "CB", "CD-L": "CB", "CD-R": "CB", "CB": "CB", "LB": "LB", "RB": "RB",
@@ -651,6 +652,12 @@ def xi_for(info: Dict[str, Any], formation: Optional[str], mode: str = "provavel
             score[i, j] = val[j] * fits[i, j] ** 3
     ri, ci = linear_sum_assignment(-score)
     pick = dict(zip(ri, ci))
+    chem_note: Dict[int, str] = {}
+    if mode != "provavel":                       # rodada 27: entrosamento entra na MELHOR escalação
+        try:
+            pick, chem_note = chemistry_refine(pick, score, val, slots, ok["nome"].tolist(), info.get("escalacoes"))
+        except Exception:
+            chem_note = {}
     chosen = {ok.iloc[j]["nome"] for j in pick.values()}
     bench = ok[~ok["nome"].isin(chosen)].sort_values("qualidade", ascending=False)
     G = len(info.get("jogos") or []) or 1
@@ -666,9 +673,114 @@ def xi_for(info: Dict[str, Any], formation: Optional[str], mode: str = "provavel
              "papel_natural": ROLE_PT.get(r["papel"], "—") if r else None}
         if r:
             p["porque"] = reasons(r, role, bench, G)
+            if chem_note.get(i):
+                p["porque"] = (p["porque"] + " · " if p["porque"] else "") + chem_note[i]
             p["destaques"] = (info.get("destaques") or {}).get(r["nome"])
         xi.append(p)
     return xi, form
+
+
+CHEM_GAMES = 15          # últimos jogos olhados para o entrosamento
+CHEM_WEIGHT = 1.2        # quanto 1 ponto por jogo a mais juntos vale, na mesma régua de 'val' (0,6·qualidade + 0,4·fase)
+CHEM_MAX_LOSS = .8       # entrosamento só troca um jogador por outro até 0,8 ponto de 'val' pior (qualidade parecida)
+
+
+def pair_chemistry(lu: Optional[pd.DataFrame], n_games: int = CHEM_GAMES) -> Dict[Tuple[str, str], Dict[str, float]]:
+    """Rodada 27 — ENTROSAMENTO: para cada dupla, quantos dos últimos `n_games` jogos começaram JUNTOS e quantos pontos
+    o time fez nesses jogos, comparado com a média do time no período. Valor = (pontos por jogo juntos − média) ×
+    jogos/(jogos+4) (pouca amostra puxa para zero)."""
+    if lu is None or getattr(lu, "empty", True) or "titular" not in lu:
+        return {}
+    st_ = lu[lu["titular"].fillna(0).astype(int) == 1]
+    games = st_.drop_duplicates("match_id").sort_values("data", ascending=False).head(n_games)
+    if games.empty:
+        return {}
+    pts = {}
+    for r in games.itertuples():
+        hs, as_ = r.home_score, r.away_score
+        if pd.isna(hs) or pd.isna(as_):
+            continue
+        home = getattr(r, "team_name", None) == r.home_team_name
+        gf, ga = (hs, as_) if home else (as_, hs)
+        pts[r.match_id] = 3 if gf > ga else 1 if gf == ga else 0
+    if not pts:
+        return {}
+    avg = float(np.mean(list(pts.values())))
+    by = st_[st_["match_id"].isin(pts)].groupby("match_id")["jogador"].apply(lambda x: sorted(set(x)))
+    acc: Dict[Tuple[str, str], List[int]] = {}
+    for mid, players in by.items():
+        for i, a in enumerate(players):
+            for b in players[i + 1:]:
+                acc.setdefault((a, b), []).append(pts[mid])
+    out = {}
+    for k, v in acc.items():
+        g = len(v)
+        out[k] = {"jogos": g, "ppj": float(np.mean(v)), "valor": (float(np.mean(v)) - avg) * g / (g + 4), "media": avg}
+    return out
+
+
+def _neighbors(slots) -> List[Tuple[int, int]]:
+    """Vagas vizinhas no desenho (zaga, lateral × ponta do mesmo lado, dupla de volantes, meia × atacante…)."""
+    out = []
+    for i, (ri, xi, yi) in enumerate(slots):
+        for j, (rj, xj, yj) in enumerate(slots):
+            if j <= i or "GK" in (ri, rj):
+                continue
+            if ((xi - xj) ** 2 + (yi - yj) ** 2) ** .5 <= 34:
+                out.append((i, j))
+    return out
+
+
+def chemistry_refine(pick: Dict[int, int], score, val, slots, names: List[str], lu) -> Tuple[Dict[int, int], Dict[int, str]]:
+    """Depois da escalação ótima por qualidade × encaixe, troca um titular por um reserva do MESMO encaixe quando o
+    entrosamento com os vizinhos compensa e a qualidade não é muito pior (até CHEM_MAX_LOSS). Ex.: dupla de zaga que
+    ganhou 14 dos últimos 15 juntos é preferida a uma dupla um pouco melhor que ganhou 4 — mas um zagueiro muito
+    melhor continua entrando."""
+    chem = pair_chemistry(lu)
+    if not chem:
+        return pick, {}
+    nb = _neighbors(slots)
+
+    def c(a, b):
+        k = (a, b) if a <= b else (b, a)
+        return chem.get(k, {}).get("valor", 0.0)
+
+    def total(pk):
+        base = sum(score[i, j] for i, j in pk.items())
+        bonus = sum(c(names[pk[a]], names[pk[b]]) for a, b in nb if a in pk and b in pk)
+        return base + CHEM_WEIGHT * bonus
+    best = dict(pick)
+    cur = total(best)
+    for _ in range(3):
+        improved = False
+        used = set(best.values())
+        for i in list(best):
+            j0 = best[i]
+            for j in range(score.shape[1]):
+                if j in used or score[i, j] <= 0:
+                    continue
+                if val[j] < val[j0] - CHEM_MAX_LOSS or score[i, j] < .7 * score[i, j0]:
+                    continue
+                trial = dict(best)
+                trial[i] = j
+                t = total(trial)
+                if t > cur + 1e-6:
+                    best, cur, used, improved = trial, t, (used - {j0}) | {j}, True
+                    j0 = j
+        if not improved:
+            break
+    notes: Dict[int, str] = {}
+    for a, b in nb:
+        if a in best and b in best:
+            na, nbn = names[best[a]], names[best[b]]
+            k = (na, nbn) if na <= nbn else (nbn, na)
+            v = chem.get(k)
+            if v and v["jogos"] >= 4 and abs(v["ppj"] - v["media"]) >= .4:
+                tail = (f": {v['jogos']} jogos juntos como titulares, {v['ppj']:.1f} pontos por jogo "
+                        f"(média do time {v['media']:.1f})")
+                notes.setdefault(a, f"entrosamento com {nbn}{tail}")
+                notes.setdefault(b, f"entrosamento com {na}{tail}")
+    return best, notes
 
 
 def weakness_tips(weak: List[Dict[str, Any]], info: Dict[str, Any]) -> List[Dict[str, Any]]:

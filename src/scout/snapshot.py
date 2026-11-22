@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v15.pkl")   # v15: reputação em escala real, nível das ligas corrigido, base
+SNAP_PATH = Path("data/processed/scout_universe_v16.pkl")   # v16: volante pela nota entre volantes, Brasil/Série B, base contínua
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -183,6 +183,17 @@ def load() -> Optional[Dict[str, Any]]:
             os.replace(tmp, SNAP_PATH)
     except Exception:
         pass
+    try:                                   # rodada 27: um nome por liga também na fotografia já pronta (só em memória)
+        u = data.get("universe") if isinstance(data, dict) else None
+        if isinstance(u, pd.DataFrame):
+            from src.scout.evaluation import canonical_league
+
+            for col in ("clube_liga", "liga", "liga_clube"):
+                if col in u:
+                    m = {x: canonical_league(x) for x in u[col].dropna().unique()}
+                    u[col] = u[col].map(lambda x, m=m: m.get(x, x))
+    except Exception:
+        pass
     return data
 
 
@@ -319,8 +330,14 @@ def quality_map() -> Dict[str, Dict[str, float]]:
     cmap = {c: team_core(c) for c in clubs.unique()}
     key = u["_core"].astype(str) + "|" + clubs.map(cmap)
     pot = u["potencial"] if "potencial" in u else u.get("potencial_teto", pd.Series(np.nan, index=u.index))
-    out = {"q": dict(zip(key, pd.to_numeric(u.get("qualidade"), errors="coerce"))),
-           "p": dict(zip(key, pd.to_numeric(pot, errors="coerce")))}
+    qv, pv = pd.to_numeric(u.get("qualidade"), errors="coerce"), pd.to_numeric(pot, errors="coerce")
+    out = {"q": dict(zip(key, qv)), "p": dict(zip(key, pv))}
+    # rodada 27: nome ÚNICO no universo (sem homônimo) também vale sem o clube — o Rankings mostra o clube da
+    # competição (Salah no Liverpool) e o Scout o clube atual; antes a qualidade ficava vazia
+    core = u["_core"].astype(str)
+    uniq = ~core.duplicated(keep=False)
+    out["uq"] = dict(zip(core[uniq], qv[uniq]))
+    out["up"] = dict(zip(core[uniq], pv[uniq]))
     _MEMO["qmap"], _MEMO["qmap_for"] = out, u
     return out
 

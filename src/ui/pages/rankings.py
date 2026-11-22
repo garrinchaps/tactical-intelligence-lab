@@ -79,9 +79,10 @@ def with_scout_quality(df: pd.DataFrame, name_col: str = "player_name", team_col
 
         qm = S.quality_map()
         q, pp = qm["q"], qm["p"]
-        k = out[name_col].map(lambda n: player_core(str(n))) + "|" + out[team_col].fillna("").map(lambda c: team_core(str(c)))
-        out["qualidade_scout"] = k.map(q).round(0)
-        out["potencial_scout"] = k.map(pp).round(0)
+        core = out[name_col].map(lambda n: player_core(str(n)))
+        k = core + "|" + out[team_col].fillna("").map(lambda c: team_core(str(c)))
+        out["qualidade_scout"] = k.map(q).fillna(core.map(qm.get("uq", {}))).round(0)
+        out["potencial_scout"] = k.map(pp).fillna(core.map(qm.get("up", {}))).round(0)
     except Exception:
         pass
     return out
@@ -130,12 +131,19 @@ def render(_ctx=None) -> None:
     if max_age < 40:
         v = v[v["idade"].fillna(99) <= max_age]
     base_v = v
-    v = v.dropna(subset=[col]).sort_values([col, "minutes"], ascending=False)
+
+    def _one(df):
+        """Rodada 27: o mesmo jogador aparecia várias vezes (uma linha por função tática — 'ponta criador' e 'ponta
+        driblador' — e por temporada). Fica UMA linha por jogador e competição (a de nota mais alta); com todas as
+        competições juntas, uma por jogador e time."""
+        keys = ["player_name", "team_name", "comp"] if (chosen and col != "geral_entre_ligas") else ["player_name", "team_name"]
+        return df.drop_duplicates(keys, keep="first")
+    v = _one(v.dropna(subset=[col]).sort_values([col, "minutes"], ascending=False))
     if v.empty and col != "desempenho_90":
         note("Ninguém atende ao critério desta avaliação neste recorte",
              f"{crit}. Mostrando o ‘⚡ Desempenho por 90’ (com 450+ min) enquanto a temporada não acumula amostra.", "info")
         col, pick = "desempenho_90", "⚡ Desempenho por 90"
-        v = base_v[base_v["minutes"] >= 450].dropna(subset=[col]).sort_values([col, "minutes"], ascending=False)
+        v = _one(base_v[base_v["minutes"] >= 450].dropna(subset=[col]).sort_values([col, "minutes"], ascending=False))
     if v.empty:
         note("Ninguém atende a este recorte", "Amplie a competição, a posição ou os minutos.", "info")
         return

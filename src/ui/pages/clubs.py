@@ -24,27 +24,7 @@ def _team_names(version: str) -> List[str]:
     return sorted(pd.unique(pd.concat([c["home_team_name"], c["away_team_name"]]).dropna()))
 
 
-_COUNTRY_KEYS = [
-    ("ec", ("equador", "ecuador", "ligapro")), ("uy", ("uruguai", "uruguay")), ("ar", ("argentina", "primera nacional")),
-    ("cl", ("chile",)), ("co", ("colômbia", "colombia")), ("pe", ("peru", "liga 1")), ("py", ("paraguai", "paraguay")),
-    ("bo", ("bolívia", "bolivia")), ("ve", ("venezuela",)), ("mx", ("liga mx", "méxico", "mexico")),
-    ("us", ("mls", "usa", "estados unidos")), ("br", ("brasil", "brasileir", "copa do brasil", "paulist", "carioca",
-                                                     "mineiro", "gaúcho", "serie a brazil")),
-    ("es", ("la liga", "laliga", "copa del rey", "espanha", "spain", "segunda división", "la liga 2")),
-    ("en", ("premier league", "championship", "fa cup", "efl", "england", "inglaterra")),
-    ("it", ("serie a", "serie b", "coppa italia", "itália", "italy")), ("de", ("bundesliga", "dfb", "alemanha", "germany")),
-    ("fr", ("ligue 1", "ligue 2", "coupe de france", "frança", "france")), ("pt", ("primeira liga", "liga portugal",
-                                                                                 "taça de portugal", "portugal")),
-    ("nl", ("eredivisie", "eerste divisie", "knvb")), ("tr", ("süper lig", "super lig", "turquia", "turkey")),
-]
-
-
-def _comp_country(comp: str):
-    c = str(comp or "").lower()
-    if any(k in c for k in ("champions", "europa", "conference", "libertadores", "sul-americana", "sudamericana",
-                            "mundial", "world", "amistoso", "friendl", "recopa", "supercopa da uefa", "super cup")):
-        return None                                      # competição internacional: não diz o país
-    return next((code for code, keys in _COUNTRY_KEYS if any(k in c for k in keys)), None)
+from src.data_hub.gender import COUNTRY_KEYS as _COUNTRY_KEYS, comp_country as _comp_country   # rodada 27: sem interface
 
 
 @st.cache_data(show_spinner=False, max_entries=2)

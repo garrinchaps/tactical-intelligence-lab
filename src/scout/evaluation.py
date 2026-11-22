@@ -85,8 +85,8 @@ NOT_OBSERVED = ["pressão sem a bola", "movimentação sem a bola", "posicioname
 TIERS = [
     (r"champions league", 1.0), (r"premier league", 1.0), (r"la ?liga", .96), (r"^bundesliga|germany.*bundesliga", .95),
     (r"brasileir[aã]o s[ée]rie a|campeonato brasileiro s[ée]rie a", .8),
-    (r"brasileir[aã]o s[ée]rie b|campeonato brasileiro s[ée]rie b", .6),
-    (r"brasileir[aã]o s[ée]rie c|campeonato brasileiro s[ée]rie c", .48),
+    (r"brasileir[aã]o s[ée]rie b|campeonato brasileiro s[ée]rie b", .64),   # rodada 27: Série B estava baixa
+    (r"brasileir[aã]o s[ée]rie c|campeonato brasileiro s[ée]rie c", .52),
     (r"^serie a$|italy|it[aá]lia", .93), (r"ligue 1", .9), (r"europa league", .9), (r"primeira liga|liga portugal", .82),
     (r"eredivisie", .8), (r"libertadores", .82),
     # rodada 27: Arábia/Emirados/Catar ANTES da liga belga — "Saudi Pro League" e "Emirados — Pro League" caíam em
@@ -95,7 +95,7 @@ TIERS = [
     (r"championship", .78), (r"conference league", .78), (r"jupiler|b[ée]lgica|belgian|^pro league$", .76),
     (r"copa do brasil", .75), (r"s[üu]per lig|turquia", .75), (r"liga profesional|argentina", .74),
     (r"sul-americana|sudamericana", .72), (r"liga mx|m[ée]xico", .72), (r"\bmls\b|major league", .7),
-    (r"s[ée]rie b", .6), (r"primera nacional", .55), (r"s[ée]rie c", .48),
+    (r"s[ée]rie b", .64), (r"primera nacional", .55), (r"s[ée]rie c", .52),
     (r"s[ée]rie d", .38), (r"paragu|urugu|chile|col[ôo]mbia|equador|ecuador|peru", .6), (r"bol[ií]via|venezuela", .5),
 ]
 
@@ -105,6 +105,29 @@ def _fold(s: Any) -> str:
     # não batiam com nenhuma regra e a Premier League ficava com o nível padrão (0,60, igual à Série B)
     t = unicodedata.normalize("NFKD", str(s or "").lower()).encode("ascii", "ignore").decode()
     return " ".join(t.replace("-", " ").replace("_", " ").split())
+
+
+# rodada 27: o mesmo campeonato aparecia com dois nomes ("campeonato-brasileiro-serie-a" do Transfermarkt e
+# "Brasileirão Série A" da FotMob) — no Scout eram duas ligas. Nome único para exibir e filtrar.
+LEAGUE_NAMES = {
+    "campeonato brasileiro serie a": "Brasileirão Série A", "brasileirao serie a": "Brasileirão Série A",
+    "campeonato brasileiro serie b": "Brasileirão Série B", "brasileirao serie b": "Brasileirão Série B",
+    "campeonato brasileiro serie c": "Brasileirão Série C", "brasileirao serie c": "Brasileirão Série C",
+    "premier league": "Premier League", "laliga": "La Liga", "la liga": "La Liga", "laliga2": "La Liga 2",
+    "bundesliga": "Bundesliga", "2 bundesliga": "2. Bundesliga", "serie a": "Serie A", "ligue 1": "Ligue 1",
+    "ligue 2": "Ligue 2", "liga portugal": "Liga Portugal", "liga portugal bwin": "Liga Portugal",
+    "eredivisie": "Eredivisie", "super lig": "Süper Lig", "saudi pro league": "Arábia Saudita — Saudi Pro League",
+    "major league soccer": "MLS", "mls": "MLS", "premier liga": "Rússia — Premier Liga", "liga mx": "Liga MX",
+    "jupiler pro league": "Bélgica — Pro League", "championship": "Championship",
+    "torneo apertura": "Argentina — Liga Profesional", "liga profesional de futbol": "Argentina — Liga Profesional",
+}
+
+
+def canonical_league(name: Any) -> Any:
+    if not isinstance(name, str) or not name.strip():
+        return name
+    k = _fold(name)
+    return LEAGUE_NAMES.get(k, name)
 
 
 def prior_level(comp: str) -> float:

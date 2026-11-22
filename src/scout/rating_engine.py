@@ -102,6 +102,8 @@ STYLES: Dict[str, Dict[str, Tuple[List[str], str]]] = {
            "Pivô": (["PHY", "AIR", "PAS"], "segura de costas e distribui"),
            "Atacante móvel": (["DRI", "MOB", "CRE"], "sai da área e participa"),
            "Centroavante aéreo": (["AIR", "SHO"], "ganha por cima"),
+           # rodada 27: quem marca muito atacando o espaço e as costas (Kaio Jorge) não é pivô nem só finalizador
+           "Atacante de ruptura": (["SHO", "DRI", "PHY"], "ataca o espaço e as costas da defesa em velocidade"),
            "Completo": (["SHO", "CRE", "PAS"], "marca e cria")},
     "FB": {"Lateral ofensivo": (["CRE", "DRI", "MOB"], "apoia, cruza e dribla"),
            "Lateral equilibrado": (["DEF", "PAS", "CRE"], "defende e constrói"),

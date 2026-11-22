@@ -212,6 +212,11 @@ class QueryUnderstanding:
         if football_hits == 0 and any(h in t for h in HELP_TERMS):
             sc.category = "help"
             return sc
+        # rodada 27: "o que o Atlético deveria ter feito de diferente?", "como jogou fulano?" são de futebol mesmo
+        # quando o time vem escrito sem o sufixo ("atletico" × "Atlético-MG")
+        if re.search(r"deveria ter|devia ter|poderia ter|faltou|fazer de diferente|o que (fazer|mudar)|substitui|"
+                     r"como (jogou|foi|se saiu|atuou)|fez no jogo|fez na partida|jogou bem|jogou mal|escalac|escalar", t):
+            football_hits += 2
         if off_hits > 0 and football_hits <= 1 or football_hits == 0:
             sc.category = "off_topic"
             return sc

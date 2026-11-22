@@ -1248,6 +1248,20 @@ class LocalScopedWriter:
     def write_boxscore(ev: Dict[str, Any], sc: QueryScope) -> str:
         b, meta = ev["blocos"], ev["metadata"]
         out: List[str] = []
+        # rodada 27: pergunta que só identifica o jogo → recepção (placar, números principais, o que perguntar)
+        from src.intelligence import player_line as PL
+
+        teams_here = [meta.get("home_team_name") or "", meta.get("away_team_name") or ""]
+        if (not sc.players and not sc.metrics and not sc.ask and sc.category == "match_tactical"
+                and PL.is_match_intro(sc.raw, teams_here)):
+            gl = [e for e in (b.get("linha_do_tempo_no_recorte") or []) if str(e.get("tipo", "")).lower() == "goal"]
+            return PL.match_intro(b.get("estatisticas_dos_times", {}), meta, gl)
+        # rodada 27: pergunta de JOGADOR ("como jogou o Igor Gomes?") → parágrafo em linguagem de futebol, sem a
+        # tabela dos times nem a linha do tempo (antes vinham as chaves cruas da fonte)
+        if b.get("atletas_citados") and not b.get("perfil") and not b.get("indisponivel") and not b.get("gol_pedido"):
+            txt = [PL.player_summary({k: v for k, v in p.items() if k != "_equipe"}, str(p.get("_equipe") or ""))
+                   for p in b["atletas_citados"]]
+            return "\n\n---\n\n".join(txt) + f"\n\n_Jogo: {meta.get('placar', '')} · números por jogador da FotMob._"
         if b.get("limitacao"):
             out.append(f"📊 {b['limitacao']} Abaixo, o que os dados reais desta partida permitem dizer.")
         stats = b.get("estatisticas_dos_times", {})
@@ -1280,7 +1294,7 @@ class LocalScopedWriter:
                 f"{e['minuto']}'{('+' + str(e['acrescimo'])) if e.get('acrescimo') else ''} {e['tipo']} — {e['jogador']} ({e['equipe']})"
                 for e in tl[:12]) + ".")
         for p in b.get("atletas_citados") or []:
-            out.append(f"**{p['jogador']}:** " + ", ".join(f"{k} {_fmt(v)}" for k, v in p.items() if k != "jogador") + ".")
+            out.append(PL.player_summary({k: v for k, v in p.items() if k != "_equipe"}, str(p.get("_equipe") or "")))
         if b.get("perfil"):
             out.insert(0, LocalScopedWriter._profile(b["perfil"]))
             return "\n\n".join(out[:1])

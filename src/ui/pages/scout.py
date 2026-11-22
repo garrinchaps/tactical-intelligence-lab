@@ -782,6 +782,23 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>'
     )
     st.markdown(player_html, unsafe_allow_html=True)
+    # rodada 27: ações num FRAGMENTO — adicionar ao plano / descartar refazem só este cartão (antes o Scout inteiro)
+    _card_actions(player, plan_key, team, name, idx, rejected_key)
+    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
+    # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
+    _vote_box(team, name, idx, player.get("votos_scout") or (0, 0),
+              str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
+    with st.expander("Ver dossiê completo da IA"):
+        _dossier(player, roster)
+
+
+
+@st.fragment
+def _card_actions(player, plan_key, team, name, idx, rejected_key):
+    rejected = st.session_state.setdefault(rejected_key, [])
+    if name in rejected:
+        st.caption("🗑️ Descartado — sai das sugestões na próxima atualização da lista.")
+        return
     a, b = st.columns([1.1, 1.1])
     in_plan = any(x.get("nome") == name for x in st.session_state.get(plan_key) or [])
     a.button("✓ No plano" if in_plan else "＋ Adicionar ao plano", key=f"scout_add_{_slug(name)}_{idx}",
@@ -790,12 +807,6 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
     if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
         open_view("jogador", name=name, core=player.get("_core"), club=str(player.get("clube") or ""),
                   pid=str(player.get("pid") or ""))
-    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
-    # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
-    _vote_box(team, name, idx, player.get("votos_scout") or (0, 0),
-              str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
-    with st.expander("Ver dossiê completo da IA"):
-        _dossier(player, roster)
     with st.expander("Descartar e recalcular"):
         reason = st.selectbox("Motivo", ["Não é bom o suficiente / não agrega", "Pior que o titular atual",
             "Muito caro","Muito velho","Perfil físico inadequado","Fase ruim (jogando mal)","Não combina com o estilo",
@@ -806,11 +817,9 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
             from src.ui.context import get_service
             E.record_rejection(get_service().db, team, name, str(player.get("papel_alvo") or ""),
                                reason, float(player.get("score_scout") or 0))
-            rejected = st.session_state.setdefault(rejected_key, [])
             if name not in rejected:
                 rejected.append(name)
-            st.rerun()
-
+            st.rerun(scope="fragment")
 
 
 @st.fragment

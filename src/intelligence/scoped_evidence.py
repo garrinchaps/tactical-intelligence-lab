@@ -1256,7 +1256,7 @@ class ScopedEvidenceBuilder:
                 if not row.empty:
                     r0 = row.iloc[0]
                     players_block.append({"jogador": p, "minutos": r0.get("minutes"), "nota": r0.get("rating"),
-                                          **(r0.get("stats") or {})})
+                                          **(r0.get("stats") or {}), "_equipe": r0.get("team_name")})
         roster = (set(lu["player_name"].tolist() if not lu.empty else []) |
                         set(ps["player_name"].tolist() if not ps.empty else []) |
                         set(e["jogador"] for e in events if e.get("jogador")) |
@@ -1281,6 +1281,9 @@ class ScopedEvidenceBuilder:
                 "data_level": meta.get("data_level", "BOXSCORE"),
                 "data_source": meta.get("data_source", ""),
                 "placar": f"{meta.get('home_team_name')} {meta.get('home_score')} x {meta.get('away_score')} {meta.get('away_team_name')}",
+                "home_team_name": meta.get("home_team_name"), "away_team_name": meta.get("away_team_name"),
+                "home_score": meta.get("home_score"), "away_score": meta.get("away_score"),
+                "competition_name": meta.get("competition_name"), "match_date": meta.get("match_date"),
                 "user_query": sc.raw,
                 "match_player_roster": sorted(r for r in roster if isinstance(r, str) and r.strip()),
             },

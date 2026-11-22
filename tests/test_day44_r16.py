@@ -53,8 +53,8 @@ def test_league_level_estimate_and_cross_league_score():
     from src.scout import evaluation as EV
 
     assert EV.prior_level("Brasileirão Série A") == .8
-    assert EV.prior_level("Brasileirão Série B") == .6
-    assert EV.prior_level("Brasileirão Série C") == .48
+    assert EV.prior_level("Brasileirão Série B") == .64      # rodada 27: Série B estava baixa
+    assert EV.prior_level("Brasileirão Série C") == .52
     assert EV.prior_level("Premier League") == 1.0
     a = EV.evaluate(EV.aggregate(_games(comp="Premier League", seed=1), {}))
     b = EV.evaluate(EV.aggregate(_games(comp="Brasileirão Série C", seed=1), {}))

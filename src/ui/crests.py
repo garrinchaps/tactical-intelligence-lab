@@ -100,6 +100,33 @@ def _local(name: str) -> Optional[str]:
     return None
 
 
+@lru_cache(maxsize=1)
+def _fotmob_ids() -> Dict[str, int]:
+    """Rodada 27: id dos clubes na FotMob (tabelas oficiais de ~20 ligas em 22/11/2026, src/ui/crest_ids.json) — o
+    escudo vem do CDN de imagens da FotMob. Chave: nome exato e núcleo do nome (Grêmio, Santos ≠ Santos Laguna)."""
+    try:
+        import json
+        from pathlib import Path
+
+        raw = json.loads((Path(__file__).with_name("crest_ids.json")).read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    out: Dict[str, int] = {}
+    cores: Dict[str, list] = {}
+    for n, i in raw.items():
+        out[norm(n)] = int(i)
+        cores.setdefault(team_core(n), []).append(int(i))
+    for c, ids in cores.items():
+        if len(set(ids)) == 1:
+            out.setdefault("core:" + c, ids[0])
+    return out
+
+
+def _fotmob_id(name: str) -> Optional[int]:
+    ids = _fotmob_ids()
+    return ids.get(norm(name)) or ids.get("core:" + team_core(name))
+
+
 def crest_url(name: str, use_local: bool = True) -> str:
     if use_local:
         loc = _local(name)
@@ -108,6 +135,9 @@ def crest_url(name: str, use_local: bool = True) -> str:
     code = nation_code(name)
     if code:
         return f"https://flagcdn.com/w80/{code}.png"
+    fid = _fotmob_id(name)
+    if fid:
+        return f"https://images.fotmob.com/image_resources/logo/teamlogo/{fid}.png"
     ids = _id_index().get(team_core(name), {})
     if ids.get("api_football"):
         return f"https://media.api-sports.io/football/teams/{ids['api_football']}.png"
@@ -120,5 +150,6 @@ def crest_img(name: str, size: str = "") -> str:
     """<img> com o escudo; se a imagem remota falhar, troca pelo escudo gerado."""
     url, fb = crest_url(name), monogram(name)
     cls = f"til-crest {size}".strip()
-    return (f'<img class="{cls}" src="{html.escape(url)}" alt="{html.escape(str(name))}" title="{html.escape(str(name))}" '
+    # rodada 27: alt vazio — com a imagem fora do ar o navegador escrevia o NOME no lugar do escudo ("Grêmio Grêmio")
+    return (f'<img class="{cls}" src="{html.escape(url)}" alt="" title="{html.escape(str(name))}" '
             f'onerror="this.onerror=null;this.src=\'{fb}\'">')

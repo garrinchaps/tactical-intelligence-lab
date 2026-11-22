@@ -737,6 +737,30 @@ Rodada 27 (22/11/2026, 532 testes verdes) — lista dos melhores, pré-jogo, bas
   de base/índices 1×/semana, estatísticas/Rankings/base 1×/dia, Scout 6 h, pip só quando o requirements.txt muda;
   `-Tudo` força. Detalhes de base com limite 20.000 (todos). A limpeza mantém a fotografia mais nova até a v15 existir.
 
+Rodada 27b (22/11/2026, 535 testes verdes) — ajustes finos pedidos com listas (a lista mundial ficou "praticamente
+perfeita" e não deve mudar):
+- ✅ Notas: volante comparado na nota FotMob só com volantes (`T` em `MID_DM`); fundo da curva menos castigado
+  (`REST_O` 44→75, topo/escada intactos); Série B 0,64 e Série C 0,52; empurrão para jovem TITULAR fora das ligas de
+  elite (`age_prior` young2); alvos novos do Brasil (Romero 78, M. Pereira 81, Kaio Jorge 79, Morisco, J. Jesus, Giay,
+  Vitor Roque, Danilo, Bontempo, Melk, Lorenzo, Mec, Kauã Prates) e potenciais (Zé Lucas/Pape 88…). Simulação: topo igual.
+- ✅ Base contínua (`potential.youth_floor`): 60 + 12·seleção de elite + 1,8·jogos + nota na base + minutos de profissional
+  + valor para a idade (55–93, sem faixas fixas). Wikidata testada como 2º portal de base: não registra convocações
+  (Endrick, Estêvão vazios) — não usada. Estilo novo de centroavante "Atacante de ruptura".
+- ✅ Liga com um nome só (`evaluation.canonical_league`: "campeonato-brasileiro-serie-a" = "Brasileirão Série A").
+- ✅ Santos × Santos Laguna (e qualquer homônimo): `gender.comp_sql` tira as ligas NACIONAIS de outro país
+  (`foreign_competitions`: país = maioria ≥ 60% dos jogos de liga; internacionais ficam) — vale nas 19 consultas por time.
+  `comp_country`/`COUNTRY_KEYS` agora em `src/data_hub/gender.py`.
+- ✅ Entrosamento na melhor escalação (`matchday.pair_chemistry/chemistry_refine`): duplas vizinhas no desenho, pontos
+  por jogo juntos nos últimos 15 × média do time; troca só com qualidade parecida (até 0,8 de 'val'); o porquê cita.
+- ✅ Assistente: pergunta que só identifica o jogo → recepção (placar, números principais, gols, sugestões —
+  `src/intelligence/player_line.py`); "como jogou X"/"o que X fez" → parágrafo em linguagem de futebol (antes chaves
+  cruas); "o que deveria ter feito de diferente" deixou de ser "fora do assunto".
+- ✅ Rankings: uma linha por jogador (e competição), qualidade do Scout por nome único quando o clube difere.
+- ✅ Escudos: ids da FotMob de ~390 clubes (`src/ui/crest_ids.json`, CDN de imagens da FotMob); `alt` vazio (o nome
+  aparecia duplicado quando a imagem falhava — "Grêmio Grêmio").
+- ✅ Scout: adicionar ao plano/descartar num fragmento (`_card_actions`) — o clique refaz só o cartão.
+- Fotografia v16; passos do script `scout_v16`/`rankings_r27` (rodam na próxima vez).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

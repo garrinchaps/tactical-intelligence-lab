@@ -148,6 +148,20 @@ REFERENCE_TARGETS.update({
     "Sergej Milinković-Savić": 81, "Yannick Carrasco": 76, "Kingsley Coman": 79,
 })
 
+# rodada 27: lista do usuário (Brasil subestimado; a lista dos melhores do mundo ficou "praticamente perfeita" e NÃO
+# deve mudar). Alvos de consenso para a correção de vieses (idade, liga, minutos, posição) — corrigem a escala do grupo
+REFERENCE_TARGETS.update({
+    "Lucas Daniel Romero": 78, "Lucas Romero": 78, "Matheus Pereira": 81, "Kaio Jorge": 79, "Gerson": 78,
+    "Fabrício Bruno": 78, "Zé Lucas": 70, "Melk": 69, "Lorenzo": 65, "Pedro Morisco": 77, "Jonathan Jesus": 76,
+    "Agustín Giay": 76, "Vitor Roque": 78, "Danilo": 79, "Gabriel Bontempo": 76, "Breno Bidon": 76,
+    "Rômulo": 72, "Gabriel Mec": 74, "Kauã Prates": 73,
+})
+POTENTIAL_TARGETS.update({
+    "Zé Lucas": 88, "Eduardo Pape": 88, "Kaio Jorge": 84, "Melk": 82, "Lorenzo": 80, "Vitor Roque": 86,
+    "Gabriel Bontempo": 84, "Pedro Morisco": 84, "Jonathan Jesus": 84, "Agustín Giay": 83, "Gabriel Mec": 89,
+    "Kauã Prates": 87,
+})
+
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
 
@@ -161,7 +175,7 @@ LADDER_O = [94, 93, 92, 91, 90, 88.5, 87, 85, 83, 81, 78, 75]
 N_REF = 20000
 # abaixo da escada: percentil (dentro do resto) → overall
 REST_P = [0.0, .05, .25, .50, .75, .90, 1.0]
-REST_O = [38, 46, 55, 62, 68, 72, 75]
+REST_O = [44, 51, 58, 63.5, 68.5, 72, 75]   # rodada 27: fundo menos castigado (Série B)
 # legado (rodada 20) — mantido para leitura de relatórios antigos
 CURVE_P = [0.0, .05, .20, .40, .60, .75, .85, .92, .96, .985, .995, .9985, 1.0]
 CURVE_O = [38, 46, 54, 60, 65, 69, 73, 77, 81, 85, 88, 90.5, 94]
@@ -275,7 +289,17 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     parts = pd.concat([p_stats.rename("s"), p_rank.rename("r"), p_ext.rename("e")], axis=1)
     w = pd.DataFrame({"s": .6 * parts["s"].notna(), "r": .3 * parts["r"].notna(), "e": .1 * parts["e"].notna()})
     d["P"] = (parts.fillna(0) * w).sum(axis=1) / w.sum(axis=1).replace(0, np.nan)
-    d["T"] = _pct(d["_rating_adj"].where(d["_elig"]), d["_fam"], ref, "_rating_adj")
+    # rodada 27: a nota da FotMob favorece o meia que chega à frente; o VOLANTE (destruidor/organizador) é comparado
+    # só com volantes na nota (Zé Lucas, Lucas Romero e Pape ficavam baixos contra os meias de chegada)
+    papel = u["papel"] if "papel" in u else pd.Series("", index=u.index)
+    t_group = d["_fam"].where(papel.ne("DM"), "MID_DM")
+    if ref is not None and "_fam" in ref:
+        ref_t = ref.copy()
+        if "papel" in ref_t:
+            ref_t["_fam"] = ref_t["_fam"].where(ref_t["papel"].ne("DM"), "MID_DM")
+        d["T"] = _pct(d["_rating_adj"].where(d["_elig"]), t_group, ref_t, "_rating_adj")
+    else:
+        d["T"] = _pct(d["_rating_adj"].where(d["_elig"]), t_group)
     # rodada 27: reputação em escala real (desvios) — contra a régua de referência quando houver
     base = ref if (ref is not None and "_rep_val" in ref and "_fam" in ref) else \
         pd.DataFrame({"_rep_val": d["_rep_val"].where(d["_elig"]), "_fam": d["_fam"]})
@@ -362,7 +386,10 @@ def age_prior(age: pd.Series, avail: pd.Series, level: Optional[pd.Series] = Non
     old = -(.08 * (a - 31).clip(lower=0, upper=6))
     lv = level.fillna(45) if level is not None else pd.Series(45.0, index=a.index)
     young = .035 * (23 - a).clip(lower=0, upper=5) * (avail.fillna(0) >= .75) * (lv >= 60)
-    return (old + young).fillna(0.0)
+    # rodada 27: jovem TITULAR fora das ligas de elite (Melk e Lorenzo na Série B, titulares aos 19–20) também prova
+    # nível acima dos números de um ano — empurrão menor, que some nas ligas de elite (onde a lista já estava certa)
+    young2 = .05 * (22 - a).clip(lower=0, upper=4) * (avail.fillna(0) >= .5) * ((lv >= 35) & (lv < 85))
+    return (old + young + young2).fillna(0.0)
 
 
 def ladder(s: pd.Series, ref_sorted: Optional[np.ndarray] = None) -> pd.Series:
