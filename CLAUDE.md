@@ -712,6 +712,31 @@ Rodada 26 (22/11/2026, 528 testes verdes) — velocidade, limpeza e notas desatu
   Passo 3 do `atualizar_tudo.ps1`.
 - Atributos e notas mudam sozinhos com os jogos novos (fotografia refeita a cada 6 h pelo processo de fundo e no passo 12).
 
+Rodada 27 (22/11/2026, 532 testes verdes) — lista dos melhores, pré-jogo, base e script mais curto:
+- ✅ Overall: a reputação virou ESCALA REAL (log do valor ajustado pela idade, padronizado por família com mediana/desvio
+  robusto, `overall.rep_z`) e P/T entram em desvios (`_probit`) — no percentil o topo ficava espremido (€180 mi ≈ €25 mi ≈
+  P99) e Watkins/Toney/Kimmich passavam Mbappé/Haaland. Grade de pesos com wR até 0,6. Fotografia v15.
+- ✅ Nível das ligas: nomes em formato de endereço ("premier-league", "super-lig") não batiam com a tabela e caíam no 0,60
+  (`evaluation._fold` troca hífen por espaço); "Saudi Pro League"/"Emirados — Pro League" caíam na liga belga (0,76) —
+  agora 0,64/0,52; o nível do overall mistura valor dos elencos (50%) com a tabela (50%). "Barcelona SC" no Barcelona
+  espanhol corrigido (`canonical_clubs`).
+- ✅ Base: `potential.youth_floor` (convocado 3+ jogos por seleção de elite → potencial ≥ 80; outras 74; nota na base até
+  +6; vale depois da calibração), sinal "seleção de base" com peso 1,6 e bônus de elite; `overall.youth_quality` (sem
+  minutos de profissional → qualidade ESTIMADA pela base: Sub-17 52–68, Sub-20 56–74); painel "🏅 Seleção de base" na
+  visão geral do jogador (`engine.youth_profile`: jogos, minutos, titular, nota, números totais e por 90); 2 competições
+  novas (10621 Eliminatórias CONCACAF Sub-20, 10068 Premier League Sub-18). A FotMob NÃO tem amistosos Sub-17/Sub-20,
+  Sul-Americano Sub-17 nem Copinha (conferido na lista oficial). Cadastro do Transfermarkt com clube ANTERIOR confirma
+  pelo histórico (`times_hist`: Zé Lucas no Sport → valor de mercado). Cabeçalho do jogador com o clube atual do Scout.
+- ✅ Pré-jogo: mandante × visitante no cartão (`hero(team_home=)`); quem não tem nota no Scout aparece com a nota recente
+  da escalação marcada "*" (antes "—"); `find_player` aceita grafia do clube diferente e prefere a linha com nota;
+  confrontos com os 30 últimos jogos de cada time (eram 15) e só do mesmo gênero; legenda 0–100.
+- ✅ Identidade: técnico do time feminino fora (`coach_periods` com `comp_sql`); desenho ATACANDO/DEFENDENDO estimado pela
+  escalação + posse/cruzamentos/PPDA para times sem lances (`lineup_phases`, marcado como estimativa).
+- ✅ Mapa de finalizações: lado do ataque decidido pelos próprios chutes (mandante → direita).
+- ✅ `atualizar_tudo.ps1` só roda o que venceu (`src/tools/passos.py`, data/atualizacao_passos.json): elencos/calendário
+  de base/índices 1×/semana, estatísticas/Rankings/base 1×/dia, Scout 6 h, pip só quando o requirements.txt muda;
+  `-Tudo` força. Detalhes de base com limite 20.000 (todos). A limpeza mantém a fotografia mais nova até a v15 existir.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

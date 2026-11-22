@@ -409,12 +409,18 @@ def stats_identity(db, names: Sequence[str], n: int = 20) -> Dict[str, Any]:
 def coach_periods(db, names: Sequence[str], n: int = 60) -> List[Dict[str, Any]]:
     """Períodos por técnico (escalação da fonte). Cada período: jogos, datas, desenho mais usado e pontos por jogo."""
     ph = ",".join("?" * len(names))
+    try:                     # rodada 27: o time feminino tem o mesmo nome (Jonas Urias aparecia como técnico do Cruzeiro)
+        from src.data_hub.gender import comp_sql
+
+        gsql = comp_sql(list(names), "m")
+    except Exception:
+        gsql = ""
     try:
         with db.connect() as conn:
             d = pd.read_sql_query(
                 f"SELECT l.match_id, m.match_date, MAX(l.coach) AS coach, MAX(l.formation) AS formation, m.home_team_name, "
                 f"m.home_score, m.away_score FROM match_lineups l JOIN matches m ON m.match_id = l.match_id "
-                f"WHERE l.team_name IN ({ph}) GROUP BY l.match_id ORDER BY m.match_date DESC LIMIT {int(n)}", conn,
+                f"WHERE l.team_name IN ({ph}){gsql} GROUP BY l.match_id ORDER BY m.match_date DESC LIMIT {int(n)}", conn,
                 params=list(names))
     except Exception:
         return []
@@ -446,8 +452,95 @@ def identity(db, names: Sequence[str], n: int = 20) -> Dict[str, Any]:
     evi = events_identity(db, names, min(n, 10))
     coaches = coach_periods(db, names)
     cur = coaches[0] if coaches else None
+    phases = None
+    if not (evi.get("jogos") and evi.get("posicoes_ultimo_jogo")):
+        try:
+            phases = lineup_phases(db, names, st)
+        except Exception:
+            phases = None
     return {"estatisticas": st, "lances": evi, "treinadores": coaches, "treinador_atual": cur,
-            "resumo": summary_text(st, evi, cur)}
+            "fases_estimadas": phases, "resumo": summary_text(st, evi, cur)}
+
+
+def _norm_form(f: Any) -> str:
+    digits = "".join(ch for ch in str(f or "") if ch.isdigit())
+    return "-".join(digits) if 3 <= len(digits) <= 5 else ""
+
+
+def lineup_phases(db, names: Sequence[str], st: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    """Rodada 27 — time SEM jogos com lances (Cruzeiro, quase toda a América do Sul): o desenho com e sem a bola sai
+    da ESCALAÇÃO do último jogo (titulares, posição e formação da fonte) ajustada pelo que os números medem: laterais
+    sobem mais quando o time cruza muito, todo o bloco sobe com posse alta e pressão alta (PPDA baixo) e recua com PPDA
+    alto. É uma ESTIMATIVA marcada como tal — não é posição medida em campo."""
+    from src.squad.formations import FORMATIONS, fit, natural_role
+
+    ph = ",".join("?" * len(names))
+    try:
+        from src.data_hub.gender import comp_sql
+
+        gsql = comp_sql(list(names), "m")
+    except Exception:
+        gsql = ""
+    with db.connect() as conn:
+        last = conn.execute(
+            f"SELECT l.match_id, MAX(l.formation), MAX(m.match_date), MAX(l.team_name) FROM match_lineups l "
+            f"JOIN matches m ON m.match_id = l.match_id WHERE l.team_name IN ({ph}) AND l.is_starter = 1{gsql} "
+            f"GROUP BY l.match_id HAVING COUNT(*) >= 10 ORDER BY MAX(m.match_date) DESC LIMIT 1", list(names)).fetchone()
+        if not last:
+            return None
+        rows = conn.execute("SELECT player_name, position FROM match_lineups WHERE match_id = ? AND team_name = ? "
+                            "AND is_starter = 1", (int(last[0]), str(last[3]))).fetchall()
+    form = _norm_form(last[1])
+    if form not in FORMATIONS:
+        form = "4-2-3-1" if form.startswith("4-2") else "4-3-3" if form.startswith("4") else "3-5-2" if form.startswith("3") else "4-4-2"
+    slots = FORMATIONS[form]
+    players = [(str(n), natural_role("", pos) or str(pos or "").upper()) for n, pos in rows]
+    gk = [p for p in players if p[1] == "GK"]
+    used, place = set(), {}
+    for role, x, y in slots:                       # goleiro primeiro, depois cada vaga com o melhor encaixe livre
+        pool = [p for p in players if p[0] not in used and ((role == "GK") == (p in gk))]
+        if not pool:
+            pool = [p for p in players if p[0] not in used]
+        if not pool:
+            break
+        best = max(pool, key=lambda p: (fit(role, p[1]) if p[1] else 0.0))
+        used.add(best[0])
+        place[best[0]] = (role, float(x), float(y))
+    if len(place) < 10:
+        return None
+    prof = (st or {}).get("perfil") or {}
+    ref = (st or {}).get("referencia") or {}
+
+    def rel(k):
+        try:
+            return (float(prof[k]) - float(ref[k])) / abs(float(ref[k]))
+        except Exception:
+            return 0.0
+    posse, cruz, ppda = rel("posse_pct"), rel("cruzamentos"), rel("ppda_aprox")
+    on, off = {}, {}
+    for name, (role, x, y) in place.items():
+        if role == "GK":
+            on[name], off[name] = (x + 4, y), (x, y)
+            continue
+        up = 8 + 14 * posse
+        if role in ("LB", "RB", "LWB", "RWB"):
+            up += 10 + 12 * max(cruz, 0)
+            y_on = y + (-4 if y < 40 else 4)
+        else:
+            y_on = y
+        if role in ("CB",):
+            up -= 2
+        on[name] = (float(np.clip(x + up, 4, 112)), float(np.clip(y_on, 3, 77)))
+        down = -6 + 18 * ppda                       # PPDA alto = marca atrás
+        if role in ("LW", "RW", "LM", "RM"):
+            down += 12                              # pontas voltam para a linha do meio
+        if role in ("ST",):
+            down += 8
+        xo = x - down
+        off[name] = (float(np.clip(xo, 8, 100)), float(np.clip(40 + (y - 40) * .85, 4, 76)))
+    base = f"escalação de {str(last[2])[:10]} ({form}) ajustada pela posse, cruzamentos e PPDA aproximado"
+    return {"com_bola": {"posicoes": on, "desenho": form}, "sem_bola": {"posicoes": off, "desenho": form},
+            "base": base, "estimado": True}
 
 
 def summary_text(st: Dict[str, Any], evi: Dict[str, Any], coach: Optional[Dict[str, Any]]) -> List[str]:

@@ -128,15 +128,23 @@ def reference(db, force: bool = False) -> pd.DataFrame:
     return ref
 
 
-def team_players(db, team_names: Sequence[str], n_games: int = 15) -> pd.DataFrame:
+def team_players(db, team_names: Sequence[str], n_games: int = 30) -> pd.DataFrame:
+    """Rodada 27: os 30 últimos jogos do time com números por jogador (antes 15 — a base ficava em 8–12 jogos por
+    atleta), só do mesmo gênero (o time feminino com o mesmo nome não entra)."""
     names = [str(x) for x in team_names if x]
     if not names:
         return pd.DataFrame()
     ph = ",".join("?" * len(names))
+    try:
+        from src.data_hub.gender import comp_sql
+
+        gsql = comp_sql(names, "m")
+    except Exception:
+        gsql = ""
     q = f"""SELECT p.player_name, SUM(p.minutes) AS mins, COUNT(*) AS jogos, {_sum_sql()}
             FROM match_player_stats p WHERE p.team_name IN ({ph}) AND p.match_id IN (
                 SELECT m.match_id FROM matches m JOIN match_player_stats q ON q.match_id = m.match_id
-                WHERE q.team_name IN ({ph}) AND q.stats_json LIKE '%dribbled_past%'
+                WHERE q.team_name IN ({ph}) AND q.stats_json LIKE '%dribbled_past%'{gsql}
                 GROUP BY m.match_id ORDER BY m.match_date DESC LIMIT {int(n_games)})
               AND COALESCE(p.minutes, 0) > 0
             GROUP BY p.player_name"""
@@ -254,7 +262,8 @@ def duel_findings(my_xi, rv_xi, my_stats, rv_stats, ref, me: str, rival: str, at
                                  (how.format(att=an, deff=dn) if attack else
                                   f"{an} ({rival}) contra {dn} — dobrar a marcação por esse lado, não deixar {dn} sozinho "
                                   f"no {title.lower()}")),
-                        "base": f"{int(ra.get('jogos') or 0)} e {int(rd.get('jogos') or 0)} jogos recentes com números por jogador",
+                        "base": f"{int(ra.get('jogos') or 0)} e {int(rd.get('jogos') or 0)} jogos de cada um, dentro dos 30 últimos "
+                                f"jogos de cada time com números por jogador (só conta jogo em que ele entrou)",
                     })
     out.sort(key=lambda x: (x["nivel"] != "escancarado", -x["score"]))
     return out

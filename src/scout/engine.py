@@ -425,6 +425,19 @@ def _history_group_totals(rows: pd.DataFrame, group_keys: List[str]) -> pd.DataF
     )
     out["ultimo_time"] = latest["team_name"].reindex(out.index).fillna("")
     out["ultima_competicao"] = latest["competition_name"].reindex(out.index).fillna("")
+    # rodada 27: todos os clubes por que ele jogou (para confirmar o cadastro do Transfermarkt que ainda mostra o clube
+    # ANTERIOR — Zé Lucas no Sport já jogando pelo Cruzeiro ficava sem valor de mercado)
+    try:
+        if not club_rows.empty:
+            cmap = {t: team_core(str(t)) for t in club_rows["team_name"].dropna().unique()}
+            tmp = club_rows[group_keys].copy()
+            tmp["_tc"] = club_rows["team_name"].map(cmap).fillna("")
+            tmp = tmp[tmp["_tc"] != ""].drop_duplicates()
+            th = tmp.groupby(group_keys, dropna=False, sort=False, observed=True)["_tc"].agg(
+                lambda x: "|".join(sorted(set(x))))
+            out["times_hist"] = th.reindex(out.index).fillna("")
+    except Exception:
+        pass
     return out
 
 
@@ -910,7 +923,7 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
     h["core_nome"] = h["core_nome"].fillna(h["core"]).astype(str)
     cand_by_name: Dict[str, List[Dict[str, Any]]] = {}
     for rec in h[[c for c in ("core", "core_nome", "ultimo_time", "clube_fm", "posicao_observada", "posicao_fm",
-                              "nascimento_fm", "nacionalidade_fm", "minutos_12m") if c in h]].to_dict("records"):
+                              "nascimento_fm", "nacionalidade_fm", "minutos_12m", "times_hist") if c in h]].to_dict("records"):
         cand_by_name.setdefault(rec["core_nome"], []).append(rec)
     tm_dup = p["_core"].duplicated(keep=False)
     births = pd.to_datetime(p.get("nascimento"), errors="coerce")
@@ -936,7 +949,8 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
             if cf and cf != fam:
                 continue                                        # goleiro × linha
             clubs = {team_core(_safe_str(c.get(k))) for k in ("ultimo_time", "clube_fm") if _safe_str(c.get(k))}
-            same_club = bool(club_c) and club_c in clubs
+            past = {x for x in str(c.get("times_hist") or "").split("|") if x}
+            same_club = bool(club_c) and (club_c in clubs or club_c in past)
             if same_club:
                 score += 2
             n1 = _country_core(c.get("nacionalidade_fm")) if _safe_str(c.get("nacionalidade_fm")) else ""
@@ -2872,6 +2886,12 @@ def canonical_clubs(universe: pd.DataFrame) -> pd.DataFrame:
     if "clube_tm" in u:
         u.loc[change & u["clube_tm"].isna(), "clube_tm"] = club[change & u["clube_tm"].isna()]
     u.loc[change, "clube"] = new[change]
+    # rodada 27: nomes que existem em dois países — o da liga do jogador manda (Raphinha, Olmo e De Jong apareciam no
+    # "Barcelona SC" do Equador mesmo com a liga "laliga")
+    for name, home_region, other in (("Barcelona SC", "América do Sul", "Barcelona"),):
+        hit = u["clube"].eq(name) & region.ne(home_region) & ~region.eq("Sem liga identificada")
+        if hit.any():
+            u.loc[hit, "clube"] = other
     return u
 
 
@@ -3070,3 +3090,65 @@ def youth_only_players(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFra
         "fonte_qualidade": "ESTIMADA pela seleção de base (nota na competição de base levada ao nível de base)",
         "so_base": True}, index=y.index)
     return out.reset_index(drop=True)
+
+
+# ================================================================== rodada 27: números da seleção de base no perfil
+YOUTH_STAT_KEYS = [("Gols", ("goals", "totalGoals")), ("Assistências", ("assists", "goalAssists", "goal_assist")),
+                   ("xG", ("xg", "expected_goals")), ("xA", ("xa", "expected_assists")),
+                   ("Chances criadas", ("chances_created",)), ("Dribles certos", ("dribbles_succeeded",)),
+                   ("Passes no terço final", ("passes_into_final_third",)), ("Desarmes", ("matchstats.headers.tackles", "tackles")),
+                   ("Interceptações", ("interceptions",)), ("Recuperações", ("recoveries",)),
+                   ("Duelos ganhos", ("duel_won",)), ("Aéreos ganhos", ("aerials_won",)), ("Toques", ("touches",))]
+
+
+def youth_profile(db, names: List[str]) -> Dict[str, Any]:
+    """Jogos do atleta por SELEÇÃO DE BASE e base de clubes (Mundial Sub-17/20, Sul-Americano, Euros, Youth League…):
+    por competição (jogos, minutos, titular, nota média) e os números somados e por 90. Fica no perfil dele — separado
+    dos números de clube (jogar bem na base não é jogar bem entre profissionais)."""
+    try:
+        from src.data_hub.sources.fotmob import YOUTH_NAMES
+    except Exception:
+        return {}
+    names = [str(n) for n in names if n]
+    if not names:
+        return {}
+    comps = sorted(YOUTH_NAMES)
+    ph_n, ph_c = ",".join("?" * len(names)), ",".join("?" * len(comps))
+    try:
+        with db.connect() as conn:
+            d = pd.read_sql_query(
+                f"SELECT m.match_id, m.match_date, m.competition_name, p.team_name, p.minutes, p.rating, p.stats_json, "
+                f"(SELECT MAX(l.is_starter) FROM match_lineups l WHERE l.match_id = p.match_id AND l.player_name = p.player_name) AS titular "
+                f"FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id "
+                f"WHERE p.player_name IN ({ph_n}) AND m.competition_name IN ({ph_c}) ORDER BY m.match_date DESC",
+                conn, params=names + comps)
+    except Exception:
+        return {}
+    if d.empty:
+        return {}
+    d = d.drop_duplicates("match_id")
+    tot = {lab: 0.0 for lab, _ in YOUTH_STAT_KEYS}
+    seen = {lab: False for lab, _ in YOUTH_STAT_KEYS}
+    for js in d["stats_json"].dropna():
+        try:
+            j = json.loads(js)
+        except Exception:
+            continue
+        for lab, keys in YOUTH_STAT_KEYS:
+            v = next((j.get(k) for k in keys if j.get(k) is not None), None)
+            try:
+                if v is not None:
+                    tot[lab] += float(v)
+                    seen[lab] = True
+            except (TypeError, ValueError):
+                pass
+    mins = float(pd.to_numeric(d["minutes"], errors="coerce").fillna(0).sum())
+    by = (d.assign(minutes=pd.to_numeric(d["minutes"], errors="coerce"), rating=pd.to_numeric(d["rating"], errors="coerce"))
+          .groupby(["competition_name", "team_name"])
+          .agg(jogos=("match_id", "nunique"), minutos=("minutes", "sum"), titular=("titular", "sum"),
+               nota=("rating", "mean"), ultimo=("match_date", "max")).reset_index()
+          .sort_values("ultimo", ascending=False))
+    numbers = [{"Número": lab, "Total": round(tot[lab], 2), "Por 90": round(tot[lab] * 90 / mins, 2) if mins >= 90 else None}
+               for lab, _ in YOUTH_STAT_KEYS if seen[lab]]
+    return {"jogos": int(d["match_id"].nunique()), "minutos": int(mins), "por_competicao": by, "numeros": numbers,
+            "nota": float(pd.to_numeric(d["rating"], errors="coerce").mean()) if d["rating"].notna().any() else None}

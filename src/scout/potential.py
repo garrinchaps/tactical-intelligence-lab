@@ -53,7 +53,7 @@ POS_WEIGHTS: Dict[str, Dict[str, float]] = {
     "GK": {"saves_p90": .6, "pass_accuracy_pct": .4, "long_ball_pct": .3},
 }
 SIGNAL_WEIGHTS = {"producao": 1.3, "nota": 1.0, "minutos_nivel": 1.4, "valor_idade": 1.1, "toques": .8,
-                  "base": .9, "fisico": .4, "precocidade": .6, "minutos_idade": 1.8}
+                  "base": 1.6, "fisico": .4, "precocidade": .6, "minutos_idade": 1.8}
 SIGNAL_LABELS = {"producao": "produção na função", "nota": "nota média (ajustada pela liga)",
                  "minutos_nivel": "minutos no ano × nível do time", "valor_idade": "valor de mercado para a idade",
                  "toques": "ações com a bola por 90", "base": "seleção de base", "fisico": "prospecto físico",
@@ -102,6 +102,33 @@ def production_index(u: pd.DataFrame, fam: pd.Series, eligible: pd.Series) -> pd
     return out
 
 
+# seleções de base que formam jogadores de elite com frequência (estimativa declarada; serve para pesar a convocação)
+ELITE_YOUTH = ("brazil", "brasil", "argentina", "france", "frança", "franca", "spain", "espanha", "england",
+               "inglaterra", "germany", "alemanha", "portugal", "netherlands", "holanda", "países baixos", "paises baixos",
+               "italy", "itália", "italia", "belgium", "bélgica", "belgica", "uruguay", "uruguai", "colombia", "colômbia")
+
+
+def youth_elite(u: pd.DataFrame) -> pd.Series:
+    """1 = convocado por seleção de base de elite, 0 = outra seleção, NaN = sem seleção de base conhecida."""
+    sel = u["selecao"] if "selecao" in u else pd.Series(None, index=u.index)
+    s = sel.fillna("").astype(str).str.lower()
+    out = s.map(lambda x: float(any(w in x for w in ELITE_YOUTH)) if x.strip() else np.nan)
+    return out.astype(float)
+
+
+def youth_floor(u: pd.DataFrame) -> pd.Series:
+    """Rodada 27 — piso do POTENCIAL de quem é da seleção de base (≤ 21 anos): convocado com frequência (3+ jogos)
+    por seleção de elite → 80; 1–2 jogos → 76; outras seleções 74/70. Os MELHORES da competição de base (nota)
+    sobem até +6. É uma projeção (o mercado e os clubes tratam esses atletas como as maiores promessas do país)."""
+    age = _col(u, "idade")
+    yj = _col(u, "selecao_base_jogos").fillna(0)
+    pct = _col(u, "selecao_base_pct")
+    el = youth_elite(u).fillna(0)
+    base = np.where(yj >= 3, 74 + 6 * el, 70 + 6 * el)
+    f = pd.Series(base, index=u.index, dtype=float) + (.12 * (pct - 50)).clip(-4, 6).fillna(0)
+    return f.where((yj > 0) & (age.isna() | (age <= 21)))
+
+
 def signals(u: pd.DataFrame, fam: pd.Series) -> pd.DataFrame:
     """Os sinais de talento (0–100) de cada atleta; NaN = sinal sem dado."""
     age = _col(u, "idade")
@@ -123,8 +150,11 @@ def signals(u: pd.DataFrame, fam: pd.Series) -> pd.DataFrame:
     s["toques"] = _rank_pct(_col(u, "touches_p90"), fam, elig)
     yj = _col(u, "selecao_base_jogos")
     ypct = _col(u, "selecao_base_pct")
-    # jogos de base + (quando há nota) o quanto ele foi dos MELHORES da competição de base
-    s["base"] = (35 + 8 * yj.clip(upper=5) + (.35 * (ypct - 50)).fillna(0)).clip(5, 98).where(yj > 0)
+    # jogos de base + (quando há nota) o quanto ele foi dos MELHORES da competição de base.
+    # rodada 27: ser convocado por uma seleção de base FORTE (Brasil, Argentina, França…) já é estar entre os poucos
+    # melhores do país na idade — vale mais do que jogar uma competição de base por uma seleção pequena
+    elite = youth_elite(u)
+    s["base"] = (45 + 6 * yj.clip(upper=6) + 12 * elite + (.35 * (ypct - 50)).fillna(0)).clip(5, 99).where(yj > 0)
     h = _col(u, "altura_cm").where(lambda x: x.between(150, 215))
     med = fam.map(TALL_MATTERS)
     s["fisico"] = (50 + 6 * (h - med)).clip(5, 95).where(med.notna() & h.notna())
@@ -174,7 +204,12 @@ def compute(u: pd.DataFrame, fam: Optional[pd.Series] = None) -> pd.DataFrame:
     no_q = q.isna() & age.notna() & (age <= 23)
     est = (48 + .22 * (talent - 50) + growth * .9).clip(35, 86)
     pot = pot.where(~no_q, est)
-    out["potencial"] = pot.where(q.notna() | no_q).round(0)
+    # rodada 27: piso pela seleção de base (Eduardo Pape titular do Brasil Sub-17 tinha potencial 55)
+    yf = youth_floor(u)
+    lift = yf.notna() & (pot.isna() | (pot < yf))
+    pot = pot.where(~lift, yf).clip(upper=POT_CAP)
+    out["potencial"] = pot.where(q.notna() | no_q | lift).round(0)
+    out["potencial_piso_base"] = lift
     out["potencial_estimado_sem_nota"] = no_q
     out["potencial_crescimento"] = growth.where(q.notna() | no_q).round(1)
     out["potencial_talento"] = talent.round(0)
@@ -182,6 +217,9 @@ def compute(u: pd.DataFrame, fam: Optional[pd.Series] = None) -> pd.DataFrame:
     out["potencial_confianca_pct"] = (100 * (.5 * (m12 / 1800).clip(0, 1) + .5 * evidence)).round(0)
     out["potencial_porque"] = [("ESTIMADO sem nota atual (poucos minutos): " if no_q.get(i) else "")
                                + _why(sig.loc[i], talent.loc[i], growth.loc[i], _col(u, "idade").get(i))
+                               + (" · piso pela seleção de base (convocado por "
+                                  + str(u.at[i, "selecao"] if "selecao" in u else "seleção de base") + ")"
+                                  if lift.get(i) else "")
                                for i in u.index]
     return out
 

@@ -89,16 +89,22 @@ TIERS = [
     (r"brasileir[aã]o s[ée]rie c|campeonato brasileiro s[ée]rie c", .48),
     (r"^serie a$|italy|it[aá]lia", .93), (r"ligue 1", .9), (r"europa league", .9), (r"primeira liga|liga portugal", .82),
     (r"eredivisie", .8), (r"libertadores", .82),
-    (r"championship", .78), (r"conference league", .78), (r"pro league|jupiler|b[ée]lgica", .76),
+    # rodada 27: Arábia/Emirados/Catar ANTES da liga belga — "Saudi Pro League" e "Emirados — Pro League" caíam em
+    # "pro league" (Bélgica, 0,76) e os veteranos de lá subiam na lista dos melhores do mundo
+    (r"saudi|ar[aá]bia", .64), (r"emirados|emirates|\buae\b|catar|qatar|stars league", .52),
+    (r"championship", .78), (r"conference league", .78), (r"jupiler|b[ée]lgica|belgian|^pro league$", .76),
     (r"copa do brasil", .75), (r"s[üu]per lig|turquia", .75), (r"liga profesional|argentina", .74),
     (r"sul-americana|sudamericana", .72), (r"liga mx|m[ée]xico", .72), (r"\bmls\b|major league", .7),
-    (r"saudi|ar[aá]bia", .68), (r"s[ée]rie b", .6), (r"primera nacional", .55), (r"s[ée]rie c", .48),
+    (r"s[ée]rie b", .6), (r"primera nacional", .55), (r"s[ée]rie c", .48),
     (r"s[ée]rie d", .38), (r"paragu|urugu|chile|col[ôo]mbia|equador|ecuador|peru", .6), (r"bol[ií]via|venezuela", .5),
 ]
 
 
 def _fold(s: Any) -> str:
-    return unicodedata.normalize("NFKD", str(s or "").lower()).encode("ascii", "ignore").decode()
+    # rodada 27: "premier-league"/"super-lig" (endereço do Transfermarkt) viram "premier league"/"super lig" — antes
+    # não batiam com nenhuma regra e a Premier League ficava com o nível padrão (0,60, igual à Série B)
+    t = unicodedata.normalize("NFKD", str(s or "").lower()).encode("ascii", "ignore").decode()
+    return " ".join(t.replace("-", " ").replace("_", " ").split())
 
 
 def prior_level(comp: str) -> float:

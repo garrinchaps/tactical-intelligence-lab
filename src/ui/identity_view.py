@@ -15,6 +15,7 @@ from src.ui.perf import timed as _perf_timed
 @_perf_timed("identity._data")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")
 def _data(names: tuple, version: str, n: int) -> Dict[str, Any]:
+    # rodada 27: sem o time feminino nos treinadores + desenho estimado pela escalação (muda a chave do cache em disco)
     from src.analytics import tactical_identity as TI
     from src.ui.context import get_service
 
@@ -103,6 +104,16 @@ def render(team: str, names: Sequence[str], version: str, key: str = "club") -> 
                            use_container_width=True, key=f"ti_off_{key}")
         st.caption("Campinho do jogo com lances mais recente: posição média de cada titular nas ações com bola e nas ações "
                    "defensivas (ataque para a direita). É média do jogo inteiro — não é foto de um instante.")
+    elif d.get("fases_estimadas"):
+        ps = d["fases_estimadas"]
+        a, b = st.columns(2)
+        a.plotly_chart(_pitch(ps["com_bola"]["posicoes"], f"Atacando (estimado) · {ps['com_bola']['desenho']}"),
+                       use_container_width=True, key=f"ti_on_est_{key}")
+        b.plotly_chart(_pitch(ps["sem_bola"]["posicoes"], f"Defendendo (estimado) · {ps['sem_bola']['desenho']}"),
+                       use_container_width=True, key=f"ti_off_est_{key}")
+        st.caption("Sem jogos com lances deste time: desenho ESTIMADO pela " + ps.get("base", "escalação") +
+                   " (ataque para a direita). Laterais sobem mais quando o time cruza muito; o bloco sobe com posse e "
+                   "pressão alta e recua quando marca atrás. Não é posição medida em campo.")
     if evi.get("corredores"):
         cor = pd.Series(evi["corredores"]).sort_values(ascending=False)
         st.markdown("**Por onde o time chega ao último terço (lances)** — " +

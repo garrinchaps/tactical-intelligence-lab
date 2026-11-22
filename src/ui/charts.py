@@ -345,8 +345,12 @@ def shot_map(shots: pd.DataFrame, home: str, title: str) -> go.Figure:
         s = shots[shots["lado"] == side]
         if s.empty:
             continue
-        x = s["x"] if side == "h" else 120 - s["x"]
-        y = s["y"] if side == "h" else 80 - s["y"]
+        # rodada 27: cada fonte guarda o lado do ataque de um jeito (a FotMob já pode trazer o visitante atacando para a
+        # esquerda) — o lado é decidido pelos PRÓPRIOS chutes: mandante sempre para a direita, visitante para a esquerda
+        mx = float(pd.to_numeric(s["x"], errors="coerce").median())
+        flip = (mx < 60) if side == "h" else (mx > 60)
+        x = 120 - s["x"] if flip else s["x"]
+        y = 80 - s["y"] if flip else s["y"]
         goal = s["resultado"].isin(["gol"])
         fig.add_trace(go.Scatter(
             x=x, y=y, mode="markers", name=str(s["equipe"].iloc[0]),

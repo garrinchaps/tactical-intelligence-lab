@@ -29,7 +29,7 @@ import numpy as np
 import pandas as pd
 
 CALIB_PATH = Path("data/processed/overall_calibration.json")
-DEFAULT_WEIGHTS = {"wR": .35, "wP": .25, "wT": .25, "wL": .15}
+DEFAULT_WEIGHTS = {"wR": .5, "wP": .2, "wT": .2, "wL": .1}
 
 REFERENCE_STARS: List[str] = [
     "Kylian Mbappé", "Erling Haaland", "Harry Kane", "Michael Olise", "Vinicius Junior", "Raphinha", "Jude Bellingham",
@@ -233,6 +233,18 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     conf = _col(u, "_conf").fillna(0)
     lvl = _col(u, "_lvl")
     lvl = lvl.fillna(_col(u, "nivel_competicao_principal")).fillna(.45).clip(0, 1)
+    # rodada 27: o nível pelo VALOR dos elencos põe a Arábia (Al Hilal, Al Nassr) perto das grandes ligas — mistura com
+    # a tabela de nível das competições (estimativa declarada em evaluation.TIERS)
+    liga = next((u[c] for c in ("clube_liga", "liga_clube", "ultima_competicao") if c in u), None)
+    if liga is not None:
+        try:
+            from src.scout.evaluation import prior_level
+
+            uniq = {x: prior_level(x) for x in liga.dropna().astype(str).unique() if x.strip() and x != "nan"}
+            tier = liga.astype(str).map(uniq)
+            lvl = (.5 * lvl + .5 * tier).where(tier.notna(), lvl).clip(0, 1)
+        except Exception:
+            pass
     perf = 50 + (raw - 50) * conf
     d["_perf_adj"] = perf * (.55 + .45 * lvl)
     d["_rank_nota"] = _col(u, "nota_rankings")
@@ -264,17 +276,62 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
     w = pd.DataFrame({"s": .6 * parts["s"].notna(), "r": .3 * parts["r"].notna(), "e": .1 * parts["e"].notna()})
     d["P"] = (parts.fillna(0) * w).sum(axis=1) / w.sum(axis=1).replace(0, np.nan)
     d["T"] = _pct(d["_rating_adj"].where(d["_elig"]), d["_fam"], ref, "_rating_adj")
+    # rodada 27: reputação em escala real (desvios) — contra a régua de referência quando houver
+    base = ref if (ref is not None and "_rep_val" in ref and "_fam" in ref) else \
+        pd.DataFrame({"_rep_val": d["_rep_val"].where(d["_elig"]), "_fam": d["_fam"]})
+    zr = pd.Series(np.nan, index=d.index)
+    for fam in d["_fam"].dropna().unique():
+        x = pd.to_numeric(base.loc[base["_fam"] == fam, "_rep_val"], errors="coerce").dropna()
+        if len(x) < 5:
+            continue
+        med = float(x.median())
+        mad = float((x - med).abs().median()) * 1.4826 or 1.0
+        m = d["_fam"] == fam
+        zr.loc[m] = ((d.loc[m, "_rep_val"] - med) / mad).clip(-3, 4.5)
+    d["_zR"] = zr.where(d["_elig"])
     return d
 
 
+def _probit(pct: pd.Series) -> pd.Series:
+    """Percentil (0–100) → desvios-padrão da curva normal. No percentil o topo fica espremido (P99 e P99,9 quase
+    iguais); em desvios ele se abre (2,3 × 3,1) — é aí que mora a diferença entre um bom titular e um craque."""
+    from scipy.stats import norm
+
+    p = pd.to_numeric(pct, errors="coerce") / 100
+    return pd.Series(norm.ppf(p.clip(.002, .998)), index=pct.index).where(p.notna())
+
+
+def rep_z(c: pd.DataFrame) -> pd.Series:
+    """Rodada 27: reputação em escala REAL (logaritmo do valor ajustado pela idade, padronizado por família com mediana
+    e desvio robusto). Mbappé (€180 mi) fica ~2 desvios acima de um bom titular de €25 mi — no percentil os dois
+    davam ~99 e o valor de mercado deixava de separar o topo (Watkins 94 × Mbappé 88)."""
+    if "_zR" in c:
+        return c["_zR"]
+    v = pd.to_numeric(c.get("_rep_val"), errors="coerce").where(c["_elig"])
+    out = pd.Series(np.nan, index=c.index)
+    for fam, idx in v.groupby(c["_fam"]).groups.items():
+        x = v.loc[idx].dropna()
+        if len(x) < 5:
+            continue
+        med = float(x.median())
+        mad = float((x - med).abs().median()) * 1.4826 or 1.0
+        out.loc[idx] = ((v.loc[idx] - med) / mad).clip(-3, 4.5)
+    return out
+
+
 def zscore(c: pd.DataFrame, w: Dict[str, float]) -> pd.Series:
-    """Média ponderada dos componentes disponíveis (0–100). A reputação pesa menos para quem jogou pouco."""
+    """Média ponderada dos componentes disponíveis, em DESVIOS (rodada 27; antes em percentil 0–100). A reputação pesa
+    menos para quem jogou pouco."""
     has_r, has_t, has_p = c["R"].notna(), c["T"].notna() if "T" in c else pd.Series(False, index=c.index), c["P"].notna()
+    zr = rep_z(c)
+    has_r = has_r & zr.notna()
+    zt = _probit(c["T"]) if "T" in c else pd.Series(np.nan, index=c.index)
+    zp = _probit(c["P"])
+    zl = (pd.to_numeric(c["L"], errors="coerce").fillna(45) - 50) / 20
     wr = w.get("wR", 0) * c["_m"] * has_r
     wt = w.get("wT", 0) * has_t
     wp = w.get("wP", 0) * has_p
-    num = wr * c["R"].fillna(0) + wt * c.get("T", pd.Series(0, index=c.index)).fillna(0) + wp * c["P"].fillna(0) \
-        + w.get("wL", 0) * c["L"]
+    num = wr * zr.fillna(0) + wt * zt.fillna(0) + wp * zp.fillna(0) + w.get("wL", 0) * zl
     den = wr + wt + wp + w.get("wL", 0)
     z = num / den.replace(0, np.nan)
     return z.where(c["_elig"] & (has_p | has_r | has_t))
@@ -447,8 +504,8 @@ def calibrate(u: pd.DataFrame, comps: pd.DataFrame, anchors: Sequence[str] = REF
     names = sorted(tidx)
     half_a, half_b = set(names[0::2]), set(names[1::2])
     best, best_obj, grid, best_corr = dict(DEFAULT_WEIGHTS), -1e9, [], None
-    for wR in (.2, .3, .4, .5):
-        for wT in (.15, .25, .35):
+    for wR in (.3, .4, .5, .6):
+        for wT in (.1, .2, .3):
             for wL in (.10, .15):
                 wP = round(1 - wR - wT - wL, 2)
                 if wP < .1:
@@ -551,9 +608,45 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         f"overall: reputação ajustada pela idade ({weights.get('wR', 0):.0%}) + desempenho na função "
         f"({weights.get('wP', 0):.0%}) + nota FotMob ajustada pela liga ({weights.get('wT', 0):.0%}) + nível "
         f"({weights.get('wL', 0):.0%}), padronizado por posição e pelos minutos do ano; teto pela minutagem", src)
+    out = youth_quality(out)
     out = _recompute_potential(out)
     if report:
         save_report(out, report)
+    return out
+
+
+YOUTH_BAND = {"sub17": (52.0, 68.0), "sub20": (56.0, 74.0)}
+
+
+def youth_quality(u: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 27 — jovem da seleção de base SEM minutos de profissional suficientes para a régua (Eduardo Pape: 0 min
+    no Cruzeiro, titular do Brasil Sub-17) ficava sem overall. Recebe uma QUALIDADE ESTIMADA pela base: a colocação da
+    nota dele dentro da competição de base vira um overall numa faixa baixa (Sub-17 52–68 · Sub-20 56–74); sem nota,
+    o meio da faixa (+4 se for seleção de elite). Sempre marcada como estimativa."""
+    if "selecao_base_jogos" not in u:
+        return u
+    from src.scout.potential import youth_elite
+
+    q = _col(u, "qualidade")
+    yj = _col(u, "selecao_base_jogos").fillna(0)
+    age = _col(u, "idade")
+    need = q.isna() & (yj > 0) & (age.isna() | (age <= 21))
+    if not need.any():
+        return u
+    comp = u.get("selecao_base_comp", pd.Series("", index=u.index)).fillna("").astype(str)
+    sub17 = comp.str.contains("17")
+    lo = np.where(sub17, YOUTH_BAND["sub17"][0], YOUTH_BAND["sub20"][0])
+    hi = np.where(sub17, YOUTH_BAND["sub17"][1], YOUTH_BAND["sub20"][1])
+    pct = _col(u, "selecao_base_pct")
+    el = youth_elite(u).fillna(0)
+    frac = (pct / 100).fillna(.5 + .1 * el)
+    est = pd.Series(lo + (hi - lo) * frac.values, index=u.index) + 2 * np.minimum(yj, 5) / 5
+    out = u.copy()
+    out.loc[need, "qualidade"] = est[need].round(0)
+    out.loc[need, "qualidade_estimada_base"] = True
+    out.loc[need, "fonte_qualidade"] = ("ESTIMADA pela seleção de base (ainda sem minutos de profissional suficientes): "
+                                        "colocação da nota na competição de base, faixa " +
+                                        pd.Series(np.where(sub17, "Sub-17 52–68", "Sub-20 56–74"), index=u.index)[need])
     return out
 
 
@@ -615,6 +708,12 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
             p["potencial"] = (q + g).clip(upper=POT.POT_CAP).where(q.notna(), p["potencial"]).round(0)
             p["potencial_crescimento"] = g.round(1)
         d.attrs["potencial_k"] = best_k
+        # rodada 27: o piso da seleção de base vale também depois da calibração do crescimento
+        yf = POT.youth_floor(d)
+        low = yf.notna() & (pd.to_numeric(p["potencial"], errors="coerce").fillna(0) < yf)
+        p.loc[low, "potencial"] = yf[low].clip(upper=POT.POT_CAP).round(0)
+        if "potencial_piso_base" in p:
+            p["potencial_piso_base"] = p["potencial_piso_base"].fillna(False).astype(bool) | low
         for c in p.columns:
             d[c] = p[c]
         # potencial nunca abaixo do overall de hoje

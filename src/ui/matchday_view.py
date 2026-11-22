@@ -15,7 +15,8 @@ from typing import Any, Dict, List, Optional
 LEVEL = {"escancarado": ("#F59E0B", "🔥 ESCANCARADO"), "claro": ("#22D3EE", "✅ CLARO")}
 
 
-def hero(team: str, rival: str, when: str = "", comp: str = "", status: str = "") -> str:
+def hero(team: str, rival: str, when: str = "", comp: str = "", status: str = "", team_home: Optional[bool] = True) -> str:
+    """Rodada 27: na ordem MANDANTE × VISITANTE (azul continua sendo o nosso time, vermelho o rival)."""
     from src.ui.crests import crest_img
 
     def side(name, color, align):
@@ -29,9 +30,11 @@ def hero(team: str, rival: str, when: str = "", comp: str = "", status: str = ""
             f'border-radius:18px;padding:18px 24px;margin:6px 0 14px">'
             f'<div style="text-align:center;color:#98A6BF;font-size:.85rem;letter-spacing:.06em">'
             f'{html.escape(comp.upper())}{" · " + html.escape(when) if when else ""}</div>'
-            f'<div style="display:flex;align-items:center;gap:22px;margin-top:10px">{side(team, "#3B82F6", "right")}'
-            f'<div style="font-size:1.1rem;font-weight:800;color:#98A6BF;padding:6px 14px;border:1px solid #1E2A44;'
-            f'border-radius:10px">VS</div>{side(rival, "#EF4444", "left")}</div>'
+            f'<div style="display:flex;align-items:center;gap:22px;margin-top:10px">'
+            + (side(team, "#3B82F6", "right") if team_home is not False else side(rival, "#EF4444", "right"))
+            + f'<div style="font-size:1.1rem;font-weight:800;color:#98A6BF;padding:6px 14px;border:1px solid #1E2A44;'
+            f'border-radius:10px">VS</div>'
+            + (side(rival, "#EF4444", "left") if team_home is not False else side(team, "#3B82F6", "left")) + '</div>'
             + (f'<div style="text-align:center;margin-top:10px;font-size:.82rem;color:#CFE8FF">{html.escape(status)}</div>'
                if status else "") + '</div>')
 
@@ -41,7 +44,7 @@ def _dot(s: Dict[str, Any], top: float, left: float, color: str, flag: Optional[
     short = name if len(name) <= 16 else name.split()[-1]
     q = s.get("qualidade") if "qualidade_fonte" in s else s.get("qualidade", s.get("nota"))
     try:
-        qtxt = "—" if q is None or q != q else f"{float(q):.0f}"
+        qtxt = "—" if q is None or q != q else f"{float(q):.0f}" + ("*" if s.get("qualidade_estimada") else "")
     except (TypeError, ValueError):
         qtxt = "—"
     ring = "#F59E0B" if flag else "#E6F7FF"
@@ -77,7 +80,15 @@ def unified_quality(xi: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]
             fit = 1.0 if pd.isna(fit) else float(np.clip(fit, 0, 1))
             s["qualidade"] = round(float(q) - 8 * (1 - fit))
             s["qualidade_fonte"] = "Scout" + ("" if fit >= .99 else f" ajustada à função (encaixe {fit:.0%})")
-        elif s.get("nota") is not None:
+        elif pd.notna(pd.to_numeric(s.get("nota"), errors="coerce")):
+            # rodada 27: sem nota no Scout (homônimo sem clube conferido, recém-chegado) — em vez de "—", a nota da
+            # escalação (0–10, desempenho recente) levada à escala 0–100, MARCADA como estimativa (*)
+            n = float(pd.to_numeric(s.get("nota"), errors="coerce"))
+            n = n * 10 if n <= 10 else n
+            s["qualidade"] = round(float(np.clip(n, 40, 85)))
+            s["qualidade_estimada"] = True
+            s["qualidade_fonte"] = "estimada pela nota recente na escalação (sem nota no Scout)"
+        else:
             s["qualidade"] = None
             s["qualidade_fonte"] = "sem nota no Scout"
         out.append(s)

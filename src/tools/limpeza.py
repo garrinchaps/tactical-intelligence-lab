@@ -67,8 +67,12 @@ def project(simulate: bool, log) -> None:
         current = (ROOT / SNAP_PATH).resolve()
     except Exception:
         current = None
-    for f in proc.glob("scout_universe_v*.pkl"):
-        if current is None or f.resolve() != current:
+    snaps = sorted(proc.glob("scout_universe_v*.pkl"), key=lambda f: f.stat().st_mtime, reverse=True)
+    # a fotografia atual ainda não existe (versão nova do código): fica a mais recente — é dela que o app recalcula as
+    # notas em segundos até a nova ficar pronta
+    keep = {current} if current is not None and current.exists() else {snaps[0].resolve()} if snaps else set()
+    for f in snaps:
+        if f.resolve() not in keep:
             _rm(f, simulate, log, "fotografia antiga do Scout")
     cats = sorted(proc.glob("catalogo_*.parquet"), key=lambda f: f.stat().st_mtime, reverse=True)
     for f in cats[1:]:

@@ -81,9 +81,13 @@ LEAGUES: Dict[int, str] = {
     9841: "Copa da Ásia Sub-20", 9571: "Copa da Ásia Sub-23", 9656: "Campeonato da CONCACAF Sub-20",
     10437: "Eliminatórias da Eurocopa Sub-21", 11032: "Intercontinental Sub-20", 344: "Amistosos Sub-21",
     305: "Torneio Maurice Revello (Toulon)", 66: "Jogos Olímpicos (futebol masculino)", 9741: "UEFA Youth League",
+    # rodada 27: o que ainda faltava na lista da FotMob (conferido em /api/data/allLeagues em 22/11/2026). A FotMob NÃO
+    # tem amistosos Sub-17/Sub-20, Sul-Americano Sub-17 nem Copinha — só os amistosos Sub-21 (344, já incluídos)
+    10621: "Eliminatórias da CONCACAF Sub-20", 10068: "Premier League Sub-18",
 }
-YOUTH_LEAGUES = [296, 306, 9848, 288, 301, 287, 9841, 9571, 9656, 10437, 11032, 344, 305, 66]  # seleções de base
-YOUTH_NAMES = {LEAGUES[i] for i in YOUTH_LEAGUES + [11022, 9741]}   # base de clubes também não vira número de clube
+YOUTH_LEAGUES = [296, 306, 9848, 288, 301, 287, 9841, 9571, 9656, 10437, 11032, 344, 305, 66, 10621]  # seleções de base
+YOUTH_CLUB = [11022, 9741, 10068]                                   # base de clubes
+YOUTH_NAMES = {LEAGUES[i] for i in YOUTH_LEAGUES + YOUTH_CLUB}      # base de clubes também não vira número de clube
 # ordem de prioridade para baixar detalhes: Brasil e Europa principal primeiro
 PRIORITY = [268, 8814, 8971, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 9464, 73, 10216, 112,
             # rodada 14: ligas sul-americanas logo depois do Brasil/Argentina/Europa principal (mercado do Scout)
@@ -93,7 +97,7 @@ REGIONS = {  # atalhos para `--ligas` (sync) e para o Scout pedir uma região in
     "sulamericanas": [112, 199, 161, 273, 274, 246, 131, 144, 339, 9305],
     "brasil": [268, 8814, 8971, 9067],
     # rodada 20/25: TODAS as seleções de base da FotMob + Libertadores Sub-20 e UEFA Youth League (clubes de base)
-    "base": [296, 306, 9848, 288, 301, 287, 9841, 9571, 9656, 10437, 11032, 344, 305, 66, 11022, 9741],
+    "base": [296, 306, 9848, 288, 301, 287, 9841, 9571, 9656, 10437, 11032, 344, 305, 66, 11022, 9741, 10621, 10068],
 }
 
 STAT_MAP = {  # chave da FotMob → chave interna

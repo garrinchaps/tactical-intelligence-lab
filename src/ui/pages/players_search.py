@@ -243,9 +243,25 @@ def render(_ctx=None) -> None:
     if hit.empty:
         empty_state("Jogador sem dados na base", "", "👤", "Abra partidas com eventos ou sincronize Transfermarkt/Understat.")
         return
+    # rodada 27: clube do cabeçalho = clube ATUAL do Scout (elenco FotMob / último jogo por clube). Antes vinha o do
+    # cadastro do Transfermarkt (Zé Lucas no Sport) ou a seleção de base (Eduardo Pape no "Brazil U17")
+    cur_club = ""
+    if not want_club:
+        try:
+            from src.scout import snapshot as _S
+
+            _r = _S.find_player(core, hit["nome"].unique().tolist(), "", pid=want_pid)
+            cur_club = str((_r or {}).get("clube") or "")
+            cur_club = "" if cur_club.lower() in ("nan", "none") else cur_club
+        except Exception:                      # noqa: BLE001
+            cur_club = ""
+    from src.squad.planner import national_team_key as _ntk
+
+    def _club_ok(x):
+        return isinstance(x, str) and x and not _ntk(x)
     p = {"core": core, "nome": min(hit["nome"], key=len), "nome_longo": max(hit["nome"], key=len),
-         "clube": want_club or next((x for x in list(hit.loc[hit["fonte"] == "Transfermarkt", "clube"]) + list(hit["clube"])
-                                     if isinstance(x, str) and x), ""),
+         "clube": want_club or cur_club or next((x for x in list(hit.loc[hit["fonte"] == "Transfermarkt", "clube"])
+                                                 + list(hit["clube"]) if _club_ok(x)), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
@@ -281,6 +297,7 @@ def render(_ctx=None) -> None:
             else:
                 st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
                            "minutos medidos pela FotMob/ESPN no último ano).")
+            _youth_panel(tuple(names), get_service().db.stable_version())
     with t5:
         _scout_tab(names)
     with t4:
@@ -578,3 +595,34 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
         f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
     st.caption("Cartão = nota 3.0 por estatísticas individuais (FotMob), comparada com jogadores da mesma função. A qualidade e a fase usam a nota final; os atributos mostram as dimensões observadas. Sem dados de tracking, trabalho sem bola não observado não é inventado.")
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=200)
+def _youth_data(names: tuple, version: str):
+    from src.scout.engine import youth_profile
+    from src.ui.context import get_service
+
+    d = youth_profile(get_service().db, list(names))
+    if d and isinstance(d.get("por_competicao"), pd.DataFrame):
+        d["por_competicao"] = d["por_competicao"].to_dict("records")
+    return d
+
+
+def _youth_panel(names: tuple, version: str) -> None:
+    """Rodada 27: os números da seleção de base ficam no perfil do atleta (separados dos números de clube)."""
+    d = _youth_data(names, version)
+    if not d or not d.get("jogos"):
+        return
+    from src.ui import fm
+
+    fm.panel(f"🏅 Seleção de base — {d['jogos']} jogos · {d['minutos']} min"
+             + (f" · nota média {d['nota']:.2f}" if d.get("nota") else ""), fm.BLUE)
+    comp = pd.DataFrame(d.get("por_competicao") or [])
+    if not comp.empty:
+        comp = comp.rename(columns={"competition_name": "Competição", "team_name": "Seleção/time", "jogos": "Jogos",
+                                    "minutos": "Minutos", "titular": "Titular", "nota": "Nota média", "ultimo": "Último jogo"})
+        comparison_table(comp)
+    if d.get("numeros"):
+        comparison_table(pd.DataFrame(d["numeros"]))
+    st.caption("Números dos jogos de base baixados da FotMob. Eles entram no POTENCIAL (e, para quem ainda não tem minutos "
+               "de profissional, numa qualidade ESTIMADA), mas não se misturam aos números de clube.")

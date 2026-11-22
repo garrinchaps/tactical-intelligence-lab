@@ -699,8 +699,15 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
     form_me = st.session_state.get("nx_form") or None
     when = f"{str(f['kickoff'])[:10]} {str(f['kickoff'])[11:16]}" if f is not None else "jogo hipotético"
     comp_txt = str(f["competition"]) if f is not None else ""
+    home_is_team = True
+    if f is not None:
+        try:
+            home_is_team = str(f.get("home")) in set(me["names"]) or str(f.get("away")) not in set(me["names"])
+        except Exception:                             # noqa: BLE001
+            home_is_team = True
     st.markdown(MV.hero(team, rival, when, comp_txt, "✅ escalações OFICIAIS publicadas" if off else
-                        "escalações prováveis (a oficial sai ~1 h antes)"), unsafe_allow_html=True)
+                        "escalações prováveis (a oficial sai ~1 h antes)", team_home=home_is_team),
+                unsafe_allow_html=True)
     _probabilities(team, rival, me["names"], rv["names"], f, version, w)       # rodada 25b
     mode = st.radio("Nossa escalação", ["Provável", "Melhor contra o rival"], horizontal=True, key=f"{w}_mode")
     if off_me and mode == "Provável":
@@ -723,7 +730,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
     pc, sc = st.columns([1.05, 1])
     with pc:
         st.markdown(MV.double_pitch(xm, xr, f"{team} ({fm})", f"{rival} ({fr})", flags), unsafe_allow_html=True)
-        st.caption("Número no círculo = qualidade (0–10). Anel laranja com número = defensor deles que a IA marcou "
+        st.caption("Número no círculo = qualidade (0–100, a mesma do Scout; com * = estimada pela escalação, sem nota no Scout). Anel laranja com número = defensor deles que a IA marcou "
                    "como alvo (ver o confronto com o mesmo número ao lado). Passe o mouse para ver nome e posição.")
     with sc:
         st.markdown("#### ⚔️ Onde ganhar o jogo")
@@ -858,7 +865,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
         with c2:
             render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
                          use_container_width=True, key=f"{w}_pitch_r")
-            st.caption("Dentro do círculo: qualidade (0–10). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
+            st.caption("Dentro do círculo: qualidade (0–100). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
     if pv.get("noticias"):
         with tabs[5]:
             st.caption("Notícia, não dado confirmado.")
@@ -872,7 +879,7 @@ def _tv(*teams) -> str:
 
     db = get_service().db
     # "r20": apelidos aprendidos entre fontes — análises guardadas antes (rival com "0 jogos") são refeitas
-    return "r21|" + ("|".join(db.team_version([t]) for t in teams if t) or db.stable_version())
+    return "r27|" + ("|".join(db.team_version([t]) for t in teams if t) or db.stable_version())
 
 
 def _pl(word):

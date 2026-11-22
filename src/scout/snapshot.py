@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v14.pkl")   # v14: nota anterior restaurada + teto pela minutagem
+SNAP_PATH = Path("data/processed/scout_universe_v15.pkl")   # v15: reputação em escala real, nível das ligas corrigido, base
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -349,8 +349,17 @@ def find_player(core: str, names: Optional[list] = None, club: str = "", pid: st
         if same.empty and "clube_tm" in hit:
             same = hit[hit["clube_tm"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
         if same.empty:
+            # rodada 27: clube com outro nome nas fontes ("Fluminense" × "Fluminense FC") — tenta pelo começo do nome
+            tc = team_core(club)
+            same = hit[hit["clube"].fillna("").map(lambda c: bool(tc) and (team_core(str(c)).startswith(tc)
+                                                                            or tc.startswith(team_core(str(c)) or "#")))]
+        if same.empty:
             return None
         hit = same
+    if "qualidade" in hit and len(hit) > 1:        # rodada 27: entre as linhas certas, a que tem nota
+        withq = hit[pd.to_numeric(hit["qualidade"], errors="coerce").notna()]
+        if not withq.empty:
+            hit = withq
     m = pd.to_numeric(hit.get("minutos_12m"), errors="coerce").fillna(0) if "minutos_12m" in hit else pd.Series(0, index=hit.index)
     return hit.loc[m.idxmax()].to_dict()
 
