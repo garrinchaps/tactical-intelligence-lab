@@ -116,3 +116,20 @@ def test_nome_unico_de_liga():
     from src.scout.evaluation import canonical_league
 
     assert canonical_league("campeonato-brasileiro-serie-a") == canonical_league("Brasileirão Série A")
+
+
+def test_treino_rotula_fatos_do_jogador_citado(tmp_path):
+    import json
+
+    from src.intelligence.lab_ai.selector import N_FEATURES
+    from src.intelligence.lab_ai.trainer import build_dataset
+
+    feats = [0.1] * N_FEATURES
+    row = {"interaction_id": "x1", "question": "como jogou o Igor Gomes?",
+           "facts": [{"key": "passes", "player": "Igor Gomes", "features": feats},
+                     {"key": "passes", "player": "Bernard", "features": feats},
+                     {"key": "posse", "player": None, "features": feats}]}
+    shown = tmp_path / "shown.jsonl"
+    shown.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    X, y, w, g, src = build_dataset(shown, tmp_path / "fb.jsonl")
+    assert len(y) == 2 and sorted(y.tolist()) == [0.0, 1.0]

@@ -37,6 +37,24 @@ def _label_key(question: str) -> Optional[str]:
     return D.FACT_KEY.get(k, k)
 
 
+def _cited_players(question: str, facts) -> set:
+    """Jogadores dos fatos cujo sobrenome (ou nome único) aparece na pergunta."""
+    from src.intelligence.query_understanding import norm
+
+    import re as _re
+
+    q = " " + " ".join(_re.split(r"[^a-z0-9]+", norm(question or ""))) + " "
+    out = set()
+    for f in facts:
+        pl = f.get("player")
+        if not pl:
+            continue
+        toks = [t for t in norm(str(pl)).split() if len(t) >= 4]
+        if toks and (f" {toks[-1]} " in q or (len(toks) == 1 and f" {toks[0]} " in q)):
+            out.add(pl)
+    return out
+
+
 def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Path] = None, use_weak: bool = True,
                   feedback_weight: float = 3.0, weak_weight: float = 1.0):
     shown_path, feedback_path = shown_path or SHOWN_PATH, feedback_path or FEEDBACK_PATH
@@ -60,6 +78,17 @@ def build_dataset(shown_path: Optional[Path] = None, feedback_path: Optional[Pat
             continue
         key = _label_key(row.get("question", ""))
         if not key or not any(str(f.get("key")) == key for f in facts):
+            # rodada 27: pergunta que CITA um jogador ("como jogou o Igor Gomes?") — os fatos dele são os certos,
+            # os de outros jogadores não; fatos do time ficam sem rótulo (não dá para dizer que estão errados)
+            cited = _cited_players(row.get("question", ""), facts)
+            if cited:
+                for f in facts:
+                    pl = f.get("player")
+                    if not pl:
+                        continue
+                    X.append(f["features"]); y.append(1.0 if pl in cited else 0.0); w.append(float(weak_weight))
+                    g.append(iid)
+                    src.append("automático (jogador citado)")
             continue                                     # sem número reconhecido, não há rótulo honesto
         for f in facts:
             X.append(f["features"]); y.append(1.0 if str(f.get("key")) == key else 0.0); w.append(float(weak_weight))

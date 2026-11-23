@@ -58,14 +58,16 @@ try {
     Step "5. Resultados dos dias que faltam + detalhes desses jogos" { & $py -c "from src.tools.sync_silencioso import catch_up; print(catch_up())" }
     if (-not $Rapido) {
         Step "6. Elencos (idade, país, valor) do Brasil e da América do Sul" { & $py -m src.data_hub.sync --only fotmob_elencos --ligas brasil sulamericanas } "elencos" 168
+        Step "6b. Elencos atuais de TODAS as ligas (idade, país, valor, posição; ~25 min, 1x por semana)" { & $py -m src.data_hub.sync --only fotmob_elencos } "elencos_todas" 168
+        Step "6c. Idade de quem ainda não tem (Wikidata, nomes únicos; até 3.000 por vez)" { & $py -m src.data_hub.sources.wikidata --limite 3000 } "idades_wikidata" 72
         Step "7. Estatísticas dos jogos das Séries A, B e C" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas brasil --limite 3000 } "jogos_brasil" 20
         Step "8. Estatísticas das ligas sul-americanas" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas sulamericanas --limite 2000 } "jogos_sulamericanas" 20
         Step "9a. Calendário das seleções de base (Mundiais, Sul-Americano, Euros, Ásia, CONCACAF, Toulon, Olimpíadas, amistosos Sub-21, Premier League Sub-18; 5 anos)" { & $py -m src.data_hub.sync --only fotmob_temporada --ligas base --temporadas 5 } "base_calendario" 168
         Step "9b. Detalhes de TODOS os jogos de base (números por jogador de cada jogo; retomável)" { & $py -m src.data_hub.sync --only fotmob_jogos --ligas base --temporadas 5 --limite 20000 } "base_jogos" 20
         Step "10. Apelidos de times entre fontes" { & $py -m src.data_hub.team_alias } "apelidos" 24
-        Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation } "rankings_r27" 20
+        Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation } "rankings_r27c" 20
     }
-    Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot } "scout_v16" 6
+    Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot } "scout_v17" 6
     Step "13. Cobertura do Scout por liga (docs\COBERTURA_SCOUT.md)" { & $py -m src.tools.cobertura_scout } "cobertura" 168
     Step "14. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho } "nucleo" 168
     Step "15. Atualização automática sem janela (ao ligar, a cada 3 h e às 6h) — agendada no fim para não disputar o banco" { powershell -ExecutionPolicy Bypass -File .\scripts\agendar_atualizacao.ps1 } "agendar" 168

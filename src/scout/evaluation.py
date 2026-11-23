@@ -96,6 +96,8 @@ TIERS = [
     (r"copa do brasil", .75), (r"s[üu]per lig|turquia", .75), (r"liga profesional|argentina", .74),
     (r"sul-americana|sudamericana", .72), (r"liga mx|m[ée]xico", .72), (r"\bmls\b|major league", .7),
     (r"s[ée]rie b", .64), (r"primera nacional", .55), (r"s[ée]rie c", .52),
+    # rodada 27: estaduais (os grandes jogam, mas quem só aparece neles costuma ser de clube pequeno)
+    (r"paulist|carioca|mineiro|ga[uú]cho|paranaense|catarinense|baiano|pernambucano|cearense|goiano", .5),
     (r"s[ée]rie d", .38), (r"paragu|urugu|chile|col[ôo]mbia|equador|ecuador|peru", .6), (r"bol[ií]via|venezuela", .5),
 ]
 

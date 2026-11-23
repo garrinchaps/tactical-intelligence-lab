@@ -116,6 +116,11 @@ def render(_ctx=None) -> None:
     func = d.selectbox("Função tática", ["Todas"] + funcs, key="rk_func", disabled=not fam)
     min_min = e.slider("Minutos mínimos", 0, 3000, 0, 90, key="rk_min")
     max_age = f.slider("Idade máxima", 16, 40, 40, key="rk_age")
+    def _reset_rk():
+        for k in list(st.session_state.keys()):
+            if str(k).startswith("rk_") and k != "rk_reset":
+                del st.session_state[k]
+    st.button("↺ Redefinir critérios", key="rk_reset", on_click=_reset_rk)
     st.caption(f"Critério: {crit}. Em ‘🌍 Geral entre ligas’ o nível de cada competição é uma ESTIMATIVA (ver abaixo).")
     v = ev.copy()
     if chosen and col != "geral_entre_ligas":

@@ -143,7 +143,8 @@ def test_mononym_needs_club_or_birth_and_minutes_cap():
     hist2 = hist.assign(ultimo_time="Real Oviedo")
     assert E.match_market_to_history(p, hist2).tolist() == ["saul"]        # mesmo clube: junta
     cap = minutes_cap(pd.DataFrame({"minutos_12m": [39, 0, 900, 2500]}))
-    assert cap.iloc[0] == 72 and cap.iloc[1] == 72 and 72 < cap.iloc[2] < 99 and cap.iloc[3] == 99
+    # rodada 27: teto menor para quem quase não jogou (estaduais com 90 min apareciam com 70)
+    assert cap.iloc[0] < 62 and cap.iloc[1] == 58 and 72 < cap.iloc[2] < 99 and cap.iloc[3] == 99
 
 
 def test_assistant_network_training_and_champion_scoring(tmp_path):

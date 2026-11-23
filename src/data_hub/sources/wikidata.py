@@ -110,7 +110,8 @@ def main() -> None:
         print("Rode antes: python -m src.scout.evaluation")
         return
     ev = res["jogadores"]
-    names = ev.loc[ev["idade"].isna() & (ev["minutes"] >= 450)].sort_values("minutes", ascending=False)["player_name"]
+    # rodada 27: também quem jogou pouco (jovens da base) — a idade pesa muito no potencial
+    names = ev.loc[ev["idade"].isna() & (ev["minutes"] >= 90)].sort_values("minutes", ascending=False)["player_name"]
     print(enrich(db, names.head(a.limite).tolist(), progress=print))
 
 

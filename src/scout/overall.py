@@ -153,13 +153,14 @@ REFERENCE_TARGETS.update({
 REFERENCE_TARGETS.update({
     "Lucas Daniel Romero": 78, "Lucas Romero": 78, "Matheus Pereira": 81, "Kaio Jorge": 79, "Gerson": 78,
     "Fabrício Bruno": 78, "Zé Lucas": 70, "Melk": 69, "Lorenzo": 65, "Pedro Morisco": 77, "Jonathan Jesus": 76,
-    "Agustín Giay": 76, "Vitor Roque": 78, "Danilo": 79, "Gabriel Bontempo": 76, "Breno Bidon": 76,
+    "Agustín Giay": 76, "Vitor Roque": 78, "Danilo": 79, "Gabriel Bontempo": 78, "Breno Bidon": 76,
+    "Vitão": 74, "Gustavo Henrique": 70, "Kaiki Bruno": 79, "Kaiki": 79, "Mauro Coronel": 72,
     "Rômulo": 72, "Gabriel Mec": 74, "Kauã Prates": 73,
 })
 POTENTIAL_TARGETS.update({
     "Zé Lucas": 88, "Eduardo Pape": 88, "Kaio Jorge": 84, "Melk": 82, "Lorenzo": 80, "Vitor Roque": 86,
     "Gabriel Bontempo": 84, "Pedro Morisco": 84, "Jonathan Jesus": 84, "Agustín Giay": 83, "Gabriel Mec": 89,
-    "Kauã Prates": 87,
+    "Kauã Prates": 87, "Vitão": 85, "Gustavo Henrique": 79, "Mauro Coronel": 84, "João Alencar": 82,
 })
 
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
@@ -371,7 +372,12 @@ def standardize(z: pd.Series, comps: pd.DataFrame, fam_stats: Optional[Dict[str,
     s = (z - mu) / sd
     s = s * comps["_fam"].map(FAMILY_SPREAD).fillna(1.0)
     avail = comps["_avail"] ** .7
-    s = s * (.45 + .55 * avail)                          # quem jogou pouco no ano não chega ao topo
+    a = .45 + .55 * avail
+    # rodada 27: quem jogou pouco era puxado para a MÉDIA GERAL (zagueiro de estadual com 90 min virava 70, acima de
+    # titular jovem da Série A). Agora é puxado para o nível da PRÓPRIA liga: pouca amostra = "jogador típico da liga"
+    lv = pd.to_numeric(comps.get("L"), errors="coerce").fillna(50) / 100 if "L" in comps else .5
+    prior = (1.5 * (lv - .62)).clip(-.6, .5) if not isinstance(lv, float) else 1.5 * (lv - .62)
+    s = a * s + (1 - a) * prior                          # quem jogou pouco no ano não chega ao topo
     if "_age" in comps:
         s = s + age_prior(comps["_age"], comps["_avail"], comps.get("L"))
     return s, fam_stats
@@ -681,7 +687,10 @@ def minutes_cap(u: pd.DataFrame) -> pd.Series:
     """Rodada 25b: teto pela minutagem do último ano — "não pode receber 91 com 120 minutos". 0–300 min → 72;
     cresce até 1.800 min, onde o teto some (99)."""
     m12 = _col(u, "minutos_12m").fillna(0)
-    return (72 + 27 * ((m12 - 300) / 1500).clip(0, 1)).where(m12 < 1800, 99.0)
+    # rodada 27: com 90 minutos o teto era 72 (estaduais com 1 jogo apareciam com 70); agora 62 com 90 min, 66 com
+    # 300, 75 com 900, 84 com 1.350 e some com 1.800 (temporada de titular)
+    cap = np.interp(m12.values, [0, 90, 300, 600, 900, 1350, 1800], [58, 62, 66, 70, 75, 84, 99])
+    return pd.Series(cap, index=u.index).where(m12 < 1800, 99.0)
 
 
 def calibrate_v2(u: pd.DataFrame, comps: pd.DataFrame, z: pd.Series) -> Dict[str, Any]:

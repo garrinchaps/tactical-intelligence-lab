@@ -726,7 +726,16 @@ def _ai_filter_form(key: str, nations: List[str], aff: Dict[str, Any], role_choi
         out["stars"] = fe.toggle("Incluir estrelas fora do patamar", value=d["stars"], key=f"{key}_stars",
                                  help="Desligado: a IA não sugere quem está muito acima do patamar salarial/fama do clube.")
         st.form_submit_button("🔎 Aplicar filtros", type="primary")
+    st.button("↺ Redefinir critérios", key=f"{key}__reset", on_click=_reset_keys, args=(f"{key}_",),
+              help="Volta todos os filtros desta lista ao padrão.")
     return out
+
+
+def _reset_keys(prefix: str) -> None:
+    """Rodada 27: botão 'Redefinir critérios' — apaga os filtros guardados (os campos voltam ao padrão)."""
+    for k in list(st.session_state.keys()):
+        if str(k).startswith(prefix) and not str(k).endswith("reset"):
+            del st.session_state[k]
 
 
 def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
@@ -1254,35 +1263,37 @@ def render(_ctx=None):
                                                zip(pool["clube_liga"], pool.get("clube_pais", pd.Series(None, index=pool.index)))])
                 # rodada 20: filtros num formulário — nada é pesquisado até apertar "Buscar" (antes cada mudança refazia tudo)
                 with st.form("scout_manual_filters", border=False):
-                    n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador")
+                    n0 = st.text_input("Nome (opcional)", placeholder="parte do nome do jogador", key="scout_mf_name")
                     c1,c2,c3 = st.columns(3)
                     roles = ["Todas"] + sorted(pool["papel"].dropna().unique().tolist())
-                    rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x))
-                    amin = c2.number_input("Idade mínima", 15, 40, 15)
-                    amax = c3.number_input("Idade máxima", 16, 50, 45)
+                    rf = c1.selectbox("Posição", roles, format_func=lambda x: "Todas" if x=="Todas" else _role(x), key="scout_mf_role")
+                    amin = c2.number_input("Idade mínima", 15, 40, 15, key="scout_mf_amin")
+                    amax = c3.number_input("Idade máxima", 16, 50, 45, key="scout_mf_amax")
                     q1, q2 = st.columns(2)
-                    qmin = q1.number_input("Qualidade mínima", 0, 100, 0)
-                    qmax = q2.number_input("Qualidade máxima", 0, 100, 100)
+                    qmin = q1.number_input("Qualidade mínima", 0, 100, 0, key="scout_mf_qmin")
+                    qmax = q2.number_input("Qualidade máxima", 0, 100, 100, key="scout_mf_qmax")
                     origins = E.origin_options(pool["origem"].dropna().unique()) if "origem" in pool else ["Todas"]
-                    origin = st.selectbox("Origem", origins, key="scout_origin",
+                    origin = st.selectbox("Origem", origins, key="scout_mf_origin",
                                           help="'Todas' = todos os jogadores da base. 'América do Sul (com Brasil)' junta "
                                                "Brasil e os vizinhos; 'Brasil (todas as séries)' junta A, B, C e D.")
                     d1,d2,d3 = st.columns(3)
                     nats = ["Todas"] + sorted(pool["nacionalidade"].dropna().astype(str).unique().tolist())
-                    nat = d1.selectbox("Nacionalidade", nats)
+                    nat = d1.selectbox("Nacionalidade", nats, key="scout_mf_nat")
                     leagues = ["Todas"] + sorted(pool.get("clube_liga", pd.Series(dtype=str)).dropna().astype(str).unique().tolist())
-                    league_filter = d2.selectbox("Liga atual", leagues)
+                    league_filter = d2.selectbox("Liga atual", leagues, key="scout_mf_league")
                     clubs_list = ["Todos"] + sorted(pool["clube"].dropna().astype(str).unique().tolist())
-                    seller = d3.selectbox("Clube atual", clubs_list)
+                    seller = d3.selectbox("Clube atual", clubs_list, key="scout_mf_club")
                     e0,e1,e2 = st.columns(3)
-                    pmin = e0.number_input("Potencial mínimo", 0, 100, 0,
+                    pmin = e0.number_input("Potencial mínimo", 0, 100, 0, key="scout_mf_pmin",
                                            help="Potencial = até onde o atleta pode chegar (idade × talento por posição). "
                                                 "Jogador sem potencial calculado some quando o mínimo é maior que 0.")
                     max_market = pd.to_numeric(pool["valor_mercado_eur"], errors="coerce").max()
                     upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
-                    vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0)
-                    vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market)
+                    vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0, key="scout_mf_vmin")
+                    vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market, key="scout_mf_vmax")
                     go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", use_container_width=True)
+                st.button("↺ Redefinir critérios", key="scout_mfreset", on_click=_reset_keys, args=("scout_mf_",),
+                          help="Volta todos os filtros desta busca ao padrão.")
                 if go_search:
                     st.session_state["scout_mf_on"] = True
                 if not st.session_state.get("scout_mf_on"):

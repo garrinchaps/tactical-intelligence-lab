@@ -761,6 +761,24 @@ perfeita" e não deve mudar):
 - ✅ Scout: adicionar ao plano/descartar num fragmento (`_card_actions`) — o clique refaz só o cartão.
 - Fotografia v16; passos do script `scout_v16`/`rankings_r27` (rodam na próxima vez).
 
+Rodada 27c (23/11/2026, 536 testes verdes) — informações faltando, fundo da régua, idades, filtros:
+- ✅ Cadastro × jogos com nome diferente entre fontes ("Kaiki" × "Kaiki Bruno", "Gleison Bremer" × "Bremer", "Khéphren
+  Thuram-Ulien" × "Khéphren Thuram"): índice por palavra do nome, só junta com o CLUBE conferindo
+  (`engine._club_like`: "Real Betis" = "Real Betis Balompié", "Zenit St/Sankt Petersburg"; Nacional ≠ Atlético Nacional,
+  Santos ≠ Santos Laguna). Liga do clube homônimo de outro país trocada pela liga dos jogos (Mauro Coronel no Nacional
+  do Paraguai aparecia na Liga Portugal).
+- ✅ Script: passo 6b elencos da FotMob de TODAS as ligas (1×/semana; idade, país, valor, posição e quem saiu — Varane,
+  Dele Alli no Como) e 6c Wikidata para idades (agora também quem jogou ≥ 90 min).
+- ✅ Idade ESTIMADA pela categoria de base quando nenhuma fonte tem nascimento (`idade_max_base`: limite da categoria +
+  anos desde o último jogo − 0,5; marcada em `idade_estimada`).
+- ✅ Fundo da régua: quem jogou pouco é puxado para o nível da PRÓPRIA liga, não para a média geral; teto por minutos
+  58/62/66/70/75/84/99 (0/90/300/600/900/1.350/1.800 min) — estaduais com 90 min apareciam com 70; estaduais nível 0,5.
+  Alvos: Bontempo 78, Vitão 74/85, Gustavo Henrique 70/79, Kaiki 79, Mauro Coronel 72/84, João Alencar 82 (pot).
+- ✅ "↺ Redefinir critérios" na Busca manual do Scout, nas listas da IA e nos Rankings.
+- ✅ Treino da IA: rótulo automático novo — pergunta que cita jogador marca os fatos dele como certos e os de outros como
+  errados (`trainer._cited_players`).
+- Fotografia v17; passos `scout_v17`/`rankings_r27c`.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

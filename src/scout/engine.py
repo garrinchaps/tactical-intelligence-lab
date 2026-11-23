@@ -909,6 +909,30 @@ def _fam_of(pos: Any) -> str:
     return "GK" if r == "GK" else ("" if not r else "OUT")
 
 
+# só palavras que não identificam o clube ("Atlético", "Real", "Sporting" identificam: Nacional ≠ Atlético Nacional)
+_GENERIC_CLUB = {"club", "clube", "fc", "sc", "ac", "cd", "ca", "esporte", "de", "do", "da", "futebol", "football"}
+_CLUB_SUFFIX = {"club", "clube", "esporte", "de", "do", "da", "futebol", "football", "balompie", "futbol", "calcio", "sad", "saf", "sau", "regatas", "e", "y", "gremio",
+                                "recreativo", "associacao", "associação", "sociedade", "esportiva"}
+
+
+def _club_like(a: str, b: str) -> bool:
+    """Rodada 27: mesmo clube com nome mais curto/mais longo ("real betis" × "real betis balompie",
+    "zenit st petersburg" × "zenit sankt petersburg") — palavras próprias em comum, sem contar as genéricas."""
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    short, long_ = (a, b) if len(a) <= len(b) else (b, a)
+    if long_.startswith(short + " "):           # só quando o que sobra é "enfeite" do nome (Balompié, Futebol Clube…)
+        extra = set(long_[len(short):].split())
+        return extra <= _CLUB_SUFFIX
+    ta = {w for w in a.split() if w not in _GENERIC_CLUB and len(w) >= 3}
+    tb = {w for w in b.split() if w not in _GENERIC_CLUB and len(w) >= 3}
+    if not ta or not tb:
+        return False
+    return len(ta & tb) / len(ta | tb) >= .66
+
+
 def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
     """Rodada 24 — cadastro (Transfermarkt) × pessoas do histórico. Nunca só pelo nome:
     nascimento diferente (> 13 meses) ou goleiro × jogador de linha = pessoas diferentes; clube igual, nascimento igual
@@ -925,14 +949,30 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
     for rec in h[[c for c in ("core", "core_nome", "ultimo_time", "clube_fm", "posicao_observada", "posicao_fm",
                               "nascimento_fm", "nacionalidade_fm", "minutos_12m", "times_hist") if c in h]].to_dict("records"):
         cand_by_name.setdefault(rec["core_nome"], []).append(rec)
+    # rodada 27: o nome muda entre as fontes ("Kaiki" × "Kaiki Bruno", "Gleison Bremer" × "Bremer", "Khéphren
+    # Thuram-Ulien" × "Khéphren Thuram"). Índice por palavra do nome para achar esses casos — só valem com o CLUBE
+    # conferindo (e sem nascimento/posição em conflito).
+    tok_index: Dict[str, List[Dict[str, Any]]] = {}
+    for recs in cand_by_name.values():
+        for rec in recs:
+            for w in set(str(rec["core_nome"]).split()):
+                if len(w) >= 4:
+                    tok_index.setdefault(w, []).append(rec)
     tm_dup = p["_core"].duplicated(keep=False)
     births = pd.to_datetime(p.get("nascimento"), errors="coerce")
     scored: List[Tuple[float, Any, str]] = []
     for i, core, club, pos, fun, nat, dup in zip(p.index, p["_core"].astype(str), p["clube"], p["posicao"], p["funcao"],
                                                  p["nacionalidade"], tm_dup):
         cands = cand_by_name.get(core)
+        fuzzy = False
         if not cands:
-            continue
+            mine = set(core.split())
+            pool = {id(r): r for w in mine if len(w) >= 4 for r in tok_index.get(w, [])}.values()
+            cands = [r for r in pool if r["core_nome"] != core and
+                     (mine < set(str(r["core_nome"]).split()) or set(str(r["core_nome"]).split()) < mine)]
+            fuzzy = True
+            if not cands or len(cands) > 40:
+                continue
         club_c = team_core(_safe_str(club)) if _safe_str(club) else ""
         fam = "GK" if _role(pos, fun) == "GK" else "OUT"
         b0 = births.get(i)
@@ -950,7 +990,9 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
                 continue                                        # goleiro × linha
             clubs = {team_core(_safe_str(c.get(k))) for k in ("ultimo_time", "clube_fm") if _safe_str(c.get(k))}
             past = {x for x in str(c.get("times_hist") or "").split("|") if x}
-            same_club = bool(club_c) and (club_c in clubs or club_c in past)
+            same_club = bool(club_c) and any(_club_like(club_c, x) for x in clubs | past)
+            if fuzzy and not same_club:
+                continue                                        # nome diferente só junta com o clube conferindo
             if same_club:
                 score += 2
             n1 = _country_core(c.get("nacionalidade_fm")) if _safe_str(c.get("nacionalidade_fm")) else ""
@@ -2848,6 +2890,17 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     observed = u.get("clube_observado", pd.Series(False, index=u.index)).fillna(False).astype(bool)
     fallback = np.where(observed & (last_comp != ""), last_comp, np.where(main_comp != "", main_comp, last_comp))
     u["clube_liga"] = liga.where(liga.str.strip() != "", pd.Series(fallback, index=u.index))
+    # rodada 27: clube homônimo de outro país no cadastro (Mauro Coronel no "Nacional" do Paraguai aparecia na Liga
+    # Portugal, liga do CD Nacional): se a liga NACIONAL dos jogos recentes é de outro país, valem os jogos
+    try:
+        from src.data_hub.gender import comp_country
+
+        cc_liga = u["clube_liga"].map(lambda x: comp_country(x) if isinstance(x, str) else None)
+        cc_last = last_comp.map(lambda x: comp_country(x) if x else None)
+        clash = cc_liga.notna() & cc_last.notna() & (cc_liga != cc_last)
+        u.loc[clash, "clube_liga"] = last_comp[clash]
+    except Exception:
+        pass
     try:                                                   # rodada 27: um nome por liga
         from src.scout.evaluation import canonical_league
 
@@ -2963,14 +3016,16 @@ def youth_caps(db) -> pd.DataFrame:
         with db.connect() as conn:
             r = pd.read_sql_query(
                 f"""SELECT player_name, competition_name, COUNT(DISTINCT match_id) AS jogos, AVG(nota) AS nota,
-                           MAX(fid) AS fotmob_id, MAX(selecao) AS selecao FROM (
+                           MAX(fid) AS fotmob_id, MAX(selecao) AS selecao, MAX(dia) AS ultimo_base FROM (
                         SELECT p.player_name, m.competition_name, m.match_id, p.rating AS nota,
-                               CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) AS fid, p.team_name AS selecao
+                               CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) AS fid, p.team_name AS selecao,
+                               m.match_date AS dia
                         FROM match_player_stats p
                         JOIN matches m ON m.match_id = p.match_id
                         WHERE m.competition_name IN ({ph}) AND COALESCE(p.minutes, 0) > 0
                         UNION
-                        SELECT l.player_name, m.competition_name, m.match_id, NULL AS nota, NULL AS fid, l.team_name
+                        SELECT l.player_name, m.competition_name, m.match_id, NULL AS nota, NULL AS fid, l.team_name,
+                               m.match_date AS dia
                         FROM match_lineups l
                         JOIN matches m ON m.match_id = l.match_id
                         WHERE m.competition_name IN ({ph}) AND l.is_starter = 1)
@@ -2983,7 +3038,12 @@ def youth_caps(db) -> pd.DataFrame:
     # rodada 22: "os melhores de cada seleção e competição" — percentil da nota DENTRO da competição de base (≥ 2 jogos)
     r["nota"] = pd.to_numeric(r["nota"], errors="coerce")
     r["pct"] = r["nota"].where(r["jogos"] >= 2).groupby(r["competition_name"]).rank(pct=True) * 100
-    out = r.groupby("core").agg(selecao_base_jogos=("jogos", "sum"),
+    # rodada 27: idade ESTIMADA pela categoria — quem jogou o Mundial Sub-17 em 2025 tem no máximo 17 + (hoje − 2025)
+    lim = r["competition_name"].astype(str).str.extract(r"(?:Sub|U)-?\s?(\d{2})", expand=False)
+    lim = pd.to_numeric(lim, errors="coerce").where(lambda x: x.between(15, 23))
+    yrs = (pd.Timestamp.today() - pd.to_datetime(r["ultimo_base"], errors="coerce")).dt.days / 365.25
+    r["idade_max_base"] = (lim + yrs).round(1)
+    out = r.groupby("core").agg(selecao_base_jogos=("jogos", "sum"), idade_max_base=("idade_max_base", "min"),
                                 selecao_base_comp=("competition_name", lambda x: " · ".join(sorted(set(x)))),
                                 selecao_base_nota=("nota", "mean"), selecao_base_pct=("pct", "max"),
                                 fotmob_id=("fotmob_id", "max"), selecao=("selecao", "first"),
@@ -3058,9 +3118,17 @@ def merge_youth(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
         club_of = c["clube_base"].dropna().map(lambda x: team_core(str(x)))
         same_club = [bool(cc in club_of.index and team_core(str(cl or "")) == club_of.get(cc)) for cc, cl in zip(core, u["clube"])]
         ok = ok | (pd.Series(same_club, index=u.index) & (age.isna() | age.le(24)))
-    for col in ("selecao_base_jogos", "selecao_base_comp", "selecao_base_nota", "selecao_base_pct", "selecao"):
+    for col in ("selecao_base_jogos", "selecao_base_comp", "selecao_base_nota", "selecao_base_pct", "selecao",
+                "idade_max_base"):
         if col in c:
             u[col] = core.where(ok).map(c[col])
+    # rodada 27: sem data de nascimento em nenhuma fonte → idade ESTIMADA pela categoria de base (limite da categoria
+    # + anos desde o último jogo, menos meio ano), marcada como estimativa
+    if "idade_max_base" in u:
+        est = (pd.to_numeric(u["idade_max_base"], errors="coerce") - .5).round(0)
+        miss = pd.to_numeric(u.get("idade"), errors="coerce").isna() & est.notna()
+        u.loc[miss, "idade"] = est[miss]
+        u.loc[miss, "idade_estimada"] = "pela categoria de base"
     return u
 
 
@@ -3080,6 +3148,8 @@ def youth_only_players(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFra
         return pd.DataFrame()
     birth = pd.to_datetime(y.get("nascimento_base"), errors="coerce") if "nascimento_base" in y else pd.Series(pd.NaT, index=y.index)
     age = ((pd.Timestamp.today() - birth).dt.days / 365.25).round(1)
+    if "idade_max_base" in y:                       # rodada 27: sem nascimento → idade estimada pela categoria
+        age = age.fillna((pd.to_numeric(y["idade_max_base"], errors="coerce") - .5).round(0))
     lo_hi = np.where(y["sub17"].fillna(False), "sub17", "sub20")
     lo = np.array([YOUTH_LEVEL[k][0] for k in lo_hi])
     hi = np.array([YOUTH_LEVEL[k][1] for k in lo_hi])
