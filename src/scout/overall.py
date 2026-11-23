@@ -25,6 +25,8 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+import unicodedata
+
 import numpy as np
 import pandas as pd
 
@@ -622,6 +624,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
     out["qualidade"] = ovr.clip(upper=cap).clip(upper=minutes_cap(out)).round(0)
+    out["qualidade"] = brazil_bump(out, out["qualidade"])
     if "so_base" in out:                     # rodada 22: só jogos de base → fica a ESTIMADA pelo nível de base
         base_only = out["so_base"].fillna(False).astype(bool)
         out.loc[base_only, "qualidade"] = pd.to_numeric(out.loc[base_only, "qualidade_base"], errors="coerce")
@@ -646,6 +649,37 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     if report:
         save_report(out, report)
     return out
+
+
+BR_BUMP_CAP = 84.0      # acima disto nada muda: a lista dos melhores do mundo fica intacta
+
+
+def _br_division(u: pd.DataFrame) -> pd.Series:
+    """'A' / 'B' para quem joga num clube da Série A / Série B (pela liga do clube), senão ''."""
+    liga = next((u[c] for c in ("clube_liga", "liga_clube", "ultima_competicao", "liga") if c in u), None)
+    if liga is None:
+        return pd.Series("", index=u.index)
+    f = liga.fillna("").astype(str).map(lambda x: unicodedata.normalize("NFKD", x.lower()).encode("ascii", "ignore").decode())
+    is_br = f.str.contains(r"brasil|brazil|brasileir|serie [ab]\b|campeonato brasileiro", regex=True)
+    a = is_br & f.str.contains(r"serie a\b|brasileirao(?! serie b)|brasileiro serie a|^brasileirao$", regex=True) \
+        & ~f.str.contains(r"serie [bcd]\b|feminin|sub", regex=True)
+    b = is_br & f.str.contains(r"serie b\b", regex=True) & ~f.str.contains(r"feminin|sub", regex=True)
+    return pd.Series(np.where(a, "A", np.where(b, "B", "")), index=u.index)
+
+
+def brazil_bump(u: pd.DataFrame, q: pd.Series) -> pd.Series:
+    """Rodada 27e — os melhores do Brasileirão ainda saíam 1 a 3 pontos abaixo do que o usuário vê no futebol (e da
+    referência de consenso). Ajuste PEQUENO e graduado: Série A +1 (nota 65) a +3 (nota 80+); Série B +1 a +2. Nunca
+    passa de 84 e quem já está acima de 84 não muda — o topo mundial fica igual."""
+    q = pd.to_numeric(q, errors="coerce")
+    div = _br_division(u)
+    bump = pd.Series(0.0, index=u.index)
+    a, b = div == "A", div == "B"
+    bump[a] = 1 + 2 * ((q[a] - 65) / 15).clip(0, 1)
+    bump[b] = 1 + ((q[b] - 62) / 12).clip(0, 1)
+    bump[(q < 55) | q.isna()] = 0.0
+    out = pd.Series(np.where(q > BR_BUMP_CAP, q, np.minimum(q + bump, np.maximum(q, BR_BUMP_CAP))), index=q.index)
+    return out.round(0)
 
 
 YOUTH_BAND = {"sub17": (52.0, 68.0), "sub20": (56.0, 74.0)}
@@ -750,15 +784,27 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
         p.loc[low, "potencial"] = yf[low].clip(upper=POT.POT_CAP).round(0)
         if "potencial_piso_base" in p:
             p["potencial_piso_base"] = p["potencial_piso_base"].fillna(False).astype(bool) | low
+        sf = POT.senior_floor(d)                          # rodada 27e: convocado para a seleção PRINCIPAL jovem
+        low_s = sf.notna() & (pd.to_numeric(p["potencial"], errors="coerce").fillna(0) < sf)
+        if low_s.any():
+            p.loc[low_s, "potencial"] = sf[low_s].round(0)
+            if "potencial_porque" in p:
+                why = ("convocado para a seleção principal (" + _col(d, "selecao_principal_jogos").fillna(0).astype(int).astype(str)
+                       + " jogo(s)) com " + _col(d, "idade").round(0).astype("Int64").astype(str) + " anos")
+                p.loc[low_s, "potencial_porque"] = (why[low_s] + " · " + p.loc[low_s, "potencial_porque"].fillna("").astype(str)).str.strip(" ·")
         for c in p.columns:
             d[c] = p[c]
         # rodada 27: o topo do potencial pela COLOCAÇÃO (como o overall) — antes muita gente batia no teto 95 (Bellingham,
         # Doué, Güler, Cubarsí, Karl…). Agora só o 1º chega a 95; o 2º ~93,5, 5º 92, 10º 91, 25º 90, 60º 89.
         raw = (q + pd.to_numeric(d.get("potencial_crescimento"), errors="coerce")).where(q.notna(), _col(d, "potencial"))
         raw = pd.concat([raw, _col(d, "potencial")], axis=1).max(axis=1)
-        d["potencial"] = top_potential_ladder(raw).where(_col(d, "potencial").notna())
+        # rodada 27e: a ORDEM do topo pesa o que o jogador já é hoje — Yamal (overall 90+ aos 19) à frente de quem tem
+        # muito crescimento previsto mas joga menos (Diomande); a nota final segue a escada (1º 95)
+        key = raw + .6 * (q - 82).clip(lower=0).fillna(0)
+        d["potencial"] = top_potential_ladder(raw, key).where(_col(d, "potencial").notna())
         # potencial nunca abaixo do overall de hoje
         d["potencial"] = pd.concat([_col(d, "potencial"), q], axis=1).max(axis=1).where(_col(d, "potencial").notna())
+        d["potencial"] = pd.to_numeric(d["potencial"], errors="coerce").round(0)
         d["potencial_teto"] = d["potencial"]
         return d
     except Exception:
@@ -770,17 +816,23 @@ POT_LADDER_R = [1, 2, 3, 5, 10, 25, 60, 150]
 POT_LADDER_O = [95, 93.5, 93, 92, 91, 90, 89, 88]
 
 
-def top_potential_ladder(raw: pd.Series) -> pd.Series:
+def top_potential_ladder(raw: pd.Series, key: Optional[pd.Series] = None) -> pd.Series:
     """Potenciais acima de 88 viram colocação: o maior (sem teto, idade × talento) leva 95; os outros descem pela escada.
-    Abaixo de 88 nada muda."""
+    `key` (opcional) decide a ORDEM; a nota de cada um nunca passa do próprio potencial bruto. Abaixo de 88 nada muda.
+    Sempre número inteiro (antes apareciam 80,2 e 76,3)."""
     out = pd.to_numeric(raw, errors="coerce").copy()
-    top = out[out >= 88].sort_values(ascending=False)
-    if top.empty:
-        return out
-    rank = np.arange(1, len(top) + 1)
+    k = (pd.to_numeric(key, errors="coerce") if key is not None else out).reindex(out.index)
+    top_idx = out[out >= 88].index
+    if len(top_idx) == 0:
+        return out.round(0)
+    order = k.loc[top_idx].fillna(out.loc[top_idx]).sort_values(ascending=False).index
+    rank = np.arange(1, len(order) + 1)
     lad = np.interp(np.log(rank), np.log(POT_LADDER_R), POT_LADDER_O)
-    out.loc[top.index] = np.minimum(top.values, np.maximum(lad, 88.0)).round(0)
-    return out.clip(upper=95)
+    top_raw = out.loc[order].values
+    # o 1º da ordem leva a escada inteira (95) mesmo com o bruto um pouco abaixo — é o melhor potencial do mundo
+    vals = np.where((rank == 1) & (top_raw >= 91), lad, np.minimum(np.maximum(top_raw, 88.0), np.maximum(lad, 88.0)))
+    out.loc[order] = np.round(vals)
+    return out.clip(upper=95).round(0)
 
 
 def _recompute_potential_old(d: pd.DataFrame) -> pd.DataFrame:

@@ -96,6 +96,8 @@ PRIORITY = [268, 8814, 8971, 9067, 45, 299, 47, 87, 54, 55, 53, 42, 61, 57, 9464
 REGIONS = {  # atalhos para `--ligas` (sync) e para o Scout pedir uma região inteira
     "sulamericanas": [112, 199, 161, 273, 274, 246, 131, 144, 339, 9305],
     "brasil": [268, 8814, 8971, 9067],
+    # rodada 27e: estaduais, Série D e Copa do Nordeste — jogadores dos clubes pequenos ficavam sem idade/país/valor
+    "estaduais": [10244, 9483, 10272, 10273, 10274, 10290, 10291, 9429, 9464, 10077],
     # rodada 20/25: TODAS as seleções de base da FotMob + Libertadores Sub-20 e UEFA Youth League (clubes de base)
     "base": [296, 306, 9848, 288, 301, 287, 9841, 9571, 9656, 10437, 11032, 344, 305, 66, 11022, 9741, 10621, 10068],
 }
@@ -831,7 +833,7 @@ class FotmobProvider:
         — Série B/C e sul-americanas não estão no Transfermarkt aberto ("Sem referência" no Scout). ~2 pedidos por clube
         na 1ª vez, 1 depois; elenco com menos de 24 h não é pedido de novo."""
         say = progress or (lambda msg: None)
-        lids = leagues or REGIONS["brasil"] + REGIONS["sulamericanas"]
+        lids = leagues or REGIONS["brasil"] + REGIONS["estaduais"] + REGIONS["sulamericanas"]
         comps = [LEAGUES[l] for l in lids if l in LEAGUES]
         if not comps:
             return {"clubes": 0, "jogadores": 0}

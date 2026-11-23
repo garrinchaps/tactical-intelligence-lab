@@ -256,6 +256,100 @@ def suggest(version: Dict[str, Any]) -> Dict[str, Any]:
     return {"diagnostico": d, "sugerido": new, "porque": why}
 
 
+# ------------------------------------------------------------------ rodada 27e: próximo treino pela EVOLUÇÃO
+_TUNE_ORDER = ("learning_rate", "l2", "epochs", "batch", "patience", "lr_decay", "seed")
+_STEP = {"learning_rate": (2.0, 1e-4, 1.0), "l2": (3.0, 1e-5, 1.0), "epochs": (1.5, 50, 1000), "batch": (2.0, 16, 1024),
+         "patience": (1.5, 5, 60), "lr_decay": (None, 0.0, 0.2), "seed": (None, 0, 9999)}
+
+
+def _trial(v: Dict[str, Any]) -> Dict[str, Any]:
+    pr = v.get("params") or {}
+    return {"learning_rate": float(v.get("learning_rate") or .1), "l2": float(v.get("l2") or .01),
+            "epochs": int(v.get("epochs") or 200), "batch": int(pr.get("batch") or 256),
+            "patience": int(pr.get("patience") or 15), "lr_decay": float(pr.get("lr_decay") or 0.0),
+            "seed": int(pr.get("seed") or 7)}
+
+
+def _key(t: Dict[str, Any]) -> tuple:
+    return tuple(round(float(t[k]), 6) for k in _TUNE_ORDER)
+
+
+def _move(t: Dict[str, Any], k: str, direction: int) -> Dict[str, Any]:
+    out = dict(t)
+    f, lo, hi = _STEP[k]
+    if k == "seed":
+        out[k] = int((t[k] * 7919 + 13) % 10000)
+    elif k == "lr_decay":
+        out[k] = round(float(np.clip(t[k] + .02 * direction, lo, hi)), 3)
+    else:
+        val = t[k] * (f if direction > 0 else 1 / f)
+        val = float(np.clip(val, lo, hi))
+        out[k] = int(round(val)) if k in ("epochs", "batch", "patience") else round(val, 6)
+    return out
+
+
+def suggest_next(versions: List[Dict[str, Any]], n_questions: int = 0, n_rated: int = 0) -> Dict[str, Any]:
+    """Rodada 27e — a cada treino a sugestão do PRÓXIMO muda, pela evolução dos treinos anteriores (como um treinador
+    que anota o que funcionou): segue a direção que baixou a perda na prova, volta atrás na que piorou, aplica o
+    diagnóstico da última curva (sobreajuste/oscilação/subajuste) e nunca repete uma combinação já testada."""
+    from src.intelligence.course import diagnose_curve
+
+    trained = [v for v in (versions or []) if v.get("val_logloss") is not None and v.get("history")]
+    if not trained:
+        base = {"learning_rate": .1, "l2": .01, "epochs": 200, "batch": 64 if n_questions < 40 else 256,
+                "patience": 15, "lr_decay": 0.0, "seed": 7}
+        return {"sugerido": base, "porque": ["primeiro treino: parâmetros padrão para o tamanho atual da base"],
+                "evolucao": [], "diagnostico": {}}
+    trials = [(_trial(v), float(v["val_logloss"]), v) for v in trained]
+    tried = {_key(t) for t, _, _ in trials}
+    best_t, best_l, best_v = min(trials, key=lambda x: x[1])
+    last_t, last_l, last_v = trials[-1]
+    why: List[str] = []
+    evo = [f"v{v.get('version')}: perda na prova {l:.4f}" + (" ✅ promovida" if v.get("promoted") else "")
+           for _, l, v in trials[-5:]]
+    d = diagnose_curve(last_v.get("history") or {}).get("diagnostico", "")
+    cand = dict(best_t)
+    moved = None
+    if d == "sobreajuste":
+        cand, moved = _move(best_t, "l2", +1), "l2"
+        why.append("a última curva DECOROU (treino cai, prova sobe) → mais L2 sobre a melhor versão")
+    elif d == "oscilação":
+        cand, moved = _move(best_t, "learning_rate", -1), "learning_rate"
+        why.append("a última curva OSCILOU → passo menor sobre a melhor versão")
+    elif d == "subajuste":
+        cand, moved = _move(_move(best_t, "epochs", +1), "learning_rate", +1), "learning_rate"
+        why.append("a última curva aprendeu POUCO → mais épocas e passo maior")
+    elif len(trials) >= 2:
+        prev_t, prev_l, _ = trials[-2]
+        changed = [k for k in _TUNE_ORDER if abs(float(last_t[k]) - float(prev_t[k])) > 1e-12]
+        if changed and last_l < prev_l - 1e-4:
+            k = changed[0]
+            direction = 1 if float(last_t[k]) > float(prev_t[k]) else -1
+            cand, moved = _move(last_t, k, direction), k
+            why.append(f"mudar {PARAMS.get(k, (k,))[0]} MELHOROU a prova ({prev_l:.4f} → {last_l:.4f}) → seguir na mesma direção")
+        elif changed:
+            k = changed[0]
+            direction = -1 if float(last_t[k]) > float(prev_t[k]) else 1
+            cand, moved = _move(best_t, k, direction), k
+            why.append(f"mudar {PARAMS.get(k, (k,))[0]} PIOROU ({prev_l:.4f} → {last_l:.4f}) → voltar à melhor versão "
+                       f"(v{best_v.get('version')}) e testar o outro sentido")
+    if moved is None or _key(cand) in tried:
+        # gira pelo próximo parâmetro ainda não explorado a partir da melhor versão
+        start = (_TUNE_ORDER.index(moved) + 1) if moved in _TUNE_ORDER else len(trials) % len(_TUNE_ORDER)
+        for j in range(len(_TUNE_ORDER) * 2):
+            k = _TUNE_ORDER[(start + j // 2) % len(_TUNE_ORDER)]
+            c = _move(best_t, k, +1 if j % 2 == 0 else -1)
+            if _key(c) not in tried:
+                cand = c
+                why.append(f"combinação nova: {PARAMS.get(k, (k,))[0]} {'maior' if j % 2 == 0 else 'menor'} a partir "
+                           f"da melhor versão (v{best_v.get('version')})")
+                break
+    if n_rated < 10:
+        why.append("o que mais melhora a IA agora continua sendo AVALIAR respostas (👍/👎) — cada avaliação vale 3 rótulos")
+    return {"sugerido": cand, "porque": why, "evolucao": evo, "diagnostico": diagnose_curve(last_v.get("history") or {}),
+            "melhor": {"version": best_v.get("version"), "val_logloss": best_l}}
+
+
 # ------------------------------------------------------------------ rodada 14: avaliação detalhada e busca automática
 def evaluate(weights: np.ndarray, X: np.ndarray, y: np.ndarray, g: np.ndarray, w: Optional[np.ndarray] = None) -> Dict[str, Any]:
     """Métricas que dizem se a RESPOSTA acertou, não só a perda:

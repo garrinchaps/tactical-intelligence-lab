@@ -116,6 +116,24 @@ def youth_elite(u: pd.DataFrame) -> pd.Series:
     return out.astype(float)
 
 
+def senior_floor(u: pd.DataFrame) -> pd.Series:
+    """Rodada 27e — piso do potencial de quem JÁ foi convocado para a seleção principal com até 23 anos. Seleção de
+    elite (Brasil, Argentina, França…): 80 + 1,5 por jogo (até 6) + 0,8 por ano abaixo dos 23; outras: 72 + 1 por
+    jogo + 0,5 por ano. Sempre ≥ overall + 4. Projeção explicada no porquê, nunca nota medida."""
+    if "selecao_principal_jogos" not in u:
+        return pd.Series(np.nan, index=u.index)
+    caps = pd.to_numeric(u["selecao_principal_jogos"], errors="coerce")
+    age = pd.to_numeric(u.get("idade"), errors="coerce")
+    sel = u.get("selecao_principal", pd.Series("", index=u.index)).fillna("").astype(str).str.lower()
+    elite = sel.map(lambda x: any(w in x for w in ELITE_YOUTH))
+    young = (23 - age).clip(lower=0)
+    fl = pd.Series(np.where(elite, 80 + 1.5 * caps.clip(upper=6) + .8 * young,
+                            72 + 1.0 * caps.clip(upper=6) + .5 * young), index=u.index)
+    q = pd.to_numeric(u.get("qualidade"), errors="coerce")
+    fl = pd.concat([fl, q + 4], axis=1).max(axis=1)
+    return fl.where((caps > 0) & age.le(23)).clip(upper=93)
+
+
 def youth_floor(u: pd.DataFrame) -> pd.Series:
     """Rodada 27 — piso do POTENCIAL de quem é da seleção de base (≤ 21 anos). É uma projeção (o mercado e os clubes
     tratam esses atletas como as maiores promessas do país), sempre explicada no 'porquê'."""

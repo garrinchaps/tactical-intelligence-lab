@@ -144,6 +144,9 @@ def render_trainer() -> None:
         except Exception:
             n_q, n_rated = 0, 0
         rec = TR.recommend(last, n_q, n_rated)
+        nxt = TR.suggest_next(sel.meta.get("versions") or [], n_q, n_rated)       # rodada 27e: muda a cada treino
+        sug = {**sug, "sugerido": {**sug.get("sugerido", {}), **nxt["sugerido"]},
+               "porque": nxt["porque"] + [p_ for p_ in sug.get("porque", []) if p_ not in nxt["porque"]][:1]}
         simple, technical = st.tabs(["🙂 Em palavras simples", "🔧 Parte técnica (ajuste fino)"])
         with simple:
             st.markdown(
@@ -155,8 +158,14 @@ def render_trainer() -> None:
             st.markdown(f"**Agora:** {n_q} perguntas com rótulo, {n_rated} avaliadas por você. "
                         + ("Ainda é pouco — o que mais ajuda é perguntar e avaliar." if n_q < 40 else
                            "Já dá para testar ajustes finos na parte técnica."))
+            st.markdown("**Sugestão para o PRÓXIMO treino** (refeita depois de cada treino, pela evolução):")
             for p_ in sug["porque"]:
                 st.markdown(f"- {p_}")
+            sg_ = sug["sugerido"]
+            st.caption(f"η {sg_.get('learning_rate')} · L2 {sg_.get('l2')} · épocas {sg_.get('epochs')} · lote "
+                       f"{sg_.get('batch', '—')} · paciência {sg_.get('patience', '—')} · semente {sg_.get('seed', '—')}")
+            if nxt.get("evolucao"):
+                st.caption("Evolução dos últimos treinos: " + " → ".join(nxt["evolucao"]))
             go_simple = st.button("🧠 Treinar agora com a sugestão da IA", type="primary", use_container_width=True,
                                   key="tr_go")
         with technical:
@@ -166,7 +175,7 @@ def render_trainer() -> None:
             prev = (last or {}).get("params") or {}
             defaults = {k: v[3] for k, v in TR.PARAMS.items()}
             defaults.update({k: prev[k] for k in prev if k in defaults})
-            defaults.update({"learning_rate": sg["learning_rate"], "l2": sg["l2"], "epochs": sg["epochs"]})
+            defaults.update({k: sg[k] for k in sg if k in defaults})
             vals = {}
             with st.form("tr_tech", border=False):
                 cols = st.columns(2)
@@ -194,8 +203,10 @@ def render_trainer() -> None:
         r = None
         if go_simple:
             with st.spinner("Treinando…"):
-                r = TR.train(learning_rate=sug["sugerido"]["learning_rate"],
-                             l2=sug["sugerido"]["l2"], epochs=int(sug["sugerido"]["epochs"]), use_weak=True)
+                sg_ = sug["sugerido"]
+                r = TR.train(learning_rate=sg_["learning_rate"], l2=sg_["l2"], epochs=int(sg_["epochs"]),
+                             batch=int(sg_.get("batch", 256)), patience=int(sg_.get("patience", 15)),
+                             lr_decay=float(sg_.get("lr_decay", 0.0)), seed=int(sg_.get("seed", 7)), use_weak=True)
         elif go_tech:
             with st.spinner("Treinando com os seus parâmetros…"):
                 r = TR.train(learning_rate=float(vals["learning_rate"]), l2=float(vals["l2"]), epochs=int(vals["epochs"]),

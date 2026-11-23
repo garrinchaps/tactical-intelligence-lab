@@ -102,8 +102,10 @@ def train_all(db, progress: Optional[Callable[[str], None]] = None) -> List[Dict
         from src.intelligence.lab_ai.selector import Selector
 
         sel = Selector()
-        sug = TR.suggest(sel.meta["versions"][-1])["sugerido"]
-        r = TR.train(learning_rate=sug["learning_rate"], l2=sug["l2"], epochs=sug["epochs"], sel=sel)
+        sug = TR.suggest_next(sel.meta.get("versions") or [])["sugerido"]      # rodada 27e: pela evolução
+        r = TR.train(learning_rate=sug["learning_rate"], l2=sug["l2"], epochs=int(sug["epochs"]),
+                     batch=int(sug.get("batch", 256)), patience=int(sug.get("patience", 15)),
+                     lr_decay=float(sug.get("lr_decay", 0.0)), seed=int(sug.get("seed", 7)), sel=sel)
         return r.get("reason", "treinado") + (f" ({r['n_perguntas']} perguntas)" if r.get("n_perguntas") else "")
 
     def danger() -> str:

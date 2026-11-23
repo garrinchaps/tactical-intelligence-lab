@@ -101,7 +101,20 @@ def _answer(question: str, current_context, use_llm: bool):
     except Exception:
         loc = None
     previous = int(st.session_state.get("match_id") or 0)
-    switched = bool(loc and loc.match_id != previous)
+    # rodada 27e: o chat fica TRAVADO no jogo aberto; só troca quando a pergunta identifica outro jogo de forma explícita
+    from src.intelligence.match_locator import should_switch
+
+    current = None
+    if previous:
+        try:
+            cat = cached_catalog()
+            row = cat[cat["match_id"] == previous]
+            current = row.iloc[0].to_dict() if not row.empty else {"match_id": previous}
+        except Exception:
+            current = {"match_id": previous}
+    switched = should_switch(question, loc, current, locked=bool(st.session_state.get("as_lock_match", True)))
+    if loc is not None and not switched and previous and loc.match_id != previous:
+        loc = None                                       # citou times/minuto, mas continua no mesmo jogo
     if switched:
         from src.ui.context import load_bundle
 
@@ -143,6 +156,8 @@ def _answer(question: str, current_context, use_llm: bool):
             from src.intelligence.lab_ai.availability import data_map, summary_line
             from src.ui.names import pt as _pt
 
+            from src.intelligence.lab_ai import reasoning as REASON
+
             engine = str(res.get("engine_used", ""))
             off_topic = engine.startswith("LOCAL_SCOPE_GUARD")       # o motor normal é LOCAL_SCOPED_ENGINE
             ask = (res.get("scope") or {}).get("ask")
@@ -153,6 +168,17 @@ def _answer(question: str, current_context, use_llm: bool):
             from src.intelligence.lab_ai import router as ROUTER
 
             keep_classic = ask in ("presence", "goals", "lineup_role", "errors", "unavailable", "result", "profile")
+            # rodada 27e: perguntas de INTERPRETAÇÃO (posse × controle, qualidade das finalizações, faltas, merecimento,
+            # correlação × causa…) vão primeiro para o raciocínio que cruza os números do jogo
+            reasoned = None
+            if ask not in ("presence", "goals", "lineup_role", "unavailable", "profile"):
+                reasoned = REASON.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
+                                         db=get_service().db, pt=_pt)
+            if reasoned is not None:
+                res["report_markdown"] = reasoned["markdown"] + foot
+                res["engine_used"] = f"IA DO LABORATÓRIO ({reasoned['intent']})"
+                res["lab_ai"] = {"direct": reasoned["intent"], "n_facts": 0}
+                off_topic, keep_classic = True, True      # já respondido: o roteador não substitui
             routed = None if (off_topic or keep_classic) else ROUTER.route(question, meta, ctx.df, ctx.bundle.boxscore,
                                                                             ctx.target_team, get_service().db, pt=_pt)
             if routed is not None:
@@ -248,9 +274,17 @@ def render(current_context, match_bar) -> None:
         st.toggle("🧠 IA do laboratório (nossa, aprende com o seu 👍/👎)", value=True, key="lab_ai_on",
                   help="Escolhe os números que importam para a pergunta com uma rede treinada pelas suas avaliações e "
                        "escreve a análise. Desligada, responde só o analista clássico.")
+        st.toggle("🔒 Manter o jogo da conversa (só troca se eu citar outro jogo com “x”, placar ou ano)", value=True,
+                  key="as_lock_match", help="Evita que uma pergunta como “no último minuto o Atlético…” leve para outro "
+                                            "jogo do Atlético. Para trocar: cite os dois times com x/contra e o ano, "
+                                            "diga “trocar de jogo”, ou use o botão abaixo.")
         use_llm = st.toggle("Redigir com Gemini (precisa de GEMINI_API_KEY no .env)", value=False)
         if st.button("Limpar conversa"):
             st.session_state["chat_history"] = []
+        if st.button("🔄 Trocar de jogo (limpa a conversa e solta o jogo)"):
+            st.session_state["chat_history"] = []
+            st.session_state["match_id"] = None
+            st.rerun()
     history = st.session_state.setdefault("chat_history", [])
     from src.intelligence.learning_hub import feedback_ids, record_feedback
 
@@ -292,7 +326,8 @@ def render(current_context, match_bar) -> None:
                              "quem mais criou perigo?”") or clicked or st.session_state.pop("_ask_from_trainer", None)
     if not question:
         if history:
-            note("Dica", "Para mudar de jogo, é só citar os times (e o ano) na próxima pergunta.")
+            note("Dica", "A conversa fica neste jogo. Para mudar, cite os dois times com “x” e o ano (ex.: “Flamengo x "
+                         "Palmeiras 2025”), escreva “trocar de jogo” ou use 🔄 em Opções do assistente.")
         return
     with st.spinner("Encontrando o jogo, recortando os dados e redigindo..."):
         try:

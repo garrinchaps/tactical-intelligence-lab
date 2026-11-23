@@ -793,6 +793,35 @@ Rodada 27d (23/11/2026, 538 testes verdes) — abertura, sugestões do Scout, po
 - ✅ Potencial do topo pela colocação (`overall.top_potential_ladder`: 1º 95, 2º 93,5, 5º 92, 10º 91, 25º 90, 60º 89) —
   só um jogador chega a 95. Fotografia v18; passo `scout_v18`.
 
+Rodada 27e (23/11/2026, 548 testes verdes) — Assistente, notas do Brasil, potencial, abas do jogador:
+- ✅ Assistente: o chat TRAVA no jogo aberto (`match_locator.should_switch`): só troca com os dois times + "x/vs/contra",
+  placar ou ano, um time + "último jogo/ontem/ano", ou "trocar de jogo" (antes "no último minuto o Atlético…" levava a
+  outro jogo do Atlético); interruptor 🔒 e botão "🔄 Trocar de jogo" em Opções.
+- ✅ Motor de INTERPRETAÇÃO (`src/intelligence/lab_ai/reasoning.py`, roda antes do roteador): posse × controle,
+  qualidade das finalizações (xG por chute), no gol × total (xGOT, goleiro), dentro × fora da área, bloqueadas, grandes
+  chances, eficiência (gols × xG + simulação das chances), passes (campo de ataque × próprio), bolas longas, cruzamentos,
+  escanteios, dribles, faltas (hipóteses ordenadas pela evidência + "critério do árbitro: não medível"), desarmes ×
+  interceptações (por posse do rival), aéreo, formações (teoria do desenho conferida pelos corredores; desenhos da
+  pergunta ≠ do jogo), substituições (associação, não causa), quem mereceu, sem olhar o placar, contradições,
+  correlação × causa, erros de interpretação, dados ausentes, risco, estado do jogo (expulsão, tempo à frente). Resposta
+  direta → números → leitura → limite; "qual jogador…" continua no ranking por jogador. "None'" na linha do tempo corrigido.
+- ✅ Treino da IA: `trainer.suggest_next` — a sugestão do PRÓXIMO treino muda a cada treino (segue a direção que melhorou,
+  volta na que piorou, aplica o diagnóstico da curva, nunca repete combinação); usada no guiado, na IA única e no painel.
+- ✅ Notas: Brasil Série A +1 (65) a +3 (80+), Série B +1 a +2, nunca acima de 84 e nada muda acima de 84
+  (`overall.brazil_bump` — topo mundial intacto); potencial SEMPRE inteiro; ordem do topo do potencial pesa o overall de
+  hoje (Yamal 1º = 95); seleção PRINCIPAL (`engine.senior_caps/merge_senior`, `potential.senior_floor`: convocado ≤ 23
+  anos de seleção de elite ≥ 80 + 1,5/jogo); cadastro × jogos tenta o nome mais longo do MESMO clube quando o nome exato
+  é outra pessoa (Transfermarkt "Otávio" × FotMob "Otavio Costa", goleiro do Cruzeiro).
+- ✅ Contratação (`attributes.contract_score`): ganho sobre o titular da posição (igual = 66), potencial do jovem, encaixe
+  ±6, fora da realidade −12 — antes era o índice de encaixe (30–50 → "Não recomendado").
+- ✅ Página do jogador: cartão com a MESMA qualidade/potencial/posição do Scout; abas "🗓️ Jogos" e "📊 Scout por 90"
+  funcionam para todos (números FotMob/ESPN quando não há lances); abas montam só quando abertas.
+- ✅ "Onde ganhar o jogo": uma dimensão por dupla atacante × defensor (a repetida perde 20%) e lista em rodízio (uma de
+  cada tipo primeiro) — acabou o "tudo drible".
+- ✅ Velocidade: abas do pré-jogo (8) e da aba Jogadores da partida só montam a aberta.
+- ✅ Estaduais/Série D/Copa do Nordeste nos elencos FotMob (`REGIONS["estaduais"]`, passo 6 `elencos_r27e`).
+- Fotografia do Scout v19 (passo `scout_v19`). Não verificável daqui: notas reais no PC depois da v19.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

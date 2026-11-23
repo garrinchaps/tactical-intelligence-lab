@@ -963,21 +963,58 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
     scored: List[Tuple[float, Any, str]] = []
     for i, core, club, pos, fun, nat, dup in zip(p.index, p["_core"].astype(str), p["clube"], p["posicao"], p["funcao"],
                                                  p["nacionalidade"], tm_dup):
-        cands = cand_by_name.get(core)
-        fuzzy = False
-        if not cands:
-            mine = set(core.split())
-            pool = {id(r): r for w in mine if len(w) >= 4 for r in tok_index.get(w, [])}.values()
-            cands = [r for r in pool if r["core_nome"] != core and
-                     (mine < set(str(r["core_nome"]).split()) or set(str(r["core_nome"]).split()) < mine)]
-            fuzzy = True
-            if not cands or len(cands) > 40:
-                continue
         club_c = team_core(_safe_str(club)) if _safe_str(club) else ""
         fam = "GK" if _role(pos, fun) == "GK" else "OUT"
         b0 = births.get(i)
         nat_c = _country_core(nat) if _safe_str(nat) else ""
-        options = []
+
+        def fuzzy_cands():
+            mine = set(core.split())
+            pool = {id(r): r for w in mine if len(w) >= 4 for r in tok_index.get(w, [])}.values()
+            return [r for r in pool if r["core_nome"] != core and
+                    (mine < set(str(r["core_nome"]).split()) or set(str(r["core_nome"]).split()) < mine)]
+
+        cands = cand_by_name.get(core)
+        fuzzy = False
+        if not cands:
+            cands, fuzzy = fuzzy_cands(), True
+            if not cands or len(cands) > 40:
+                continue
+        options = _market_options(cands, fuzzy, club_c, fam, b0, nat_c)
+        if not options and not fuzzy:
+            # rodada 27e: o nome exato existe, mas é OUTRA pessoa (o "Otávio" do Paris FC) — tenta o nome mais longo do
+            # mesmo clube ("Otavio Costa", goleiro do Cruzeiro), que antes nunca era tentado
+            fc = fuzzy_cands()
+            if fc and len(fc) <= 40:
+                options = _market_options(fc, True, club_c, fam, b0, nat_c)
+                cands = fc
+        if not options:
+            continue
+        options.sort(key=lambda t: -t[0])
+        best = options[0]
+        tie = len(options) > 1 and options[1][0] == best[0]
+        # rodada 25b: nome de UMA palavra (Saúl, Fred, Gerson, Otávio) é homônimo em potencial mesmo quando só aparece
+        # uma vez no cadastro — juntar só com clube ou nascimento conferindo (Saúl de 41 anos era outro Saúl)
+        mononym = len(core.split()) == 1
+        if mononym and best[0] < 2:
+            continue
+        if dup or len(cands) > 1:
+            if best[0] < 2 or tie:
+                continue                                        # homônimo sem confirmação: fica separado
+        scored.append((best[0], i, best[1]))
+    taken: set = set()
+    for score, i, key in sorted(scored, key=lambda t: -t[0]):
+        if key in taken:
+            continue
+        taken.add(key)
+        out.at[i] = key
+    return out
+
+
+def _market_options(cands, fuzzy, club_c, fam, b0, nat_c):
+    """Pontua cada pessoa candidata do histórico para uma linha do cadastro (ver match_market_to_history)."""
+    options = []
+    if True:
         for c in cands:
             score = 0.0
             b1 = pd.to_datetime(c.get("nascimento_fm"), errors="coerce")
@@ -1002,27 +1039,7 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
                 elif not same_club and score < 3:
                     continue                                    # país e clube diferentes, sem nascimento: não junta
             options.append((score, c["core"]))
-        if not options:
-            continue
-        options.sort(key=lambda t: -t[0])
-        best = options[0]
-        tie = len(options) > 1 and options[1][0] == best[0]
-        # rodada 25b: nome de UMA palavra (Saúl, Fred, Gerson, Otávio) é homônimo em potencial mesmo quando só aparece
-        # uma vez no cadastro — juntar só com clube ou nascimento conferindo (Saúl de 41 anos era outro Saúl)
-        mononym = len(core.split()) == 1
-        if mononym and best[0] < 2:
-            continue
-        if dup or len(cands) > 1:
-            if best[0] < 2 or tie:
-                continue                                        # homônimo sem confirmação: fica separado
-        scored.append((best[0], i, best[1]))
-    taken: set = set()
-    for score, i, key in sorted(scored, key=lambda t: -t[0]):
-        if key in taken:
-            continue
-        taken.add(key)
-        out.at[i] = key
-    return out
+    return options
 
 
 def build_market_universe(tm_players: Optional[pd.DataFrame], history: Optional[pd.DataFrame] = None,
@@ -1354,7 +1371,7 @@ def add_quality_scores(players: pd.DataFrame, min_minutes: int = 450) -> pd.Data
     prec = precocity(d)
     d["precocidade"] = prec.round(0)
     growth = years * (.9 + 1.2 * conf + 1.6 * prec.fillna(30) / 100) * (.7 + .5 * lvl_s)
-    d["potencial_teto"] = (quality + growth).clip(upper=96).where(quality.notna()).round(1)
+    d["potencial_teto"] = np.ceil((quality + growth).clip(upper=96)).where(quality.notna())   # inteiro, nunca abaixo
     d["potencial_revenda"] = (0.55 * d["potencial_teto"] + 0.25 * ((25 - age) / 8 * 100).clip(0, 100)
                               + 0.20 * (100 - market_pct)).where(age.le(23) & quality.notna()).round(1)
     d["projecao_valorizacao_24m_pct"] = ((d["potencial_teto"] - quality) * 2.2 + (100 - market_pct) * .15).clip(0, 60
@@ -3065,6 +3082,78 @@ def youth_caps(db) -> pd.DataFrame:
     except Exception:
         pass
     return out
+
+
+SENIOR_COMP = r"(?i)world cup|copa do mundo|qualif|elimin|friendl|amistos|copa am|nations league|liga das na|euro\b|" \
+              r"european championship|gold cup|africa cup|african nations|asian cup|concacaf|conmebol|finalissima"
+YOUTH_TEAM = r"(?i)\b(u-?\d{2}|sub-?\d{2}|olympic|olimpic|women|feminin)\b"
+
+
+def senior_caps(db, years: int = 3) -> pd.DataFrame:
+    """Rodada 27e — jogos pela SELEÇÃO PRINCIPAL (adulta) nos últimos anos, por atleta (id da FotMob quando há).
+    Ser convocado para a seleção principal aos 20 anos (Otávio, goleiro do Cruzeiro) é dos sinais mais fortes de
+    potencial que existem; antes só a base (Sub-17/Sub-20) entrava."""
+    from src.squad.planner import national_team_key
+
+    since = (pd.Timestamp.today() - pd.Timedelta(days=365 * years)).date().isoformat()
+    try:
+        with db.connect() as conn:
+            r = pd.read_sql_query(
+                """SELECT p.player_name, p.team_name, m.competition_name, m.match_id, m.match_date, p.minutes, p.rating,
+                          CAST(json_extract(p.stats_json, '$.fotmob_id') AS INTEGER) AS fotmob_id
+                   FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+                   WHERE m.match_date >= ? AND COALESCE(p.minutes, 0) > 0""", conn, params=(since,))
+            lu = pd.read_sql_query(
+                """SELECT l.player_name, l.team_name, m.competition_name, m.match_id, m.match_date, NULL AS minutes,
+                          NULL AS rating, NULL AS fotmob_id
+                   FROM match_lineups l JOIN matches m ON m.match_id = l.match_id
+                   WHERE m.match_date >= ? AND l.is_starter = 1""", conn, params=(since,))
+    except Exception:
+        return pd.DataFrame()
+    r = pd.concat([r, lu[~lu["match_id"].isin(r["match_id"])]], ignore_index=True)
+    if r.empty:
+        return pd.DataFrame()
+    r = r[r["competition_name"].astype(str).str.contains(SENIOR_COMP, regex=True)
+          & ~r["competition_name"].astype(str).str.contains(YOUTH_TEAM, regex=True)
+          & ~r["team_name"].astype(str).str.contains(YOUTH_TEAM, regex=True)]
+    if r.empty:
+        return pd.DataFrame()
+    teams = pd.Series(r["team_name"].unique())
+    nat = dict(zip(teams, teams.map(national_team_key)))
+    r = r.assign(pais=r["team_name"].map(nat))
+    r = r[r["pais"].fillna("") != ""]
+    if r.empty:
+        return pd.DataFrame()
+    r["core"] = r["player_name"].map(player_core)
+    out = r.groupby("core").agg(selecao_principal_jogos=("match_id", "nunique"),
+                                selecao_principal_min=("minutes", lambda x: float(pd.to_numeric(x, errors="coerce").sum())),
+                                selecao_principal=("team_name", "first"), selecao_principal_pais=("pais", "first"),
+                                selecao_principal_ultimo=("match_date", "max"),
+                                fotmob_id=("fotmob_id", "max")).reset_index()
+    return out
+
+
+def merge_senior(universe: pd.DataFrame, caps: pd.DataFrame) -> pd.DataFrame:
+    """Liga as convocações ao atleta: pelo id da FotMob; sem id, só núcleo de nome ÚNICO e com a nacionalidade da
+    seleção conferindo (nunca um homônimo de outro país)."""
+    if universe is None or universe.empty or caps is None or caps.empty:
+        return universe
+    u = universe.copy()
+    cols = ["selecao_principal_jogos", "selecao_principal_min", "selecao_principal", "selecao_principal_ultimo"]
+    by_id = caps.dropna(subset=["fotmob_id"]).drop_duplicates("fotmob_id").set_index("fotmob_id")
+    fid = pd.to_numeric(u.get("fotmob_id"), errors="coerce") if "fotmob_id" in u else pd.Series(np.nan, index=u.index)
+    core = u["_core"].astype(str) if "_core" in u else u["nome"].map(player_core)
+    from src.squad.planner import national_team_key
+
+    nat = u.get("nacionalidade", pd.Series("", index=u.index)).map(lambda x: national_team_key(str(x or "")))
+    unique = ~core.duplicated(keep=False)
+    by_core = caps.drop_duplicates("core").set_index("core")
+    for c in cols:
+        v_id = fid.map(by_id[c]) if c in by_id else pd.Series(np.nan, index=u.index)
+        country_ok = core.map(by_core["selecao_principal_pais"]).eq(nat) | nat.eq("")
+        v_core = core.where(unique & country_ok).map(by_core[c]) if c in by_core else pd.Series(np.nan, index=u.index)
+        u[c] = v_id.combine_first(v_core)
+    return u
 
 
 def youth_identities(db, ids: List[int], names: Optional[List[str]] = None) -> pd.DataFrame:

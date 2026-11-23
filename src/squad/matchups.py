@@ -266,7 +266,20 @@ def duel_findings(my_xi, rv_xi, my_stats, rv_stats, ref, me: str, rival: str, at
                                 f"jogos de cada time com números por jogador (só conta jogo em que ele entrou)",
                     })
     out.sort(key=lambda x: (x["nivel"] != "escancarado", -x["score"]))
-    return out
+    # rodada 27e: um duelo por dupla atacante × defensor — a dimensão mais forte, mas a que já apareceu em outra dupla
+    # perde 20% (drible não toma conta de todas as dicas quando há bola aérea, cruzamento ou pressão para explorar)
+    groups: Dict[Any, List[Dict[str, Any]]] = {}
+    for x in out:
+        groups.setdefault((x["atacante"], x["defensor"]), []).append(x)
+    used: Dict[str, int] = {}
+    lead, others = [], []
+    for _, cands in sorted(groups.items(), key=lambda kv: -max(c["score"] for c in kv[1])):
+        pick = max(cands, key=lambda c: c["score"] * (0.8 ** used.get(c["dimensao"], 0)))
+        used[pick["dimensao"]] = used.get(pick["dimensao"], 0) + 1
+        lead.append(pick)
+        others += [c for c in cands if c is not pick]
+    lead.sort(key=lambda x: (x["nivel"] != "escancarado", -x["score"]))
+    return lead + others
 
 
 def _fmt(metric: str, v) -> str:
@@ -533,16 +546,26 @@ def merge_same_defender(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _kind(x: Dict[str, Any]) -> str:
+    return str(x.get("dimensao") or x.get("mecanismo") or x.get("tipo"))
+
+
 def _diverse(items: List[Dict[str, Any]], per_kind: int = 2) -> List[Dict[str, Any]]:
-    """No máximo `per_kind` dicas do MESMO tipo (antes eram 4 de drible seguidas)."""
-    seen: Dict[str, int] = {}
-    out = []
+    """Rodada 27e — dicas VARIADAS: primeiro uma de cada tipo (na ordem de força), depois a segunda de cada tipo, até
+    `per_kind`. Antes o corte só limitava a 2 por tipo, mas a lista começava com dribles e o usuário via "tudo drible"."""
+    by_kind: Dict[str, List[Dict[str, Any]]] = {}
+    order: List[str] = []
     for x in items:
-        k = str(x.get("dimensao") or x.get("tipo"))
-        if seen.get(k, 0) >= per_kind:
-            continue
-        seen[k] = seen.get(k, 0) + 1
-        out.append(x)
+        k = _kind(x)
+        if k not in by_kind:
+            by_kind[k] = []
+            order.append(k)
+        by_kind[k].append(x)
+    out: List[Dict[str, Any]] = []
+    for rnd in range(per_kind):
+        for k in order:
+            if len(by_kind[k]) > rnd:
+                out.append(by_kind[k][rnd])
     return out
 
 

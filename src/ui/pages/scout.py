@@ -627,7 +627,8 @@ def _dossier(player, roster):
         from src.scout import attributes as AT
         from src.ui import fm, player_fm
 
-        v, txt = AT.verdict(player.get("score_scout"))
+        role = str(player.get("papel_alvo") or player.get("papel") or "")
+        v, txt = AT.verdict(AT.contract_score(player, _starter_quality(roster).get(role)))
         fm.verdict_card(v, txt)
         player_fm.overview(player, key=f"dos_{_slug(player.get('nome'))}_{_slug(player.get('papel_alvo'))}")
         player_fm.squad_compare(player, roster, key=f"dosc_{_slug(player.get('nome'))}")
@@ -1320,7 +1321,7 @@ def render(_ctx=None):
                 show["Posição"] = show["papel"].map(E.ROLE_LABELS).fillna("—")
                 # rodada 25: potencial em TODOS (o do universo; sem ele, o teto antigo) + estilo de jogo medido
                 show["potencial_show"] = pd.to_numeric(show.get("potencial"), errors="coerce").combine_first(
-                    pd.to_numeric(show.get("potencial_teto"), errors="coerce"))
+                    pd.to_numeric(show.get("potencial_teto"), errors="coerce")).round(0)
                 if "confianca_nota" in show:
                     show["confianca_pct"] = pd.to_numeric(show["confianca_nota"], errors="coerce").combine_first(
                         pd.to_numeric(show.get("confianca_pct"), errors="coerce"))

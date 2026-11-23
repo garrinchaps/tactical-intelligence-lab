@@ -261,7 +261,7 @@ def zebra(df: pd.DataFrame):
 
 
 _INT_TOKENS = ("idade", "age", "minutos", "minutes", "jogos", "games", "gols", "assist", "nº", "camisa", "ano",
-               "temporada", "chegou primeiro", "titular")
+               "temporada", "chegou primeiro", "titular", "potencial", "overall", "qualidade", "ovr")
 
 
 def tidy_numbers(df: pd.DataFrame) -> pd.DataFrame:

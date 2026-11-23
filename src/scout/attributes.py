@@ -157,14 +157,50 @@ def star_html(s: Optional[float], color: str = "#22D3EE") -> str:
 
 
 # ------------------------------------------------------------------ veredito e prós/contras
-def verdict(score_scout: Any) -> Tuple[Optional[int], str]:
-    """score do Scout (0–100) → nota da contratação 1–100 + frase (rodada 24: sem a escala 1–20)."""
+def _num(v: Any) -> Optional[float]:
     try:
-        v = int(np.clip(round(float(score_scout)), 1, 100))
+        x = float(v)
+        return None if np.isnan(x) else x
+    except (TypeError, ValueError):
+        return None
+
+
+def contract_score(player: Dict[str, Any], starter: Optional[float] = None) -> Optional[float]:
+    """Rodada 27e — nota da CONTRATAÇÃO (1–100) pelo que importa para o clube, não pelo índice de encaixe da busca
+    (que fica entre 30 e 50 para quase todo mundo e virava "30 Não recomendado"):
+      * ganho sobre o titular da posição hoje: igual ao titular = 66; +5 = 84; −5 = 48;
+      * jovem (≤ 23) com potencial acima do titular: até +12;
+      * encaixe do Scout (índice da busca) ajusta pouco (±6);
+      * fora da realidade do clube (patamar/valor): −12.
+    Sem titular conhecido, compara com 70 (titular típico de liga média)."""
+    q = _num(player.get("qualidade"))
+    if q is None:
+        return None
+    ref = starter if starter is not None else 70.0
+    v = 66 + 3.6 * (q - ref)
+    age = _num(player.get("idade"))
+    pot = _num(player.get("potencial")) or _num(player.get("potencial_teto"))
+    if age is not None and age <= 23 and pot is not None and pot > ref:
+        v += min(12.0, 1.5 * (pot - ref))
+    sc = _num(player.get("score_scout"))
+    if sc is not None:
+        v += float(np.clip((sc - 45) * .25, -6, 6))
+    real = player.get("realismo")
+    if isinstance(real, dict) and real.get("patamar"):
+        v -= 12
+    if age is not None and age >= 32:
+        v -= 2 * (age - 31)                     # contrato de veterano: valor cai rápido
+    return float(np.clip(v, 1, 100))
+
+
+def verdict(score: Any) -> Tuple[Optional[int], str]:
+    """nota da contratação 1–100 + frase."""
+    try:
+        v = int(np.clip(round(float(score)), 1, 100))
     except (TypeError, ValueError):
         return None, "sem avaliação"
-    txt = ("Seria uma excelente contratação" if v >= 85 else "Seria uma boa contratação" if v >= 70 else
-           "Contratação razoável" if v >= 55 else "Contratação duvidosa" if v >= 40 else "Não recomendado")
+    txt = ("Seria uma excelente contratação" if v >= 82 else "Seria uma boa contratação" if v >= 70 else
+           "Contratação razoável" if v >= 58 else "Contratação duvidosa" if v >= 45 else "Não recomendado")
     return v, txt
 
 

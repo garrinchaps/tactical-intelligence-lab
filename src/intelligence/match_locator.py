@@ -113,3 +113,38 @@ def locate(question: str, catalog: pd.DataFrame, index: Optional[Dict[str, List[
     return LocatedMatch(int(best["match_id"]), [", ".join(g[:1]) for g in groups], year,
                         f"{best['home_team_name']} {score} {best['away_team_name']} · {best['competition_name']} · {best['match_date']}",
                         sel.head(6))
+
+
+# ------------------------------------------------------------------------------------------- trava do jogo do chat
+SWITCH_WORDS = re.compile(r"\b(troc\w*|mud\w*|outr[oa]|nov[oa]) (de )?(jogo|partida)\b|\bagora (o|a|no|na) (jogo|partida)\b")
+MATCH_SHAPE = re.compile(r"\s(x|vs|versus|contra)\s|\d+\s*[x×-]\s*\d+|\b(18[7-9]\d|19\d\d|20[0-4]\d)\b")
+ONE_TEAM_SHAPE = re.compile(r"\b(ultim[oa]|proxim[oa]|penultim[oa]) (jogo|partida)\b|\bontem\b|\bhoje\b|"
+                            r"\b(18[7-9]\d|19\d\d|20[0-4]\d)\b")
+
+
+def should_switch(question: str, loc: Optional[LocatedMatch], current: Optional[Dict[str, object]],
+                  locked: bool = True) -> bool:
+    """Rodada 27e — o chat TRAVA no jogo aberto. Só troca quando a pergunta identifica OUTRO jogo de forma explícita:
+    os dois times com "x/vs/contra", placar ou ano; um time com "último jogo/ontem/ano"; ou "trocar de jogo".
+    Antes, "no último minuto o Atlético…" ou citar os dois times do mesmo jogo levava para outra partida."""
+    if loc is None:
+        return False
+    if not current or not current.get("match_id"):
+        return True
+    if int(loc.match_id) == int(current.get("match_id") or 0):
+        return False
+    t = " " + norm(question) + " "
+    cur = {team_core(str(current.get("home_team_name") or "")), team_core(str(current.get("away_team_name") or ""))}
+    teams_q = {team_core(x.split(", ")[0]) for x in loc.teams}
+    same_pair = bool(teams_q) and teams_q <= cur
+    ym = re.search(r"\b(18[7-9]\d|19\d\d|20[0-4]\d)\b", t)
+    cur_year = str(current.get("match_date") or "")[:4]
+    if SWITCH_WORDS.search(t):
+        return True
+    if same_pair and not (ym and ym.group(1) != cur_year) and not re.search(r"\b(ida|volta|outro|anterior|returno|turno)\b", t):
+        return False                                      # mesmos times do jogo aberto → é o MESMO jogo
+    if not locked:
+        return True
+    if len(loc.teams) >= 2:
+        return bool(MATCH_SHAPE.search(t))
+    return bool(ONE_TEAM_SHAPE.search(t))

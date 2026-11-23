@@ -260,20 +260,23 @@ def render(ctx: MatchContext) -> None:
     players_df = PlayerTacticalEvaluator.evaluate_team_players(ctx.df, ctx.target_team)
     from src.ui.i18n import t as _t
 
-    t0, t1, t2 = st.tabs([_t(x) for x in ("📋 Estatísticas individuais", "🧩 Elenco & substituições", "🕵️ Dossiê & comparador")])
+    t0, t1, t2 = st.tabs([_t(x) for x in ("📋 Estatísticas individuais", "🧩 Elenco & substituições", "🕵️ Dossiê & comparador")], key="mplayers_tabs", on_change="rerun")
     with t0:
-        try:
-            _stats_table(ctx)
-        except Exception as exc:
-            error_state("Estatísticas indisponíveis", exc)
+        if t0.open is not False:          # rodada 27e: só a aba aberta é montada
+            try:
+                _stats_table(ctx)
+            except Exception as exc:
+                error_state("Estatísticas indisponíveis", exc)
     with t1:
-        try:
-            _squad(ctx, players_df)
-        except Exception as exc:
-            error_state("Elenco indisponível", exc)
+        if t1.open is not False:          # rodada 27e: só a aba aberta é montada
+            try:
+                _squad(ctx, players_df)
+            except Exception as exc:
+                error_state("Elenco indisponível", exc)
     with t2:
-        try:
-            _scout(ctx, players_df)
-        except Exception as exc:
-            error_state("Scout indisponível", exc)
+        if t2.open is not False:          # rodada 27e: só a aba aberta é montada
+            try:
+                _scout(ctx, players_df)
+            except Exception as exc:
+                error_state("Scout indisponível", exc)
     provenance_panel(ctx.registry)

@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v18.pkl")   # v18: topo do potencial pela colocação
+SNAP_PATH = Path("data/processed/scout_universe_v19.pkl")   # v19: seleção principal, Brasil +1–3, Otávio, Yamal 1º
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -77,6 +77,10 @@ def build_universe(db) -> Dict[str, Any]:
     universe = E.canonical_clubs(universe)               # rodada 20: um nome por clube ("Cruzeiro" × "Cruzeiro EC")
     caps = E.youth_caps(db)
     universe = E.merge_youth(universe, caps)  # rodada 20: seleções de base → potencial e característica
+    try:                                       # rodada 27e: convocações para a seleção PRINCIPAL → potencial
+        universe = E.merge_senior(universe, E.senior_caps(db))
+    except Exception:
+        pass
     try:                                       # rodada 22: quem só tem jogos de base entra com qualidade ESTIMADA
         extra = E.youth_only_players(universe, caps)
         if not extra.empty:

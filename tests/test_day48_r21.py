@@ -87,7 +87,8 @@ def test_diverse_caps_same_kind():
 
     items = [{"dimensao": "drible"}] * 4 + [{"dimensao": "aereo"}]
     out = MU._diverse(items, per_kind=2)
-    assert [x["dimensao"] for x in out] == ["drible", "drible", "aereo"]
+    # rodada 27e: primeiro uma de cada tipo, depois a segunda — o máximo por tipo continua 2
+    assert [x["dimensao"] for x in out] == ["drible", "aereo", "drible"]
 
 
 def test_loading_screen_per_area():

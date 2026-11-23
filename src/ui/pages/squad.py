@@ -755,122 +755,130 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
     tabs = st.tabs(["🧭 Onde atacar", "👥 Escalações e porquês", "🔍 Leitura do rival", "🩹 Onde sofremos",
                     "✏️ Editar o campinho"] + (["📰 Notícias"] if pv.get("noticias") else []) + ["🧠 Modelo de jogo do rival",
                                                                                                     "📋 Relatório do olheiro"],
-                   key=f"{w}_tabs")
+                   key=f"{w}_tabs", on_change="rerun")
     with tabs[-1]:                                     # rodada 23: relatório do olheiro do rival estilo FM
-        from src.ui import team_report_view
+        if tabs[-1].open is not False:          # rodada 27e: só a aba aberta é montada
+            from src.ui import team_report_view
 
-        team_report_view.render(rival, rv["names"], version, key=f"{w}_tr", my_team=team, my_names=me["names"])
+            team_report_view.render(rival, rv["names"], version, key=f"{w}_tr", my_team=team, my_names=me["names"])
     with tabs[-2]:                                     # rodada 22: identidade tática do rival + plano por fase
-        from src.ui import identity_view
-        from src.analytics import tactical_identity as TI
+        if tabs[-2].open is not False:          # rodada 27e: só a aba aberta é montada
+            from src.ui import identity_view
+            from src.analytics import tactical_identity as TI
 
-        identity_view.render(rival, rv["names"], version, key=f"{w}_rival")
-        try:
-            plan = TI.opposition_plan(identity_view._data(tuple(rv["names"]), version, 20))
-        except Exception:
-            plan = []
-        if plan:
-            st.markdown(f"##### ♟️ Plano contra o modelo de jogo de {rival}")
-            for x in plan:
-                st.markdown(f"- **{x['fase']}** — {x['acao']} *(base: {x['base']})*")
+            identity_view.render(rival, rv["names"], version, key=f"{w}_rival")
+            try:
+                plan = TI.opposition_plan(identity_view._data(tuple(rv["names"]), version, 20))
+            except Exception:
+                plan = []
+            if plan:
+                st.markdown(f"##### ♟️ Plano contra o modelo de jogo de {rival}")
+                for x in plan:
+                    st.markdown(f"- **{x['fase']}** — {x['acao']} *(base: {x['base']})*")
     with tabs[0]:
-        from src.ui import vuln_view
+        if tabs[0].open is not False:          # rodada 27e: só a aba aberta é montada
+            from src.ui import vuln_view
 
-        out_rv = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
-            if not b["jogadores"].empty and "indisponivel" in b["jogadores"] else []
-        vuln_view.render(rival, rv["names"], me["names"], version, where=w,
-                         lineup=[x.get("jogador") for x in xr if x.get("jogador")], out=out_rv)
+            out_rv = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
+                if not b["jogadores"].empty and "indisponivel" in b["jogadores"] else []
+            vuln_view.render(rival, rv["names"], me["names"], version, where=w,
+                             lineup=[x.get("jogador") for x in xr if x.get("jogador")], out=out_rv)
     with tabs[1]:
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown(f"#### 🔵 {team} — {mode.lower()} ({fm})")
-            out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
-            if len(out):
-                st.markdown(f"**Nossos desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
-            dv = a["jogadores"][a["jogadores"]["duvida"].astype(bool)] if "duvida" in a["jogadores"] else a["jogadores"].iloc[0:0]
-            if len(dv):
-                st.markdown(f"**Nossas dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
-            st.markdown("**Por que cada jogador nosso foi escolhido**")
-            _xi_cards(xm, "#22D3EE")
-        with c2:
-            st.markdown(f"#### 🔴 {rival} provável ({fr})")
-            out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
-            if len(out):
-                st.markdown(f"**Desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
-            dv = b["jogadores"][b["jogadores"].get("duvida", "").astype(bool)] if "duvida" in b["jogadores"] else b["jogadores"].iloc[0:0]
-            if len(dv):
-                st.markdown(f"**Dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
-            st.markdown("**Por que cada jogador do rival deve começar**")
-            _xi_cards(xr, "#EF4444")
+        if tabs[1].open is not False:          # rodada 27e: só a aba aberta é montada
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown(f"#### 🔵 {team} — {mode.lower()} ({fm})")
+                out = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)] if not a["jogadores"].empty else a["jogadores"]
+                if len(out):
+                    st.markdown(f"**Nossos desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+                dv = a["jogadores"][a["jogadores"]["duvida"].astype(bool)] if "duvida" in a["jogadores"] else a["jogadores"].iloc[0:0]
+                if len(dv):
+                    st.markdown(f"**Nossas dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
+                st.markdown("**Por que cada jogador nosso foi escolhido**")
+                _xi_cards(xm, "#22D3EE")
+            with c2:
+                st.markdown(f"#### 🔴 {rival} provável ({fr})")
+                out = b["jogadores"][b["jogadores"]["indisponivel"].astype(bool)] if not b["jogadores"].empty else b["jogadores"]
+                if len(out):
+                    st.markdown(f"**Desfalques ({len(out)}):** " + "; ".join(f"{r.nome} ({r.indisponivel})" for r in out.itertuples()))
+                dv = b["jogadores"][b["jogadores"].get("duvida", "").astype(bool)] if "duvida" in b["jogadores"] else b["jogadores"].iloc[0:0]
+                if len(dv):
+                    st.markdown(f"**Dúvidas ({len(dv)}):** " + _grouped(dv.itertuples(), "duvida"))
+                st.markdown("**Por que cada jogador do rival deve começar**")
+                _xi_cards(xr, "#EF4444")
     with tabs[2]:
-        k1, k2 = st.columns(2)
-        with k1:
-            st.markdown("**Fragilidades por setor (dados dos últimos jogos)**")
-            for wk in weak[:6] or []:
-                st.markdown(f'<div class="fm-card" style="border-left:4px solid #F59E0B;border-radius:14px;padding:.55rem .9rem;'
-                            f'margin-bottom:.45rem">⚠️ {wk["texto"]}</div>', unsafe_allow_html=True)
-            if not weak:
-                st.caption("Nenhuma fragilidade clara por setor nos jogos recentes (sem desfalques, posições estáveis).")
-        with k2:
-            st.markdown("**Quem decide do lado deles**")
-            for t in M.threats(b):
-                st.markdown(f'<div class="fm-card" style="border-left:4px solid #EF4444;border-radius:14px;padding:.55rem .9rem;'
-                            f'margin-bottom:.45rem">🎯 <b>{t["nome"]}</b> ({t["papel"] or "?"}{", lado " + t["lado"] if t["lado"] else ""}): '
-                            f'{t["gols"]} gols e {t["assistencias"]} assistências nos últimos {len(b["jogos"])} jogos</div>',
-                            unsafe_allow_html=True)
-        try:                                           # rodada 5: estilo habitual e problemas que se repetem (pré-jogo)
-            from src.ui.pages.patterns import _history
+        if tabs[2].open is not False:          # rodada 27e: só a aba aberta é montada
+            k1, k2 = st.columns(2)
+            with k1:
+                st.markdown("**Fragilidades por setor (dados dos últimos jogos)**")
+                for wk in weak[:6] or []:
+                    st.markdown(f'<div class="fm-card" style="border-left:4px solid #F59E0B;border-radius:14px;padding:.55rem .9rem;'
+                                f'margin-bottom:.45rem">⚠️ {wk["texto"]}</div>', unsafe_allow_html=True)
+                if not weak:
+                    st.caption("Nenhuma fragilidade clara por setor nos jogos recentes (sem desfalques, posições estáveis).")
+            with k2:
+                st.markdown("**Quem decide do lado deles**")
+                for t in M.threats(b):
+                    st.markdown(f'<div class="fm-card" style="border-left:4px solid #EF4444;border-radius:14px;padding:.55rem .9rem;'
+                                f'margin-bottom:.45rem">🎯 <b>{t["nome"]}</b> ({t["papel"] or "?"}{", lado " + t["lado"] if t["lado"] else ""}): '
+                                f'{t["gols"]} gols e {t["assistencias"]} assistências nos últimos {len(b["jogos"])} jogos</div>',
+                                unsafe_allow_html=True)
+            try:                                           # rodada 5: estilo habitual e problemas que se repetem (pré-jogo)
+                from src.ui.pages.patterns import _history
 
-            hx = _history(rival, int(f["match_id"]) if f is not None else 0, version)
-            idn, vu = hx.get("identidade") or {}, hx.get("vulneraveis") or {}
-            if idn.get("tracos") or vu.get("padroes") or vu.get("sinais"):
-                st.markdown(f"**🧬 Como {rival} costuma jogar e onde costuma sofrer** (últimos {idn.get('jogos', 0)} jogos com estatísticas)")
-                for t_ in idn.get("tracos") or []:
-                    st.markdown(f"- {rival} {t_['traco']} — {t_['metrica']} {t_['media']} (normal {t_['referencia']}), em "
-                                f"{t_['frequencia_pct']}% dos jogos")
-                for p_ in vu.get("padroes") or []:
-                    st.markdown(f"- 🩹 **Padrão:** {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos) — explore isso")
-                for p_ in vu.get("sinais") or []:
-                    st.markdown(f"- ⚠️ Sinal: {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos)")
-        except Exception:
-            pass
-        lu = b["escalacoes"]
-        if lu is not None and not lu.empty:
-            with st.expander(f"Últimos jogos de {rival} usados na leitura"):
-                g = lu.drop_duplicates("match_id")[["data", "adversario", "home_score", "away_score", "competition_name", "formation"]]
-                comparison_table(g.rename(columns={"data": "Data", "adversario": "Adversário", "home_score": "Mandante",
-                                                   "away_score": "Visitante", "competition_name": "Competição",
-                                                   "formation": "Formação"}))
+                hx = _history(rival, int(f["match_id"]) if f is not None else 0, version)
+                idn, vu = hx.get("identidade") or {}, hx.get("vulneraveis") or {}
+                if idn.get("tracos") or vu.get("padroes") or vu.get("sinais"):
+                    st.markdown(f"**🧬 Como {rival} costuma jogar e onde costuma sofrer** (últimos {idn.get('jogos', 0)} jogos com estatísticas)")
+                    for t_ in idn.get("tracos") or []:
+                        st.markdown(f"- {rival} {t_['traco']} — {t_['metrica']} {t_['media']} (normal {t_['referencia']}), em "
+                                    f"{t_['frequencia_pct']}% dos jogos")
+                    for p_ in vu.get("padroes") or []:
+                        st.markdown(f"- 🩹 **Padrão:** {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos) — explore isso")
+                    for p_ in vu.get("sinais") or []:
+                        st.markdown(f"- ⚠️ Sinal: {p_['problema']} ({p_['jogos_acima']} de {p_['jogos']} jogos)")
+            except Exception:
+                pass
+            lu = b["escalacoes"]
+            if lu is not None and not lu.empty:
+                with st.expander(f"Últimos jogos de {rival} usados na leitura"):
+                    g = lu.drop_duplicates("match_id")[["data", "adversario", "home_score", "away_score", "competition_name", "formation"]]
+                    comparison_table(g.rename(columns={"data": "Data", "adversario": "Adversário", "home_score": "Mandante",
+                                                       "away_score": "Visitante", "competition_name": "Competição",
+                                                       "formation": "Formação"}))
     with tabs[3]:
-        from src.ui import vuln_view
+        if tabs[3].open is not False:          # rodada 27e: só a aba aberta é montada
+            from src.ui import vuln_view
 
-        st.caption(f"Onde {team} sofre — pontos a corrigir antes do jogo.")
-        out_me = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
-            if not a["jogadores"].empty and "indisponivel" in a["jogadores"] else []
-        vuln_view.render(team, me["names"], rv["names"], version, mine=True, where=w,
-                         lineup=[x.get("jogador") for x in xm if x.get("jogador")], out=out_me)
+            st.caption(f"Onde {team} sofre — pontos a corrigir antes do jogo.")
+            out_me = a["jogadores"][a["jogadores"]["indisponivel"].astype(bool)]["nome"].tolist() \
+                if not a["jogadores"].empty and "indisponivel" in a["jogadores"] else []
+            vuln_view.render(team, me["names"], rv["names"], version, mine=True, where=w,
+                             lineup=[x.get("jogador") for x in xm if x.get("jogador")], out=out_me)
     with tabs[4]:
-        c1, c2 = st.columns(2)
-        with c1:
-            import streamlit.components.v1 as components
+        if tabs[4].open is not False:          # rodada 27e: só a aba aberta é montada
+            c1, c2 = st.columns(2)
+            with c1:
+                import streamlit.components.v1 as components
 
-            from src.ui import drag_pitch
+                from src.ui import drag_pitch
 
-            used = {x.get("jogador") for x in xm}
-            pl = a["jogadores"] if a["jogadores"] is not None else pd.DataFrame()
-            bench = [{"nome": r["nome"], "nota": r.get("qualidade"), "papel_pt": str(r.get("papel") or "")}
-                     for r in pl.to_dict("records") if r.get("nome") not in used and not r.get("indisponivel")][:14]
-            components.html(drag_pitch.html(team, fm, xm, bench, M.weakness_tips(weak, b) if weak else []), height=760)
-            st.caption("Arraste, troque com o banco e mude a formação. As mudanças ficam neste navegador (não alteram a base).")
-        with c2:
-            render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
-                         use_container_width=True, key=f"{w}_pitch_r")
-            st.caption("Dentro do círculo: qualidade (0–100). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
+                used = {x.get("jogador") for x in xm}
+                pl = a["jogadores"] if a["jogadores"] is not None else pd.DataFrame()
+                bench = [{"nome": r["nome"], "nota": r.get("qualidade"), "papel_pt": str(r.get("papel") or "")}
+                         for r in pl.to_dict("records") if r.get("nome") not in used and not r.get("indisponivel")][:14]
+                components.html(drag_pitch.html(team, fm, xm, bench, M.weakness_tips(weak, b) if weak else []), height=760)
+                st.caption("Arraste, troque com o banco e mude a formação. As mudanças ficam neste navegador (não alteram a base).")
+            with c2:
+                render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
+                             use_container_width=True, key=f"{w}_pitch_r")
+                st.caption("Dentro do círculo: qualidade (0–100). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
     if pv.get("noticias"):
         with tabs[5]:
-            st.caption("Notícia, não dado confirmado.")
-            for nw in pv["noticias"]:
-                st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
+            if tabs[5].open is not False:
+                st.caption("Notícia, não dado confirmado.")
+                for nw in pv["noticias"]:
+                    st.markdown(f"**{nw['titulo']}** · {nw['data']}  \n{nw['resumo']}")
 
 
 def _tv(*teams) -> str:

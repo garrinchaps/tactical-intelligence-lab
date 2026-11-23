@@ -279,16 +279,18 @@ def render(_ctx=None) -> None:
         st.rerun()
     if p["clube"]:
         nav.link(f"🛡️ Ver o time: {p['clube']}", "time", key="player_team", name=p["clube"])
-    t0, t1, t5, t4, t2, t3 = st.tabs(["📋 Visão geral (olheiro)", "🗓️ Jogos com todos os lances", "📊 Scout por 90 min",
+    t0, t1, t5, t4, t2, t3 = st.tabs(["📋 Visão geral (olheiro)", "🗓️ Jogos", "📊 Scout por 90 min",
                                       "📚 Carreira (Transfermarkt)", "💶 Perfil e valor", "📈 Temporada (Understat)"],
                                      key=f"player_tabs_{p['core']}", on_change="rerun")
     with t0:
         if t0.open is not False:          # rodada 23: visão geral estilo FM com números medidos
-            _player_card(p["nome"], tuple(names), p["clube"])
             from src.scout import snapshot as S
             from src.ui import player_fm
 
             row = S.find_player(p["core"], names, p["clube"], pid=want_pid)
+            # rodada 27e: o cartão usa a MESMA qualidade, potencial e posição do Scout (antes: média da nota por jogo,
+            # "67 ponta" para o Bontempo e "75 centroavante" para o Mbappé)
+            _player_card(p["nome"], tuple(names), p["clube"], row=row)
             if row:
                 from src.analytics.rating_v2 import RATING_ENGINE_VERSION
 
@@ -299,89 +301,100 @@ def render(_ctx=None) -> None:
                            "minutos medidos pela FotMob/ESPN no último ano).")
             _youth_panel(tuple(names), get_service().db.stable_version())
     with t5:
-        _scout_tab(names)
+        if t5.open is not False:
+            _scout_tab(names, want_club or p["clube"] or "")
     with t4:
-        _career_tab(p["core"])
+        if t4.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
+            _career_tab(p["core"])
     with t1:
-        frames = [player_matches(n) for n in names]
-        pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
-        if not pm.empty:                                   # B4: mesmo jogo em duas fontes conta uma vez
-            from src.data_hub.player_resolver import merge_match_rows
+        if t1.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
+            frames = [player_matches(n) for n in names]
+            pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
+            if not pm.empty:                                   # B4: mesmo jogo em duas fontes conta uma vez
+                from src.data_hub.player_resolver import merge_match_rows
 
-            pm = merge_match_rows(pm)
-        if want_club and not pm.empty and "team_name" in pm:     # rodada 24: homônimo de outro clube fica de fora
-            pm = _same_club_rows(pm.rename(columns={"team_name": "clube"}), want_club).rename(columns={"clube": "team_name"})
-        if pm.empty:
-            empty_state("Nenhum jogo com lances deste atleta na base", "", "🗓️",
-                        "Os jogos com todos os lances vêm da StatsBomb/Wyscout.")
-        else:
-            pm = pm.sort_values("match_date", ascending=False)
-            k = st.columns(5)
-            k[0].metric("Jogos", len(pm))
-            k[1].metric("Gols", int(pm["gols"].sum()))
-            k[2].metric("xG", round(float(pm["xg"].sum()), 2))
-            k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
-            k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
-            notes = _ratings_block(pm, names)
-            for i, r in enumerate(pm.to_dict("records")):
-                a, b = st.columns([8, 1.3])
-                nt = (notes.get(int(r["match_id"])) or {}).get("nota") if notes else None
-                score = f"{int(r['home_score'])} – {int(r['away_score'])}" if pd.notna(r["home_score"]) else "x"
-                a.markdown(f'<div class="til-result"><div class="tm r">{r["home_team_name"]}</div><div class="sc">{score}</div>'
-                           f'<div class="tm">{r["away_team_name"]}</div><div class="meta">{r["competition_name"]}<br>'
-                           f'{r["match_date"]} · {int(r["acoes"])} ações · {int(r["gols"] or 0)} gol(s) · xG {r["xg"]}'
-                           + (f' · 🏅 {nt:.1f}' if nt is not None else '') + '</div></div>',
-                           unsafe_allow_html=True)
-                b.write("")
-                if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", use_container_width=True, type="primary"):
-                    st.session_state["team_focus"] = r["team_name"]
-                    nav.open_view("jogo", match_id=int(r["match_id"]))
+                pm = merge_match_rows(pm)
+            if want_club and not pm.empty and "team_name" in pm:     # rodada 24: homônimo de outro clube fica de fora
+                pm = _same_club_rows(pm.rename(columns={"team_name": "clube"}), want_club).rename(columns={"clube": "team_name"})
+            if pm.empty:
+                # rodada 27e: sem jogos com lances, mostra os jogos com ESTATÍSTICAS dele (FotMob/ESPN) — antes a aba ficava
+                # vazia para quase todo jogador do Brasil
+                bg = _box_games(tuple(names), want_club or p["clube"] or "", get_service().db.stable_version())
+                if bg.empty:
+                    empty_state("Nenhum jogo deste atleta com números na base", "", "🗓️",
+                                "Os jogos aparecem quando a FotMob/ESPN trazem os números por jogador da partida.")
+                else:
+                    _box_games_view(bg)
+            else:
+                pm = pm.sort_values("match_date", ascending=False)
+                k = st.columns(5)
+                k[0].metric("Jogos", len(pm))
+                k[1].metric("Gols", int(pm["gols"].sum()))
+                k[2].metric("xG", round(float(pm["xg"].sum()), 2))
+                k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
+                k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
+                notes = _ratings_block(pm, names)
+                for i, r in enumerate(pm.to_dict("records")):
+                    a, b = st.columns([8, 1.3])
+                    nt = (notes.get(int(r["match_id"])) or {}).get("nota") if notes else None
+                    score = f"{int(r['home_score'])} – {int(r['away_score'])}" if pd.notna(r["home_score"]) else "x"
+                    a.markdown(f'<div class="til-result"><div class="tm r">{r["home_team_name"]}</div><div class="sc">{score}</div>'
+                               f'<div class="tm">{r["away_team_name"]}</div><div class="meta">{r["competition_name"]}<br>'
+                               f'{r["match_date"]} · {int(r["acoes"])} ações · {int(r["gols"] or 0)} gol(s) · xG {r["xg"]}'
+                               + (f' · 🏅 {nt:.1f}' if nt is not None else '') + '</div></div>',
+                               unsafe_allow_html=True)
+                    b.write("")
+                    if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", use_container_width=True, type="primary"):
+                        st.session_state["team_focus"] = r["team_name"]
+                        nav.open_view("jogo", match_id=int(r["match_id"]))
     with t2:
-        try:
-            from src.data_lake.lake import Lake
+        if t2.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
+            try:
+                from src.data_lake.lake import Lake
 
-            lake = Lake(sqlite_path=None)
-            tm = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
-        except Exception:
-            tm = pd.DataFrame()
-        r = tm[tm["nome"].map(_norm) == p["core"]] if not tm.empty else tm
-        if want_club and len(r) > 1 and "clube" in r:           # rodada 24: homônimo → só o cadastro do clube certo
-            r = _same_club_rows(r, want_club)
-        if r.empty:
-            empty_state("Sem perfil do Transfermarkt", "", "💶", "python -m src.data_hub.sync --only transfermarkt lake")
-        else:
-            x = r.sort_values("ultima_temporada", ascending=False).iloc[0]
-            c = st.columns(5)
-            c[0].metric("Valor atual", f"€ {round((x.get('valor_mercado_eur') or 0) / 1e6, 1)} mi")
-            c[1].metric("Maior valor", f"€ {round((x.get('maior_valor_eur') or 0) / 1e6, 1)} mi")
-            c[2].metric("Posição", f"{x.get('funcao') or x.get('posicao') or '—'}")
-            c[3].metric("Nascimento", str(x.get("nascimento", "—"))[:10])
-            c[4].metric("Contrato até", str(x.get("fim_contrato", "—"))[:10])
-            if lake.exists("tm_valores"):
-                from src.squad import data as D
+                lake = Lake(sqlite_path=None)
+                tm = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
+            except Exception:
+                tm = pd.DataFrame()
+            r = tm[tm["nome"].map(_norm) == p["core"]] if not tm.empty else tm
+            if want_club and len(r) > 1 and "clube" in r:           # rodada 24: homônimo → só o cadastro do clube certo
+                r = _same_club_rows(r, want_club)
+            if r.empty:
+                empty_state("Sem perfil do Transfermarkt", "", "💶", "python -m src.data_hub.sync --only transfermarkt lake")
+            else:
+                x = r.sort_values("ultima_temporada", ascending=False).iloc[0]
+                c = st.columns(5)
+                c[0].metric("Valor atual", f"€ {round((x.get('valor_mercado_eur') or 0) / 1e6, 1)} mi")
+                c[1].metric("Maior valor", f"€ {round((x.get('maior_valor_eur') or 0) / 1e6, 1)} mi")
+                c[2].metric("Posição", f"{x.get('funcao') or x.get('posicao') or '—'}")
+                c[3].metric("Nascimento", str(x.get("nascimento", "—"))[:10])
+                c[4].metric("Contrato até", str(x.get("fim_contrato", "—"))[:10])
+                if lake.exists("tm_valores"):
+                    from src.squad import data as D
 
-                v = D.table("tm_valores", None, "transfermarkt_id", [x["transfermarkt_id"]]).sort_values("data")
-                if not v.empty:
-                    from src.ui import charts
+                    v = D.table("tm_valores", None, "transfermarkt_id", [x["transfermarkt_id"]]).sort_values("data")
+                    if not v.empty:
+                        from src.ui import charts
 
-                    render_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
-                                                 "Valor de mercado ao longo do tempo (€ mi, Transfermarkt)", "€ mi"),
-                                    use_container_width=True)
+                        render_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
+                                                     "Valor de mercado ao longo do tempo (€ mi, Transfermarkt)", "€ mi"),
+                                        use_container_width=True)
     with t3:
-        try:
-            from src.data_lake.lake import Lake
+        if t3.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
+            try:
+                from src.data_lake.lake import Lake
 
-            lake = Lake(sqlite_path=None)
-            us = lake.read("us_jogadores") if lake.exists("us_jogadores") else pd.DataFrame()
-        except Exception:
-            us = pd.DataFrame()
-        r = us[us["nome"].map(_norm) == p["core"]] if not us.empty else us
-        if r.empty:
-            empty_state("Sem dados do Understat", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
-        else:
-            cols = [c for c in ["temporada", "liga", "clube", "jogos", "minutos", "gols", "xG", "npxG", "assistencias", "xA",
-                                "chutes", "passes_chave", "xGChain", "xGBuildup"] if c in r.columns]
-            comparison_table(r[cols].sort_values("temporada", ascending=False), "Fonte: Understat.")
+                lake = Lake(sqlite_path=None)
+                us = lake.read("us_jogadores") if lake.exists("us_jogadores") else pd.DataFrame()
+            except Exception:
+                us = pd.DataFrame()
+            r = us[us["nome"].map(_norm) == p["core"]] if not us.empty else us
+            if r.empty:
+                empty_state("Sem dados do Understat", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
+            else:
+                cols = [c for c in ["temporada", "liga", "clube", "jogos", "minutos", "gols", "xG", "npxG", "assistencias", "xA",
+                                    "chutes", "passes_chave", "xGChain", "xGBuildup"] if c in r.columns]
+                comparison_table(r[cols].sort_values("temporada", ascending=False), "Fonte: Understat.")
 
 
 # ------------------------------------------------------------------------------------------------ scout e carreira
@@ -449,12 +462,111 @@ def player_scout(names: tuple) -> pd.DataFrame:
             return pd.DataFrame()
 
 
-def _scout_tab(names: List[str]) -> None:
+BOX_COLS = [("totalGoals", "Gols"), ("goalAssists", "Assist."), ("totalShots", "Finalizações"), ("xg", "xG"),
+            ("xa", "xA"), ("chances_created", "Chances criadas"), ("accurate_passes", "Passes certos"),
+            ("accurate_passes_total", "Passes"), ("passes_into_final_third", "Passes no terço final"),
+            ("dribbles_succeeded", "Dribles certos"), ("matchstats.headers.tackles", "Desarmes"),
+            ("interceptions", "Interceptações"), ("recoveries", "Recuperações"), ("aerials_won", "Aéreos ganhos"),
+            ("duel_won", "Duelos ganhos"), ("saves", "Defesas")]
+
+
+@st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=200)
+def _box_games(names: tuple, club: str, version: str) -> pd.DataFrame:
+    """Jogos do atleta com números por jogador (FotMob/ESPN), dos últimos 3 anos, só do clube pedido (homônimo de
+    outro clube não entra) e sem repetir a mesma partida de duas fontes."""
+    import json
+
+    from src.ui.context import get_service
+
+    if not names:
+        return pd.DataFrame()
+    ph = ",".join("?" * len(names))
+    since = (pd.Timestamp.today() - pd.Timedelta(days=3 * 365)).date().isoformat()
+    try:
+        with get_service().db.connect() as conn:
+            r = pd.read_sql_query(
+                f"""SELECT m.match_id, m.match_date, m.competition_name, m.home_team_name, m.away_team_name, m.home_score,
+                           m.away_score, m.data_source, p.team_name AS clube, p.player_name, p.minutes, p.rating, p.stats_json
+                    FROM match_player_stats p JOIN matches m ON m.match_id = p.match_id
+                    WHERE p.player_name IN ({ph}) AND m.match_date >= ?
+                    ORDER BY m.match_date DESC LIMIT 400""", conn, params=[*names, since])
+    except Exception:
+        return pd.DataFrame()
+    if r.empty:
+        return r
+    if club:
+        same = _same_club_rows(r, club)
+        try:
+            from src.squad.planner import national_team_key as _ntk
+
+            nat = r[r["clube"].map(lambda x: bool(_ntk(str(x or ""))))]       # jogos pela seleção também contam
+        except Exception:
+            nat = r.iloc[0:0]
+        r = pd.concat([same, nat]).drop_duplicates("match_id") if not same.empty else r
+    r = r.drop_duplicates(subset=["match_date", "clube"])                       # mesma partida em duas fontes
+    st_ = r["stats_json"].map(lambda x: json.loads(x) if x else {})
+    for k, _ in BOX_COLS:
+        r[k] = pd.to_numeric(st_.map(lambda d: d.get(k)), errors="coerce")
+    r["minutes"] = pd.to_numeric(r["minutes"], errors="coerce").combine_first(
+        pd.to_numeric(st_.map(lambda d: d.get("minutes")), errors="coerce"))
+    return r.drop(columns=["stats_json"]).sort_values("match_date", ascending=False).reset_index(drop=True)
+
+
+def _box_games_view(bg: pd.DataFrame) -> None:
+    k = st.columns(5)
+    k[0].metric("Jogos", len(bg))
+    k[1].metric("Minutos", int(bg["minutes"].fillna(0).sum()))
+    k[2].metric("Gols", int(bg["totalGoals"].fillna(0).sum()))
+    k[3].metric("Assistências", int(bg["goalAssists"].fillna(0).sum()))
+    nt = pd.to_numeric(bg["rating"], errors="coerce")
+    k[4].metric("Nota média (FotMob)", f"{nt.mean():.2f}".replace(".", ",") if nt.notna().any() else "—")
+    show = bg.copy()
+    show["Jogo"] = show["home_team_name"] + " " + show["home_score"].map(lambda x: "" if pd.isna(x) else str(int(x))) + \
+        " x " + show["away_score"].map(lambda x: "" if pd.isna(x) else str(int(x))) + " " + show["away_team_name"]
+    cols = {"match_date": "Data", "competition_name": "Competição", "Jogo": "Jogo", "clube": "Pelo time",
+            "minutes": "Minutos", "rating": "Nota", **dict(BOX_COLS)}
+    show = show[[c for c in cols if c in show]].rename(columns=cols)
+    show = show.loc[:, show.notna().any()]
+    comparison_table(show.head(60))
+    st.caption("Jogos com os números por jogador da FotMob/ESPN (sem todos os lances). Número que a fonte não mediu "
+               "aparece vazio, não como zero.")
+
+
+def _box_per90_view(bg: pd.DataFrame) -> None:
+    mins = float(bg["minutes"].fillna(0).sum())
+    k = st.columns(4)
+    k[0].metric("Jogos", len(bg))
+    k[1].metric("Minutos", f"{mins:.0f}")
+    k[2].metric("Minutos por jogo", f"{mins / max(len(bg), 1):.0f}")
+    k[3].metric("Gols / xG", f"{int(bg['totalGoals'].fillna(0).sum())} / {bg['xg'].fillna(0).sum():.2f}".replace(".", ","))
+    rows = []
+    for key, lab in BOX_COLS:
+        v = bg[key]
+        if v.notna().sum() == 0:
+            continue
+        m = float(bg.loc[v.notna(), "minutes"].fillna(0).sum())     # só os minutos dos jogos em que foi medido
+        if m <= 0:
+            continue
+        rows.append({"Indicador": lab, "Por 90": round(float(v.sum()) / m * 90, 2), "Total": round(float(v.sum()), 2),
+                     "Jogos medidos": int(v.notna().sum())})
+    if rows:
+        comparison_table(pd.DataFrame(rows))
+    st.caption("Por 90 minutos pelos números por jogador da FotMob/ESPN: cada indicador é dividido só pelos minutos dos "
+               "jogos em que a fonte o mediu.")
+
+
+def _scout_tab(names: List[str], club: str = "") -> None:
     sc = player_scout(tuple(names))
     if sc.empty:
-        empty_state("Sem jogos com lances deste atleta", "", "📊",
-                    "O scout por 90 minutos usa partidas com todos os lances (StatsBomb, Wyscout, OpenPlay). "
-                    "Abra jogos do atleta para que entrem na base.")
+        from src.ui.context import get_service
+
+        bg = _box_games(tuple(names), club, get_service().db.stable_version())
+        if bg.empty:
+            empty_state("Sem jogos com números deste atleta", "", "📊",
+                        "O scout por 90 minutos usa os lances (StatsBomb, Wyscout, OpenPlay) ou os números por jogador "
+                        "da FotMob/ESPN.")
+            return
+        _box_per90_view(bg)
         return
     sc = sc.fillna(0)
     minutes = (sc["m1"] - sc["m0"]).clip(lower=1, upper=125)        # tempo entre a 1ª e a última ação: estimativa
@@ -543,7 +655,7 @@ DIM_SHORT = [("ofensiva", "ATA"), ("criacao", "CRI"), ("progressao", "PRO"), ("d
 GK_SHORT = [("defesas", "DEF"), ("aereo", "AER"), ("distribuicao", "DIS"), ("seguranca", "SEG"), ("cobertura", "COB")]
 
 
-def _player_card(nome: str, names: tuple, club: str = "") -> None:
+def _player_card(nome: str, names: tuple, club: str = "", row: Optional[dict] = None) -> None:
     """
     Cartão no estilo FC/FIFA: qualidade = média da nota 3.0 nos últimos jogos com números por jogador;
     fase = últimos 5; regularidade = quanto a nota oscila. Atributos = média de cada dimensão (0–10 → 0–99).
@@ -567,6 +679,22 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
     fun = f["funcao"].mode().iloc[0]
     dims = GK_SHORT if fun == "goleiro" else DIM_SHORT
     tier = "#FBBF24" if q >= 7 else "#CBD5E1" if q >= 5.5 else "#B45309"
+    big, pot = int(round(9.9 * q)), None
+    role_txt = fun
+    if row:
+        rq = pd.to_numeric(pd.Series([row.get("qualidade")]), errors="coerce").iloc[0]
+        rp = pd.to_numeric(pd.Series([row.get("potencial")]), errors="coerce").iloc[0]
+        if pd.notna(rq):
+            big = int(round(float(rq)))
+            tier = "#FBBF24" if big >= 80 else "#CBD5E1" if big >= 68 else "#B45309"
+        if pd.notna(rp):
+            pot = int(round(float(rp)))
+        try:
+            from src.scout.engine import ROLE_LABELS
+
+            role_txt = ROLE_LABELS.get(str(row.get("papel") or ""), "") or str(row.get("funcao_legivel") or "") or fun
+        except Exception:
+            role_txt = fun
     attrs = "".join(
         f'<div style="display:flex;justify-content:space-between;gap:8px"><span style="color:#94A3B8">{lab}</span>'
         f'<b>{int(round(9.9 * float(f[k].dropna().mean())))}</b></div>' for k, lab in dims if k in f and f[k].notna().any())
@@ -584,17 +712,20 @@ def _player_card(nome: str, names: tuple, club: str = "") -> None:
         f'<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:stretch;margin:.4rem 0 1rem">'
         f'<div style="width:190px;background:linear-gradient(160deg,{tier}33,#0F1626 55%);border:2px solid {tier};'
         f'border-radius:18px;padding:14px 16px">'
-        f'<div style="font-size:2.6rem;font-weight:800;line-height:1;color:{tier}">{int(round(9.9 * q))}</div>'
-        f'<div style="font-size:.8rem;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em">{fun}</div>'
+        f'<div style="font-size:2.6rem;font-weight:800;line-height:1;color:{tier}">{big}</div>'
+        + (f'<div style="font-size:.85rem;color:#22D3EE;font-weight:700">POTENCIAL {pot}</div>' if pot is not None else "")
+        + f'<div style="font-size:.8rem;color:#CBD5E1;text-transform:uppercase;letter-spacing:.08em">{role_txt}</div>'
         f'<div style="font-weight:700;margin:6px 0 8px;color:#F5F7FB">{nome}</div>{attrs}</div>'
         f'<div style="flex:1;min-width:240px;background:#0F1626;border:1px solid #1E2A44;border-radius:18px;padding:14px 16px">'
-        f'<div style="color:#94A3B8;font-size:.8rem">QUALIDADE (média de {len(f)} jogos)</div>'
+        f'<div style="color:#94A3B8;font-size:.8rem">NOTA MÉDIA POR JOGO (0–10, {len(f)} jogos)</div>'
         f'<div style="font-size:1.6rem;font-weight:700">{q:.1f}</div>'
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">FASE (últimos {len(recent_scores)} jogos com nota) '
         f'<span style="color:{tcol}">{trend}</span></div><div style="font-size:1.3rem;font-weight:700">{fase:.1f}</div>'
         f'<div style="color:#94A3B8;font-size:.8rem;margin-top:6px">REGULARIDADE</div><div>{reg} (oscila ±{sd:.1f})</div>'
         f'<div style="margin-top:10px">{spark}</div></div></div>', unsafe_allow_html=True)
-    st.caption("Cartão = nota 3.0 por estatísticas individuais (FotMob), comparada com jogadores da mesma função. A qualidade e a fase usam a nota final; os atributos mostram as dimensões observadas. Sem dados de tracking, trabalho sem bola não observado não é inventado.")
+    st.caption("Número grande, potencial e posição = os mesmos do Scout (overall 0–100). Nota média, fase e regularidade = "
+               "nota 3.0 de cada jogo (0–10, estatísticas individuais contra a mesma função); os atributos mostram as "
+               "dimensões observadas. Sem tracking, o trabalho sem bola não observado não é inventado.")
 
 
 @st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=200)

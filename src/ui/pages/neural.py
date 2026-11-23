@@ -278,7 +278,10 @@ def _lab_ai_panel() -> None:
     st.markdown("#### 🏋️ Treinar a IA do Assistente (como a rede de perigo)")
     last = sel.meta["versions"][-1] if sel.meta.get("versions") else {}
     sug = TR.suggest(last)
-    st.caption("Sugestão da própria IA a partir do último treino: " + " · ".join(sug["porque"]))
+    _nx = TR.suggest_next(sel.meta.get("versions") or [])        # rodada 27e: sugestão nova a cada treino
+    sug = {**sug, "sugerido": {**sug["sugerido"], **_nx["sugerido"]}, "porque": _nx["porque"]}
+    st.caption("Sugestão da própria IA para o PRÓXIMO treino (pela evolução dos treinos): " + " · ".join(sug["porque"])
+               + ((" · evolução: " + " → ".join(_nx["evolucao"])) if _nx.get("evolucao") else ""))
     # rodada 25b: cada controle com o (i) — o que é, alto × baixo e a recomendação para o estado atual
     try:
         n_q = len(set(TR.build_dataset()[3].tolist()))

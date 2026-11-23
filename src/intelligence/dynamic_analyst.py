@@ -198,6 +198,10 @@ def _fmt(v: Any) -> str:
     return str(v)
 
 
+_TL_PT = {"Goal": "gol", "Yellow Card": "amarelo", "Red Card": "vermelho", "Substitution": "substituição",
+          "Second Yellow": "segundo amarelo", "Own Goal": "gol contra", "Penalty": "pênalti", "Var": "VAR"}
+
+
 class LocalScopedWriter:
     """Redator local: só escreve sobre os blocos calculados para a pergunta."""
 
@@ -1291,7 +1295,9 @@ class LocalScopedWriter:
         tl = b.get("linha_do_tempo_no_recorte") or []
         if tl:
             out.append("**Lances no recorte:** " + "; ".join(
-                f"{e['minuto']}'{('+' + str(e['acrescimo'])) if e.get('acrescimo') else ''} {e['tipo']} — {e['jogador']} ({e['equipe']})"
+                (f"{e['minuto']}'" if e.get("minuto") is not None else "minuto não informado")
+                + (f"+{int(e['acrescimo'])}" if e.get("acrescimo") == e.get("acrescimo") and e.get("acrescimo") else "")
+                + f" {_TL_PT.get(str(e['tipo']), e['tipo'])} — {e.get('jogador') or 'jogador não informado'} ({e['equipe']})"
                 for e in tl[:12]) + ".")
         for p in b.get("atletas_citados") or []:
             out.append(PL.player_summary({k: v for k, v in p.items() if k != "_equipe"}, str(p.get("_equipe") or "")))
