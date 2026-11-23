@@ -483,12 +483,45 @@ def _merge_roster(roster, _universe, team=None, version=""):
             if col in lookup:
                 mapped = r["_core"].map(lookup[col])
                 r[col] = r[col].combine_first(mapped) if col in r else mapped
+        # rodada 27: atleta achado no universo NESTE clube → valor e idade do universo mandam (o cadastro do elenco
+        # trazia o valor de um homônimo: Otávio goleiro do Cruzeiro com € 500 mil de outro Otávio)
+        if team and "clube" in universe:
+            own_cores = set(own["_core"].astype(str)) if "own" in locals() else set()
+            hit = r["_core"].isin(own_cores)
+            for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque"):
+                if col in lookup and hit.any():
+                    r.loc[hit, col] = r.loc[hit, "_core"].map(lookup[col]).combine_first(
+                        r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object))
     r = _fill_from_club_games(r, universe, team)
     if "qualidade" not in r:
         r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
     else:
         r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(
             pd.to_numeric(r.get("nota"), errors="coerce"))
+    # rodada 27: quem ainda ficou sem POTENCIAL (nome não achado no universo) → busca pelo clube no universo; sem
+    # isso, potencial estimado pela idade e pela nota (marcado), em vez de vazio
+    try:
+        from src.scout import snapshot as S
+
+        pot = pd.to_numeric(r.get("potencial"), errors="coerce") if "potencial" in r else pd.Series(np.nan, index=r.index)
+        for i in r.index[pot.isna()]:
+            row = S.find_player(str(r.at[i, "_core"]), [str(r.at[i, "nome"])], str(team or ""))
+            if row and pd.notna(pd.to_numeric(row.get("potencial"), errors="coerce")):
+                for col in ("potencial", "potencial_porque", "qualidade", "valor_mercado_eur", "idade"):
+                    v = row.get(col)
+                    if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                        r.at[i, col] = v
+        pot = pd.to_numeric(r.get("potencial"), errors="coerce")
+        miss = pot.isna() & pd.to_numeric(r.get("qualidade"), errors="coerce").notna()
+        if miss.any():
+            from src.scout.potential import age_growth
+
+            q_ = pd.to_numeric(r.loc[miss, "qualidade"], errors="coerce")
+            g_ = age_growth(pd.to_numeric(r.loc[miss, "idade"], errors="coerce")) * .7
+            r.loc[miss, "potencial"] = (q_ + g_).clip(upper=93).round(0)
+            r.loc[miss, "potencial_porque"] = "ESTIMADO pela idade e pela nota (atleta fora do universo do Scout)"
+    except Exception:
+        pass
     return r
 
 
@@ -736,6 +769,52 @@ def _reset_keys(prefix: str) -> None:
     for k in list(st.session_state.keys()):
         if str(k).startswith(prefix) and not str(k).endswith("reset"):
             del st.session_state[k]
+
+
+# posição pedida → posições próximas que aparecem junto (com a ressalva de não ser a original)
+SECONDARY_ROLES = {"LB": ("LWB",), "RB": ("RWB",), "LWB": ("LB", "LM"), "RWB": ("RB", "RM"), "LW": ("LM",),
+                   "RW": ("RM",), "LM": ("LW", "LWB"), "RM": ("RW", "RWB"), "DM": ("CM",), "CM": ("DM", "AM"),
+                   "AM": ("CM",), "ST": ("CF",), "CF": ("ST",)}
+
+
+def _starter_quality(roster: pd.DataFrame) -> Dict[str, float]:
+    """Qualidade do titular atual de cada posição (o melhor do elenco na posição)."""
+    if roster is None or roster.empty or "papel" not in roster:
+        return {}
+    q = pd.to_numeric(roster.get("qualidade"), errors="coerce")
+    return {str(k): float(v) for k, v in q.groupby(roster["papel"]).max().items() if pd.notna(v)}
+
+
+def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float):
+    """Rodada 27 — três perfis de contratação, cada um com 3 nomes:
+      🌱 jovens promessas (≤ 21, potencial acima do titular, custo até 60% da verba);
+      📈 para investir (22–26, já perto do titular e crescendo, custo até a verba);
+      ⭐ para chegar e jogar (melhor que o titular hoje, até 31 anos, até 120% da verba — os mais caros).
+    Quem é pior que o titular e não é promessa não entra aqui (era o caso de 65 sugerido para o lugar de um 79)."""
+    if ranked is None or ranked.empty:
+        return []
+    d = ranked.copy()
+    role = d.get("papel_alvo", d.get("papel")).astype(str)
+    tq = _starter_quality(roster)
+    starter = role.map(tq).astype(float)
+    q = pd.to_numeric(d.get("qualidade"), errors="coerce")
+    pot = pd.to_numeric(d.get("potencial", d.get("potencial_teto")), errors="coerce")
+    age = pd.to_numeric(d.get("idade"), errors="coerce")
+    val = pd.to_numeric(d.get("valor_mercado_eur"), errors="coerce")
+    b = budget if budget and budget > 0 else np.inf
+    ref = starter.fillna(q.quantile(.6) if q.notna().any() else 70)
+    order = pd.to_numeric(d.get("score_scout"), errors="coerce").fillna(0)
+    young = d[(age <= 21) & (pot >= ref + 2) & (val.isna() | (val <= .6 * b))]
+    young = young.loc[(pot[young.index] * 2 + order[young.index] / 10).sort_values(ascending=False).index].head(3)
+    invest = d[age.between(22, 26) & (q >= ref - 3) & (pot >= ref + 2) & (val.isna() | (val <= b))
+               & ~d.index.isin(young.index)]
+    invest = invest.loc[((pot - q)[invest.index] + q[invest.index] + order[invest.index] / 20).sort_values(ascending=False).index].head(3)
+    ready = d[(q >= ref + 1) & (age <= 31) & (val.isna() | (val <= 1.2 * b))
+              & ~d.index.isin(young.index) & ~d.index.isin(invest.index)]
+    ready = ready.loc[(q[ready.index] * 2 + order[ready.index] / 10).sort_values(ascending=False).index].head(3)
+    return [("🌱 Jovens promessas", "até 21 anos, potencial acima do titular atual da posição e preço até 60% da verba", young),
+            ("📈 Para investir", "22 a 26 anos, já perto do titular e com espaço para crescer, dentro da verba", invest),
+            ("⭐ Para chegar e jogar", "melhores que o titular atual HOJE, até 31 anos — os mais caros, até 120% da verba", ready)]
 
 
 def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
@@ -1113,7 +1192,7 @@ def render(_ctx=None):
     tabs = st.tabs(tab_names, key="scout_tabs", default="IA · Top 5", on_change="rerun")
     with tabs[0]:
         if tabs[0].open is not False:          # rodada 21: só a aba aberta é montada
-            st.markdown("#### Cinco nomes priorizados")
+            st.markdown("#### Sugestões por perfil")
             if feedback.get("amostra"):
                 st.caption(f"A recomendação considerou {feedback['amostra']} rejeição(ões) anteriores deste clube.")
             st.caption("Qualidade estatística por função + urgência + realismo + compatibilidade + sinergia. Abra cada dossiê para ver as evidências.")
@@ -1128,7 +1207,29 @@ def render(_ctx=None):
                 with st.expander("🎛️ Filtros dos cinco nomes (idade, qualidade, valor, nacionalidade)", expanded=False):
                     f5 = _ai_filter_form("scout_top5", nations, aff)
                 top5 = _apply_ai_filters(ranked, f5)
-                for idx, row in top5.head(5).iterrows():
+                # rodada 27: sugestões POR PERFIL, sempre contra o titular atual da posição e a verba da janela
+                budget0 = float(financial.get("orcamento_proxy_eur") or 0) / 1e6
+                bc1, bc2 = st.columns([1, 2])
+                budget_m = bc1.number_input("Verba para a janela (€ mi)", 0.0, 500.0, round(budget0, 1), 0.5,
+                                            key=f"scout_budget_{_slug(team)}",
+                                            help="Estimada pelas maiores compras do clube nos últimos 5 anos e pelo valor "
+                                                 "do time titular. Ajuste se souber a verba real.")
+                bc2.caption(f"Estimativa do laboratório: € {budget0:.1f} mi por contratação grande "
+                            f"(o que o clube já provou que paga). Não é orçamento oficial nem inclui salários.")
+                groups = _profile_groups(top5, roster, budget_m * 1e6)
+                shown = set()
+                for title, sub, df in groups:
+                    st.markdown(f"##### {title}")
+                    st.caption(sub)
+                    if df.empty:
+                        st.caption("Ninguém na base atende a este perfil com os filtros e a verba atuais.")
+                        continue
+                    for idx, row in df.iterrows():
+                        shown.add(idx)
+                        _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
+                st.markdown("##### 🎯 Outras opções da IA")
+                rest = top5[~top5.index.isin(shown)]
+                for idx, row in rest.head(3).iterrows():
                     _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
                 if top5.empty:
                     st.info("Nenhum atleta atende aos filtros atuais. Amplie a faixa ou use a busca manual.")
@@ -1306,7 +1407,15 @@ def render(_ctx=None):
                     filt = filt[filt["nome"].astype(str).map(_pc).str.contains(_k, regex=False, na=False)]
                 if origin != "Todas" and "origem" in filt:
                     filt = filt[E.origin_match(filt["origem"], origin)]
-                if rf!="Todas": filt=filt[filt["papel"]==rf]
+                if rf!="Todas":
+                    # rodada 27: posição parecida também entra (lateral esquerdo traz o ala esquerdo), com a ressalva
+                    near = SECONDARY_ROLES.get(rf, ())
+                    filt = filt[filt["papel"].isin((rf,) + tuple(near))].copy()
+                    alt = filt["papel"] != rf
+                    filt["obs_posicao"] = ""
+                    if alt.any():
+                        filt.loc[alt, "obs_posicao"] = filt.loc[alt, "papel"].map(
+                            lambda r_: f"joga de {_role(r_)} — {_role(rf)} não é a posição original")
                 _ag=np.floor(pd.to_numeric(filt["idade"],errors="coerce")); filt=filt[_ag.isna()|_ag.between(amin,amax)]
                 _q=pd.to_numeric(filt["qualidade"],errors="coerce")
                 if qmin>0: filt=filt[_q.reindex(filt.index).fillna(0)>=qmin]
@@ -1325,9 +1434,9 @@ def render(_ctx=None):
                 st.caption(f"{len(filt):,} atletas dentro dos filtros.".replace(",","."))
                 if "potencial" not in filt and "potencial_teto" in filt:
                     filt = filt.assign(potencial=filt["potencial_teto"])
-                cols = [x for x in ("nome","papel","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
+                cols = [x for x in ("nome","papel","obs_posicao","idade","clube","clube_liga","nacionalidade","valor_mercado_eur",
                                     "qualidade","potencial","nota_rankings","confianca_pct","minutos_12m","rating_12m") if x in filt]
-                display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","idade":"Idade","clube":"Clube",
+                display=filt[cols].rename(columns={"nome":"Jogador","papel":"Posição","obs_posicao":"Observação","idade":"Idade","clube":"Clube",
                     "clube_liga":"Liga","nota_rankings":"Nota dos Rankings","potencial":"Potencial",
                     "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
                     "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)

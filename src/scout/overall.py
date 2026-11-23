@@ -752,6 +752,11 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
             p["potencial_piso_base"] = p["potencial_piso_base"].fillna(False).astype(bool) | low
         for c in p.columns:
             d[c] = p[c]
+        # rodada 27: o topo do potencial pela COLOCAÇÃO (como o overall) — antes muita gente batia no teto 95 (Bellingham,
+        # Doué, Güler, Cubarsí, Karl…). Agora só o 1º chega a 95; o 2º ~93,5, 5º 92, 10º 91, 25º 90, 60º 89.
+        raw = (q + pd.to_numeric(d.get("potencial_crescimento"), errors="coerce")).where(q.notna(), _col(d, "potencial"))
+        raw = pd.concat([raw, _col(d, "potencial")], axis=1).max(axis=1)
+        d["potencial"] = top_potential_ladder(raw).where(_col(d, "potencial").notna())
         # potencial nunca abaixo do overall de hoje
         d["potencial"] = pd.concat([_col(d, "potencial"), q], axis=1).max(axis=1).where(_col(d, "potencial").notna())
         d["potencial_teto"] = d["potencial"]
@@ -759,6 +764,23 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
     except Exception:
         pass
     return _recompute_potential_old(d)
+
+
+POT_LADDER_R = [1, 2, 3, 5, 10, 25, 60, 150]
+POT_LADDER_O = [95, 93.5, 93, 92, 91, 90, 89, 88]
+
+
+def top_potential_ladder(raw: pd.Series) -> pd.Series:
+    """Potenciais acima de 88 viram colocação: o maior (sem teto, idade × talento) leva 95; os outros descem pela escada.
+    Abaixo de 88 nada muda."""
+    out = pd.to_numeric(raw, errors="coerce").copy()
+    top = out[out >= 88].sort_values(ascending=False)
+    if top.empty:
+        return out
+    rank = np.arange(1, len(top) + 1)
+    lad = np.interp(np.log(rank), np.log(POT_LADDER_R), POT_LADDER_O)
+    out.loc[top.index] = np.minimum(top.values, np.maximum(lad, 88.0)).round(0)
+    return out.clip(upper=95)
 
 
 def _recompute_potential_old(d: pd.DataFrame) -> pd.DataFrame:

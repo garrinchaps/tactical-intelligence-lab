@@ -158,6 +158,14 @@ def splash_gate(state: Dict[str, Any]) -> bool:
 
     if state.get("done") or st.session_state.get("_warm_skip"):
         return True
+    # rodada 27: só espera o ESSENCIAL (base + Scout) e no máximo 25 s — times e jogos recentes continuam sendo
+    # preparados em segundo plano com o app já aberto (antes a tela ficou 6 min em "Times que você abriu por último")
+    steps = state.get("steps") or []
+    essential = [s_ for s_ in steps if str(s_.get("nome", "")).startswith(("Abrindo a base", "Mercado do Scout"))]
+    if (essential and all(s_.get("status") not in ("fila", "rodando") for s_ in essential)) or \
+            (time.time() - float(state.get("t0") or time.time())) > 25:
+        st.session_state["_warm_skip"] = True
+        return True
     st.markdown(splash_html(state), unsafe_allow_html=True)
     _, mid, _ = st.columns([2, 1, 2])
     if mid.button("Entrar agora", use_container_width=True, key="til_warm_skip"):

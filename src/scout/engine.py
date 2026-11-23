@@ -1932,10 +1932,17 @@ def buyer_financial_profile(db, club: Optional[Dict[str, Any]], roster: pd.DataF
         fees = [x for x in fees if x is not None and x > 0]
     median_fee = float(np.median(fees)) if fees else None
     max_fee = float(max(fees)) if fees else None
-    proxy = median_fee or (max_fee * .55 if max_fee else None) or (xi_value * .22 if xi_value else None) or \
-            (squad_value * .10 if squad_value else None)
-    low = proxy * .55 if proxy else None
-    high = proxy * 1.65 if proxy else None
+    # rodada 27: a MEDIANA das compras subestimava o clube (Cruzeiro com 4,2 mi, mas já pagou ~20 mi): muitas compras
+    # baratas puxam a mediana para baixo. Capacidade = o que o clube JÁ PROVOU que paga numa compra grande — 85% da
+    # maior taxa ou o percentil 80 das compras (o que for maior), conferido pelo valor do elenco titular.
+    p80 = float(np.percentile(fees, 80)) if len(fees) >= 3 else None
+    by_fees = max([x for x in (.85 * max_fee if max_fee else None, p80) if x], default=None)
+    by_squad = (xi_value * .12) if xi_value else ((squad_value * .08) if squad_value else None)
+    proxy = by_fees or by_squad
+    if by_fees and by_squad:
+        proxy = max(by_fees, .6 * by_squad)
+    low = (median_fee or (proxy * .3 if proxy else None)) if proxy else None
+    high = max(proxy * 1.25, max_fee or 0) if proxy else None
     vals = pd.to_numeric(roster.get("valor_mercado_eur"), errors="coerce").dropna() if not roster.empty else pd.Series(dtype=float)
     quals = pd.to_numeric(roster.get("qualidade"), errors="coerce").dropna() if not roster.empty else pd.Series(dtype=float)
     return {

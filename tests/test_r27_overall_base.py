@@ -133,3 +133,24 @@ def test_treino_rotula_fatos_do_jogador_citado(tmp_path):
     shown.write_text(json.dumps(row) + "\n", encoding="utf-8")
     X, y, w, g, src = build_dataset(shown, tmp_path / "fb.jsonl")
     assert len(y) == 2 and sorted(y.tolist()) == [0.0, 1.0]
+
+
+def test_so_o_primeiro_potencial_chega_a_95():
+    from src.scout.overall import top_potential_ladder
+
+    out = top_potential_ladder(pd.Series([103, 99, 98, 97, 96, 85]))
+    assert (out == 95).sum() == 1 and out.iloc[-1] == 85
+
+
+def test_sugestoes_por_perfil_respeitam_titular_e_verba():
+    from src.ui.pages.scout import _profile_groups
+
+    roster = pd.DataFrame({"papel": ["AM"], "qualidade": [79]})
+    ranked = pd.DataFrame({
+        "nome": ["Jovem", "Investe", "Pronto", "Fraco"], "papel_alvo": ["AM"] * 4,
+        "idade": [19, 24, 28, 26], "qualidade": [70, 77, 82, 65], "potencial": [86, 84, 83, 66],
+        "valor_mercado_eur": [3e6, 12e6, 22e6, .3e6], "score_scout": [70, 70, 70, 90]})
+    g = {t: set(df["nome"]) for t, _, df in _profile_groups(ranked, roster, 20e6)}
+    assert "Jovem" in g["🌱 Jovens promessas"] and "Investe" in g["📈 Para investir"]
+    assert "Pronto" in g["⭐ Para chegar e jogar"]
+    assert all("Fraco" not in v for v in g.values())

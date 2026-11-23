@@ -779,6 +779,20 @@ Rodada 27c (23/11/2026, 536 testes verdes) — informações faltando, fundo da 
   errados (`trainer._cited_players`).
 - Fotografia v17; passos `scout_v17`/`rankings_r27c`.
 
+Rodada 27d (23/11/2026, 538 testes verdes) — abertura, sugestões do Scout, potencial do topo:
+- ✅ Abertura: a tela de carregamento espera só o ESSENCIAL (base + Scout) e no máximo 25 s; times/jogos recentes
+  seguem em segundo plano (`loading.splash_gate`) — antes ficou 6 min em "Times que você abriu por último".
+- ✅ Verba do clube (`engine.buyer_financial_profile`): 85% da maior compra dos 5 anos ou P80 das compras (não mais a
+  mediana — Cruzeiro aparecia com 4,2 mi), conferida pelo valor do XI; campo "Verba para a janela" editável no Scout.
+- ✅ Sugestões por perfil (`scout._profile_groups`): 🌱 3 jovens promessas (≤ 21, potencial > titular +2, até 60% da verba),
+  📈 3 para investir (22–26, ≥ titular −3, potencial > titular +2), ⭐ 3 para chegar e jogar (≥ titular +1, ≤ 31, até
+  120% da verba); quem é pior que o titular e não é promessa não entra (era o Martegani 65 para o lugar do M. Pereira 79).
+- ✅ Busca manual: posição parecida entra junto (lateral esquerdo traz ala esquerdo…) com coluna "Observação".
+- ✅ Elenco do Scout: potencial/valor/idade do universo para quem é do PRÓPRIO clube (Otávio com valor de homônimo e sem
+  potencial); sem linha no universo → `find_player` pelo clube → potencial ESTIMADO pela idade e nota (marcado).
+- ✅ Potencial do topo pela colocação (`overall.top_potential_ladder`: 1º 95, 2º 93,5, 5º 92, 10º 91, 25º 90, 60º 89) —
+  só um jogador chega a 95. Fotografia v18; passo `scout_v18`.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial
