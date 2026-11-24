@@ -191,17 +191,19 @@ def test_busy_background_waits_for_page():
     assert order == ["pagina", "fundo"]
 
 
-def test_old_snapshot_used_as_is(tmp_path, monkeypatch):
+def test_old_snapshot_is_migrated_into_current_version(tmp_path, monkeypatch):
     import pandas as pd
 
     from src.scout import snapshot as S
 
     old = tmp_path / "old.pkl"
+    current = tmp_path / "nova.pkl"
     pd.to_pickle({"universe": pd.DataFrame({"nome": ["A"]})}, old)
-    monkeypatch.setattr(S, "SNAP_PATH", tmp_path / "nova.pkl")
+    monkeypatch.setattr(S, "SNAP_PATH", current)
     monkeypatch.setattr(S, "OLD_SNAPS", [old])
     d = S.load()
-    assert d["parcial"] and d["universe"]["nome"].tolist() == ["A"] and not (tmp_path / "nova.pkl").exists()
+    assert d["parcial"] and d["universe"]["nome"].tolist() == ["A"]
+    assert current.exists()
 
 
 def test_bg_fetch_runs_once_and_off_the_click():
