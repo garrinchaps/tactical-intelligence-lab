@@ -184,3 +184,26 @@ def test_find_player_does_not_treat_transfermarkt_past_club_as_current_club(monk
 
     assert S.find_player("otavio costa", ["Otávio Costa"], "Cruzeiro", age=20)["qualidade"] == 64
     assert S.find_player("otavio costa", ["Otávio Costa"], "FC Porto", age=20) is None
+
+
+def test_source_profile_short_name_uses_age_to_disambiguate_same_club_candidates():
+    from src.ui.pages.players_search import _source_rows_for_player
+
+    rows = pd.DataFrame({
+        "transfermarkt_id": [222, 333],
+        "nome": ["Otávio Costa", "Otávio Silva"],
+        "clube": ["Cruzeiro", "Cruzeiro"],
+        "nascimento": ["2006-04-10", "1995-02-09"],
+    })
+    found = _source_rows_for_player(rows, ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
+    assert found["transfermarkt_id"].astype(str).tolist() == ["222"]
+
+
+def test_scout_roster_short_name_uses_age_to_disambiguate_same_club_candidates():
+    from src.ui.pages.scout import _resolve_roster_name_cores
+
+    resolved = _resolve_roster_name_cores(
+        ["Otávio"], ["Otávio Costa", "Otávio Silva"],
+        roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [20], "Otávio Silva": [31]},
+    )
+    assert resolved["Otávio"] == "Otávio Costa"
