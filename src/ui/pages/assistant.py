@@ -121,7 +121,15 @@ def _answer(question: str, current_context, use_llm: bool):
     from src.guard.present import present
 
     present(res)                                        # confere os números; trechos sem origem saem do texto
-    if st.session_state.get("lab_ai_on", True):          # rodada 11: a NOSSA IA responde direto ou não acrescenta nada
+    from src.intelligence import player_line as PL
+
+    intro_teams = [meta.get("home_team_name") or "", meta.get("away_team_name") or ""]
+    match_only = PL.is_match_intro(question, intro_teams)
+    if match_only:
+        # A frase só seleciona o contexto. Não antecipa estatísticas, gols ou sugestões.
+        res["report_markdown"] = PL.match_intro({}, meta, [])
+        res["engine_used"] = "confirmação da partida"
+    if not match_only and st.session_state.get("lab_ai_on", True):          # rodada 11: a NOSSA IA responde direto ou não acrescenta nada
         try:
             from src.intelligence.lab_ai import direct as DIRECT
             from src.intelligence.lab_ai import engine as LAB
