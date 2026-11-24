@@ -347,11 +347,11 @@ def render(_ctx=None) -> None:
             row = profile_scout
             # rodada 27e: o cartão usa a MESMA qualidade, potencial e posição do Scout (antes: média da nota por jogo,
             # "67 ponta" para o Bontempo e "75 centroavante" para o Mbappé)
-            _player_card(p["nome"], tuple(names), p["clube"], row=row)
+            _player_card(p["nome"], tuple(source_names), profile_club, row=row)
             if row:
                 from src.analytics.rating_v2 import RATING_ENGINE_VERSION
 
-                form = _form_data(tuple(names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, p["clube"] or "")
+                form = _form_data(tuple(source_names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, profile_club)
                 player_fm.overview(row, key=f"pfm_{p['core']}", form=form)
             else:
                 st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
@@ -359,13 +359,13 @@ def render(_ctx=None) -> None:
             _youth_panel(tuple(source_names), get_service().db.stable_version(), expected_age)
     with t5:
         if t5.open is not False:
-            _scout_tab(names, profile_club)
+            _scout_tab(source_names, profile_club)
     with t4:
         if t4.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
             _career_tab(p["core"], source_names, p["clube"], expected_age)
     with t1:
         if t1.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
-            frames = [player_matches(n) for n in names]
+            frames = [player_matches(n) for n in source_names]
             pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
             if not pm.empty:                                   # B4: mesmo jogo em duas fontes conta uma vez
                 from src.data_hub.player_resolver import merge_match_rows
@@ -392,7 +392,7 @@ def render(_ctx=None) -> None:
                 k[2].metric("xG", round(float(pm["xg"].sum()), 2))
                 k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
                 k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
-                notes = _ratings_block(pm, names)
+                notes = _ratings_block(pm, source_names)
                 for i, r in enumerate(pm.to_dict("records")):
                     a, b = st.columns([8, 1.3])
                     nt = (notes.get(int(r["match_id"])) or {}).get("nota") if notes else None
