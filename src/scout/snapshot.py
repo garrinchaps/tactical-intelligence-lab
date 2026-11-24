@@ -457,7 +457,7 @@ def _age_scoped_rows(frame: pd.DataFrame, age: Optional[float]) -> pd.DataFrame:
         return frame
     known = pd.to_numeric(frame["idade"], errors="coerce")
     if known.notna().any():
-        return frame[known.isna() | ((known - float(age)).abs() <= 1)]
+        return frame[known.notna() & ((known - float(age)).abs() <= 1)]
     return frame
 
 
