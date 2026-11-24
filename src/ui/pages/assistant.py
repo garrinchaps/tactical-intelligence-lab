@@ -14,7 +14,7 @@ from typing import Any
 import streamlit as st
 
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
-from src.ui.components import hero, note
+from src.ui.components import hero
 from src.ui.context import chosen_levels
 
 EXAMPLES = [
@@ -285,9 +285,6 @@ def render(current_context, match_bar) -> None:
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked or st.session_state.pop("_ask_from_trainer", None)
     if not question:
-        if history:
-            note("Dica", "A conversa fica neste jogo. Para mudar, cite os dois times com “x” e o ano (ex.: “Flamengo x "
-                         "Palmeiras 2025”), escreva “trocar de jogo” ou use 🔄 em Opções do assistente.")
         return
     with st.spinner("Encontrando o jogo, recortando os dados e redigindo..."):
         try:
