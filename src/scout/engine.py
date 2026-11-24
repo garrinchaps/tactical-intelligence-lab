@@ -3454,7 +3454,17 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
             drop.add(e)
     if not drop:
         return u
-    d["apelidos_core"] = pd.Series({i: "|".join(v) for i, v in aliases.items()}).reindex(d.index)
+    # Não perder aliases de fusões anteriores quando a fotografia já foi normalizada parcialmente.
+    prior: Dict[Any, List[str]] = {}
+    if "apelidos_core" in d:
+        for i, value in d["apelidos_core"].items():
+            if _safe_str(value):
+                prior[i] = [x for x in str(value).split("|") if x]
+    for i, values in aliases.items():
+        prior.setdefault(i, []).extend(values)
+    d["apelidos_core"] = pd.Series(
+        {i: "|".join(dict.fromkeys(values)) for i, values in prior.items()}
+    ).reindex(d.index)
     return d.drop(index=list(drop))
 
 
