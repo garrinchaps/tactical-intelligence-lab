@@ -9,6 +9,8 @@ Cada resposta passa pelo guard de números; o modelo de perigo campeão é usado
 from __future__ import annotations
 
 import re
+from typing import Any
+
 import streamlit as st
 
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
