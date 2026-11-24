@@ -306,7 +306,7 @@ def test_cross_source_duplicate_reconciliation_is_generic():
     assert merged.iloc[0]["clube"] == "Club A"
     assert merged.iloc[0]["qualidade"] == 81
     assert merged.iloc[0]["potencial"] == 88
-    assert str(merged.iloc[0]["transfermarkt_id"]) == "200"
+    assert pd.to_numeric(merged.iloc[0]["transfermarkt_id"]) == 200
 
 
 def test_cross_source_reconciliation_rejects_homonyms_and_biographical_conflicts():
