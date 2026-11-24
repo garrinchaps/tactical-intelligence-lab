@@ -183,7 +183,7 @@ def newest_old() -> Optional[Path]:
     return None
 
 
-IDENTITY_VERSION = "r27j"          # muda quando as regras de "mesmo atleta" mudam
+IDENTITY_VERSION = "r27k"          # muda quando as regras de "mesmo atleta" mudam
 
 
 def load() -> Optional[Dict[str, Any]]:
