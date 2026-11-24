@@ -468,9 +468,16 @@ def _resolve_roster_name_cores(roster_names, scout_names):
         tokens = set(core.split())
         if not name or not tokens:
             continue
-        candidates = [n for n in targets if tokens < set(target_cores[n].split()) and tokens <= set(target_cores[n].split())]
+        candidates = [n for n in targets if tokens < set(target_cores[n].split())]
         if len(candidates) == 1:
             out[name] = candidates[0]
+            continue
+        # Complementa nomes abreviados por inicial + sobrenome (ex.: M. Henrique).
+        if name:
+            from src.squad.matchday import canonical_names
+            canonical = canonical_names([name], targets).get(name)
+            if canonical and player_core(canonical) != core:
+                out[name] = canonical
     return out
 
 def _role(role):
