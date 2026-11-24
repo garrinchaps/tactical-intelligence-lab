@@ -309,11 +309,12 @@ def render(_ctx=None) -> None:
                                                  + list(hit["clube"]) if _club_ok(x)), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
+    profile_club = want_club or p["clube"] or ""
     # Perfil do Scout validado pelo clube (e idade, quando veio do elenco); não reutiliza um PID sem conferência.
     profile_scout = None
     try:
         from src.scout import snapshot as _S
-        profile_scout = _S.find_player(core, names, p["clube"], pid=want_pid, age=expected_age)
+        profile_scout = _S.find_player(core, names, profile_club, pid=want_pid, age=expected_age)
     except Exception:
         profile_scout = None
     if expected_age is None and profile_scout:
@@ -358,7 +359,7 @@ def render(_ctx=None) -> None:
             _youth_panel(tuple(source_names), get_service().db.stable_version(), expected_age)
     with t5:
         if t5.open is not False:
-            _scout_tab(names, want_club or p["clube"] or "")
+            _scout_tab(names, profile_club)
     with t4:
         if t4.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
             _career_tab(p["core"], source_names, p["clube"], expected_age)
@@ -370,12 +371,14 @@ def render(_ctx=None) -> None:
                 from src.data_hub.player_resolver import merge_match_rows
 
                 pm = merge_match_rows(pm)
-            if want_club and not pm.empty and "team_name" in pm:     # rodada 24: homônimo de outro clube fica de fora
-                pm = _same_club_rows(pm.rename(columns={"team_name": "clube"}), want_club).rename(columns={"clube": "team_name"})
+            if not pm.empty and "team_name" in pm:
+                # Nunca mantém partidas de nome homônimo sem um clube atual confirmado.
+                pm = (_same_club_rows(pm.rename(columns={"team_name": "clube"}), profile_club)
+                      .rename(columns={"clube": "team_name"}) if profile_club else pm.iloc[0:0])
             if pm.empty:
                 # rodada 27e: sem jogos com lances, mostra os jogos com ESTATÍSTICAS dele (FotMob/ESPN) — antes a aba ficava
                 # vazia para quase todo jogador do Brasil
-                bg = _box_games(tuple(names), want_club or p["clube"] or "", get_service().db.stable_version())
+                bg = _box_games(tuple(source_names), profile_club, get_service().db.stable_version())
                 if bg.empty:
                     empty_state("Nenhum jogo deste atleta com números na base", "", "🗓️",
                                 "Os jogos aparecem quando a FotMob/ESPN trazem os números por jogador da partida.")
@@ -540,7 +543,7 @@ def _box_games(names: tuple, club: str, version: str) -> pd.DataFrame:
 
     from src.ui.context import get_service
 
-    if not names:
+    if not names or not club:
         return pd.DataFrame()
     ph = ",".join("?" * len(names))
     since = (pd.Timestamp.today() - pd.Timedelta(days=3 * 365)).date().isoformat()
@@ -618,6 +621,10 @@ def _box_per90_view(bg: pd.DataFrame) -> None:
 
 
 def _scout_tab(names: List[str], club: str = "") -> None:
+    if not club:
+        empty_state("Clube do atleta não confirmado", "", "📊",
+                    "Não agregamos estatísticas por nome sem um clube de referência, para evitar misturar homônimos.")
+        return
     teams = ()
     if club:
         try:
@@ -711,6 +718,8 @@ def _career_tab(core: str, names, club: str, expected_age=None) -> None:
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
 def _form_data(names: tuple, version: str, club: str = "") -> pd.DataFrame:
+    if not club or not names:
+        return pd.DataFrame()
     from src.analytics import rating_box as RB
     from src.ui.context import get_service
 
