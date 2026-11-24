@@ -101,6 +101,30 @@ def test_elenco_prefere_alias_e_clube_a_um_pid_transfermarkt_legado(monkeypatch)
     assert calls[0]["club"] == "Cruzeiro"
 
 
+
+def test_merge_roster_prioriza_alias_canonico_quando_chave_curta_colide(monkeypatch):
+    from src.ui.pages import scout as scout_page
+
+    # Fotografia com a ficha curta antiga e a ficha completa da mesma goleira.
+    universe = pd.DataFrame([
+        {"nome": "Otávio", "_core": "otavio", "clube": "Cruzeiro", "papel": "GK", "idade": 20,
+         "qualidade": 65, "potencial": 71, "minutos_12m": 3150, "rating_12m": 7.15},
+        {"nome": "Otávio Costa", "_core": "otavio costa", "clube": "Cruzeiro", "papel": "GK", "idade": 20,
+         "qualidade": 64, "potencial": 86, "minutos_12m": 3465, "rating_12m": 7.16, "fotmob_id": 12345},
+    ])
+    roster = pd.DataFrame([{
+        "nome": "Otávio", "papel": "GK", "idade": 20, "qualidade": 65, "potencial": 71,
+        "valor_mercado_eur": 500000,
+    }])
+    monkeypatch.setattr(scout_page, "_fill_from_club_games", lambda frame, _universe, _team: frame)
+
+    result = scout_page._merge_roster(roster, universe, "Cruzeiro", "test-alias-precedence-v2")
+
+    assert result.loc[0, "qualidade"] == 64
+    assert result.loc[0, "potencial"] == 86
+    assert result.loc[0, "minutos_12m"] == 3465
+    assert result.loc[0, "rating_12m"] == 7.16
+
 def test_cartao_scout_nao_exibe_nan_como_posicao():
     from src.ui.pages.scout import _missing_value, _role
 

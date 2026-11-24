@@ -466,25 +466,41 @@ def _merge_roster(roster, _universe, team=None, version=""):
     r = roster.copy()
     r["_core"] = r["nome"].map(player_core)
     if universe is not None and not universe.empty:
-        # rodada 24: homônimo → a linha do universo DESTE clube vem primeiro (dois "Matheus Pereira" não trocam de nota)
+        # O elenco do clube tem prioridade. Reaplica a consolidação de apelidos no recorte do próprio clube,
+        # inclusive quando a fotografia persistida ainda contém duas linhas ("Otávio" e "Otávio Costa").
+        own = pd.DataFrame()
+        alias_source = universe
+        lookup_source = universe
         if team and "clube" in universe:
             tc0 = team_core(team)
-            own = universe[universe["clube"].map(lambda c: team_core(str(c)) == tc0)]
-            lookup = pd.concat([own, universe]).drop_duplicates("_core").set_index("_core")
-        else:
-            lookup = universe.drop_duplicates("_core").set_index("_core")
-        if "apelidos_core" in universe:            # rodada 27g: "Otávio" (elenco) → linha "Otavio Costa" do mercado
-            al = universe.dropna(subset=["apelidos_core"])
-            if team and "clube" in al:
-                al = al[al["clube"].map(lambda c: team_core(str(c)) == team_core(team))]
-            extra = []
+            own_mask = universe["clube"].map(lambda c: team_core(str(c)) == tc0)
+            own = universe.loc[own_mask].copy()
+            others = universe.loc[~own_mask]
+            if not own.empty:
+                own = E.merge_club_aliases(own)
+            alias_source = own
+            lookup_source = pd.concat([own, others], axis=0)
+        lookup = lookup_source.drop_duplicates("_core").set_index("_core")
+        if "apelidos_core" in alias_source:
+            al = alias_source.dropna(subset=["apelidos_core"])
+            # Um apelido só pode apontar para um perfil canônico dentro do clube. Se houver colisão
+            # entre dois perfis diferentes, não arrisca escolher nenhum.
+            alias_rows = {}
+            ambiguous_aliases = set()
             for _, row in al.iterrows():
-                for a in str(row["apelidos_core"]).split("|"):
-                    if a and a not in lookup.index:
-                        extra.append(row.rename(a))
+                for alias in str(row["apelidos_core"]).split("|"):
+                    if not alias:
+                        continue
+                    if alias in alias_rows and str(alias_rows[alias].get("_core")) != str(row.get("_core")):
+                        ambiguous_aliases.add(alias)
+                    else:
+                        alias_rows[alias] = row
+            extra = [row.rename(alias) for alias, row in alias_rows.items() if alias not in ambiguous_aliases]
             if extra:
+                # Apelido confirmado do elenco atual prevalece sobre um homônimo de outro clube
+                # ou sobre a linha curta/antiga que tinha ocupado a mesma chave no lookup.
                 lookup = pd.concat([lookup, pd.DataFrame(extra)])
-                lookup = lookup[~lookup.index.duplicated(keep="first")]
+                lookup = lookup[~lookup.index.duplicated(keep="last")]
         # rodada 11: nome do elenco ≠ nome do mercado ("Lucas Romero" × "Lucas Daniel Romero") — liga pela mesma regra
         # da Escalação, só entre atletas do PRÓPRIO clube (nunca junta dois jogadores diferentes por palpite)
         miss = ~r["_core"].isin(lookup.index)
