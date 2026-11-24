@@ -255,3 +255,33 @@ def test_profile_groups_never_empty_with_market():
                          "idade": rng.integers(17, 31, 60), "valor_mercado_eur": rng.integers(1, 30, 60) * 1e6})
     groups = SC._profile_groups(ranked, roster, 22.9e6, pool=pool)
     assert all(len(df) == 3 for _, _, df in groups)
+
+
+def test_same_goalkeeper_seen_by_two_sources_is_one_person():
+    import json
+
+    from src.scout.engine import merge_club_aliases
+
+    games = json.dumps([{"match_date": f"2026-0{m}-1{d}"} for m in range(3, 9) for d in range(3)])
+    u = pd.DataFrame({"nome": ["Otávio", "Otavio Costa"], "clube": ["Cruzeiro", "Cruzeiro"], "papel": ["GK", "GK"],
+                      "idade": [20, 20], "minutos_12m": [3150, 3465], "valor_mercado_eur": [5e5, 22.5e6],
+                      "potencial": [71, 86], "qualidade": [65, 62], "ultimos_jogos": [games, games]})
+    out = merge_club_aliases(u)
+    assert len(out) == 1 and out.iloc[0]["potencial"] == 86 and out.iloc[0]["valor_mercado_eur"] == 22.5e6
+
+
+def test_story_and_advice_answers():
+    from src.intelligence.lab_ai import reasoning as R
+
+    assert R.detect("porque o barcelona virou o jogo?") == ["historia"]
+    assert "conselho" in R.detect("qual sugestao voce daria ao treinador do villareal para nao tomar a virada?")
+    st = R.answer("por que o Botafogo virou?", META, None, _box())["markdown"]
+    assert "gol de" in st and "None'" not in st
+    adv = R.answer("que dica você daria ao treinador do gremio?", META, None, _box())["markdown"]
+    assert "Grêmio" in adv and "1." in adv
+
+
+def test_card_survives_nan_fields():
+    from src.ui.pages import scout as SC
+
+    assert SC._d(float("nan")) == {} and SC._d({"score": 3}) == {"score": 3}

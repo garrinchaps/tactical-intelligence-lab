@@ -1170,8 +1170,206 @@ def r_state(g: Game, q: str, focus: str) -> Answer:
     return "**Resposta direta:** " + line.replace("**Estado do jogo:** ", "") + ("\n\n**Leitura:**\n" + _bullets(reading) if reading else "")
 
 
+def _window_stats(g: Game, a: float, b: float) -> Dict[str, Dict[str, float]]:
+    """Chutes, xG e pressão (momentum) de cada time entre os minutos a e b."""
+    out: Dict[str, Dict[str, float]] = {}
+    s = g.shots
+    for t in g.teams:
+        d: Dict[str, float] = {}
+        if s is not None and not s.empty:
+            m = pd.to_numeric(s["minute"], errors="coerce")
+            part = s[(s["team_name"] == t) & (m >= a) & (m < b)]
+            d["chutes"] = float(len(part))
+            if "xg" in part:
+                d["xg"] = float(pd.to_numeric(part["xg"], errors="coerce").sum())
+        mo = _momentum_window(g, t, a, b)
+        if mo is not None:
+            d["pressao"] = mo
+        out[t] = d
+    return out
+
+
+def _fmt_window(g: Game, w: Dict[str, Dict[str, float]]) -> str:
+    bits = []
+    for t in g.teams:
+        d = w.get(t) or {}
+        if not d:
+            continue
+        txt = f"{g.pt(t)} {fmt(d.get('chutes'), 0)} chute(s)" if "chutes" in d else g.pt(t)
+        if "xg" in d:
+            txt += f" (xG {fmt(d['xg'])})"
+        bits.append(txt)
+    p = {t: (w.get(t) or {}).get("pressao") for t in g.teams}
+    dom = [t for t in g.teams if p.get(t) is not None and p[t] > 15]
+    tail = f"; quem pressionava: {g.pt(dom[0])}" if dom else ""
+    return " × ".join(bits) + tail if bits else ""
+
+
+def r_story(g: Game, q: str, focus: str) -> Answer:
+    """A HISTÓRIA do jogo trecho a trecho: entre um gol e outro, quem chutou, com que perigo e quem pressionava —
+    responde 'por que virou', 'por que saiu atrás', 'por que os gols saíram tão rápido', 'onde virou'."""
+    st = game_state(g)
+    goals = st["goals"]
+    if not goals:
+        return None
+    marks = [0.0] + [float(_f(e["minute"])) for e in goals] + [95.0]
+    lines = []
+    sh = sa = 0
+    for i, e in enumerate(goals):
+        a, b = marks[i], marks[i + 1]
+        w = _window_stats(g, a, b)
+        win = _fmt_window(g, w)
+        if e.get("team") == g.home:
+            sh += 1
+        else:
+            sa += 1
+        lines.append(f"**{minute(e['minute'])} gol de {g.pt(e.get('team') or '')}** ({e.get('player') or 'autor não informado'}) "
+                     f"→ {fmt(sh, 0)} x {fmt(sa, 0)}" + (f". Antes dele ({int(a)}'–{int(b)}'): {win}" if win else ""))
+    w_end = _window_stats(g, marks[-2], 95)
+    end = _fmt_window(g, w_end)
+    if end:
+        lines.append(f"Depois do último gol ({int(marks[-2])}' ao fim): {end}")
+    reading = []
+    early = [e for e in goals if (_f(e["minute"]) or 99) <= 15]
+    if len(early) >= 2:
+        reading.append(f"Dois gols nos primeiros 15 minutos: o time que levou ainda não tinha se organizado sem a bola — "
+                       f"gol cedo costuma vir de bola parada, erro na saída ou transição rápida; a fonte não traz o tipo de "
+                       f"jogada de cada gol, só o minuto e o autor.")
+    if len(goals) >= 2 and len(early) < 2:
+        gap = (_f(goals[1]["minute"]) or 0) - (_f(goals[0]["minute"]) or 0)
+        if 0 <= gap <= 10:
+            reading.append(f"Os dois primeiros gols saíram com {gap:.0f} min de diferença: logo depois de um gol o time que "
+                           f"marcou relaxa ou o que sofreu se lança — os minutos seguintes a um gol são os mais abertos do jogo.")
+    s = g.shots
+    if s is not None and not s.empty and "situation" in s and (early or len(goals) >= 2):
+        early = early or goals[:2]
+        for e in early:
+            m = pd.to_numeric(s["minute"], errors="coerce")
+            hit = s[(s["team_name"] == e.get("team")) & ((m - (_f(e["minute"]) or 0)).abs() <= 1)
+                    & s["outcome"].astype(str).str.contains("Goal", case=False)]
+            if len(hit):
+                r = hit.iloc[0]
+                reading.append(f"Gol dos {minute(e['minute'])}: {SIT.get(str(r.get('situation')), str(r.get('situation')))}, "
+                               f"xG {fmt(r.get('xg'))} ({'chance clara' if (_f(r.get('xg')) or 0) >= .3 else 'chance difícil'}).")
+    # virada
+    first = goals[0]["team"]
+    w = g.winner
+    if w and first and w != first:
+        reading.append(f"{g.pt(w)} saiu atrás e virou: depois do 1º gol, quem precisava do resultado ficou com a bola "
+                       f"e foi empurrando o rival para trás — veja o volume de chutes de cada trecho acima.")
+        if g.has("possession_pct") and g.has("shots_total"):
+            reading.append(f"No jogo todo: {g.pt(w)} {fmt(g.v('possession_pct', w), 0)}% de posse e {fmt(g.v('shots_total', w), 0)} "
+                           f"chutes contra {fmt(g.v('shots_total', g.other(w)), 0)} — a virada veio de insistência, não de um lance isolado.")
+    for r in st["reds"]:
+        mm = minute(r.get("minute"))
+        reading.append(f"Expulsão de {r.get('player') or 'um jogador'} ({g.pt(r.get('team') or '')})"
+                       + (f" aos {mm}" if mm else " (a fonte não informou o minuto)") + " — muda o resto do jogo.")
+    subs = [e for e in g.timeline if e.get("type") == "Substitution" and _f(e.get("minute")) is not None]
+    if subs and w and first and w != first:
+        before = [e for e in subs if e.get("team") == w and _f(e["minute"]) <= max(marks[1:-1] or [90])]
+        if before:
+            reading.append("Trocas de " + g.pt(w) + " antes da reação: " + "; ".join(
+                f"{minute(e['minute'])} entra {e.get('player') or '—'}" for e in before[:4]) + " (associação, não prova de causa).")
+    z = (g.extra or {}).get("zonas_ataque") or {}
+    if z and re.search(r"\bonde\b|lado|corredor|setor", q):
+        for side, t in (("home", g.home), ("away", g.away)):
+            sh2 = ((z.get(side) or {}).get("secondHalf") or {})
+            if sh2:
+                reading.append(f"Por onde {g.pt(t)} atacou no 2º tempo (FotMob): esquerda {sh2.get('left')}% · meio "
+                               f"{sh2.get('center')}% · direita {sh2.get('right')}%.")
+    direct = (f"{g.score()}. " + (f"{g.pt(first)} abriu o placar aos {minute(goals[0]['minute'])}" if first else "")
+              + (f" e {g.pt(w)} virou." if w and w != first else "."))
+    return _block(direct, lines, reading, "a fonte de estatísticas não traz o lance de cada gol (tipo de jogada, quem "
+                  "errou); a leitura usa minuto, autor, chutes/xG por trecho e a pressão (momentum) da FotMob.")
+
+
+SIT = {"RegularPlay": "jogada trabalhada", "FastBreak": "contra-ataque", "SetPiece": "bola parada",
+       "FromCorner": "escanteio", "Penalty": "pênalti", "FreeKick": "falta direta", "ThrowInSetPiece": "lateral"}
+
+
+def r_advice(g: Game, q: str, focus: str) -> Answer:
+    """Conselho ao treinador de um time, tirado dos números deste jogo (o que deixou o rival fazer, o que repetir)."""
+    team = focus if focus in g.teams else (g.other(g.winner) if g.winner else g.home)
+    o = g.other(team)
+    tips: List[Tuple[int, str]] = []
+    st = game_state(g)
+    if g.has("possession_pct") and g.v("possession_pct", o) >= 62:
+        tips.append((3, f"**Não entregar a bola por inteiro:** {g.pt(o)} teve {fmt(g.v('possession_pct', o), 0)}% de posse. "
+                        f"Na frente do placar, ter 3–4 passes de saída (goleiro, zagueiros e um volante que se ofereça) "
+                        f"tira o rival do campo de ataque por alguns minutos."))
+    if g.has("shots_total") and g.v("shots_total", o) >= 15:
+        tips.append((3, f"**Defender mais longe da área:** cedeu {fmt(g.v('shots_total', o), 0)} finalizações"
+                        + (f" ({fmt(g.v('shots_inside_box', o), 0)} de dentro da área)" if g.has("shots_inside_box") else "")
+                        + ". Subir o bloco 5–10 m e encurtar entre linhas reduz o chute dentro da área."))
+    if g.has("corners") and g.v("corners", o) >= 7:
+        tips.append((2, f"**Bola parada:** {fmt(g.v('corners', o), 0)} escanteios contra — cada corte para a linha de fundo vira "
+                        f"um escanteio; marcação mista na área e um homem na entrada para a segunda bola."))
+    if g.has("fouls") and g.v("fouls", team) >= 15:
+        tips.append((2, f"**Menos faltas:** {fmt(g.v('fouls', team), 0)} faltas"
+                        + (f" e {fmt(g.v('yellow_cards', team), 0)} amarelos" if g.has("yellow_cards") else "")
+                        + " — com amarelado, o defensor perde o bote; trocar quem está pendurado antes do 60'."))
+    if g.has("crosses_accurate") and (g.pct.get("crosses_accurate") or {}).get(o) is not None and g.has("aerials_won") \
+            and g.v("aerials_won", o) > g.v("aerials_won", team):
+        tips.append((2, f"**Jogo aéreo:** {g.pt(o)} ganhou mais no alto ({fmt(g.v('aerials_won', o), 0)} × "
+                        f"{fmt(g.v('aerials_won', team), 0)}) — evitar cruzamento sem pressão no cruzador."))
+    w_lead = st["lead"].get(team, 0)
+    if w_lead >= 20 and g.winner == o:
+        tips.append((3, f"**Gerir a vantagem:** {g.pt(team)} ficou ~{w_lead:.0f} min na frente e perdeu. Troca para fechar "
+                        f"(um volante a mais ou um zagueiro) logo depois do gol do rival, não no fim; e manter um atacante "
+                        f"rápido para o contra-ataque — sem ameaça na frente o rival sobe todo mundo."))
+    if g.has("xg") and g.v("xg", o) >= 2:
+        tips.append((2, f"**Chances claras cedidas:** xG {fmt(g.v('xg', o))} do rival — não é azar, é volume de chance boa; o ajuste "
+                        f"é na proteção da área (zagueiros não saem do lugar, volantes fecham o corredor central)."))
+    if g.has("shots_total") and g.has("xg") and g.v("shots_total", team) >= 10 and \
+            g.v("xg", team) / max(g.v("shots_total", team), 1) < .065:
+        tips.append((2, f"**Chutar de lugar melhor:** {fmt(g.v('shots_total', team), 0)} finalizações para só {fmt(g.v('xg', team))} "
+                        f"de xG — muito chute de fora ou travado. Rodar mais a bola até achar o passe para dentro da área."))
+    if g.has("possession_pct") and g.has("xg") and g.v("possession_pct", team) >= 58 and g.v("xg", team) < g.v("xg", o):
+        tips.append((3, f"**Posse com mais profundidade:** {fmt(g.v('possession_pct', team), 0)}% de bola e menos xG que o rival "
+                        f"({fmt(g.v('xg', team))} × {fmt(g.v('xg', o))}). Mais gente atacando o espaço atrás da linha e "
+                        f"menos passe lateral na intermediária."))
+    if g.has("shots_on_target") and g.has("shots_total") and g.v("shots_total", o) >= 6 and \
+            g.v("shots_on_target", o) / max(g.v("shots_total", o), 1) >= .5:
+        tips.append((2, f"**Pressão no chutador:** o rival acertou o gol em {fmt(g.v('shots_on_target', o), 0)} de "
+                        f"{fmt(g.v('shots_total', o), 0)} chutes — chegou livre para finalizar; o bote tem que ser antes do chute."))
+    if g.has("aerials_won") and g.v("aerials_won", team) >= 1.3 * max(1.0, g.v("aerials_won", o)):
+        tips.append((1, f"**Usar o que funcionou:** ganhou o jogo aéreo ({fmt(g.v('aerials_won', team), 0)} × "
+                        f"{fmt(g.v('aerials_won', o), 0)}) — mais bola parada ofensiva e cruzamento para a segunda trave."))
+    if g.has("shots_total") and g.has("xg") and g.v("shots_total", team) >= 10 and \
+            g.v("xg", team) / max(g.v("shots_total", team), 1) < .065:
+        tips.append((2, f"**Chutar de lugar melhor:** {fmt(g.v('shots_total', team), 0)} finalizações para só {fmt(g.v('xg', team))} "
+                        f"de xG — muito chute de fora ou travado. Rodar mais a bola até achar o passe para dentro da área."))
+    if g.has("possession_pct") and g.has("xg") and g.v("possession_pct", team) >= 58 and g.v("xg", team) < g.v("xg", o):
+        tips.append((3, f"**Posse com mais profundidade:** {fmt(g.v('possession_pct', team), 0)}% de bola e menos xG que o rival "
+                        f"({fmt(g.v('xg', team))} × {fmt(g.v('xg', o))}). Mais gente atacando o espaço atrás da linha e "
+                        f"menos passe lateral na intermediária."))
+    if g.has("shots_on_target") and g.has("shots_total") and g.v("shots_total", o) >= 6 and \
+            g.v("shots_on_target", o) / max(g.v("shots_total", o), 1) >= .5:
+        tips.append((2, f"**Pressão no chutador:** o rival acertou o gol em {fmt(g.v('shots_on_target', o), 0)} de "
+                        f"{fmt(g.v('shots_total', o), 0)} chutes — chegou livre para finalizar; o bote tem que ser antes do chute."))
+    if g.has("aerials_won") and g.v("aerials_won", team) >= 1.3 * max(1.0, g.v("aerials_won", o)):
+        tips.append((1, f"**Usar o que funcionou:** ganhou o jogo aéreo ({fmt(g.v('aerials_won', team), 0)} × "
+                        f"{fmt(g.v('aerials_won', o), 0)}) — mais bola parada ofensiva e cruzamento para a segunda trave."))
+    reds = [r for r in st["reds"] if r.get("team") == o]
+    if reds:
+        tips.append((1, f"O rival teve expulsão ({reds[0].get('player') or '—'}): com um a mais, acelerar o jogo pelos lados."))
+    if not tips:
+        return (f"**Resposta direta:** nos números deste jogo não aparece um ponto fraco claro de {g.pt(team)} — o resultado "
+                f"saiu de detalhes (eficiência, um lance).")
+    tips.sort(key=lambda t: -t[0])
+    return (f"**Resposta direta:** para {g.pt(team)}, pelos números deste jogo ({g.score()}), o que eu mudaria:\n\n"
+            + "\n".join(f"{i}. {t[1]}" for i, t in enumerate(tips[:5], 1))
+            + "\n\n_Limite: conselho pelas estatísticas do jogo (posse, chutes, escanteios, faltas, aéreo, placar); a fonte "
+              "não mostra a posição de cada jogador, então ajuste fino de linha e marcação é sugestão, não medição._")
+
+
 # ------------------------------------------------------------------------------------------------- detecção
 TOPICS: List[Tuple[str, str, Callable]] = [
+    ("conselho", r"sugest|\bdica|conselh|o que (o |a )?\w* ?(deveria|devia|poderia|precisa)|como (evitar|nao tomar|segurar|"
+                 r"impedir|nao sofrer)|para nao (tomar|sofrer|levar)|o que fazer|o que mudar", r_advice),
+    ("historia", r"vir(ou|ada|ar)\b|sai(u|r) (na frente|atras|perdendo)|comec\w* perdendo|gols? (tao |muito )?rapid|"
+                 r"primeiros? (dois )?gols?|como (sairam|saiu|foram|aconteceram) os gols|por ?que (sofreu|tomou|levou)|"
+                 r"reag(iu|ir)|reacao|empatou|onde (o \w+ )?vir", r_story),
     ("risco", r"\brisco|arrisc|vulnerav|corre perigo", r_risk),
     ("contradicao", r"contradi|paradox|nao bate|incoeren|conflit|parece estranho|nao faz sentido", r_contradictions),
     ("causalidade", r"causalidade|correlac|e causa|foi a causa|causou|relacao de causa|causa e efeito", r_causality),
@@ -1240,7 +1438,9 @@ def answer(question: str, meta: Dict[str, Any], df, box, focus: str = "", db=Non
     if not g.teams:
         return None
     fq = _fold(question)
-    named = [t for t in g.teams if any(w in fq for w in _fold(t).split() if len(w) >= 4) or _fold(pt(t)) in fq]
+    # rodada 27i: grafia aproximada também vale ("villareal" = Villarreal): basta o começo da palavra do time
+    named = [t for t in g.teams if any(w in fq or (len(w) >= 6 and w[:5] in fq) for w in _fold(t).split() if len(w) >= 4)
+             or _fold(pt(t)) in fq]
     focus = named[0] if len(named) == 1 else focus
     fns = {n: fn for n, _, fn in TOPICS}
     parts = []
@@ -1274,7 +1474,7 @@ def _log_error(name: str, exc: Exception) -> None:
         pass
 
 
-_TITLE = {"risco": "Risco", "contradicao": "Números que parecem se contradizer", "causalidade": "Correlação × causa",
+_TITLE = {"conselho": "Conselho ao treinador", "historia": "A história do jogo", "risco": "Risco", "contradicao": "Números que parecem se contradizer", "causalidade": "Correlação × causa",
           "erros_leitura": "Erros de interpretação", "ausentes": "Dados ausentes", "sem_placar": "Sem olhar o placar",
           "mereceu": "Quem mereceu", "estado": "Estado do jogo", "formacao": "Formações", "substituicao": "Substituições",
           "faltas": "Faltas", "defesa": "Desarmes × interceptações", "aereo": "Jogo aéreo", "drible": "Dribles",

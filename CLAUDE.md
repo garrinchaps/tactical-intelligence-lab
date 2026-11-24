@@ -863,6 +863,24 @@ Rodada 27h (24/11/2026, 555 testes verdes) — Scout do Cruzeiro (prints do usu�
   levavam o de linha, −0,48) e goleiro titular (1.800+ min) da Série A/B ganha +2 no ajuste do Brasil (teto 84).
 - Fotografia v20 (passo `scout_v20`); a v19 é usada até a nova ficar pronta (processo de fundo com a tela parada).
 
+Rodada 27i (24/11/2026, 558 testes verdes):
+- ✅ Erros do Scout: `'float' object has no attribute 'get'` (cartão) e "DataFrame constructor not properly called"
+  (dossiê) — linhas vindas do mercado inteiro têm NaN em realismo/compatibilidade/histórico (`scout._d`, `unpack`).
+- ✅ Otávio: as DUAS linhas tinham jogos (ESPN "Otávio" 3.150 min × FotMob "Otavio Costa" 3.465 min).
+  `merge_club_aliases` junta também quando os jogos coincidem (≥ 60% das datas) e é goleiro ou só uma linha tem id da
+  FotMob; nome com dois candidatos continua separado. Vale para todo o mercado.
+- ✅ Goleiro veterano titular (33+, 75%+ dos minutos): reputação (valor de mercado) pesa 40% (Fábio € 75 mil aos 46).
+  Titular sem valor de mercado: reputação ESTIMADA pela mediana dos titulares do clube −0,25 (`_R_estimada`; Pedrinho,
+  Wendel, Nino no Zenit).
+- ✅ Joias U23 com o MESMO potencial do app (antes o teto antigo) e 60 nomes.
+- ✅ Assistente: raciocínios novos `historia` (gol a gol, chutes/xG/pressão entre os gols, gols seguidos, virada,
+  expulsão, trocas, corredores do 2º tempo) e `conselho` (dicas ao treinador pelos números: posse cedida, chutes
+  cedidos, escanteios, faltas/amarelos, gestão da vantagem, posse sem profundidade, chute de longe, pressão no
+  chutador, aéreo); grafia aproximada do time ("villareal"); "por que virou" passa pelo raciocínio mesmo quando o
+  analista clássico achava que era pergunta de gols.
+- ✅ `docs/DOCUMENTACAO_TECNICA.md` — documentação técnica completa (resumo, stack, arquitetura, funções, lacunas).
+- Fotografia v21 (`scout_v21`); elencos de todas as ligas de novo no script (`elencos_todas_r27i`).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

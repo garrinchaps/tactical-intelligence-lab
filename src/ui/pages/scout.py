@@ -630,12 +630,18 @@ def _club_squad(team, version, universe):
         return {"squad": _merge_roster(roster, universe, team, version), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
+def _d(v):
+    """Rodada 27i: campo que deveria ser dicionário (realismo, compatibilidade) pode vir NaN de linhas do mercado."""
+    return v if isinstance(v, dict) else {}
+
+
 def _dossier(player, roster):
-    def unpack(v):
+    def unpack(v):                       # rodada 27i: NaN (linha vinda do mercado inteiro) não é lista
         try:
-            return json.loads(v) if isinstance(v, str) else (v or [])
+            v = json.loads(v) if isinstance(v, str) else v
         except Exception:
             return []
+        return v if isinstance(v, list) else []
     hist, recent = unpack(player.get("historico_temporadas")), unpack(player.get("ultimos_jogos"))
     try:                                   # rodada 23: relatório do olheiro estilo FM (veredito, estrelas, atributos)
         from src.scout import attributes as AT
@@ -717,7 +723,7 @@ def _dossier(player, roster):
             "competition_name":"Competição","minutes":"Minutos","rating":"Nota FotMob",
             "rating_ajustada":"Nota ajustada","_opponent_level":"Nível adversário (0–100)",
             "_opponent_adjustment":"Ajuste por adversário"}).head(15))
-    realism, fit, syn = player.get("realismo") or {}, player.get("compatibilidade") or {}, player.get("sinergia") or {}
+    realism, fit, syn = _d(player.get("realismo")), _d(player.get("compatibilidade")), _d(player.get("sinergia"))
     st.markdown("**Motivo da indicação**")
     st.write(player.get("motivo_principal") or "Encaixe com uma necessidade detectada no elenco.")
     st.markdown(f"**Realismo:** {realism.get('score','—')}% · {realism.get('rotulo','sem estimativa')} · "
@@ -883,7 +889,7 @@ def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
 
 def _player_card(player, roster, team, idx, plan_key, rejected_key):
     name = str(player.get("nome") or "Jogador")
-    r = player.get("realismo") or {}
+    r = _d(player.get("realismo"))
     score = int(r.get("score") or 0)
     tag = "viable" if score >= 76 else "loan" if r.get("oportunidade_emprestimo") else "dream"
     quality = player.get("qualidade")
@@ -902,7 +908,7 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'{html.escape(str(int(float(player.get("idade")))) if pd.notna(player.get("idade")) else "idade n/d")} anos · '
         f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
         f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
-        f'<span class="scout-tag neutral">Compatibilidade {(player.get("compatibilidade") or {}).get("score","—")}%</span>'
+        f'<span class="scout-tag neutral">Compatibilidade {_d(player.get("compatibilidade")).get("score","—")}%</span>'
         f'<span class="scout-tag neutral">Overall {quality}</span>'
         + (f'<span class="scout-tag neutral" title="{html.escape(str(player.get("potencial_porque") or ""))}">'
            f'Potencial {float(player.get("potencial") if pd.notna(player.get("potencial")) else player.get("potencial_teto")):.0f}</span>'
@@ -1578,7 +1584,10 @@ def render(_ctx=None):
                        f"clube: {_money(capacity)}), nacionalidade comum na liga e clube de origem de porte igual ou menor. "
                        "Teto = qualidade atual + crescimento esperado pela idade e nível — projeção, não certeza.")
             gems=_not_ours(pool.copy(), team, version, roster)
-            if not gems.empty and "potencial_teto" in gems:
+            if not gems.empty and ("potencial" in gems or "potencial_teto" in gems):
+                # rodada 27i: o MESMO potencial do resto do app (antes o teto antigo ordenava e filtrava as joias)
+                gems["potencial_teto"] = pd.to_numeric(gems.get("potencial"), errors="coerce").combine_first(
+                    pd.to_numeric(gems.get("potencial_teto"), errors="coerce"))
                 ages=np.floor(pd.to_numeric(gems["idade"],errors="coerce"))
                 mv=pd.to_numeric(gems["valor_mercado_eur"],errors="coerce")
                 nm=financial.get("nat_market") or {}
@@ -1590,7 +1599,7 @@ def render(_ctx=None):
                 gems=gems[ok].assign(_aff=affs[ok])
                 gems=gems.assign(_rank=pd.to_numeric(gems["potencial_teto"],errors="coerce")*.6
                                  + pd.to_numeric(gems["qualidade"],errors="coerce").fillna(40)*.25 + gems["_aff"]*.15)
-                gems=gems.sort_values(["_rank","confianca_pct"],ascending=False).head(30)
+                gems=gems.sort_values(["_rank","confianca_pct"],ascending=False).head(60)
             if gems.empty:
                 empty_state("Nenhuma joia com amostra mínima", "Só aparecem jovens com dados estatísticos suficientes.", "💎")
             else:
@@ -1623,8 +1632,8 @@ def render(_ctx=None):
             plan=st.session_state[plan_key]
             if plan:
                 comparison_table(pd.DataFrame([{"Entrada":p.get("nome"),"Posição":p.get("papel_alvo_label"),
-                    "Qualidade":p.get("qualidade"),"Realismo":(p.get("realismo") or {}).get("score"),
-                    "Taxa estimada":_money((p.get("realismo") or {}).get("taxa_estimada_eur"))} for p in plan]))
+                    "Qualidade":p.get("qualidade"),"Realismo":_d(p.get("realismo")).get("score"),
+                    "Taxa estimada":_money(_d(p.get("realismo")).get("taxa_estimada_eur"))} for p in plan]))
                 remove=st.selectbox("Remover do plano",["—"]+[p.get("nome") for p in plan],key="scout_remove")
                 if remove!="—" and st.button("Remover jogador",key="scout_remove_button"):
                     st.session_state[plan_key]=[p for p in plan if p.get("nome")!=remove]; st.rerun()
@@ -1665,7 +1674,7 @@ def render(_ctx=None):
                     styled_dataframe(pd.DataFrame(simulation["deltas"]).rename(columns={"indicador":"Indicador","antes":"Antes",
                         "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),use_container_width=True,hide_index=True)
                 st.caption(simulation.get("limite",""))
-            incoming=sum(float((p.get("realismo") or {}).get("taxa_estimada_eur") or 0) for p in plan)
+            incoming=sum(float(_d(p.get("realismo")).get("taxa_estimada_eur") or 0) for p in plan)
             sales=0.0
             if not roster.empty:
                 for name,decision in decisions.items():

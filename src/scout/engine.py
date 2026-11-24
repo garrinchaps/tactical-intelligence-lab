@@ -2380,12 +2380,12 @@ def why_chosen(player: Dict[str, Any], roster: Optional[pd.DataFrame] = None) ->
     for t in (player.get("caracteristicas") or [])[:4]:
         if isinstance(t, dict):
             pro.append(f"{t.get('emoji', '')} {t.get('nome')}: {t.get('porque')}.")
-    r = player.get("realismo") or {}
+    r = player.get("realismo") if isinstance(player.get("realismo"), dict) else {}
     sc = _num(r.get("score"))
     if sc is not None:
         (pro if sc >= 70 else con).append(f"Viabilidade {sc:.0f}% ({r.get('rotulo', '')}) — "
                                           + "; ".join((r.get("motivos") or [])[:2]))
-    fit_ = player.get("compatibilidade") or {}
+    fit_ = player.get("compatibilidade") if isinstance(player.get("compatibilidade"), dict) else {}
     fs = _num(fit_.get("score"))
     if fs is not None:
         (pro if fs >= 65 else con).append(f"Encaixe no estilo do time: {fs:.0f}% ({fit_.get('label', '')}).")
@@ -3327,6 +3327,31 @@ def youth_profile(db, names: List[str]) -> Dict[str, Any]:
             "nota": float(pd.to_numeric(d["rating"], errors="coerce").mean()) if d["rating"].notna().any() else None}
 
 
+def _game_dates(v) -> set:
+    try:
+        g = json.loads(v) if isinstance(v, str) else v
+    except Exception:
+        return set()
+    return {str(x.get("match_date"))[:10] for x in g if isinstance(x, dict) and x.get("match_date")} if isinstance(g, list) else set()
+
+
+def _absorb(d: pd.DataFrame, keep, gone) -> None:
+    """Completa a linha que fica com o que só a outra tem; valor e potencial = o maior dos dois."""
+    for col in d.columns:
+        if col.startswith("_"):
+            continue
+        v0 = d.at[keep, col]
+        if not isinstance(v0, (list, dict, tuple)) and pd.isna(v0):
+            v = d.at[gone, col]
+            if not (isinstance(v, float) and np.isnan(v)):
+                d.at[keep, col] = v
+    for col in ("valor_mercado_eur", "potencial", "potencial_teto", "qualidade"):
+        if col in d:
+            a_, b_ = pd.to_numeric(pd.Series([d.at[keep, col], d.at[gone, col]]), errors="coerce")
+            if pd.notna(b_) and (pd.isna(a_) or b_ > a_):
+                d.at[keep, col] = b_
+
+
 def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
     """Rodada 27g — o MESMO atleta em duas linhas do mercado no mesmo clube: uma só do cadastro (sem minutos: "Otávio",
     Transfermarkt) e outra dos jogos ("Otavio Costa", FotMob, 3.465 min, potencial 86). O elenco pegava a do cadastro
@@ -3350,6 +3375,33 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
         idx = list(idx)
         empty = [i for i in idx if mins[i] <= 0]
         played = [i for i in idx if mins[i] > 0]
+        # rodada 27i: as DUAS linhas com jogos (ESPN "Otávio" 3.150 min × FotMob "Otavio Costa" 3.465 min) — é o mesmo
+        # atleta quando os jogos coincidem (mesmas datas = os mesmos jogos vistos por duas fontes) e: é goleiro (só um
+        # joga por partida) ou só uma das linhas tem o id da FotMob (fontes diferentes). A de menos minutos vira apelido.
+        both = []
+        for e in played:
+            te = set(core[e].split())
+            by_name = [p for p in played if p != e and (te < set(core[p].split()))]
+            if len(by_name) != 1:
+                continue
+            p = by_name[0]
+            if pd.notna(age[e]) and pd.notna(age[p]) and abs(age[e] - age[p]) > 1.2:
+                continue
+            de, dp = _game_dates(d.at[e, "ultimos_jogos"] if "ultimos_jogos" in d else None), \
+                _game_dates(d.at[p, "ultimos_jogos"] if "ultimos_jogos" in d else None)
+            if not de or not dp or len(de & dp) < .6 * min(len(de), len(dp)):
+                continue
+            fid = d.get("fotmob_id")
+            one_id = fid is not None and (pd.notna(fid[e]) != pd.notna(fid[p]))
+            if fam[e] == "GK" or one_id:
+                keep, gone = (p, e) if mins[p] >= mins[e] else (e, p)
+                both.append((gone, keep))
+        for gone, keep in both:
+            if gone in drop or keep in drop:
+                continue
+            _absorb(d, keep, gone)
+            aliases.setdefault(keep, []).append(core[gone])
+            drop.add(gone)
         if not empty or not played:
             continue
         for e in empty:
@@ -3364,18 +3416,7 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
             if len(cands) != 1:
                 continue                                   # nenhum ou ambíguo (dois "Gabriel …"): fica separado
             p = cands[0]
-            for col in d.columns:
-                if col.startswith("_"):
-                    continue
-                if pd.isna(d.at[p, col]) if not isinstance(d.at[p, col], (list, dict, tuple)) else False:
-                    v = d.at[e, col]
-                    if not (isinstance(v, float) and np.isnan(v)):
-                        d.at[p, col] = v
-            for col in ("valor_mercado_eur", "potencial", "potencial_teto"):
-                if col in d:
-                    a_, b_ = pd.to_numeric(pd.Series([d.at[p, col], d.at[e, col]]), errors="coerce")
-                    if pd.notna(b_) and (pd.isna(a_) or b_ > a_):
-                        d.at[p, col] = b_
+            _absorb(d, p, e)
             aliases.setdefault(p, []).append(core[e])
             drop.add(e)
     if not drop:

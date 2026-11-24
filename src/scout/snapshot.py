@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v20.pkl")   # v20: goleiros (idade), mesmo atleta com 2 nomes no clube
+SNAP_PATH = Path("data/processed/scout_universe_v21.pkl")   # v21: Otávio (2 fontes), goleiros veteranos, reputação estimada
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v20.pkl"), Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 

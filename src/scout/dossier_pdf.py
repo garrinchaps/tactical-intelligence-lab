@@ -107,7 +107,7 @@ def build(team: str, formation: str, xi: List[Dict[str, Any]], plan: List[Dict[s
     pdf.drawString(40, y, "Quem chega")
     y -= 22
     for p in plan:
-        r = p.get("realismo") or {}
+        r = p.get("realismo") if isinstance(p.get("realismo"), dict) else {}
         if y < 140:
             pdf.showPage()
             page_bg()

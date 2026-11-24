@@ -171,7 +171,9 @@ def _answer(question: str, current_context, use_llm: bool):
             # rodada 27e: perguntas de INTERPRETAÇÃO (posse × controle, qualidade das finalizações, faltas, merecimento,
             # correlação × causa…) vão primeiro para o raciocínio que cruza os números do jogo
             reasoned = None
-            if ask not in ("presence", "goals", "lineup_role", "unavailable", "profile"):
+            _topics = REASON.detect(question)
+            if ask not in ("presence", "goals", "lineup_role", "unavailable", "profile") or \
+                    {"historia", "conselho"} & set(_topics):    # rodada 27i: "por que virou" não é lista de gols
                 reasoned = REASON.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
                                          db=get_service().db, pt=_pt)
             if reasoned is not None:

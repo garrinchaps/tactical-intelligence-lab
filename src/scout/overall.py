@@ -316,6 +316,17 @@ def components(u: pd.DataFrame, reference: Optional[pd.DataFrame] = None) -> pd.
         m = d["_fam"] == fam
         zr.loc[m] = ((d.loc[m, "_rep_val"] - med) / mad).clip(-3, 4.5)
     d["_zR"] = zr.where(d["_elig"])
+    # rodada 27i: titular SEM valor de mercado em nenhuma fonte (Pedrinho, Wendel, Nino no Zenit) ficava só com os
+    # números e caía para 54–62. A reputação vira ESTIMADA: a mediana dos titulares do mesmo clube, −0,25 (prudente).
+    if "clube" in u:
+        club = u["clube"].fillna("").astype(str)
+        starter = d["_avail"] >= .5
+        med = d["_zR"].where(starter).groupby(club).transform("median")
+        fill = d["_zR"].isna() & starter & med.notna() & (club != "") & d["_elig"]
+        d.loc[fill, "_zR"] = med[fill] - .25
+        rmed = d["R"].where(starter).groupby(club).transform("median")
+        d.loc[fill & d["R"].isna(), "R"] = rmed[fill & d["R"].isna()]
+        d["_R_estimada"] = fill
     return d
 
 
@@ -356,6 +367,11 @@ def zscore(c: pd.DataFrame, w: Dict[str, float]) -> pd.Series:
     zp = _probit(c["P"])
     zl = (pd.to_numeric(c["L"], errors="coerce").fillna(45) - 50) / 20
     wr = w.get("wR", 0) * c["_m"] * has_r
+    if "_age" in c and "_fam" in c:
+        # rodada 27i: goleiro de 33+ titular — o valor de mercado despenca com a idade (Fábio € 75 mil aos 46, titular
+        # com 5.940 min); a reputação pesa 40% e os números em campo mandam
+        vet_gk = c["_fam"].astype(str).eq("GK") & (pd.to_numeric(c["_age"], errors="coerce") >= 33) & (c["_avail"] >= .75)
+        wr = wr.where(~vet_gk, wr * .4)
     wt = w.get("wT", 0) * has_t
     wp = w.get("wP", 0) * has_p
     num = wr * zr.fillna(0) + wt * zt.fillna(0) + wp * zp.fillna(0) + w.get("wL", 0) * zl
