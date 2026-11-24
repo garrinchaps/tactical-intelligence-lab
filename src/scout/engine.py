@@ -982,25 +982,30 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
                 continue
         options = _market_options(cands, fuzzy, club_c, fam, b0, nat_c)
         if not options and not fuzzy:
-            # rodada 27e: o nome exato existe, mas é OUTRA pessoa (o "Otávio" do Paris FC) — tenta o nome mais longo do
-            # mesmo clube ("Otavio Costa", goleiro do Cruzeiro), que antes nunca era tentado
             fc = fuzzy_cands()
             if fc and len(fc) <= 40:
                 options = _market_options(fc, True, club_c, fam, b0, nat_c)
-                cands = fc
+                cands, fuzzy = fc, True
         if not options:
             continue
         options.sort(key=lambda t: -t[0])
         best = options[0]
         tie = len(options) > 1 and options[1][0] == best[0]
-        # rodada 25b: nome de UMA palavra (Saúl, Fred, Gerson, Otávio) é homônimo em potencial mesmo quando só aparece
-        # uma vez no cadastro — juntar só com clube ou nascimento conferindo (Saúl de 41 anos era outro Saúl)
+        # Nome curto/duplicado exige evidência por clube ou nascimento. Uma correspondência exata fraca
+        # (p.ex. só nacionalidade) não pode bloquear a tentativa segura com o nome completo no clube certo.
         mononym = len(core.split()) == 1
-        if mononym and best[0] < 2:
-            continue
-        if dup or len(cands) > 1:
-            if best[0] < 2 or tie:
-                continue                                        # homônimo sem confirmação: fica separado
+        needs_confirmation = mononym or dup or len(cands) > 1
+        if needs_confirmation and (best[0] < 2 or tie) and not fuzzy:
+            fc = fuzzy_cands()
+            if fc and len(fc) <= 40:
+                fuzzy_options = _market_options(fc, True, club_c, fam, b0, nat_c)
+                fuzzy_options.sort(key=lambda t: -t[0])
+                if fuzzy_options:
+                    options, cands, fuzzy = fuzzy_options, fc, True
+                    best = options[0]
+                    tie = len(options) > 1 and options[1][0] == best[0]
+        if needs_confirmation and (best[0] < 2 or tie):
+            continue                                        # homônimo sem confirmação: fica separado
         scored.append((best[0], i, best[1]))
     taken: set = set()
     for score, i, key in sorted(scored, key=lambda t: -t[0]):
