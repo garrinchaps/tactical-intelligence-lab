@@ -596,11 +596,13 @@ def _merge_roster(roster, _universe, team=None, version=""):
                 mapped = r.loc[hit, "_core"].map(scout_lookup[col])
                 current = r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object)
                 r.loc[hit, col] = mapped.combine_first(current)
+    # Ausência da coluna "nota" deve ser uma Series alinhada, não escalar NaN/float.
+    fallback_nota = r["nota"] if "nota" in r else pd.Series(np.nan, index=r.index, dtype=float)
+    fallback_nota = pd.to_numeric(fallback_nota, errors="coerce")
     if "qualidade" not in r:
-        r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
+        r["qualidade"] = fallback_nota
     else:
-        r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(
-            pd.to_numeric(r.get("nota"), errors="coerce"))
+        r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(fallback_nota)
     # rodada 27: quem ainda ficou sem POTENCIAL (nome não achado no universo) → busca pelo clube no universo; sem
     # isso, potencial estimado pela idade e pela nota (marcado), em vez de vazio
     try:
