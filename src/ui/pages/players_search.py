@@ -20,34 +20,61 @@ def _norm(s: str) -> str:
 
 
 INDEX_PATH = __import__("pathlib").Path("data/processed/player_index.parquet")
+INDEX_META_PATH = INDEX_PATH.with_suffix(".meta.json")
+
+
+def _player_index_version(db_version: str) -> str:
+    """SQLite revision + file revisions of the external lakes used by the player index."""
+    parts = [str(db_version)]
+    try:
+        from src.data_lake.lake import Lake
+        lake = Lake(sqlite_path=None)
+        for name in ("tm_jogadores", "us_jogadores"):
+            path = lake.path(name)
+            try:
+                stat = path.stat()
+                parts.append(f"{name}:{stat.st_size}:{stat.st_mtime_ns}")
+            except OSError:
+                parts.append(f"{name}:missing")
+    except Exception:
+        parts.append("lake-unavailable")
+    return "|".join(parts)
 
 
 @st.cache_data(show_spinner=False)
 def player_index(version: str) -> pd.DataFrame:
-    """
-    Rodada 12: o índice de jogadores é PESADO (soma todos os lances da base e une as grafias de ~100 mil nomes).
-    Antes era refeito a cada 15 min dentro da tela. Agora fica salvo em data/processed/player_index.parquet: a tela só
-    lê o arquivo; o processo de fundo o refaz 1x por dia, com a tela parada. Sem arquivo, monta uma vez e salva.
-    """
+    """Índice pesado persistido, mas sempre vinculado à versão exata do banco para não servir aliases antigos."""
+    import json
+
     try:
-        if INDEX_PATH.exists():
-            return pd.read_parquet(INDEX_PATH)
+        if INDEX_PATH.exists() and INDEX_META_PATH.exists():
+            meta = json.loads(INDEX_META_PATH.read_text(encoding="utf-8"))
+            if str(meta.get("version", "")) == str(version):
+                return pd.read_parquet(INDEX_PATH)
     except Exception:
         pass
     from src.ui.context import get_service
 
     df = build_player_index(get_service().db)
-    save_player_index(df)
+    save_player_index(df, version)
     return df
 
 
-def save_player_index(df: pd.DataFrame) -> None:
+def save_player_index(df: pd.DataFrame, version: str = "") -> None:
+    """Substituição atômica do índice e do marcador de versão; não altera nenhuma tabela de origem."""
+    import json
+    import os
+
     try:
         INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
         tmp = INDEX_PATH.with_suffix(".tmp")
         df.astype({c: "string" for c in df.columns if df[c].dtype == object}).to_parquet(tmp, index=False)
-        __import__("os").replace(tmp, INDEX_PATH)
+        os.replace(tmp, INDEX_PATH)
+        meta_tmp = INDEX_META_PATH.with_suffix(".tmp")
+        meta_tmp.write_text(json.dumps({"version": str(version)}, ensure_ascii=False), encoding="utf-8")
+        os.replace(meta_tmp, INDEX_META_PATH)
     except Exception:
+        # Não apaga a última fotografia válida; na ausência de marcador, a próxima leitura reconstrói o índice.
         pass
 
 
@@ -64,13 +91,23 @@ def build_player_index(db) -> pd.DataFrame:
             pass
         # Índice também inclui atletas com estatísticas de boxscore (FotMob), mesmo sem eventos com coordenadas.
         try:
-            fm = pd.read_sql_query(
-                "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos "
+            query_fm = (
+                "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos, "
+                "MAX(CASE WHEN json_valid(s.stats_json) THEN CAST(json_extract(s.stats_json, '$.fotmob_id') AS TEXT) END) AS fotmob_id "
                 "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
                 "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
-                "GROUP BY s.player_name, s.team_name", conn)
-            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "FotMob (estatísticas)", "jogos": int(r.jogos)}
-                     for r in fm.itertuples()]
+                "GROUP BY s.player_name, s.team_name")
+            try:
+                fm = pd.read_sql_query(query_fm, conn)
+            except Exception:
+                # SQLite sem JSON1: mantém o índice de nomes/clubes, apenas sem IDs do provedor.
+                fm = pd.read_sql_query(
+                    "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos "
+                    "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+                    "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
+                    "GROUP BY s.player_name, s.team_name", conn)
+            rows += [{"nome": r.nome, "clube": r.clube, "fonte": "FotMob (estatísticas)", "jogos": int(r.jogos),
+                      "fotmob_id": getattr(r, "fotmob_id", None)} for r in fm.itertuples()]
         except Exception:
             pass
     try:
@@ -80,13 +117,17 @@ def build_player_index(db) -> pd.DataFrame:
         if lake.exists("tm_jogadores"):
             cols = ["nome", "clube", "ultima_temporada"]
             try:
-                tm = lake.read("tm_jogadores", cols + ["nascimento", "nacionalidade"])
+                tm = lake.read("tm_jogadores", cols + ["nascimento", "nacionalidade", "transfermarkt_id"])
             except Exception:
-                tm = lake.read("tm_jogadores", cols)
+                try:
+                    tm = lake.read("tm_jogadores", cols + ["nascimento", "nacionalidade"])
+                except Exception:
+                    tm = lake.read("tm_jogadores", cols)
             tm = tm[pd.to_numeric(tm["ultima_temporada"], errors="coerce").fillna(0) >= 2015]
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Transfermarkt", "jogos": None,
                       "nascimento": str(getattr(r, "nascimento", "") or "")[:10],
-                      "nacionalidade": getattr(r, "nacionalidade", None)} for r in tm.itertuples()]
+                      "nacionalidade": getattr(r, "nacionalidade", None),
+                      "transfermarkt_id": getattr(r, "transfermarkt_id", None)} for r in tm.itertuples()]
         if lake.exists("us_jogadores"):
             us = lake.read("us_jogadores", ["nome", "clube"]).drop_duplicates()
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "Understat", "jogos": None} for r in us.itertuples()]
@@ -272,7 +313,7 @@ def render(_ctx=None) -> None:
     if not (core or given):
         empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
-    idx = player_index(get_service().db.stable_version())
+    idx = player_index(_player_index_version(get_service().db.stable_version()))
     core = core or _norm(given)
     if not idx.empty:
         person = core if core in set(idx["pessoa"]) else next(iter(idx.loc[idx["core"] == core, "pessoa"]), core)

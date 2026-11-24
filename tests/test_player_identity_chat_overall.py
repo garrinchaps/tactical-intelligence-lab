@@ -215,3 +215,30 @@ def test_otavio_prioriza_ficha_completa_sem_puxar_overall_antigo():
     assert merged.iloc[0]["valor_mercado_eur"] == 500000
     assert "otavio" in merged.iloc[0]["apelidos_core"]
 
+
+
+def test_player_index_rebuilds_when_persisted_cache_version_is_stale(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from src.ui.pages import players_search as P
+    import src.ui.context as context
+
+    monkeypatch.setattr(P, "INDEX_PATH", tmp_path / "player_index.parquet")
+    monkeypatch.setattr(P, "INDEX_META_PATH", tmp_path / "player_index.meta.json")
+    P.INDEX_PATH.write_bytes(b"stale parquet placeholder")
+    P.INDEX_META_PATH.write_text(json.dumps({"version": "database-v1"}), encoding="utf-8")
+    monkeypatch.setattr(pd, "read_parquet", lambda *a, **k: (_ for _ in ()).throw(AssertionError("stale cache was read")))
+
+    built = []
+    saved = []
+    expected = pd.DataFrame([{"nome": "Kaiki", "pessoa": "kaiki"}])
+    monkeypatch.setattr(P, "build_player_index", lambda db: built.append(db) or expected)
+    monkeypatch.setattr(P, "save_player_index", lambda frame, version="": saved.append((frame, version)))
+    monkeypatch.setattr(context, "get_service", lambda: SimpleNamespace(db="current-db"))
+    P.player_index.clear()
+
+    result = P.player_index("database-v2")
+    assert result.equals(expected)
+    assert built == ["current-db"]
+    assert saved and saved[0][1] == "database-v2"
+    P.player_index.clear()

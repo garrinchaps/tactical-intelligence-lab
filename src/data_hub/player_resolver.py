@@ -37,7 +37,7 @@ def _toks(name: str) -> List[str]:
 def profiles(idx: pd.DataFrame) -> pd.DataFrame:
     """Uma linha por grafia (core): nomes, clubes/seleções, nascimento, nacionalidade, 1º clube, jogos (data|time)."""
     d = idx.copy()
-    for c in ("nascimento", "nacionalidade", "primeiro_clube", "jogos_chave"):
+    for c in ("nascimento", "nacionalidade", "primeiro_clube", "jogos_chave", "fotmob_id", "transfermarkt_id"):
         if c not in d:
             d[c] = None
     d["core"] = d.get("core", d["nome"].map(player_core))
@@ -53,14 +53,35 @@ def profiles(idx: pd.DataFrame) -> pd.DataFrame:
             if isinstance(x, (set, list, tuple)):
                 out |= set(x)
         return out
+
+    def identifiers(s):
+        return {str(x).strip() for x in s if x is not None and str(x).strip().casefold() not in {"", "nan", "none"}}
+
+    def split_teams(s):
+        clubs, selections = set(), set()
+        from src.squad.planner import national_team_key
+        for value in s:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            selection = national_team_key(value)
+            if selection:
+                selections.add(selection)
+            else:
+                clubs.add(team_core(value))
+        return clubs, selections
+
     g = d.groupby("core")
+    team_sets = g["clube"].agg(split_teams)
     return pd.DataFrame({
         "nomes": g["nome"].agg(lambda s: sorted(set(map(str, s)))),
-        "clubes": g["clube"].agg(lambda s: {team_core(x) for x in s if isinstance(x, str) and x}),
+        "clubes": team_sets.map(lambda x: x[0]),
+        "selecoes": team_sets.map(lambda x: x[1]),
         "nascimento": g["nascimento"].agg(lambda s: first([str(x)[:10] for x in s if isinstance(x, str) and len(str(x)) >= 8])),
         "nacionalidade": g["nacionalidade"].agg(lambda s: first([norm(x) for x in s if isinstance(x, str)])),
         "primeiro_clube": g["primeiro_clube"].agg(lambda s: first([team_core(x) for x in s if isinstance(x, str)])),
         "jogos_chave": g["jogos_chave"].agg(union),
+        "fotmob_ids": g["fotmob_id"].agg(identifiers),
+        "transfermarkt_ids": g["transfermarkt_id"].agg(identifiers),
     }).reset_index()
 
 
@@ -80,11 +101,39 @@ def score(a: Dict, b: Dict, name_score: float) -> Tuple[float, List[str]]:
             why.append(lab)
     if a.get("jogos_chave") and b.get("jogos_chave") and set(a["jogos_chave"]) & set(b["jogos_chave"]):
         return -1.0, ["jogaram juntos no mesmo jogo"]
-    teams_a = set(a.get("clubes") or set()) | ({a["nacionalidade"]} if a.get("nacionalidade") else set())
-    teams_b = set(b.get("clubes") or set()) | ({b["nacionalidade"]} if b.get("nacionalidade") else set())
-    if (set(a.get("clubes") or ()) & teams_b) or (set(b.get("clubes") or ()) & teams_a):
+
+    # IDs do mesmo provedor são prova forte; IDs de provedores diferentes não são comparáveis.
+    id_match, id_conflict = False, False
+    for field, label in (("fotmob_ids", "ID FotMob"), ("transfermarkt_ids", "ID Transfermarkt")):
+        ids_a, ids_b = set(a.get(field) or ()), set(b.get(field) or ())
+        if ids_a and ids_b:
+            if ids_a & ids_b:
+                id_match = True
+            else:
+                id_conflict = True
+    if id_match:
+        return 1.0, why + ["ID externo igual"]
+    if id_conflict:
+        # Dois IDs do mesmo provedor são um alerta, não veto absoluto: duplicatas do próprio catálogo
+        # podem ter IDs diferentes; só a biografia concordante pode superar essa divergência.
+        s -= 0.20
+        why.append("IDs do provedor divergentes; exige confirmação biográfica")
+
+    # Compartilhar um clube histórico é apenas um indício fraco, nunca confundir país/nacionalidade com clube.
+    clubs_a, clubs_b = set(a.get("clubes") or ()), set(b.get("clubes") or ())
+    if clubs_a & clubs_b:
         s += 0.30
-        why.append("clube/seleção em comum")
+        why.append("clube em comum")
+    selections_a, selections_b = set(a.get("selecoes") or ()), set(b.get("selecoes") or ())
+    nat_a = norm(a.get("nacionalidade") or "")
+    nat_b = norm(b.get("nacionalidade") or "")
+    # Seleção e nacionalidade são relacionadas, mas nacionalidade nunca é tratada como clube.
+    selection_match = bool(selections_a & selections_b) or bool(
+        (nat_a and nat_a in selections_b) or (nat_b and nat_b in selections_a)
+    )
+    if selection_match:
+        s += 0.30
+        why.append("seleção/nacionalidade compatível")
     return round(s, 2), why
 
 
@@ -100,16 +149,56 @@ def candidate_pairs(prof: pd.DataFrame) -> List[Tuple[int, int, float]]:
                 by_first_tok.setdefault((t[0], x), []).append(i)
                 by_ini_tok.setdefault((t[0][0], x), []).append(i)
     pairs = []
+    seen = set()
+
+    def add(i: int, j: int, score_: float):
+        if i == j:
+            return
+        key = (min(i, j), max(i, j))
+        if key in seen:
+            return
+        seen.add(key)
+        pairs.append((i, j, score_))
+
+    # IDs do mesmo provedor permitem resolver variações até de um único token (ex.: "Kaiki" / "David Kaiki").
+    for field in ("fotmob_ids", "transfermarkt_ids"):
+        by_id: Dict[str, List[int]] = {}
+        for i, values in prof[field].items():
+            for value in values or ():
+                by_id.setdefault(str(value), []).append(i)
+        for group in by_id.values():
+            unique = list(dict.fromkeys(group))
+            if len(unique) > 1:
+                for n, i in enumerate(unique):
+                    for j in unique[n + 1:]:
+                        add(i, j, NAME_SCORE)
+
+    # Nome de um token só é associado a um nome completo apenas com nascimento idêntico e candidato único.
+    by_dob: Dict[str, List[int]] = {}
+    if "nascimento" in prof:
+        for i, dob in prof["nascimento"].items():
+            value = str(dob or "")[:10]
+            if len(value) >= 8 and "|CONFLITO|" not in value:
+                by_dob.setdefault(value, []).append(i)
     for i, t in toks.items():
+        if len(t) == 1 and "nascimento" in prof:
+            dob = str(prof.at[i, "nascimento"] or "")[:10]
+            if len(dob) >= 8:
+                candidates = [j for j in by_dob.get(dob, []) if j != i and len(toks[j]) > 1 and t[0] in toks[j]]
+                if len(candidates) == 1:
+                    add(i, candidates[0], NAME_SCORE)
         if len(t) >= 2:
             cands = [j for j in by_first_tok.get((t[0], t[-1]), []) if j != i and len(toks[j]) > len(t) and set(t) <= set(toks[j])]
             if len(cands) == 1:
-                pairs.append((i, cands[0], NAME_SCORE))
+                add(i, cands[0], NAME_SCORE)
             elif cands:
-                pairs += [(i, j, NAME_SCORE - 0.15) for j in cands]   # ambíguo: nome vale menos
+                for j in cands:
+                    add(i, j, NAME_SCORE - 0.15)   # ambíguo: nome vale menos
         r = raw[i]
         if len(r) == 2 and len(r[0]) == 1:                    # abreviado: decidido depois das outras fusões
-            pairs += [(i, j, -1.0) for j in by_ini_tok.get((r[0], r[1]), []) if j != i]
+            for j in by_ini_tok.get((r[0], r[1]), []):
+                if j != i:
+                    add(i, j, -1.0)
     return pairs
 
 

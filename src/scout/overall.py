@@ -371,7 +371,7 @@ def zscore(c: pd.DataFrame, w: Dict[str, float]) -> pd.Series:
         # rodada 27i: goleiro de 33+ titular — o valor de mercado despenca com a idade (Fábio € 75 mil aos 46, titular
         # com 5.940 min); a reputação pesa 40% e os números em campo mandam
         vet_gk = c["_fam"].astype(str).eq("GK") & (pd.to_numeric(c["_age"], errors="coerce") >= 33) & (c["_avail"] >= .75)
-        wr = wr.where(~vet_gk, wr * .4)
+        wr = wr.where(~vet_gk, wr * .10)
     wt = w.get("wT", 0) * has_t
     wp = w.get("wP", 0) * has_p
     num = wr * zr.fillna(0) + wt * zt.fillna(0) + wp * zp.fillna(0) + w.get("wL", 0) * zl
@@ -470,7 +470,7 @@ CORR_CLIP = 1.2
 # rodada 24: goleiros e laterais tinham a mesma "largura" de régua que atacantes — com ~1 goleiro em cada 11 atletas,
 # o topo ficava cheio de goleiros e laterais de times médios (Çakır 91, Dimarco 88). A régua dessas famílias é
 # estreitada (o melhor goleiro ainda chega ao topo da posição, mas o 15º goleiro não vira 88).
-FAMILY_SPREAD = {"GK": .78, "FB": .86, "CB": .93, "MID": 1.0, "AM": 1.0, "WIDE": 1.0, "ST": 1.0}
+FAMILY_SPREAD = {"GK": .90, "FB": .86, "CB": .93, "MID": 1.0, "AM": 1.0, "WIDE": 1.0, "ST": 1.0}
 
 
 def corr_features(comps: pd.DataFrame, age: pd.Series) -> pd.DataFrame:
@@ -599,6 +599,32 @@ def calibrate(u: pd.DataFrame, comps: pd.DataFrame, anchors: Sequence[str] = REF
     return {"pesos": best, "correcao": best_corr, "grade": grid, "encontrados": found, "tetos": capped, "alvos": tidx}
 
 
+def _blend_goalkeeper_attribute_performance(comps: pd.DataFrame, engine: Optional[pd.DataFrame],
+                                               base_weight: float = .55) -> pd.DataFrame:
+    """Blend the dedicated GK attribute engine into P, without changing outfield-player ratings.
+
+    The legacy market/statistical P remains the majority source. The dedicated goalkeeper engine adds a
+    position-aware check (shot stopping, distribution and security) so a poor distribution percentile alone
+    cannot drag an otherwise strong, high-minute keeper down. Requires a sufficiently large GK reference pool.
+    """
+    if comps is None or comps.empty or engine is None or engine.empty or "ovr2_bruto" not in engine:
+        return comps
+    if "_fam" not in comps or "P" not in comps:
+        return comps
+    gk = comps["_fam"].astype(str).eq("GK")
+    raw = pd.to_numeric(engine.get("ovr2_bruto"), errors="coerce").reindex(comps.index)
+    valid = gk & raw.notna()
+    if int(valid.sum()) < 10:
+        return comps
+    out = comps.copy()
+    # Percentile keeps this signal on the same 0–100 scale as P and adapts to the current keeper population.
+    gk_pct = raw.loc[valid].rank(pct=True, method="average") * 100
+    base = pd.to_numeric(out.loc[valid, "P"], errors="coerce")
+    blended = base_weight * base + (1.0 - base_weight) * gk_pct
+    out.loc[valid, "P"] = blended.where(base.notna(), gk_pct)
+    return out
+
+
 def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Optional[pd.DataFrame] = None,
                      weights: Optional[Dict[str, float]] = None) -> pd.DataFrame:
     """Recalcula `qualidade` como OVERALL 0–100. Guarda a nota antiga em `qualidade_base` e os componentes."""
@@ -618,6 +644,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         from src.scout import rating_engine as RE
 
         eng = RE.compute(out)
+        comps = _blend_goalkeeper_attribute_performance(comps, eng)
         for c in eng.columns:
             if c.startswith("atr2_") or c in ("estilo", "dificuldade_ajuste"):
                 out[c] = eng[c]
