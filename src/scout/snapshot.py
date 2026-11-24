@@ -435,17 +435,21 @@ def _club_scoped_rows(frame: pd.DataFrame, club: str) -> pd.DataFrame:
     requested = team_core(club)
     if not requested:
         return frame.iloc[0:0]
-    matched = pd.Series(False, index=frame.index)
-    found_column = False
-    for column in ("clube", "clube_tm"):
-        if column not in frame:
-            continue
-        found_column = True
-        def same(value):
-            current = team_core(str(value)) if pd.notna(value) else ""
-            return bool(current) and (current == requested or current.startswith(requested) or requested.startswith(current))
-        matched |= frame[column].map(same)
-    return frame[matched] if found_column else frame.iloc[0:0]
+
+    def same(value):
+        current = team_core(str(value)) if pd.notna(value) else ""
+        return bool(current) and (current == requested or current.startswith(requested) or requested.startswith(current))
+
+    if "clube" in frame:
+        current_names = frame["clube"].fillna("").astype(str).str.strip()
+        has_current = current_names.ne("")
+        matched = frame["clube"].map(same)
+        if "clube_tm" in frame:
+            matched |= (~has_current) & frame["clube_tm"].map(same)
+        return frame[matched]
+    if "clube_tm" in frame:
+        return frame[frame["clube_tm"].map(same)]
+    return frame.iloc[0:0]
 
 
 def _age_scoped_rows(frame: pd.DataFrame, age: Optional[float]) -> pd.DataFrame:
