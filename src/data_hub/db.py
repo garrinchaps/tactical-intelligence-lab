@@ -194,6 +194,28 @@ def _frozen() -> bool:
         return False
 
 
+_MIGRATED: set = set()
+_MIG_LOCK = __import__("threading").Lock()
+
+
+def _migration_key(path: Path):
+    """(arquivo, identidade no disco): se o arquivo for apagado e recriado (testes), migra de novo."""
+    try:
+        p = Path(path).resolve()
+        st_ = p.stat()
+    except OSError:
+        return None
+    try:                                     # versão do esquema: base antiga reaberta → migra (backfills legados)
+        c = sqlite3.connect(str(p), timeout=1)
+        try:
+            uv = int((c.execute("PRAGMA user_version").fetchone() or [0])[0])
+        finally:
+            c.close()
+    except sqlite3.Error:
+        uv = -1
+    return (str(p), st_.st_ino, st_.st_dev, uv)
+
+
 class DataHubDB:
     """Wrapper fino sobre o SQLite com migração idempotente."""
 
@@ -204,7 +226,31 @@ class DataHubDB:
         self.db_path = Path(configured_path)
         self.schema_path = Path(schema_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._migrate_patiently()
+        # rodada 27f (LENTIDÃO): a migração rodava a CADA `DataHubDB()` — e o app cria vários (filtro de país em toda
+        # consulta por time, Assistente, Scout). Com o processo de fundo gravando, cada uma esperava até 60 s × 4 + pausas
+        # (≈ 5 min por tela). Agora: uma vez por processo e por arquivo; banco já pronto e ocupado → segue na hora.
+        key = _migration_key(self.db_path)
+        if key is not None and key in _MIGRATED:
+            return
+        with _MIG_LOCK:
+            if key is not None and key in _MIGRATED:
+                return
+            self._migrate_patiently()
+            k2 = _migration_key(self.db_path)
+            if k2 is not None:
+                _MIGRATED.add(k2)
+
+    def _has_tables(self) -> bool:
+        if not self.db_path.exists() or self.db_path.stat().st_size == 0:
+            return False
+        try:
+            c = sqlite3.connect(str(self.db_path), timeout=5)
+            try:
+                return bool(c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='matches'").fetchone())
+            finally:
+                c.close()
+        except sqlite3.Error:
+            return False
 
     def _migrate_patiently(self, tries: int = 4, wait_s: float = 15.0) -> None:
         """Rodada 25c: outro processo do laboratório gravando (atualização automática, processo de fundo) fazia TODA
@@ -212,9 +258,12 @@ class DataHubDB:
         tem as tabelas, segue sem migrar (as tabelas novas entram na próxima abertura livre)."""
         import time as _t
 
+        ready = self._has_tables()
+        if ready:
+            tries = 1                       # banco já existe: migração leve só se estiver livre, sem esperar minutos
         for i in range(tries):
             try:
-                self.migrate()
+                self.migrate(quick=True) if ready else self.migrate()
                 return
             except sqlite3.OperationalError as exc:
                 if "locked" not in str(exc).lower() and "busy" not in str(exc).lower():
@@ -230,7 +279,8 @@ class DataHubDB:
             ok = None
         if not ok:
             raise sqlite3.OperationalError("database is locked (e o banco ainda não tem as tabelas)")
-        print("  banco continua ocupado: sigo sem a migração leve (só leitura das tabelas que já existem)", flush=True)
+        if not ready:
+            print("  banco continua ocupado: sigo sem a migração leve (só leitura das tabelas que já existem)", flush=True)
 
     # ------------------------------------------------------------------ infra
     @contextmanager
@@ -301,8 +351,22 @@ class DataHubDB:
                 pass
         return made
 
-    def migrate(self) -> None:
-        """Aplica DDL leve e backfills legados uma única vez por versão do schema."""
+    def migrate(self, quick: bool = False) -> None:
+        """Aplica DDL leve e backfills legados uma única vez por versão do schema.
+        quick=True (banco já existente): espera no máximo 3 s por outro gravador; ocupado → OperationalError e o
+        chamador segue com as tabelas que já existem."""
+        if quick:
+            with self.connect() as conn:
+                conn.execute("PRAGMA busy_timeout = 3000;")
+            try:
+                self._migrate_body()
+            finally:
+                with self.connect() as conn:
+                    conn.execute("PRAGMA busy_timeout = 60000;")
+            return
+        self._migrate_body()
+
+    def _migrate_body(self) -> None:
         with self.connect() as conn:
             conn.execute("PRAGMA journal_mode = WAL;")
             if self.schema_path.exists():

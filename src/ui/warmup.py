@@ -142,7 +142,11 @@ def _run() -> None:
     try:
         plan = _plan()
         _STATE["steps"] = [{"nome": n, "status": "fila", "s": None} for n, _ in plan]
+        from src.ui.busy import yield_to_user
+
         for i, (name, fn) in enumerate(plan):
+            if i >= 2:                                   # rodada 27f: depois do essencial, cede a vez às páginas abertas
+                yield_to_user()
             _STATE["current"] = name
             _STATE["steps"][i]["status"] = "rodando"
             t = time.perf_counter()

@@ -170,9 +170,30 @@ def age_hours() -> Optional[float]:
         return None
 
 
+def newest_old() -> Optional[Path]:
+    """A fotografia anterior mais nova que existe no disco (ou None)."""
+    for old in OLD_SNAPS:
+        if old.exists():
+            return old
+    return None
+
+
 def load() -> Optional[Dict[str, Any]]:
     if not SNAP_PATH.exists():
-        return _upgrade_old()
+        # rodada 27f (LENTIDÃO): antes a tela recalculava as notas de TODO o mercado aqui dentro (calibração completa,
+        # minutos) sempre que a versão do código mudava. Agora usa a fotografia anterior como está, na hora, marcada
+        # como parcial; o processo de fundo (ou o passo 12 do atualizar_tudo) monta a nova.
+        old = newest_old()
+        if old is None:
+            return None
+        try:
+            data = pd.read_pickle(old)
+        except Exception:
+            return None
+        if isinstance(data, dict):
+            data["parcial"] = True
+            data["fotografia_antiga"] = old.name
+        return data
     try:
         data = pd.read_pickle(SNAP_PATH)
     except Exception:

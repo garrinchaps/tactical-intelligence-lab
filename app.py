@@ -348,8 +348,11 @@ def main() -> None:
     from src.ui import perf as _perf
 
     _t0 = _time.perf_counter()
+    from src.ui import busy as _busy
+
     try:
-        page.run()
+        with _busy.foreground():                          # rodada 27f: trabalhos de fundo da tela esperam esta página
+            page.run()
     finally:                                              # rodada 16: tempo de cada tela (monitor de velocidade)
         _cover.empty()
         _dt = _time.perf_counter() - _t0

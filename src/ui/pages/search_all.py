@@ -87,11 +87,16 @@ def _prewarm_teams(names: tuple) -> None:
             from src.ui.context import get_service
             from src.ui.pages import clubs as C
 
+            from src.ui.busy import yield_to_user
+
             db = get_service().db
             for n in todo:
+                yield_to_user()                       # rodada 27f: não disputa o processador com a página aberta
                 ns = C.same_team_names(n)
                 C.team_matches(ns)
+                yield_to_user()
                 C._style_data(tuple(ns), db.team_version(ns))
+                yield_to_user()
                 C._formation_data(tuple(ns), db.team_version(ns))
         except Exception:
             pass

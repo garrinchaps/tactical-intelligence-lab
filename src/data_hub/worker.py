@@ -117,6 +117,11 @@ def _scheduled_sync_loop(db) -> None:
             if not A._state["running"]:
                 pending = A.due(db)
                 if pending:
+                    from src.data_hub import activity
+
+                    # rodada 27f: as bases de 3 h/24 h esperam a tela parada (até 30 min) — gravar centenas de milhares
+                    # de linhas no meio do uso deixava o app lento. Os resultados do dia seguem no laço próprio.
+                    activity.wait_idle(A._state, "fase", max_wait_s=1800)
                     A._state.update(running=True, last_attempt=datetime.now(timezone.utc), due=pending)
                     A._run(pending, db)
         except Exception as exc:
@@ -142,7 +147,7 @@ def _scout_snapshot_loop(db) -> None:
             a = S.age_hours()
             from src.data_hub import activity
 
-            if a is not None:                            # já existe fotografia: refaz só com a tela parada
+            if a is not None or S.newest_old() is not None:   # há fotografia (nova ou anterior): refaz com a tela parada
                 activity.wait_idle(_scout_state, "fase")
             if a is None or a >= S.max_age_hours():
                 _scout_state["rodando"] = True

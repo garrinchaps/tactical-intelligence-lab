@@ -1030,7 +1030,7 @@ def render(_ctx=None):
     version = S.version()
     prefill = str(param("club", "") or st.session_state.get("scout_selected_club", ""))
     try:
-        first = S.load() is None
+        first = not S.SNAP_PATH.exists() and S.newest_old() is None     # rodada 27f: sem reler a fotografia
         msg = ("Montando o mercado pela primeira vez (só desta vez — depois fica pronto e é atualizado em segundo plano)..."
                if first else "Abrindo o mercado...")
         with st.spinner(msg):

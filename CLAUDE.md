@@ -822,6 +822,22 @@ Rodada 27e (23/11/2026, 548 testes verdes) — Assistente, notas do Brasil, pote
 - ✅ Estaduais/Série D/Copa do Nordeste nos elencos FotMob (`REGIONS["estaduais"]`, passo 6 `elencos_r27e`).
 - Fotografia do Scout v19 (passo `scout_v19`). Não verificável daqui: notas reais no PC depois da v19.
 
+Rodada 27f (24/11/2026, 551 testes verdes) — "nenhuma aba abre em menos de 5 minutos":
+- Causa achada e reproduzida: cada `DataHubDB()` refazia a MIGRAÇÃO (esquema + gravações) — e o app cria vários (filtro
+  de país em toda consulta por time, Assistente, Scout). Com outro processo gravando (processo de fundo, atualização,
+  tarefa agendada) cada abertura esperava até 60 s × 4 + pausas: 198 s medidos numa base simulada de 300 mil jogos.
+- ✅ `db.py`: migração UMA vez por processo e arquivo (`_MIGRATED`, chave com a versão do esquema); banco já pronto e
+  ocupado → espera no máximo 3 s e segue (`migrate(quick=True)`). Mesmo cenário: 198 s → 3 s; reabrir = 0,0001 s.
+- ✅ Scout: `snapshot.load` sem a fotografia nova usa a ANTERIOR como está (marcada parcial) — antes recalculava as notas
+  do mercado inteiro dentro da tela; a aba Scout relia a fotografia do disco a cada clique (`S.load()` só para saber
+  se era a 1ª vez). O processo de fundo monta a nova com a tela parada.
+- ✅ Processo de fundo: sincronização de 3 h/24 h espera a tela parada (até 30 min); fotografia do Scout idem quando
+  já há uma anterior. Na tela: pré-aquecimento e times da busca cedem a vez à página aberta (`src/ui/busy.py`).
+- ✅ `python -m src.tools.diagnostico_lentidao`: mede abrir banco, catálogo, buscas, time, Scout, WAL, índices, se há
+  outro processo gravando e as telas mais lentas do uso; relatório em data/diagnostico_lentidao.txt.
+- Base simulada (300 mil jogos), telas pelo Streamlit: busca 0,3–0,7 s (1ª 5,9 s, leitura do catálogo), time 2,6 s,
+  jogador/Scout/Rankings/Escalação < 0,5 s.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

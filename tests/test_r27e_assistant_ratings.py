@@ -153,3 +153,52 @@ def test_market_match_tries_longer_name_of_same_club():
                          "nascimento_fm": [None, None], "nacionalidade_fm": ["Brazil", "Brazil"], "minutos_12m": [900, 1500],
                          "times_hist": ["", ""]})
     assert match_market_to_history(p, hist).iloc[0] == "otavio costa"
+
+
+def test_db_migrates_once_per_process(tmp_path):
+    """Rodada 27f: abrir o banco de novo não pode refazer a migração (era a causa de telas de minutos)."""
+    import time
+
+    from src.data_hub import db as DB
+
+    p = tmp_path / "x.db"
+    DB.DataHubDB(p)
+    calls = []
+    orig = DB.DataHubDB._migrate_patiently
+    DB.DataHubDB._migrate_patiently = lambda self, *a, **k: calls.append(1)
+    try:
+        t = time.time()
+        for _ in range(20):
+            DB.DataHubDB(p)
+        assert not calls and time.time() - t < 1
+    finally:
+        DB.DataHubDB._migrate_patiently = orig
+
+
+def test_busy_background_waits_for_page():
+    import threading
+    import time
+
+    from src.ui import busy
+
+    order = []
+    with busy.foreground():
+        th = threading.Thread(target=lambda: (busy.yield_to_user(max_wait_s=5, step_s=.05), order.append("fundo")))
+        th.start()
+        time.sleep(.3)
+        order.append("pagina")
+    th.join(5)
+    assert order == ["pagina", "fundo"]
+
+
+def test_old_snapshot_used_as_is(tmp_path, monkeypatch):
+    import pandas as pd
+
+    from src.scout import snapshot as S
+
+    old = tmp_path / "old.pkl"
+    pd.to_pickle({"universe": pd.DataFrame({"nome": ["A"]})}, old)
+    monkeypatch.setattr(S, "SNAP_PATH", tmp_path / "nova.pkl")
+    monkeypatch.setattr(S, "OLD_SNAPS", [old])
+    d = S.load()
+    assert d["parcial"] and d["universe"]["nome"].tolist() == ["A"] and not (tmp_path / "nova.pkl").exists()
