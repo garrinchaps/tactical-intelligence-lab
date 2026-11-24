@@ -159,3 +159,13 @@ def test_source_profile_lookup_rejects_multiple_transfermarkt_ids_for_same_club(
     })
     found = _source_rows_for_player(rows, ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
     assert found.empty
+
+
+def test_scout_roster_name_resolution_rejects_age_conflict():
+    from src.ui.pages.scout import _resolve_roster_name_cores
+
+    resolved = _resolve_roster_name_cores(
+        ["Otávio"], ["Otávio Costa"],
+        roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [31]},
+    )
+    assert "Otávio" not in resolved
