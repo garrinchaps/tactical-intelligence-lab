@@ -955,7 +955,7 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
     tok_index: Dict[str, List[Dict[str, Any]]] = {}
     for recs in cand_by_name.values():
         for rec in recs:
-            for w in set(str(rec["core_nome"]).split()):
+            for w in set(player_core(rec["core_nome"]).split()):
                 if len(w) >= 4:
                     tok_index.setdefault(w, []).append(rec)
     tm_dup = p["_core"].duplicated(keep=False)
@@ -971,8 +971,8 @@ def match_market_to_history(p: pd.DataFrame, hist: pd.DataFrame) -> pd.Series:
         def fuzzy_cands():
             mine = set(core.split())
             pool = {id(r): r for w in mine if len(w) >= 4 for r in tok_index.get(w, [])}.values()
-            return [r for r in pool if r["core_nome"] != core and
-                    (mine < set(str(r["core_nome"]).split()) or set(str(r["core_nome"]).split()) < mine)]
+            return [r for r in pool if player_core(r["core_nome"]) != core and
+                    (mine < set(player_core(r["core_nome"]).split()) or set(player_core(r["core_nome"]).split()) < mine)]
 
         cands = cand_by_name.get(core)
         fuzzy = False
