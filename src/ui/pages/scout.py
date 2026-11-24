@@ -1527,7 +1527,10 @@ def render(_ctx=None):
                 selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
                                         key="scout_roster_select")
                 if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
-                    open_view("jogador", name=selected, club=str(team or ""))
+                    selected_rows = roster[roster["nome"].astype(str) == selected]
+                    selected_age = pd.to_numeric(selected_rows["idade"], errors="coerce").iloc[0] if not selected_rows.empty else np.nan
+                    open_view("jogador", name=selected, club=str(team or ""),
+                              age=int(selected_age) if pd.notna(selected_age) else None)
             else:
                 st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
             st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")
