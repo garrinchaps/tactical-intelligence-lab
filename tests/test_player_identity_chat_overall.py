@@ -148,3 +148,23 @@ def test_id_estavel_unifica_atleta_mesmo_com_mudanca_de_funcao():
     assert len(merged) == 1
     assert merged.iloc[0]["clube"] == "Clube B"
 
+def test_otavio_prioriza_ficha_completa_sem_puxar_overall_antigo():
+    games = '[{"match_date":"2026-10-01"},{"match_date":"2026-10-08"}]'
+    players = pd.DataFrame([
+        {"nome": "Otávio", "clube": "Cruzeiro", "papel": "GK", "idade": 20,
+         "minutos_12m": 3150, "ultimos_jogos": games, "qualidade": 65, "potencial": 71,
+         "valor_mercado_eur": 500000, "fotmob_id": None},
+        {"nome": "Otávio Costa", "clube": "Cruzeiro", "papel": "GK", "idade": 20,
+         "minutos_12m": 3465, "ultimos_jogos": games, "qualidade": 64, "potencial": 86,
+         "valor_mercado_eur": np.nan, "fotmob_id": 12345},
+    ])
+
+    merged = scout_engine.merge_club_aliases(players)
+
+    assert len(merged) == 1
+    assert merged.iloc[0]["nome"] == "Otávio Costa"
+    assert merged.iloc[0]["qualidade"] == 64
+    assert merged.iloc[0]["potencial"] == 86
+    assert merged.iloc[0]["valor_mercado_eur"] == 500000
+    assert "otavio" in merged.iloc[0]["apelidos_core"]
+
