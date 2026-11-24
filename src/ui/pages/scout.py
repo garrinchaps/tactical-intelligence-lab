@@ -601,7 +601,7 @@ def _merge_roster(roster, _universe, team=None, version=""):
 
         pot = pd.to_numeric(r.get("potencial"), errors="coerce") if "potencial" in r else pd.Series(np.nan, index=r.index)
         for i in r.index[pot.isna()]:
-            row = S.find_player(str(r.at[i, "_core"]), [str(r.at[i, "nome"])], str(team or ""))
+            row = S.find_player(str(r.at[i, "_core"]), [str(r.at[i, "nome"])], str(team or ""), age=r.at[i, "idade"] if "idade" in r else None)
             if row and pd.notna(pd.to_numeric(row.get("potencial"), errors="coerce")):
                 for col in ("potencial", "potencial_porque", "qualidade", "valor_mercado_eur", "idade"):
                     v = row.get(col)
