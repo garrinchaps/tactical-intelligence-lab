@@ -11,11 +11,8 @@ from __future__ import annotations
 import re
 import streamlit as st
 
-from src.ui.components import styled_dataframe
-
-from src.data_hub.registry import BADGES
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
-from src.ui.components import hero, note, result_card_html
+from src.ui.components import hero, note
 from src.ui.context import chosen_levels
 
 EXAMPLES = [
@@ -36,35 +33,9 @@ def _index(version: str, levels="EVENTS|BOXSCORE", only_real: bool = True):
     return build_index(cached_catalog() if isinstance(levels, str) else cached_catalog(include_score_only=not levels))
 
 
-def _meta_line(res) -> str:
-    n = res.get("number_tags") or {}
-    tot = n.get("exato", 0) + n.get("derivado", 0)
-    e = str(res.get("engine_used", ""))
-    eng = "Gemini" if e.upper().startswith("GEMINI") else (
-        e.replace("IA DO LABORATÓRIO", "pela IA do laboratório").replace(" + analista clássico", " + analista clássico")
-        if e.startswith("IA DO LABORATÓRIO") else "analista local")
-    if "lab_ai" in res:
-        eng += f" ({res['lab_ai'].get('n_facts', 0)} fatos lidos)"
-    hidden = f" · {n['ocultadas']} trecho(s) cortado(s) por falta de origem" if n.get("ocultadas") else ""
-    lat = res.get("latency_s")
-    speed = f" · respondido em {lat:.1f} s" if isinstance(lat, (int, float)) else ""
-    who = eng if eng.startswith("pela") else f"pelo {eng}"
-    return f"✔ {tot} números conferidos com os dados da partida · redigido {who}{hidden}{speed}"
-
-
-def _audit_panel(h) -> None:
-    rows = h.get("audit") or []
-    if not rows and not h.get("llm_error"):
-        return
-    with st.expander("🔎 Conferência dos números", expanded=False):
-        if rows:
-            import pandas as pd
-
-            st.caption("EXATO = o número está nos dados · DERIVADO = calculado a partir deles. "
-                       "Frases com número sem origem nos dados são cortadas antes de aparecer.")
-            styled_dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        if h.get("llm_error"):
-            st.caption(f"Gemini indisponível nesta resposta: {h['llm_error']}")
+def _chat_text(value: Any) -> str:
+    """Remove apenas marcação HTML de subscrito; o texto útil permanece legível."""
+    return re.sub(r"</?sub\b[^>]*>", "", str(value or ""), flags=re.I)
 
 
 @st.fragment
@@ -208,8 +179,7 @@ def _answer(question: str, current_context, use_llm: bool):
             except Exception:
                 pass
     # Tags HTML de subscrito não fazem parte do texto conversacional do assistente.
-    res["report_markdown"] = re.sub(r"</?sub\b[^>]*>", "", str(res.get("report_markdown") or ""), flags=re.I)
-    res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
+    res["report_markdown"] = _chat_text(res.get("report_markdown"))
     return res, loc, switched
 
 
@@ -305,8 +275,7 @@ def render(current_context, match_bar) -> None:
         with st.chat_message("user", avatar="🧑‍💼"):
             st.markdown(h["q"])
         with st.chat_message("assistant", avatar="⚽"):
-            answer = re.sub(r"</?sub\b[^>]*>", "", str(h.get("a") or ""), flags=re.I)
-            st.markdown(answer)
+            st.markdown(_chat_text(h.get("a")))
             learning_id = h.get("learning_id")
             if learning_id and learning_id not in reviewed:
                 _feedback_box(learning_id, str(h.get("engine") or h.get("intent") or "resposta")[:60],
