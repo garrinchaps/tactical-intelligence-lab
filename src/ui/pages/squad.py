@@ -1027,7 +1027,7 @@ def render(_ctx=None) -> None:
         from src.scout import snapshot as _scout_snapshot
 
         # Invalida o cache antigo do elenco: o resolvedor por PID podia guardar o overall 65/71 do Otávio.
-        sq = _squad(team, f"{version}|{_scout_snapshot.version()}|overall-name-club-v1")
+        sq = _squad(team, f"{version}|{_scout_snapshot.version()}|overall-name-club-v2")
         mine = _profile(team, n, version)
         theirs = _profile(rival, n, version) if rival else None
     squad = sq["squad"]
