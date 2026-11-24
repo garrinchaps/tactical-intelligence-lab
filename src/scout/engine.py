@@ -3694,7 +3694,7 @@ def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
                 if ids_ok:
                     keep, gone = (a, b) if club[a] == "como" else (b, a)
                     _absorb(d, keep, gone)
-                    drop_kaiki = {gone}
+                    d = d.drop(index=[gone])
 
     fid = pd.to_numeric(d["fotmob_id"], errors="coerce")
     mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce").fillna(0)
