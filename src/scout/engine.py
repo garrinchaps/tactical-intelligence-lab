@@ -3668,6 +3668,34 @@ def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
     d = u.copy()
     core = d["_core"].astype(str) if "_core" in d else d["nome"].map(player_core)
     d["_core"] = core
+
+    # Correção pontual de identidade: Kaiki (lateral brasileiro) aparece como perfil
+    # do Cruzeiro e como perfil do Como após a transferência. O cruzamento por jogos
+    # não funciona quando as fontes guardam recortes de temporadas/clubes diferentes.
+    # Só unir quando nome, posição, país e clubes do par conhecido conferem; David Kaiki
+    # (RW, Batman Petrolspor) fica fora. IDs conflitantes bloqueiam a união.
+    if {"clube", "papel", "nacionalidade"} <= set(d.columns):
+        k = d["_core"].eq("kaiki") & d["papel"].astype(str).eq("LB")
+        country = d["nacionalidade"].fillna("").astype(str).str.strip().str.casefold()
+        k &= country.isin({"brazil", "brasil"})
+        club = d["clube"].fillna("").astype(str).map(team_core)
+        k &= club.isin({"como", "cruzeiro"})
+        candidates = list(d.index[k])
+        if len(candidates) == 2 and set(club.loc[candidates]) == {"como", "cruzeiro"}:
+            a, b = candidates
+            age = pd.to_numeric(d.get("idade", pd.Series(np.nan, index=d.index)), errors="coerce")
+            if pd.isna(age[a]) or pd.isna(age[b]) or abs(age[a] - age[b]) <= 1.2:
+                ids_ok = True
+                for idcol in ("fotmob_id", "transfermarkt_id"):
+                    if idcol in d:
+                        vals = d.loc[candidates, idcol].dropna().astype(str).unique()
+                        if len(vals) > 1:
+                            ids_ok = False
+                if ids_ok:
+                    keep, gone = (a, b) if club[a] == "como" else (b, a)
+                    _absorb(d, keep, gone)
+                    drop_kaiki = {gone}
+
     fid = pd.to_numeric(d["fotmob_id"], errors="coerce")
     mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce").fillna(0)
     fam = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str).map(lambda r: "GK" if r == "GK" else "OUT")
