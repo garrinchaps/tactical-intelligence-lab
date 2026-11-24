@@ -169,3 +169,18 @@ def test_scout_roster_name_resolution_rejects_age_conflict():
         roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [31]},
     )
     assert "Otávio" not in resolved
+
+
+def test_find_player_does_not_treat_transfermarkt_past_club_as_current_club(monkeypatch):
+    from src.scout import snapshot as S
+
+    universe = pd.DataFrame({
+        "_core": ["otavio costa"], "nome": ["Otávio Costa"],
+        "clube": ["Cruzeiro"], "clube_tm": ["FC Porto"], "idade": [20],
+        "qualidade": [64], "potencial": [86], "minutos_12m": [3465],
+    }, index=[1])
+    monkeypatch.setattr(S, "cached_universe", lambda: universe)
+    monkeypatch.setattr(S, "_index", lambda: {"core": {"otavio costa": [1]}, "pid": {}})
+
+    assert S.find_player("otavio costa", ["Otávio Costa"], "Cruzeiro", age=20)["qualidade"] == 64
+    assert S.find_player("otavio costa", ["Otávio Costa"], "FC Porto", age=20) is None
