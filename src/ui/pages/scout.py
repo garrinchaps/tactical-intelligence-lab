@@ -519,7 +519,7 @@ def _merge_roster(roster, _universe, team=None, version=""):
                             "jogos_12m", "nacionalidade", "valor_mercado_eur", "valor_tm_atual",
                             "valor_tm_media_12m", "valor_tm_ultima_avaliacao", "variacao_tm_12m_pct", "fim_contrato",
                             "goals_p90", "assists_p90", "xg_p90", "xa_p90", "chances_created_p90",
-                            "def_actions_p90", "sprints_p90", "historico_temporadas", "ultimos_jogos")
+                            "def_actions_p90", "sprints_p90", "historico_temporadas", "ultimos_jogos", "caracteristicas_top")
                 if x in lookup]
         for col in cols:
             mapped = r["_core"].map(lookup[col])
