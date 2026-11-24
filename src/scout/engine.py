@@ -3524,7 +3524,7 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
         if ri != rj:
             parent[rj] = ri
 
-    # IDs de fonte são a evidência mais forte, desde que função/nascimento/país não conflitem.
+    # IDs estáveis são a evidência mais forte; data de nascimento ou nacionalidade conflitantes ainda bloqueiam a fusão.
     id_columns = [c for c in ("fotmob_id", "transfermarkt_id") if c in d]
     if "pid" in d:
         id_columns.append("pid")
