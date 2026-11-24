@@ -202,3 +202,17 @@ def test_old_snapshot_used_as_is(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "OLD_SNAPS", [old])
     d = S.load()
     assert d["parcial"] and d["universe"]["nome"].tolist() == ["A"] and not (tmp_path / "nova.pkl").exists()
+
+
+def test_bg_fetch_runs_once_and_off_the_click():
+    import time
+
+    from src.ui import bg_fetch
+
+    calls = []
+    t = time.time()
+    assert bg_fetch.schedule("t:x", lambda: (time.sleep(.3), calls.append(1)))
+    assert time.time() - t < .2                       # não espera o download
+    bg_fetch.schedule("t:x", lambda: calls.append(2))  # repetido: ignorado
+    time.sleep(.8)
+    assert calls == [1] and not bg_fetch.running("t:x")

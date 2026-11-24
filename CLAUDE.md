@@ -838,6 +838,18 @@ Rodada 27f (24/11/2026, 551 testes verdes) — "nenhuma aba abre em menos de 5 m
 - Base simulada (300 mil jogos), telas pelo Streamlit: busca 0,3–0,7 s (1ª 5,9 s, leitura do catálogo), time 2,6 s,
   jogador/Scout/Rankings/Escalação < 0,5 s.
 
+Rodada 27g (24/11/2026, 552 testes verdes) — diagnóstico real do PC (banco 19 GB, 66.851 jogadores no Scout):
+- O diagnóstico mostrou banco livre e abertura 0,1 s, mas piores casos de 306 s (Escalação `_squad`), 225 s (jogador),
+  96 s (`_matchday`), busca "real madrid" 4,8 s e catálogo frio 10,8 s.
+- ✅ Causa da Escalação: a tela BAIXAVA na hora 12 jogos da FotMob (pausa entre pedidos + tentativas) quando faltavam
+  escalações recentes, e o elenco FotMob/escalação oficial ESPN também eram pedidos no clique. Agora tudo isso vai para
+  `src/ui/bg_fetch.py` (thread, 1 download por chave a cada 30 min/6 h); a tela usa o que já está na base e avisa
+  "📥 baixando em segundo plano". Base simulada: `_matchday` 11 s → 0,9 s. Scripts/CLI continuam baixando na hora.
+- ✅ Busca com dois times ("real madrid"): `_split_two_teams` usa `fast_scores` (descarta cedo) e os nomes de time vêm
+  do catálogo em memória, uma vez por versão (antes UNION nas 300 mil partidas a cada busca): ~4,4 s → 0,44 s com 30 mil nomes.
+- Catálogo frio (10,8 s) acontece uma vez por abertura do app (na tela de carregamento); a cópia em parquet é gravada
+  depois da 1ª leitura completa.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

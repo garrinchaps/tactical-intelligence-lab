@@ -45,7 +45,16 @@ def fotmob_roster(db, team_names: Sequence[str], fetch: bool = True) -> pd.DataF
     try:
         from src.data_hub.sources.fotmob import FotmobProvider
 
-        rows = FotmobProvider(db).roster(list(team_names), fetch=fetch)
+        prov = FotmobProvider(db)
+        from src.ui import bg_fetch
+
+        if fetch and bg_fetch.in_ui():
+            # rodada 27f: na tela usa o elenco já guardado (até de dias atrás) e renova em segundo plano
+            rows = prov.roster(list(team_names), fetch=False)
+            bg_fetch.schedule("roster:" + "|".join(sorted(team_names)), lambda: prov.roster(list(team_names), fetch=True),
+                              cooldown_s=6 * 3600)
+        else:
+            rows = prov.roster(list(team_names), fetch=fetch)
     except Exception:
         rows = []
     if not rows:

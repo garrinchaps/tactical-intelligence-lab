@@ -27,11 +27,13 @@ def _findings(names: tuple, our: tuple, version: str) -> Dict[str, Any]:
     svc = get_service()
     r = team_vulnerabilities(svc.db, list(names), 12, list(our) if our else None, h)
     if r.get("jogos", 0) < 5 and svc.fotmob.enabled:          # poucos jogos com números por jogador: busca na FotMob agora
-        try:
+        try:                                                    # rodada 27f: em segundo plano (não trava a tela)
+            from src.ui import bg_fetch
+
             for nm in (names, our or ()):
                 if nm:
-                    svc.fotmob.ensure_teams(list(nm), n=12)
-            r = team_vulnerabilities(svc.db, list(names), 12, list(our) if our else None, h)
+                    bg_fetch.schedule("teams:" + "|".join(sorted(nm)),
+                                      lambda nm=nm: svc.fotmob.ensure_teams(list(nm), n=12))
         except Exception:
             pass
     return r

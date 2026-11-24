@@ -477,7 +477,11 @@ def _matchday(team: str, version: str, n: int, target_competition: Optional[str]
                                   f"l.match_id WHERE l.team_name IN ({ph}) AND m.match_date >= date('now', '-45 days'){comp_sql(names, 'm')}",
                                   list(names)).fetchone()[0]
         if recent < 4 and get_service().fotmob.enabled:
-            get_service().fotmob.ensure_teams(list(names), n=12)
+            # rodada 27f: baixa em SEGUNDO PLANO (antes era dentro do clique: 1–5 min na Escalação)
+            from src.ui import bg_fetch
+
+            svc_ = get_service()
+            bg_fetch.schedule("teams:" + "|".join(sorted(names)), lambda: svc_.fotmob.ensure_teams(list(names), n=12))
     except Exception:
         pass
     info = M.player_table(db, names, n=n, tm_values=tm, target_competition=target_competition)
@@ -494,7 +498,11 @@ def _preview(match_id: int, league: str, names: tuple) -> Dict[str, Any]:
         if not svc.espn.enabled:
             return {}
         roster_names = []
-        return svc.espn.preview(match_id, league, list(names) + roster_names)
+        from src.ui import bg_fetch                      # rodada 27f: ESPN em segundo plano, a tela não espera
+
+        if not bg_fetch.in_ui():
+            return svc.espn.preview(match_id, league, list(names) + roster_names)
+        return bg_fetch.value(f"preview:{match_id}", lambda: svc.espn.preview(match_id, league, list(names))) or {}
     except Exception:
         return {}
 
@@ -954,6 +962,14 @@ def render(_ctx=None) -> None:
         st.caption(f"Adversário em análise no Plano de jogo e na escalação 'Contra o adversário': **{rival}** "
                    f"({st.session_state.get('sq_rival_src', 'escolhido')}). Para trocar, use as abas 🔭 Próximo jogo "
                    "ou 🧪 Jogo hipotético e clique em 'Analisar este jogo'.")
+    try:
+        from src.ui import bg_fetch as _bg
+
+        if team and _bg.running_for(team):
+            st.caption(f"📥 Baixando em segundo plano os jogos/elenco mais recentes de {team} — a tela já mostra o que "
+                       "está na base; reabra em ~1 minuto para ver completo.")
+    except Exception:
+        pass
     c1, c2, c3 = st.columns([1.2, 1.2, 2])
     formation = c1.selectbox("Formação", list(FORMATIONS), key="sq_form")
     n = c2.select_slider("Últimos jogos", N_OPTIONS, value=N_OPTIONS[-1], key="sq_n")      # rodada 22: visão conjunta

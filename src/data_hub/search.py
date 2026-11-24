@@ -378,19 +378,40 @@ class UniversalMatchFinder:
         best: Tuple[float, Optional[List[str]]] = (0.0, None)
         for i in range(1, len(words)):
             left, right = " ".join(words[:i]), " ".join(words[i:])
-            sl = max((team_score(left, n) for n in names), default=0)
-            sr = max((team_score(right, n) for n in names), default=0)
+            # rodada 27f: fast_scores descarta cedo quem não chega a 0,9 (antes SequenceMatcher completo em ~30 mil
+            # nomes × cada divisão da frase = "real madrid" levava ~5 s)
+            sl = max(fast_scores(left, names).values(), default=0)
+            if sl < 0.9:
+                continue
+            sr = max(fast_scores(right, names).values(), default=0)
             if min(sl, sr) >= 0.9 and min(sl, sr) > best[0]:
                 best = (min(sl, sr), [left, right])
         return best[1]
 
+    _NAMES: Dict[str, Any] = {}
+
     def _known_team_names(self) -> List[str]:
+        """Nomes de time do catálogo — rodada 27f: uma vez por processo e versão do catálogo (antes a cada busca nova
+        relia as 300 mil partidas com UNION)."""
         if not hasattr(self, "_team_cache"):
-            with self.db.connect() as conn:
-                rows = conn.execute(
-                    "SELECT home_team_name FROM matches UNION SELECT away_team_name FROM matches"
-                ).fetchall()
-            self._team_cache = [r[0] for r in rows if r[0]]
+            try:
+                ver = self.db.stable_version()
+            except Exception:
+                ver = ""
+            key = f"{self.db.db_path}|{ver}"
+            hit = UniversalMatchFinder._NAMES.get(key)
+            if hit is None:
+                try:
+                    cat = self.db.catalog_memo(ver)
+                    hit = sorted(set(cat["home_team_name"].dropna()) | set(cat["away_team_name"].dropna()))
+                except Exception:
+                    with self.db.connect() as conn:
+                        rows = conn.execute(
+                            "SELECT home_team_name FROM matches UNION SELECT away_team_name FROM matches"
+                        ).fetchall()
+                    hit = [r[0] for r in rows if r[0]]
+                UniversalMatchFinder._NAMES = {key: hit}
+            self._team_cache = hit
         return self._team_cache
 
     # ------------------------------------------------------------- geral
