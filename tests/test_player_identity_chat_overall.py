@@ -135,3 +135,16 @@ def test_merge_aliases_preserva_aliases_de_outras_fichas():
     assert "lucas" in preserved
     assert "lucas silva" in preserved
 
+def test_id_estavel_unifica_atleta_mesmo_com_mudanca_de_funcao():
+    players = pd.DataFrame([
+        {"nome": "Atleta Exemplo", "clube": "Clube A", "papel": "LB", "fotmob_id": 999,
+         "nascimento": "2002-01-01", "nacionalidade": "Brazil", "clube_observado": False},
+        {"nome": "Atleta Exemplo", "clube": "Clube B", "papel": "CB", "fotmob_id": 999,
+         "nascimento": "2002-01-01", "nacionalidade": "Brazil", "clube_observado": True},
+    ])
+
+    merged = scout_engine.merge_verified_player_duplicates(players)
+
+    assert len(merged) == 1
+    assert merged.iloc[0]["clube"] == "Clube B"
+
