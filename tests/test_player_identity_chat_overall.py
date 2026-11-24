@@ -325,10 +325,17 @@ def test_cross_source_reconciliation_rejects_homonyms_and_biographical_conflicts
          "idade": 22, "nacionalidade": "Brazil", "fotmob_id": 5, "transfermarkt_id": None},
         {"nome": "Player Role", "_core": "player role", "clube": "Club F", "papel": "CB",
          "idade": 22, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 6},
+        # Sem idade, datas de nascimento incompatíveis também bloqueiam a fusão.
+        {"nome": "Player Birth", "_core": "player birth", "clube": "Club G", "papel": "DM",
+         "idade": np.nan, "nascimento": "2001-01-01", "nacionalidade": "Brazil",
+         "fotmob_id": 7, "transfermarkt_id": None},
+        {"nome": "Player Birth", "_core": "player birth", "clube": "Club H", "papel": "DM",
+         "idade": np.nan, "nascimento": "2002-01-01", "nacionalidade": "Brazil",
+         "fotmob_id": None, "transfermarkt_id": 8},
     ]
     merged = E.merge_cross_source_duplicates(pd.DataFrame(rows))
 
-    assert len(merged) == 6
+    assert len(merged) == 8
 
 
 def test_cross_source_reconciliation_leaves_ambiguous_three_way_match_separate():
