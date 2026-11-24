@@ -3481,7 +3481,7 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
 
     role = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str)
     family = role.map(_role_family)
-    birth = pd.to_datetime(d.get("nascimento", pd.Series(None, index=d.index)), errors="coerce").dt.strftime("%Y-%m-%d")
+    birth = pd.to_datetime(d.get("nascimento", pd.Series(None, index=d.index)), errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
     nat = d.get("nacionalidade", pd.Series("", index=d.index)).fillna("").astype(str).str.strip().str.casefold()
     last = pd.to_datetime(d.get("ultimo_jogo", pd.Series(None, index=d.index)), errors="coerce")
     minutes = pd.to_numeric(d.get("minutos_12m", pd.Series(0, index=d.index)), errors="coerce").fillna(0)
