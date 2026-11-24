@@ -76,7 +76,7 @@ POS_WEIGHTS: Dict[str, Dict[str, float]] = {
     "DM": {"SHO": .02, "CRE": .08, "DRI": .05, "PAS": .20, "DEF": .30, "PHY": .20, "AIR": .08, "SEC": .05, "MOB": .02},
     "FB": {"SHO": .05, "CRE": .12, "DRI": .12, "PAS": .18, "DEF": .25, "PHY": .15, "AIR": .05, "SEC": .05, "MOB": .03},
     "CB": {"SHO": .01, "CRE": .02, "DRI": .03, "PAS": .18, "DEF": .35, "PHY": .20, "AIR": .15, "SEC": .05, "MOB": .01},
-    "GK": {"GKS": .75, "GKD": .10, "GKE": .15},
+    "GK": {"GKS": .72, "GKD": .10, "GKE": .18},
 }
 
 # perfis por família: nome → (atributos que definem, frase)
