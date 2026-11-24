@@ -665,7 +665,7 @@ def _dossier(player, roster):
         from src.scout import attributes as AT
         from src.ui import fm, player_fm
 
-        role = str(player.get("papel_alvo") or player.get("papel") or "")
+        role = _display_text(player.get("papel_alvo"), _display_text(player.get("papel"), ""))
         v, txt = AT.verdict(AT.contract_score(player, _starter_quality(roster).get(role)))
         fm.verdict_card(v, txt)
         player_fm.overview(player, key=f"dos_{_slug(player.get('nome'))}_{_slug(player.get('papel_alvo'))}")
@@ -957,7 +957,7 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
     st.markdown(player_html, unsafe_allow_html=True)
     _card_actions(player, plan_key, team, name, idx, rejected_key)
     _vote_box(team, name, idx, player.get("votos_scout"),
-              str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
+              _display_text(player.get("papel_alvo"), _display_text(player.get("papel"), "sugestao")))
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
 
