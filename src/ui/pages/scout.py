@@ -465,6 +465,8 @@ def _merge_roster(roster, _universe, team=None, version=""):
 
     r = roster.copy()
     r["_core"] = r["nome"].map(player_core)
+    scout_lookup = None
+    scout_own_cores = set()
     if universe is not None and not universe.empty:
         # O elenco do clube tem prioridade. Reaplica a consolidação de apelidos no recorte do próprio clube,
         # inclusive quando a fotografia persistida ainda contém duas linhas ("Otávio" e "Otávio Costa").
@@ -536,17 +538,20 @@ def _merge_roster(roster, _universe, team=None, version=""):
             if "own" in locals() and "apelidos_core" in own:
                 own_cores |= {a for v in own["apelidos_core"].dropna() for a in str(v).split("|") if a}
             hit = r["_core"].isin(own_cores)
-            # Para atletas deste elenco (incluindo apelidos resolvidos), os dados do perfil canônico
-            # prevalecem sobre métricas antigas da ficha curta. Isso inclui minutos e nota média:
-            # manter 3.150/7,15 da linha legada anulava a consolidação 3.465/7,16 do Otávio Costa.
-            for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque",
-                        "qualidade", "confianca_pct", "minutos_12m", "jogos_12m", "rating_12m",
-                        "estilo", "caracteristicas_top"):
-                if col in lookup and hit.any():
-                    mapped = r.loc[hit, "_core"].map(lookup[col])
-                    current = r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object)
-                    r.loc[hit, col] = mapped.combine_first(current)
+            scout_lookup = lookup
+            scout_own_cores = own_cores
     r = _fill_from_club_games(r, universe, team)
+    # Reaplica depois dos números agregados do banco do clube: caso contrário, eles podem recolocar
+    # minutos/nota média de uma ficha abreviada já consolidada no perfil canônico do Scout.
+    if scout_lookup is not None and scout_own_cores:
+        hit = r["_core"].isin(scout_own_cores)
+        for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque",
+                    "qualidade", "confianca_pct", "minutos_12m", "jogos_12m", "rating_12m",
+                    "estilo", "caracteristicas_top"):
+            if col in scout_lookup and hit.any():
+                mapped = r.loc[hit, "_core"].map(scout_lookup[col])
+                current = r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object)
+                r.loc[hit, col] = mapped.combine_first(current)
     if "qualidade" not in r:
         r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
     else:
