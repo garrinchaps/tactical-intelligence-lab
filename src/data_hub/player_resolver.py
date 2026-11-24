@@ -125,9 +125,15 @@ def score(a: Dict, b: Dict, name_score: float) -> Tuple[float, List[str]]:
         s += 0.30
         why.append("clube em comum")
     selections_a, selections_b = set(a.get("selecoes") or ()), set(b.get("selecoes") or ())
-    if selections_a & selections_b:
+    nat_a = norm(a.get("nacionalidade") or "")
+    nat_b = norm(b.get("nacionalidade") or "")
+    # Seleção e nacionalidade são relacionadas, mas nacionalidade nunca é tratada como clube.
+    selection_match = bool(selections_a & selections_b) or bool(
+        (nat_a and nat_a in selections_b) or (nat_b and nat_b in selections_a)
+    )
+    if selection_match:
         s += 0.30
-        why.append("seleção em comum")
+        why.append("seleção/nacionalidade compatível")
     return round(s, 2), why
 
 
