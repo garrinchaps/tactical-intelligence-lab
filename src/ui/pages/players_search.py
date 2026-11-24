@@ -242,11 +242,11 @@ def _source_rows_for_player(frame: pd.DataFrame, names, club: str, id_col: str =
     hit = _age_matches_source_rows(hit, expected_age)
     if hit.empty and wanted:
         from src.squad.matchday import canonical_names
-        mapped = canonical_names(wanted, scoped["nome"].astype(str).unique().tolist())
+        candidate_scope = _age_matches_source_rows(scoped, expected_age)
+        mapped = canonical_names(wanted, candidate_scope["nome"].astype(str).unique().tolist())
         resolved = set(mapped.values())
         if resolved:
-            hit = scoped[scoped["nome"].astype(str).isin(resolved)].copy()
-            hit = _age_matches_source_rows(hit, expected_age)
+            hit = candidate_scope[candidate_scope["nome"].astype(str).isin(resolved)].copy()
     if hit.empty:
         return hit
     if id_col:
