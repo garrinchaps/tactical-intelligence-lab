@@ -23,6 +23,24 @@ INDEX_PATH = __import__("pathlib").Path("data/processed/player_index.parquet")
 INDEX_META_PATH = INDEX_PATH.with_suffix(".meta.json")
 
 
+def _player_index_version(db_version: str) -> str:
+    """SQLite revision + file revisions of the external lakes used by the player index."""
+    parts = [str(db_version)]
+    try:
+        from src.data_lake.lake import Lake
+        lake = Lake(sqlite_path=None)
+        for name in ("tm_jogadores", "us_jogadores"):
+            path = lake.path(name)
+            try:
+                stat = path.stat()
+                parts.append(f"{name}:{stat.st_size}:{stat.st_mtime_ns}")
+            except OSError:
+                parts.append(f"{name}:missing")
+    except Exception:
+        parts.append("lake-unavailable")
+    return "|".join(parts)
+
+
 @st.cache_data(show_spinner=False)
 def player_index(version: str) -> pd.DataFrame:
     """Índice pesado persistido, mas sempre vinculado à versão exata do banco para não servir aliases antigos."""
@@ -295,7 +313,7 @@ def render(_ctx=None) -> None:
     if not (core or given):
         empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
-    idx = player_index(get_service().db.stable_version())
+    idx = player_index(_player_index_version(get_service().db.stable_version()))
     core = core or _norm(given)
     if not idx.empty:
         person = core if core in set(idx["pessoa"]) else next(iter(idx.loc[idx["core"] == core, "pessoa"]), core)
