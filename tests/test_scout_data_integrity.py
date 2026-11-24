@@ -247,3 +247,16 @@ def test_player_resolver_can_confirm_single_token_alias_with_same_birth_date():
     ])
     people, _ = resolve(rows)
     assert people.nunique() == 1
+
+
+def test_player_resolver_can_reconcile_duplicate_provider_ids_with_same_biography():
+    from src.data_hub.player_resolver import resolve
+
+    rows = pd.DataFrame([
+        {"nome": "Kaiki", "core": "kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "fotmob_id": "fm-old", "nascimento": "2003-03-01", "nacionalidade": "Brazil"},
+        {"nome": "David Kaiki", "core": "david kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "fotmob_id": "fm-new", "nascimento": "2003-03-01", "nacionalidade": "Brazil"},
+    ])
+    people, _ = resolve(rows)
+    assert people.nunique() == 1
