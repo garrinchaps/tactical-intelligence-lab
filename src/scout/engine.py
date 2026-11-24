@@ -3369,7 +3369,7 @@ def _game_dates(v) -> set:
 
 
 def _absorb(d: pd.DataFrame, keep, gone) -> None:
-    """Completa o registro prioritário com campos ausentes, sem sobrescrever notas atuais."""
+    """Completa campos ausentes; conserva OVR/potencial prioritários e o maior valor de mercado conhecido."""
     for col in d.columns:
         if col.startswith("_"):
             continue
@@ -3378,6 +3378,15 @@ def _absorb(d: pd.DataFrame, keep, gone) -> None:
             v = d.at[gone, col]
             if not (isinstance(v, float) and np.isnan(v)):
                 d.at[keep, col] = v
+    # Mantém a regra histórica de mercado: valor é o maior observado entre as fontes.
+    # Overall e potencial continuam sendo os da ficha prioritária, mais atual/completa.
+    if "valor_mercado_eur" in d:
+        current, other = pd.to_numeric(
+            pd.Series([d.at[keep, "valor_mercado_eur"], d.at[gone, "valor_mercado_eur"]]),
+            errors="coerce",
+        )
+        if pd.notna(other) and (pd.isna(current) or other > current):
+            d.at[keep, "valor_mercado_eur"] = other
 
 
 def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
