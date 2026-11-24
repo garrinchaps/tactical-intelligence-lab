@@ -3505,9 +3505,11 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
             i = parent[i]
         return i
 
-    def compatible(i, j):
+    def compatible(i, j, require_same_role: bool = True):
         fi, fj = family.get(i, "OTHER"), family.get(j, "OTHER")
-        if fi == "OTHER" or fj == "OTHER" or fi != fj:
+        # Um ID estável pode ligar o mesmo atleta mesmo após mudança de posição.
+        # Sem ID, a família de posição é obrigatória para a comparação nominal.
+        if require_same_role and (fi == "OTHER" or fj == "OTHER" or fi != fj):
             return False
         bi, bj = birth.get(i), birth.get(j)
         if bi and bj and bi != bj:
@@ -3537,7 +3539,7 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
             if len(indices) > 1:
                 for pos, i in enumerate(indices):
                     for j in indices[pos + 1:]:
-                        if compatible(i, j):
+                        if compatible(i, j, require_same_role=False):
                             unite(i, j)
 
     # Sem ID comum: nascimento exato + nome igual/abreviado + país e função compatíveis.
