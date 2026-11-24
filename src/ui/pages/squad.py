@@ -1026,7 +1026,8 @@ def render(_ctx=None) -> None:
     with st.spinner("Montando elenco e perfis..."):
         from src.scout import snapshot as _scout_snapshot
 
-        sq = _squad(team, f"{version}|{_scout_snapshot.version()}")
+        # Invalida o cache antigo do elenco: o resolvedor por PID podia guardar o overall 65/71 do Otávio.
+        sq = _squad(team, f"{version}|{_scout_snapshot.version()}|overall-name-club-v1")
         mine = _profile(team, n, version)
         theirs = _profile(rival, n, version) if rival else None
     squad = sq["squad"]
