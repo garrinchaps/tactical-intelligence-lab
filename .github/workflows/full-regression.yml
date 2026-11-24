@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - codex/**
+      - claude/gifted-knuth-q93cbz
   pull_request:
     branches:
       - codex/fotmob-depth-routing
       - codex/inteligencia-compartilhada
       - codex/implementation-foundation
       - main
+      - claude/gifted-knuth-q93cbz
   workflow_dispatch:
 
 permissions:
