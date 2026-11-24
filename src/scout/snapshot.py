@@ -448,7 +448,7 @@ def find_player(core: str, names: Optional[list] = None, club: str = "", pid: st
         requested = player_core(str(core or ""))
         all_cores = u["_core"].astype(str)
         prefix_rows = u.index[all_cores.str.startswith(requested, na=False) & (all_cores != requested)].tolist()
-        if prefix_rows:
+        if requested and prefix_rows:
             candidates = u.loc[prefix_rows]
             tc = team_core(club)
             club_cols = [c for c in ("clube", "clube_tm") if c in candidates]
