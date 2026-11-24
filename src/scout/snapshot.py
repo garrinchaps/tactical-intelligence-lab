@@ -342,8 +342,9 @@ def cached_data() -> Optional[Dict[str, Any]]:
 
 
 def _index() -> Dict[str, Any]:
-    """Rodada 25: índices núcleo-do-nome → linhas e pid → linha, montados UMA vez por fotografia. Antes cada busca de
-    jogador varria o universo inteiro (60 mil+ linhas) — o campinho com 22 nomes fazia 22 varreduras."""
+    """Índices por nome, alias e PID, montados uma vez por fotografia."""
+    from src.data_lake.ids import player_core
+
     u = cached_universe()
     if u is None or u.empty:
         return {}
@@ -376,7 +377,7 @@ def quality_map() -> Dict[str, Dict[str, float]]:
         return {"q": {}, "p": {}}
     if _MEMO.get("qmap_for") is u:
         return _MEMO["qmap"]
-    from src.data_lake.ids import team_core
+    from src.data_lake.ids import player_core, team_core
 
     clubs = u["clube"].fillna("").astype(str)
     cmap = {c: team_core(c) for c in clubs.unique()}
