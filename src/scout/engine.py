@@ -3369,7 +3369,7 @@ def _game_dates(v) -> set:
 
 
 def _absorb(d: pd.DataFrame, keep, gone) -> None:
-    """Completa a linha que fica com o que só a outra tem; valor e potencial = o maior dos dois."""
+    """Completa o registro prioritário com campos ausentes, sem sobrescrever notas atuais."""
     for col in d.columns:
         if col.startswith("_"):
             continue
@@ -3378,11 +3378,6 @@ def _absorb(d: pd.DataFrame, keep, gone) -> None:
             v = d.at[gone, col]
             if not (isinstance(v, float) and np.isnan(v)):
                 d.at[keep, col] = v
-    for col in ("valor_mercado_eur", "potencial", "potencial_teto", "qualidade"):
-        if col in d:
-            a_, b_ = pd.to_numeric(pd.Series([d.at[keep, col], d.at[gone, col]]), errors="coerce")
-            if pd.notna(b_) and (pd.isna(a_) or b_ > a_):
-                d.at[keep, col] = b_
 
 
 def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
