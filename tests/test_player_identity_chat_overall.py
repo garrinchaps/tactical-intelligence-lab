@@ -117,3 +117,21 @@ def test_chat_remove_tag_sub_mantendo_texto_legivel():
     from src.ui.pages.assistant import _chat_text
 
     assert _chat_text("Weverton <sub>em 90 min</sub>") == "Weverton em 90 min"
+
+def test_merge_aliases_preserva_aliases_de_outras_fichas():
+    players = pd.DataFrame([
+        {"nome": "Bruno", "clube": "Clube A", "papel": "CM", "idade": 27,
+         "minutos_12m": 0, "ultimos_jogos": None, "apelidos_core": None},
+        {"nome": "Bruno Fernandes", "clube": "Clube A", "papel": "CM", "idade": 27,
+         "minutos_12m": 1800, "ultimos_jogos": None, "apelidos_core": None},
+        {"nome": "Lucas Silva", "clube": "Clube B", "papel": "CM", "idade": 29,
+         "minutos_12m": 800, "ultimos_jogos": None, "apelidos_core": "lucas|lucas silva"},
+    ])
+
+    merged = scout_engine.merge_club_aliases(players)
+
+    assert len(merged) == 2
+    preserved = merged.loc[merged["nome"] == "Lucas Silva", "apelidos_core"].iloc[0]
+    assert "lucas" in preserved
+    assert "lucas silva" in preserved
+
