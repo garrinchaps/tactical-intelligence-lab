@@ -132,7 +132,7 @@ def candidate_pairs(prof: pd.DataFrame) -> List[Tuple[int, int, float]]:
     # IDs do mesmo provedor permitem resolver variações até de um único token (ex.: "Kaiki" / "David Kaiki").
     for field in ("fotmob_ids", "transfermarkt_ids"):
         by_id: Dict[str, List[int]] = {}
-        for i, values in prof[field].items() if field in prof else []:
+        for i, values in prof[field].items():
             for value in values or ():
                 by_id.setdefault(str(value), []).append(i)
         for group in by_id.values():
