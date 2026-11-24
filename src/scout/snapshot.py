@@ -260,6 +260,29 @@ def load() -> Optional[Dict[str, Any]]:
     return data
 
 
+POTENTIAL_COLUMNS = (
+    "potencial", "potencial_teto", "potencial_crescimento", "potencial_revenda",
+    "projecao_valorizacao_24m_pct", "potencial_natureza", "potencial_piso_base",
+    "potencial_porque", "potencial_confianca_pct", "precocidade",
+)
+
+
+def _preserve_existing_potential(source: pd.DataFrame, recalculated: pd.DataFrame) -> pd.DataFrame:
+    """Preserva as projeções que já estavam na fotografia ao recalcular somente o OVR."""
+    if source is None or recalculated is None or recalculated.empty:
+        return recalculated
+    out = recalculated.copy()
+    for column in POTENTIAL_COLUMNS:
+        if column not in source:
+            continue
+        previous = source[column].reindex(out.index)
+        if column in out:
+            out[column] = previous.combine_first(out[column])
+        else:
+            out[column] = previous
+    return out
+
+
 def _upgrade_old() -> Optional[Dict[str, Any]]:
     """
     Rodada 11: a fotografia nova ainda não existe — aproveita a anterior e só RECALCULA as notas (segundos), em vez de
@@ -282,6 +305,7 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                     u = add_peak(u, D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"]))
                 except Exception:
                     pass
+            saved_potential = u[[c for c in POTENTIAL_COLUMNS if c in u]].copy()
             for c in ("caracteristicas", "caracteristicas_top", "precocidade", "qualidade", "qualidade_base", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
                       "qualidade_estatistica", "nota_externa", "fontes_nota_externa", "fonte_qualidade"):
                 if c in u:
@@ -295,7 +319,8 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
             from src.scout.overall import finalize_overall
             from src.scout.traits import add_traits
 
-            u2 = E.merge_rankings(E.merge_external_ratings(E.add_quality_scores(u), ext), _evaluations())
+            recalculated = _preserve_existing_potential(saved_potential, E.add_quality_scores(u))
+            u2 = E.merge_rankings(E.merge_external_ratings(recalculated, ext), _evaluations())
             u2 = E.canonical_clubs(u2)
             try:
                 from src.data_hub.gender import drop_women_players

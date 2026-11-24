@@ -248,3 +248,25 @@ def test_overall_migration_can_recalculate_quality_without_changing_potential(mo
 
     assert result.loc[0, "qualidade"] == 72.0
     assert result.loc[0, "potencial"] == 86.0
+
+
+def test_snapshot_migration_preserves_existing_potential_fields():
+    from src.scout.snapshot import _preserve_existing_potential
+
+    old = pd.DataFrame({
+        "potencial": [86.0], "potencial_teto": [90.0],
+        "potencial_revenda": [75.0], "precocidade": [82.0],
+    })
+    recalculated = pd.DataFrame({
+        "potencial": [78.0], "potencial_teto": [83.0],
+        "potencial_revenda": [61.0], "precocidade": [55.0],
+        "qualidade": [72.0],
+    })
+
+    out = _preserve_existing_potential(old, recalculated)
+
+    assert out.loc[0, "qualidade"] == 72.0
+    assert out.loc[0, "potencial"] == 86.0
+    assert out.loc[0, "potencial_teto"] == 90.0
+    assert out.loc[0, "potencial_revenda"] == 75.0
+    assert out.loc[0, "precocidade"] == 82.0
