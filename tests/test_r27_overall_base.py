@@ -186,6 +186,7 @@ def test_veteran_regular_goalkeeper_market_reputation_is_heavily_discounted():
         "_avail": [1.0, 1.0, 1.0, 1.0],
         "_m": [1.0, 1.0, 1.0, 1.0],
         "R": [10.0, 90.0, 10.0, 90.0],
+        "_zR": [-2.0, 2.0, -2.0, 2.0],
         "P": [75.0] * 4,
         "T": [75.0] * 4,
         "L": [70.0] * 4,
