@@ -69,11 +69,22 @@ def test_campinho_exibe_o_overall_exato_do_scout(monkeypatch):
     assert result[0]["qualidade_fonte"] == "Overall do Scout"
 
 
-def test_elenco_usa_overall_e_potencial_do_scout(monkeypatch):
+def test_elenco_prefere_alias_e_clube_a_um_pid_transfermarkt_legado(monkeypatch):
     from src.scout import snapshot as S
     from src.ui.pages.squad import apply_scout_overall
 
-    monkeypatch.setattr(S, "find_player", lambda *args, **kwargs: {"qualidade": 64, "potencial": 86})
+    calls = []
+
+    def find_player(core, names=None, club="", pid=""):
+        calls.append({"core": core, "names": names, "club": club, "pid": pid})
+        if pid:
+            # Simula o comportamento antigo: o ID da ficha TM encontra o registro legado.
+            return {"nome": "Otávio", "clube": "Cruzeiro", "qualidade": 65, "potencial": 71}
+        # Alias consolidado da busca manual: ficha completa FotMob, com nota correta.
+        return {"nome": "Otávio Costa", "apelidos_core": "otavio", "clube": "Cruzeiro",
+                "qualidade": 64, "potencial": 86}
+
+    monkeypatch.setattr(S, "find_player", find_player)
     squad = pd.DataFrame([{
         "nome": "Otávio", "transfermarkt_id": 123, "nota": 65, "nota_base": "estimativa local",
     }])
@@ -84,6 +95,10 @@ def test_elenco_usa_overall_e_potencial_do_scout(monkeypatch):
     assert result.loc[0, "qualidade"] == 64
     assert result.loc[0, "potencial"] == 86
     assert result.loc[0, "nota_base"] == "Overall do Scout"
+    assert len(calls) == 1
+    assert calls[0]["pid"] == ""
+    assert calls[0]["names"] == ["Otávio"]
+    assert calls[0]["club"] == "Cruzeiro"
 
 
 def test_cartao_scout_nao_exibe_nan_como_posicao():
