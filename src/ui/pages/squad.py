@@ -139,7 +139,7 @@ def apply_scout_overall(squad: pd.DataFrame, team: str) -> pd.DataFrame:
         # linha consolidada do Scout (ex.: Otávio → Otávio Costa, perfil com histórico FotMob).
         # Nome/alias + clube devem prevalecer; passar pid primeiro fazia find_player retornar
         # imediatamente a ficha legada 65/71, sem validar nome ou clube.
-        row = S.find_player(player_core(name), [name], str(team or ""))
+        row = S.find_player(player_core(name), [name], str(team or ""), age=player.get("idade"))
         if not row:
             continue
         quality = pd.to_numeric(pd.Series([row.get("qualidade")]), errors="coerce").iloc[0]
@@ -1027,7 +1027,7 @@ def render(_ctx=None) -> None:
         from src.scout import snapshot as _scout_snapshot
 
         # Invalida o cache antigo do elenco: o resolvedor por PID podia guardar o overall 65/71 do Otávio.
-        sq = _squad(team, f"{version}|{_scout_snapshot.version()}|overall-name-club-v1")
+        sq = _squad(team, f"{version}|{_scout_snapshot.version()}|overall-name-club-v2")
         mine = _profile(team, n, version)
         theirs = _profile(rival, n, version) if rival else None
     squad = sq["squad"]

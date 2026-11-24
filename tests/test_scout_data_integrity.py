@@ -91,3 +91,119 @@ def test_scout_roster_name_resolution_handles_short_names_and_ambiguity():
     assert resolved["Leonardo"] == "Leonardo Nascimento"
     assert resolved["M. Henrique"] == "Matheus Henrique"
     assert "João" not in resolved  # nome ambíguo não é associado por chute
+
+
+
+def test_find_player_rejects_a_single_exact_name_from_the_wrong_club(monkeypatch):
+    from src.scout import snapshot as S
+
+    universe = pd.DataFrame({
+        "_core": ["otavio"], "nome": ["Otávio"], "clube": ["Porto"],
+        "clube_tm": ["Porto"], "qualidade": [82], "potencial": [85],
+        "minutos_12m": [3000],
+    }, index=[1])
+    monkeypatch.setattr(S, "cached_universe", lambda: universe)
+    monkeypatch.setattr(S, "_index", lambda: {"core": {"otavio": [1]}, "pid": {}})
+
+    assert S.find_player("otavio", ["Otávio"], "Cruzeiro") is None
+
+
+def test_find_player_discards_wrong_pid_and_resolves_same_club_full_name(monkeypatch):
+    from src.scout import snapshot as S
+
+    universe = pd.DataFrame({
+        "_core": ["otavio", "otavio costa"],
+        "nome": ["Otávio", "Otávio Costa"],
+        "clube": ["Porto", "Cruzeiro"],
+        "clube_tm": ["Porto", "Cruzeiro"],
+        "idade": [31, 20],
+        "pid": ["tm-old", "tm-current"],
+        "qualidade": [82, 64], "potencial": [84, 86],
+        "minutos_12m": [3000, 3465],
+    }, index=[1, 2])
+    index = {"core": {"otavio": [1], "otavio costa": [2]},
+             "pid": {"tm-old": 1, "tm-current": 2}}
+    monkeypatch.setattr(S, "cached_universe", lambda: universe)
+    monkeypatch.setattr(S, "_index", lambda: index)
+
+    found = S.find_player("otavio", ["Otávio"], "Cruzeiro", pid="tm-old", age=20)
+    assert found["nome"] == "Otávio Costa"
+    assert found["qualidade"] == 64
+    assert found["potencial"] == 86
+
+
+def test_source_profile_lookup_never_uses_same_name_from_another_club():
+    from src.ui.pages.players_search import _source_rows_for_player
+
+    rows = pd.DataFrame({
+        "transfermarkt_id": [111, 222],
+        "nome": ["Otávio", "Otávio Costa"],
+        "clube": ["FC Porto", "Cruzeiro"],
+        "nascimento": ["1995-02-09", "2006-04-10"],
+    })
+    found = _source_rows_for_player(rows, ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
+    assert found["transfermarkt_id"].astype(str).tolist() == ["222"]
+
+    wrong_only = _source_rows_for_player(rows.iloc[[0]], ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
+    assert wrong_only.empty
+
+
+def test_source_profile_lookup_rejects_multiple_transfermarkt_ids_for_same_club():
+    from src.ui.pages.players_search import _source_rows_for_player
+
+    rows = pd.DataFrame({
+        "transfermarkt_id": [222, 333],
+        "nome": ["Otávio Costa", "Otávio Costa"],
+        "clube": ["Cruzeiro", "Cruzeiro"],
+        "nascimento": ["2006-04-10", "2006-04-10"],
+    })
+    found = _source_rows_for_player(rows, ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
+    assert found.empty
+
+
+def test_scout_roster_name_resolution_rejects_age_conflict():
+    from src.ui.pages.scout import _resolve_roster_name_cores
+
+    resolved = _resolve_roster_name_cores(
+        ["Otávio"], ["Otávio Costa"],
+        roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [31]},
+    )
+    assert "Otávio" not in resolved
+
+
+def test_find_player_does_not_treat_transfermarkt_past_club_as_current_club(monkeypatch):
+    from src.scout import snapshot as S
+
+    universe = pd.DataFrame({
+        "_core": ["otavio costa"], "nome": ["Otávio Costa"],
+        "clube": ["Cruzeiro"], "clube_tm": ["FC Porto"], "idade": [20],
+        "qualidade": [64], "potencial": [86], "minutos_12m": [3465],
+    }, index=[1])
+    monkeypatch.setattr(S, "cached_universe", lambda: universe)
+    monkeypatch.setattr(S, "_index", lambda: {"core": {"otavio costa": [1]}, "pid": {}})
+
+    assert S.find_player("otavio costa", ["Otávio Costa"], "Cruzeiro", age=20)["qualidade"] == 64
+    assert S.find_player("otavio costa", ["Otávio Costa"], "FC Porto", age=20) is None
+
+
+def test_source_profile_short_name_uses_age_to_disambiguate_same_club_candidates():
+    from src.ui.pages.players_search import _source_rows_for_player
+
+    rows = pd.DataFrame({
+        "transfermarkt_id": [222, 333],
+        "nome": ["Otávio Costa", "Otávio Silva"],
+        "clube": ["Cruzeiro", "Cruzeiro"],
+        "nascimento": ["2006-04-10", "1995-02-09"],
+    })
+    found = _source_rows_for_player(rows, ["Otávio"], "Cruzeiro", "transfermarkt_id", expected_age=20)
+    assert found["transfermarkt_id"].astype(str).tolist() == ["222"]
+
+
+def test_scout_roster_short_name_uses_age_to_disambiguate_same_club_candidates():
+    from src.ui.pages.scout import _resolve_roster_name_cores
+
+    resolved = _resolve_roster_name_cores(
+        ["Otávio"], ["Otávio Costa", "Otávio Silva"],
+        roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [20], "Otávio Silva": [31]},
+    )
+    assert resolved["Otávio"] == "Otávio Costa"

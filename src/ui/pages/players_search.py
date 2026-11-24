@@ -217,6 +217,46 @@ def _same_club_rows(hit: pd.DataFrame, club: str) -> pd.DataFrame:
     return same
 
 
+def _age_matches_source_rows(frame: pd.DataFrame, expected_age=None) -> pd.DataFrame:
+    """Reject source records whose birth year cannot match the selected player's age."""
+    if frame is None or frame.empty or expected_age is None or pd.isna(expected_age) or "nascimento" not in frame:
+        return frame
+    birth = pd.to_datetime(frame["nascimento"], errors="coerce")
+    known = birth.notna()
+    if not known.any():
+        return frame
+    age_now = pd.Timestamp.today().year - birth.dt.year
+    return frame[known & ((age_now - float(expected_age)).abs() <= 1)]
+
+
+def _source_rows_for_player(frame: pd.DataFrame, names, club: str, id_col: str = "", expected_age=None) -> pd.DataFrame:
+    """Resolve source rows only inside the selected club; reject ambiguous IDs and age conflicts."""
+    if frame is None or frame.empty or not club or "nome" not in frame or "clube" not in frame:
+        return pd.DataFrame()
+    scoped = _same_club_rows(frame, club)
+    if scoped.empty:
+        return scoped
+    wanted = list(dict.fromkeys(str(n).strip() for n in (names or []) if n and str(n).strip()))
+    wanted_cores = {_norm(n) for n in wanted}
+    hit = scoped[scoped["nome"].map(_norm).isin(wanted_cores)].copy()
+    hit = _age_matches_source_rows(hit, expected_age)
+    if hit.empty and wanted:
+        from src.squad.matchday import canonical_names
+        candidate_scope = _age_matches_source_rows(scoped, expected_age)
+        mapped = canonical_names(wanted, candidate_scope["nome"].astype(str).unique().tolist())
+        resolved = set(mapped.values())
+        if resolved:
+            hit = candidate_scope[candidate_scope["nome"].astype(str).isin(resolved)].copy()
+    if hit.empty:
+        return hit
+    if id_col:
+        if id_col not in hit:
+            return hit.iloc[0:0]
+        ids = hit[id_col].dropna().astype(str).unique()
+        if len(ids) != 1:
+            return hit.iloc[0:0]
+    return hit
+
 def render(_ctx=None) -> None:
     from src.ui import nav
     from src.ui.context import get_service
@@ -224,6 +264,11 @@ def render(_ctx=None) -> None:
     nav.back_button(key="player_back")
     core, given = nav.param("core"), nav.param("name")
     want_club, want_pid = str(nav.param("club") or ""), str(nav.param("pid") or "")
+    expected_age = nav.param("age")
+    try:
+        expected_age = float(expected_age) if expected_age is not None and pd.notna(expected_age) else None
+    except (TypeError, ValueError):
+        expected_age = None
     if not (core or given):
         empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
@@ -250,7 +295,7 @@ def render(_ctx=None) -> None:
         try:
             from src.scout import snapshot as _S
 
-            _r = _S.find_player(core, hit["nome"].unique().tolist(), "", pid=want_pid)
+            _r = _S.find_player(core, hit["nome"].unique().tolist(), "", pid=want_pid, age=expected_age)
             cur_club = str((_r or {}).get("clube") or "")
             cur_club = "" if cur_club.lower() in ("nan", "none") else cur_club
         except Exception:                      # noqa: BLE001
@@ -264,6 +309,18 @@ def render(_ctx=None) -> None:
                                                  + list(hit["clube"]) if _club_ok(x)), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
+    profile_club = want_club or p["clube"] or ""
+    # Perfil do Scout validado pelo clube (e idade, quando veio do elenco); não reutiliza um PID sem conferência.
+    profile_scout = None
+    try:
+        from src.scout import snapshot as _S
+        profile_scout = _S.find_player(core, names, profile_club, pid=want_pid, age=expected_age)
+    except Exception:
+        profile_scout = None
+    if expected_age is None and profile_scout:
+        age_value = pd.to_numeric(pd.Series([profile_scout.get("idade")]), errors="coerce").iloc[0]
+        expected_age = float(age_value) if pd.notna(age_value) else None
+    source_names = list(dict.fromkeys(names + ([str(profile_scout.get("nome"))] if profile_scout and profile_scout.get("nome") else [])))
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
                 f'<div class="d">{p["nome_longo"] if p["nome_longo"] != p["nome"] else ""} · {p["clube"]} · fontes: {p["fontes"]}</div>'
                 f'</div></div>', unsafe_allow_html=True)
@@ -287,39 +344,41 @@ def render(_ctx=None) -> None:
             from src.scout import snapshot as S
             from src.ui import player_fm
 
-            row = S.find_player(p["core"], names, p["clube"], pid=want_pid)
+            row = profile_scout
             # rodada 27e: o cartão usa a MESMA qualidade, potencial e posição do Scout (antes: média da nota por jogo,
             # "67 ponta" para o Bontempo e "75 centroavante" para o Mbappé)
-            _player_card(p["nome"], tuple(names), p["clube"], row=row)
+            _player_card(p["nome"], tuple(source_names), profile_club, row=row)
             if row:
                 from src.analytics.rating_v2 import RATING_ENGINE_VERSION
 
-                form = _form_data(tuple(names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, p["clube"] or "")
+                form = _form_data(tuple(source_names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, profile_club)
                 player_fm.overview(row, key=f"pfm_{p['core']}", form=form)
             else:
                 st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
                            "minutos medidos pela FotMob/ESPN no último ano).")
-            _youth_panel(tuple(names), get_service().db.stable_version())
+            _youth_panel(tuple(source_names), get_service().db.stable_version(), expected_age)
     with t5:
         if t5.open is not False:
-            _scout_tab(names, want_club or p["clube"] or "")
+            _scout_tab(source_names, profile_club)
     with t4:
         if t4.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
-            _career_tab(p["core"])
+            _career_tab(p["core"], source_names, p["clube"], expected_age)
     with t1:
         if t1.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
-            frames = [player_matches(n) for n in names]
+            frames = [player_matches(n) for n in source_names]
             pm = pd.concat([f for f in frames if not f.empty], ignore_index=True) if any(not f.empty for f in frames) else pd.DataFrame()
             if not pm.empty:                                   # B4: mesmo jogo em duas fontes conta uma vez
                 from src.data_hub.player_resolver import merge_match_rows
 
                 pm = merge_match_rows(pm)
-            if want_club and not pm.empty and "team_name" in pm:     # rodada 24: homônimo de outro clube fica de fora
-                pm = _same_club_rows(pm.rename(columns={"team_name": "clube"}), want_club).rename(columns={"clube": "team_name"})
+            if not pm.empty and "team_name" in pm:
+                # Nunca mantém partidas de nome homônimo sem um clube atual confirmado.
+                pm = (_same_club_rows(pm.rename(columns={"team_name": "clube"}), profile_club)
+                      .rename(columns={"clube": "team_name"}) if profile_club else pm.iloc[0:0])
             if pm.empty:
                 # rodada 27e: sem jogos com lances, mostra os jogos com ESTATÍSTICAS dele (FotMob/ESPN) — antes a aba ficava
                 # vazia para quase todo jogador do Brasil
-                bg = _box_games(tuple(names), want_club or p["clube"] or "", get_service().db.stable_version())
+                bg = _box_games(tuple(source_names), profile_club, get_service().db.stable_version())
                 if bg.empty:
                     empty_state("Nenhum jogo deste atleta com números na base", "", "🗓️",
                                 "Os jogos aparecem quando a FotMob/ESPN trazem os números por jogador da partida.")
@@ -333,7 +392,7 @@ def render(_ctx=None) -> None:
                 k[2].metric("xG", round(float(pm["xg"].sum()), 2))
                 k[3].metric("Passes certos", f"{int(pm['passes_certos'].sum())} de {int(pm['passes'].sum())}")
                 k[4].metric("Finalizações", int(pm["finalizacoes"].sum()))
-                notes = _ratings_block(pm, names)
+                notes = _ratings_block(pm, source_names)
                 for i, r in enumerate(pm.to_dict("records")):
                     a, b = st.columns([8, 1.3])
                     nt = (notes.get(int(r["match_id"])) or {}).get("nota") if notes else None
@@ -356,9 +415,7 @@ def render(_ctx=None) -> None:
                 tm = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
             except Exception:
                 tm = pd.DataFrame()
-            r = tm[tm["nome"].map(_norm) == p["core"]] if not tm.empty else tm
-            if want_club and len(r) > 1 and "clube" in r:           # rodada 24: homônimo → só o cadastro do clube certo
-                r = _same_club_rows(r, want_club)
+            r = _source_rows_for_player(tm, source_names, p["clube"], "transfermarkt_id", expected_age)
             if r.empty:
                 empty_state("Sem perfil do Transfermarkt", "", "💶", "python -m src.data_hub.sync --only transfermarkt lake")
             else:
@@ -388,7 +445,7 @@ def render(_ctx=None) -> None:
                 us = lake.read("us_jogadores") if lake.exists("us_jogadores") else pd.DataFrame()
             except Exception:
                 us = pd.DataFrame()
-            r = us[us["nome"].map(_norm) == p["core"]] if not us.empty else us
+            r = _source_rows_for_player(us, source_names, p["clube"], expected_age=expected_age)
             if r.empty:
                 empty_state("Sem dados do Understat", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
             else:
@@ -429,7 +486,7 @@ SELECT e.match_id, MIN(e.minute) AS m0, MAX(e.minute) AS m1, COUNT(*) AS acoes,
   SUM(e.type_name = 'Foul Committed') AS faltas_cometidas, SUM(e.type_name = 'Foul Won') AS faltas_sofridas,
   SUM(e.type_name = 'Error') AS erros,
   SUM(e.foul_committed_card_name LIKE '%Yellow%') AS amarelos, SUM(e.foul_committed_card_name LIKE '%Red%') AS vermelhos
-FROM events e WHERE e.player_name IN ({ph}) AND e.period <= 4 GROUP BY e.match_id
+FROM events e WHERE e.player_name IN ({ph}){team_filter} AND e.period <= 4 GROUP BY e.match_id
 """
 
 SCOUT_GROUPS = {
@@ -451,13 +508,21 @@ SCOUT_GROUPS = {
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=32)
-def player_scout(names: tuple) -> pd.DataFrame:
+def player_scout(names: tuple, teams: tuple = ()) -> pd.DataFrame:
     from src.ui.context import get_service
 
+    if not names:
+        return pd.DataFrame()
     ph = ",".join("?" * len(names))
+    team_filter = ""
+    params = list(names)
+    if teams:
+        th = ",".join("?" * len(teams))
+        team_filter = f" AND e.team_name IN ({th})"
+        params.extend(teams)
     with get_service().db.connect() as conn:
         try:
-            return pd.read_sql_query(SCOUT_SQL.format(ph=ph), conn, params=list(names))
+            return pd.read_sql_query(SCOUT_SQL.format(ph=ph, team_filter=team_filter), conn, params=params)
         except Exception:
             return pd.DataFrame()
 
@@ -478,7 +543,7 @@ def _box_games(names: tuple, club: str, version: str) -> pd.DataFrame:
 
     from src.ui.context import get_service
 
-    if not names:
+    if not names or not club:
         return pd.DataFrame()
     ph = ",".join("?" * len(names))
     since = (pd.Timestamp.today() - pd.Timedelta(days=3 * 365)).date().isoformat()
@@ -556,7 +621,18 @@ def _box_per90_view(bg: pd.DataFrame) -> None:
 
 
 def _scout_tab(names: List[str], club: str = "") -> None:
-    sc = player_scout(tuple(names))
+    if not club:
+        empty_state("Clube do atleta não confirmado", "", "📊",
+                    "Não agregamos estatísticas por nome sem um clube de referência, para evitar misturar homônimos.")
+        return
+    teams = ()
+    if club:
+        try:
+            from src.ui.pages.clubs import same_team_names
+            teams = tuple(dict.fromkeys([club, *same_team_names(club)]))
+        except Exception:
+            teams = (club,)
+    sc = player_scout(tuple(names), teams)
     if sc.empty:
         from src.ui.context import get_service
 
@@ -597,19 +673,26 @@ def _scout_tab(names: List[str], club: str = "") -> None:
                "Velocidade, distância e mapa de calor de rastreamento não existem nas fontes abertas.")
 
 
-def _career_tab(core: str) -> None:
+def _career_tab(core: str, names, club: str, expected_age=None) -> None:
     from src.squad import data as D
 
-    tm = D.table("tm_jogadores", ["transfermarkt_id", "nome", "ultima_temporada"])
-    hit = tm[tm["nome"].map(_norm) == core] if not tm.empty else tm
+    tm = D.table("tm_jogadores", ["transfermarkt_id", "nome", "ultima_temporada", "clube", "nascimento"])
+    hit = _source_rows_for_player(tm, names or [core], club, "transfermarkt_id", expected_age)
     if hit.empty:
-        empty_state("Sem cadastro no Transfermarkt", "", "📚", "python -m src.data_hub.sync --only transfermarkt")
+        empty_state("Carreira do Transfermarkt não vinculada com segurança", "", "📚",
+                    "Não exibimos a carreira de homônimos de outros clubes. É necessário um cadastro único do atleta "
+                    "no clube selecionado; sincronize o Transfermarkt se estiver faltando.")
         return
-    pid = hit.sort_values("ultima_temporada", ascending=False).iloc[0]["transfermarkt_id"]
+    ids = hit["transfermarkt_id"].dropna().astype(str).unique()
+    if len(ids) != 1:
+        empty_state("Cadastro do Transfermarkt ambíguo", "", "📚",
+                    "Há mais de um ID possível para este nome e clube; nenhum perfil foi escolhido automaticamente.")
+        return
+    pid = ids[0]
     ap = D.table("tm_aparicoes", None, "transfermarkt_id", [pid])
     if ap.empty:
         empty_state("Sem aparições jogo a jogo", "", "📚",
-                    "Rode `python -m src.data_hub.sync --only transfermarkt` para baixar as aparições (carreira).")
+                    "Rode python -m src.data_hub.sync --only transfermarkt para baixar as aparições (carreira).")
         return
     ap = ap.copy()
     d = pd.to_datetime(ap["data"], errors="coerce")
@@ -635,6 +718,8 @@ def _career_tab(core: str) -> None:
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=64)
 def _form_data(names: tuple, version: str, club: str = "") -> pd.DataFrame:
+    if not club or not names:
+        return pd.DataFrame()
     from src.analytics import rating_box as RB
     from src.ui.context import get_service
 
@@ -729,19 +814,19 @@ def _player_card(nome: str, names: tuple, club: str = "", row: Optional[dict] = 
 
 
 @st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=200)
-def _youth_data(names: tuple, version: str):
+def _youth_data(names: tuple, version: str, expected_age=None):
     from src.scout.engine import youth_profile
     from src.ui.context import get_service
 
-    d = youth_profile(get_service().db, list(names))
+    d = youth_profile(get_service().db, list(names), expected_age=expected_age)
     if d and isinstance(d.get("por_competicao"), pd.DataFrame):
         d["por_competicao"] = d["por_competicao"].to_dict("records")
     return d
 
 
-def _youth_panel(names: tuple, version: str) -> None:
+def _youth_panel(names: tuple, version: str, expected_age=None) -> None:
     """Rodada 27: os números da seleção de base ficam no perfil do atleta (separados dos números de clube)."""
-    d = _youth_data(names, version)
+    d = _youth_data(names, version, expected_age)
     if not d or not d.get("jogos"):
         return
     from src.ui import fm

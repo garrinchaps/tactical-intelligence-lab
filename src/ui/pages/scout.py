@@ -450,17 +450,20 @@ def _display_text(value, fallback: str) -> str:
 
 
 
-def _resolve_roster_name_cores(roster_names, scout_names):
-    """Resolve short roster names to a unique full Scout name within the current club.
-
-    Only a strict token-subset match is allowed (e.g. 'Otavio' -> 'Otavio Costa').
-    It is applied even when the short name already exists as a separate Scout row,
-    because that row may be stale/incomplete. Ambiguous matches are left untouched.
-    """
+def _resolve_roster_name_cores(roster_names, scout_names, roster_ages=None, scout_ages=None):
+    """Resolve a short roster name only to one full Scout name in the same club and compatible age."""
     from src.data_lake.ids import player_core
 
+    roster_ages = roster_ages or {}
+    scout_ages = scout_ages or {}
     targets = list(dict.fromkeys(str(n).strip() for n in scout_names if n and str(n).strip()))
     target_cores = {n: player_core(n) for n in targets}
+
+    def age_ok(roster_name, candidate):
+        expected = pd.to_numeric(pd.Series([roster_ages.get(roster_name)]), errors="coerce").iloc[0]
+        known = pd.to_numeric(pd.Series(scout_ages.get(candidate, [])), errors="coerce").dropna()
+        return pd.isna(expected) or known.empty or bool(((known - float(expected)).abs() <= 1).any())
+
     out = {}
     for raw in roster_names:
         name = str(raw or "").strip()
@@ -468,17 +471,17 @@ def _resolve_roster_name_cores(roster_names, scout_names):
         tokens = set(core.split())
         if not name or not tokens:
             continue
-        candidates = [n for n in targets if tokens < set(target_cores[n].split())]
+        candidates = [n for n in targets if tokens < set(target_cores[n].split()) and age_ok(name, n)]
         if len(candidates) == 1:
             out[name] = candidates[0]
             continue
-        # Complementa nomes abreviados por inicial + sobrenome (ex.: M. Henrique).
-        if name:
-            from src.squad.matchday import canonical_names
-            canonical = canonical_names([name], targets).get(name)
-            if canonical and player_core(canonical) != core:
-                out[name] = canonical
+        from src.squad.matchday import canonical_names
+        age_candidates = [candidate for candidate in targets if age_ok(name, candidate)]
+        canonical = canonical_names([name], age_candidates).get(name)
+        if canonical and player_core(canonical) != core:
+            out[name] = canonical
     return out
+
 
 def _role(role):
     if _missing_value(role):
@@ -515,7 +518,11 @@ def _merge_roster(roster, _universe, team=None, version=""):
                 # Corrige nomes abreviados do elenco mesmo quando já existe uma linha
                 # com esse nome curto no universo (ela pode ser um perfil legado).
                 if "nome" in own:
-                    resolved_names = _resolve_roster_name_cores(r["nome"].astype(str).tolist(), own["nome"].astype(str).tolist())
+                    roster_age_map = dict(zip(r["nome"].astype(str), pd.to_numeric(r.get("idade"), errors="coerce"))) if "idade" in r else {}
+                    scout_age_map = (own.groupby(own["nome"].astype(str))["idade"].apply(list).to_dict()
+                                     if "idade" in own else {})
+                    resolved_names = _resolve_roster_name_cores(r["nome"].astype(str).tolist(), own["nome"].astype(str).tolist(),
+                                                                roster_age_map, scout_age_map)
                     r["_core"] = [player_core(resolved_names.get(n, n)) for n in r["nome"].astype(str)]
             alias_source = own
             lookup_source = pd.concat([own, others], axis=0)
@@ -589,11 +596,13 @@ def _merge_roster(roster, _universe, team=None, version=""):
                 mapped = r.loc[hit, "_core"].map(scout_lookup[col])
                 current = r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object)
                 r.loc[hit, col] = mapped.combine_first(current)
+    # Ausência da coluna "nota" deve ser uma Series alinhada, não escalar NaN/float.
+    fallback_nota = r["nota"] if "nota" in r else pd.Series(np.nan, index=r.index, dtype=float)
+    fallback_nota = pd.to_numeric(fallback_nota, errors="coerce")
     if "qualidade" not in r:
-        r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")
+        r["qualidade"] = fallback_nota
     else:
-        r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(
-            pd.to_numeric(r.get("nota"), errors="coerce"))
+        r["qualidade"] = pd.to_numeric(r["qualidade"], errors="coerce").combine_first(fallback_nota)
     # rodada 27: quem ainda ficou sem POTENCIAL (nome não achado no universo) → busca pelo clube no universo; sem
     # isso, potencial estimado pela idade e pela nota (marcado), em vez de vazio
     try:
@@ -601,7 +610,7 @@ def _merge_roster(roster, _universe, team=None, version=""):
 
         pot = pd.to_numeric(r.get("potencial"), errors="coerce") if "potencial" in r else pd.Series(np.nan, index=r.index)
         for i in r.index[pot.isna()]:
-            row = S.find_player(str(r.at[i, "_core"]), [str(r.at[i, "nome"])], str(team or ""))
+            row = S.find_player(str(r.at[i, "_core"]), [str(r.at[i, "nome"])], str(team or ""), age=r.at[i, "idade"] if "idade" in r else None)
             if row and pd.notna(pd.to_numeric(row.get("potencial"), errors="coerce")):
                 for col in ("potencial", "potencial_porque", "qualidade", "valor_mercado_eur", "idade"):
                     v = row.get(col)
@@ -703,14 +712,14 @@ def _club_squad(team, version, universe):
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
         # Invalida o cache antigo que mantinha nomes curtos ligados à ficha incompleta.
-        sq = _merge_roster(data.get("squad"), universe, team, f"{version}|roster-name-resolution-v2")
+        sq = _merge_roster(data.get("squad"), universe, team, f"{version}|roster-name-resolution-v3")
         return {**data, "squad": drop_women_players(sq, _gs().db, _stn(team))}     # rodada 20
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
         club = E.market_club(D.table("tm_clubes"), team)
         roster = E.current_roster(get_service().db, club, same_team_names(team), D.table("tm_jogadores"), universe)
-        return {"squad": _merge_roster(roster, universe, team, f"{version}|roster-name-resolution-v2"), "club": club, "fonte": "Transfermarkt + escalações"}
+        return {"squad": _merge_roster(roster, universe, team, f"{version}|roster-name-resolution-v3"), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
 def _d(v):
@@ -1527,7 +1536,10 @@ def render(_ctx=None):
                 selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
                                         key="scout_roster_select")
                 if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
-                    open_view("jogador", name=selected, club=str(team or ""))
+                    selected_rows = roster[roster["nome"].astype(str) == selected]
+                    selected_age = pd.to_numeric(selected_rows["idade"], errors="coerce").iloc[0] if not selected_rows.empty else np.nan
+                    open_view("jogador", name=selected, club=str(team or ""),
+                              age=int(selected_age) if pd.notna(selected_age) else None)
             else:
                 st.warning("O elenco atual não pôde ser confirmado. As sugestões serão limitadas à cobertura do catálogo.")
             st.caption(f"Regra de estrangeiros: estimativa feita sobre até 23 atletas mais prováveis por qualidade/minutagem ({foreign_count} nacionalidade(s) estrangeira(s) identificada(s)); não equivale à lista oficial de relacionados.")

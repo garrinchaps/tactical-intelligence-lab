@@ -75,8 +75,8 @@ def test_elenco_prefere_alias_e_clube_a_um_pid_transfermarkt_legado(monkeypatch)
 
     calls = []
 
-    def find_player(core, names=None, club="", pid=""):
-        calls.append({"core": core, "names": names, "club": club, "pid": pid})
+    def find_player(core, names=None, club="", pid="", age=None):
+        calls.append({"core": core, "names": names, "club": club, "pid": pid, "age": age})
         if pid:
             # Simula o comportamento antigo: o ID da ficha TM encontra o registro legado.
             return {"nome": "Otávio", "clube": "Cruzeiro", "qualidade": 65, "potencial": 71}
