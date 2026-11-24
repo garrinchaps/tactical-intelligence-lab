@@ -135,9 +135,11 @@ def apply_scout_overall(squad: pd.DataFrame, team: str) -> pd.DataFrame:
         name = str(player.get("nome") or "").strip()
         if not name or name.casefold() in {"nan", "none"}:
             continue
-        tm_id = player.get("transfermarkt_id")
-        pid = f"tm{str(tm_id).strip()}" if pd.notna(tm_id) else ""
-        row = S.find_player(player_core(name), [name], str(team or ""), pid=pid)
+        # A ficha do elenco (Transfermarkt) pode carregar um ID antigo que não corresponde à
+        # linha consolidada do Scout (ex.: Otávio → Otávio Costa, perfil com histórico FotMob).
+        # Nome/alias + clube devem prevalecer; passar pid primeiro fazia find_player retornar
+        # imediatamente a ficha legada 65/71, sem validar nome ou clube.
+        row = S.find_player(player_core(name), [name], str(team or ""))
         if not row:
             continue
         quality = pd.to_numeric(pd.Series([row.get("qualidade")]), errors="coerce").iloc[0]
