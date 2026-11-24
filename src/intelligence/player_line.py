@@ -163,7 +163,4 @@ def match_intro(stats: Dict[str, Dict[str, Any]], meta: Dict[str, Any], goals: L
     home, away = meta.get("home_team_name", ""), meta.get("away_team_name", "")
     score = f"{meta.get('home_score', '')}–{meta.get('away_score', '')}"
     match = f"{home} {score} {away}".strip()
-    details = [str(meta.get("competition_name") or "").strip(), str(meta.get("match_date") or "")[:10]]
-    details = [x for x in details if x and x.lower() not in {"none", "nan"}]
-    suffix = f" · {' · '.join(details)}" if details else ""
-    return f"⚽ **Jogo identificado: {match}**{suffix}. Pode perguntar sobre esta partida."
+    return f"⚽ **Jogo identificado: {match}.** Pode perguntar sobre a partida."
