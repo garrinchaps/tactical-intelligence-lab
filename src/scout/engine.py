@@ -3307,7 +3307,7 @@ YOUTH_STAT_KEYS = [("Gols", ("goals", "totalGoals")), ("Assistências", ("assist
                    ("Duelos ganhos", ("duel_won",)), ("Aéreos ganhos", ("aerials_won",)), ("Toques", ("touches",))]
 
 
-def youth_profile(db, names: List[str]) -> Dict[str, Any]:
+def youth_profile(db, names: List[str], expected_age: Optional[float] = None) -> Dict[str, Any]:
     """Jogos do atleta por SELEÇÃO DE BASE e base de clubes (Mundial Sub-17/20, Sul-Americano, Euros, Youth League…):
     por competição (jogos, minutos, titular, nota média) e os números somados e por 90. Fica no perfil dele — separado
     dos números de clube (jogar bem na base não é jogar bem entre profissionais)."""
@@ -3330,6 +3330,12 @@ def youth_profile(db, names: List[str]) -> Dict[str, Any]:
                 conn, params=names + comps)
     except Exception:
         return {}
+    if d.empty or expected_age is None or pd.isna(expected_age):
+        # Sem idade de referência não há como distinguir homônimos nas competições de base.
+        return {}
+    match_year = pd.to_datetime(d["match_date"], errors="coerce").dt.year
+    age_at_match = float(expected_age) - (pd.Timestamp.today().year - match_year)
+    d = d[age_at_match.between(14, 22)]
     if d.empty:
         return {}
     d = d.drop_duplicates("match_id")
