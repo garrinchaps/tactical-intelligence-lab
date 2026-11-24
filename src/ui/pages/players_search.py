@@ -295,7 +295,7 @@ def render(_ctx=None) -> None:
         try:
             from src.scout import snapshot as _S
 
-            _r = _S.find_player(core, hit["nome"].unique().tolist(), "", pid=want_pid)
+            _r = _S.find_player(core, hit["nome"].unique().tolist(), "", pid=want_pid, age=expected_age)
             cur_club = str((_r or {}).get("clube") or "")
             cur_club = "" if cur_club.lower() in ("nan", "none") else cur_club
         except Exception:                      # noqa: BLE001
