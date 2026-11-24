@@ -703,14 +703,14 @@ def _club_squad(team, version, universe):
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
         # Invalida o cache antigo que mantinha nomes curtos ligados à ficha incompleta.
-        sq = _merge_roster(data.get("squad"), universe, team, f"{version}|roster-name-resolution-v2")
+        sq = _merge_roster(data.get("squad"), universe, team, f"{version}|roster-name-resolution-v3")
         return {**data, "squad": drop_women_players(sq, _gs().db, _stn(team))}     # rodada 20
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
         club = E.market_club(D.table("tm_clubes"), team)
         roster = E.current_roster(get_service().db, club, same_team_names(team), D.table("tm_jogadores"), universe)
-        return {"squad": _merge_roster(roster, universe, team, f"{version}|roster-name-resolution-v2"), "club": club, "fonte": "Transfermarkt + escalações"}
+        return {"squad": _merge_roster(roster, universe, team, f"{version}|roster-name-resolution-v3"), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
 def _d(v):
