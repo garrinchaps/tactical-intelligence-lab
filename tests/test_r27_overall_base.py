@@ -154,3 +154,43 @@ def test_sugestoes_por_perfil_respeitam_titular_e_verba():
     assert "Jovem" in g["🌱 Jovens promessas"] and "Investe" in g["📈 Para investir"]
     assert "Pronto" in g["⭐ Para chegar e jogar"]
     assert all("Fraco" not in v for v in g.values())
+
+
+def test_gk_attribute_engine_affects_only_goalkeeper_performance_percentile():
+    comps = pd.DataFrame({
+        "_fam": ["GK"] * 10 + ["FB"] * 2,
+        "P": [50.0] * 12,
+    })
+    engine = pd.DataFrame({
+        "ovr2_bruto": list(np.linspace(40, 90, 10)) + [20.0, 80.0],
+    })
+    out = O._blend_goalkeeper_attribute_performance(comps, engine)
+
+    assert out.loc[9, "P"] > out.loc[0, "P"]
+    assert out.loc[10, "P"] == 50.0
+    assert out.loc[11, "P"] == 50.0
+
+
+def test_gk_overall_weights_do_not_let_distribution_dominate():
+    from src.scout import rating_engine as RE
+
+    weights = RE.POS_WEIGHTS["GK"]
+    assert weights == {"GKS": .75, "GKD": .10, "GKE": .15}
+    assert weights["GKS"] > weights["GKD"]
+
+
+def test_veteran_regular_goalkeeper_market_reputation_is_heavily_discounted():
+    comps = pd.DataFrame({
+        "_fam": ["GK", "GK", "FB", "FB"],
+        "_age": [46, 46, 30, 30],
+        "_avail": [1.0, 1.0, 1.0, 1.0],
+        "_m": [1.0, 1.0, 1.0, 1.0],
+        "R": [10.0, 90.0, 10.0, 90.0],
+        "P": [75.0] * 4,
+        "T": [75.0] * 4,
+        "L": [70.0] * 4,
+        "_elig": [True] * 4,
+    })
+    z = O.zscore(comps, {"wR": .5, "wP": .2, "wT": .2, "wL": .1})
+    # A low market valuation must move a high-minute 46-year-old goalkeeper less than an outfield player.
+    assert abs(float(z.iloc[1] - z.iloc[0])) < abs(float(z.iloc[3] - z.iloc[2]))
