@@ -4,9 +4,11 @@ on:
   push:
     branches:
       - codex/fotmob-depth-routing
+      - claude/gifted-knuth-q93cbz
   pull_request:
     branches:
       - codex/inteligencia-compartilhada
+      - claude/gifted-knuth-q93cbz
   workflow_dispatch:
 
 jobs:
