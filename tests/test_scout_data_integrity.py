@@ -55,3 +55,26 @@ def test_fotmob_international_friendlies_are_in_automatic_catalog():
 
     assert LEAGUES[114] == "Amistosos internacionais"
     assert 114 in PRIORITY
+
+
+def test_find_player_resolves_unique_short_name_only_with_matching_club(monkeypatch):
+    from src.scout import snapshot as S
+
+    universe = pd.DataFrame({
+        "_core": ["otavio costa", "otavio silva"],
+        "clube": ["Cruzeiro", "Atlético"],
+        "clube_tm": ["Cruzeiro", "Atlético"],
+        "qualidade": [64, 70],
+        "potencial": [86, 80],
+        "minutos_12m": [3465, 2000],
+    }, index=[10, 20])
+    index = {"core": {}, "pid": {}}
+    monkeypatch.setattr(S, "cached_universe", lambda: universe)
+    monkeypatch.setattr(S, "_index", lambda: index)
+
+    found = S.find_player("otavio", ["Otávio"], "Cruzeiro")
+    assert found["qualidade"] == 64
+    assert found["potencial"] == 86
+    assert found["clube"] == "Cruzeiro"
+
+    assert S.find_player("otavio", ["Otávio"], "Flamengo") is None
