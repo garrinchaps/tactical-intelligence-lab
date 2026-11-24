@@ -217,6 +217,46 @@ def _same_club_rows(hit: pd.DataFrame, club: str) -> pd.DataFrame:
     return same
 
 
+def _age_matches_source_rows(frame: pd.DataFrame, expected_age=None) -> pd.DataFrame:
+    """Reject source records whose birth year cannot match the selected player's age."""
+    if frame is None or frame.empty or expected_age is None or pd.isna(expected_age) or "nascimento" not in frame:
+        return frame
+    birth = pd.to_datetime(frame["nascimento"], errors="coerce")
+    known = birth.notna()
+    if not known.any():
+        return frame
+    age_now = pd.Timestamp.today().year - birth.dt.year
+    return frame[known & ((age_now - float(expected_age)).abs() <= 1)]
+
+
+def _source_rows_for_player(frame: pd.DataFrame, names, club: str, id_col: str = "", expected_age=None) -> pd.DataFrame:
+    """Resolve source rows only inside the selected club; reject ambiguous IDs and age conflicts."""
+    if frame is None or frame.empty or not club or "nome" not in frame or "clube" not in frame:
+        return pd.DataFrame()
+    scoped = _same_club_rows(frame, club)
+    if scoped.empty:
+        return scoped
+    wanted = list(dict.fromkeys(str(n).strip() for n in (names or []) if n and str(n).strip()))
+    wanted_cores = {_norm(n) for n in wanted}
+    hit = scoped[scoped["nome"].map(_norm).isin(wanted_cores)].copy()
+    hit = _age_matches_source_rows(hit, expected_age)
+    if hit.empty and wanted:
+        from src.squad.matchday import canonical_names
+        mapped = canonical_names(wanted, scoped["nome"].astype(str).unique().tolist())
+        resolved = set(mapped.values())
+        if resolved:
+            hit = scoped[scoped["nome"].astype(str).isin(resolved)].copy()
+            hit = _age_matches_source_rows(hit, expected_age)
+    if hit.empty:
+        return hit
+    if id_col:
+        if id_col not in hit:
+            return hit.iloc[0:0]
+        ids = hit[id_col].dropna().astype(str).unique()
+        if len(ids) != 1:
+            return hit.iloc[0:0]
+    return hit
+
 def render(_ctx=None) -> None:
     from src.ui import nav
     from src.ui.context import get_service
@@ -597,19 +637,26 @@ def _scout_tab(names: List[str], club: str = "") -> None:
                "Velocidade, distância e mapa de calor de rastreamento não existem nas fontes abertas.")
 
 
-def _career_tab(core: str) -> None:
+def _career_tab(core: str, names, club: str, expected_age=None) -> None:
     from src.squad import data as D
 
-    tm = D.table("tm_jogadores", ["transfermarkt_id", "nome", "ultima_temporada"])
-    hit = tm[tm["nome"].map(_norm) == core] if not tm.empty else tm
+    tm = D.table("tm_jogadores", ["transfermarkt_id", "nome", "ultima_temporada", "clube", "nascimento"])
+    hit = _source_rows_for_player(tm, names or [core], club, "transfermarkt_id", expected_age)
     if hit.empty:
-        empty_state("Sem cadastro no Transfermarkt", "", "📚", "python -m src.data_hub.sync --only transfermarkt")
+        empty_state("Carreira do Transfermarkt não vinculada com segurança", "", "📚",
+                    "Não exibimos a carreira de homônimos de outros clubes. É necessário um cadastro único do atleta "
+                    "no clube selecionado; sincronize o Transfermarkt se estiver faltando.")
         return
-    pid = hit.sort_values("ultima_temporada", ascending=False).iloc[0]["transfermarkt_id"]
+    ids = hit["transfermarkt_id"].dropna().astype(str).unique()
+    if len(ids) != 1:
+        empty_state("Cadastro do Transfermarkt ambíguo", "", "📚",
+                    "Há mais de um ID possível para este nome e clube; nenhum perfil foi escolhido automaticamente.")
+        return
+    pid = ids[0]
     ap = D.table("tm_aparicoes", None, "transfermarkt_id", [pid])
     if ap.empty:
         empty_state("Sem aparições jogo a jogo", "", "📚",
-                    "Rode `python -m src.data_hub.sync --only transfermarkt` para baixar as aparições (carreira).")
+                    "Rode python -m src.data_hub.sync --only transfermarkt para baixar as aparições (carreira).")
         return
     ap = ap.copy()
     d = pd.to_datetime(ap["data"], errors="coerce")
