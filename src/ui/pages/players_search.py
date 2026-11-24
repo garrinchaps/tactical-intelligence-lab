@@ -73,12 +73,21 @@ def build_player_index(db) -> pd.DataFrame:
             pass
         # Índice também inclui atletas com estatísticas de boxscore (FotMob), mesmo sem eventos com coordenadas.
         try:
-            fm = pd.read_sql_query(
+            query_fm = (
                 "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos, "
-                "MAX(CAST(json_extract(s.stats_json, '$.fotmob_id') AS TEXT)) AS fotmob_id "
+                "MAX(CASE WHEN json_valid(s.stats_json) THEN CAST(json_extract(s.stats_json, '$.fotmob_id') AS TEXT) END) AS fotmob_id "
                 "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
                 "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
-                "GROUP BY s.player_name, s.team_name", conn)
+                "GROUP BY s.player_name, s.team_name")
+            try:
+                fm = pd.read_sql_query(query_fm, conn)
+            except Exception:
+                # SQLite sem JSON1: mantém o índice de nomes/clubes, apenas sem IDs do provedor.
+                fm = pd.read_sql_query(
+                    "SELECT s.player_name AS nome, s.team_name AS clube, COUNT(DISTINCT s.match_id) AS jogos "
+                    "FROM match_player_stats s JOIN matches m ON m.match_id = s.match_id "
+                    "WHERE m.data_source = 'fotmob' AND s.player_name IS NOT NULL "
+                    "GROUP BY s.player_name, s.team_name", conn)
             rows += [{"nome": r.nome, "clube": r.clube, "fonte": "FotMob (estatísticas)", "jogos": int(r.jogos),
                       "fotmob_id": getattr(r, "fotmob_id", None)} for r in fm.itertuples()]
         except Exception:
