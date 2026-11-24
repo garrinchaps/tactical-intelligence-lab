@@ -96,8 +96,9 @@ def build_universe(db) -> Dict[str, Any]:
     from src.scout.overall import finalize_overall
     from src.scout.traits import add_traits
 
-    try:                                                 # rodada 27g: mesmo atleta com 2 nomes no mesmo clube
+    try:                                                 # identidade de atleta: aliases locais + duplicatas verificadas entre clubes
         universe = E.merge_club_aliases(universe)
+        universe = E.merge_verified_player_duplicates(universe)
     except Exception:
         pass
     universe = add_traits(finalize_overall(universe))   # rodada 20: overall 0–100 calibrado com craques de referência
@@ -197,6 +198,15 @@ def load() -> Optional[Dict[str, Any]]:
         if isinstance(data, dict):
             data["parcial"] = True
             data["fotografia_antiga"] = old.name
+            try:
+                u = data.get("universe")
+                if isinstance(u, pd.DataFrame):
+                    from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
+
+                    u = merge_club_aliases(u)
+                    data["universe"] = merge_verified_player_duplicates(u)
+            except Exception:
+                pass
         return data
     try:
         data = pd.read_pickle(SNAP_PATH)
@@ -212,12 +222,13 @@ def load() -> Optional[Dict[str, Any]]:
             os.replace(tmp, SNAP_PATH)
     except Exception:
         pass
-    try:                                   # rodada 27g: junta o mesmo atleta com 2 nomes no clube (só em memória)
+    try:                                   # normaliza aliases e IDs em fotografias antigas (só em memória)
         u = data.get("universe") if isinstance(data, dict) else None
-        if isinstance(u, pd.DataFrame) and "apelidos_core" not in u:
-            from src.scout.engine import merge_club_aliases
+        if isinstance(u, pd.DataFrame):
+            from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
 
-            data["universe"] = merge_club_aliases(u)
+            u = merge_club_aliases(u)
+            data["universe"] = merge_verified_player_duplicates(u)
     except Exception:
         pass
     try:                                   # rodada 27: um nome por liga também na fotografia já pronta (só em memória)
@@ -278,6 +289,8 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 u2 = drop_women_players(u2, DataHubDB())
             except Exception:
                 pass
+            u2 = E.merge_club_aliases(u2)
+            u2 = E.merge_verified_player_duplicates(u2)
             data["universe"] = with_attributes(add_traits(finalize_overall(u2)))
             data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
             save(data)
@@ -337,8 +350,9 @@ def cached_data() -> Optional[Dict[str, Any]]:
 
 
 def _index() -> Dict[str, Any]:
-    """Rodada 25: índices núcleo-do-nome → linhas e pid → linha, montados UMA vez por fotografia. Antes cada busca de
-    jogador varria o universo inteiro (60 mil+ linhas) — o campinho com 22 nomes fazia 22 varreduras."""
+    """Índices por nome, alias e PID, montados uma vez por fotografia."""
+    from src.data_lake.ids import player_core
+
     u = cached_universe()
     if u is None or u.empty:
         return {}
@@ -348,6 +362,16 @@ def _index() -> Dict[str, Any]:
     if "_core" in u:
         for i, c in zip(u.index, u["_core"].astype(str)):
             by_core.setdefault(c, []).append(i)
+    if "apelidos_core" in u:
+        for i, aliases in u["apelidos_core"].items():
+            if aliases is None or (isinstance(aliases, float) and pd.isna(aliases)):
+                continue
+            values = aliases if isinstance(aliases, (list, tuple, set)) else str(aliases).split("|")
+            for alias in values:
+                alias_core = player_core(str(alias))
+                if alias_core and alias_core.casefold() not in {"nan", "none"}:
+                    by_core.setdefault(alias_core, []).append(i)
+    by_core = {k: list(dict.fromkeys(v)) for k, v in by_core.items()}
     by_pid = dict(zip(u["pid"].astype(str), u.index)) if "pid" in u else {}
     _MEMO["idx"] = {"core": by_core, "pid": by_pid}
     _MEMO["idx_for"] = u
@@ -361,7 +385,7 @@ def quality_map() -> Dict[str, Dict[str, float]]:
         return {"q": {}, "p": {}}
     if _MEMO.get("qmap_for") is u:
         return _MEMO["qmap"]
-    from src.data_lake.ids import team_core
+    from src.data_lake.ids import player_core, team_core
 
     clubs = u["clube"].fillna("").astype(str)
     cmap = {c: team_core(c) for c in clubs.unique()}
@@ -369,6 +393,17 @@ def quality_map() -> Dict[str, Dict[str, float]]:
     pot = u["potencial"] if "potencial" in u else u.get("potencial_teto", pd.Series(np.nan, index=u.index))
     qv, pv = pd.to_numeric(u.get("qualidade"), errors="coerce"), pd.to_numeric(pot, errors="coerce")
     out = {"q": dict(zip(key, qv)), "p": dict(zip(key, pv))}
+    # Os mesmos aliases usados pela busca manual também encontram o overall neste mapa.
+    if "apelidos_core" in u:
+        for i, aliases in u["apelidos_core"].items():
+            if aliases is None or (isinstance(aliases, float) and pd.isna(aliases)):
+                continue
+            values = aliases if isinstance(aliases, (list, tuple, set)) else str(aliases).split("|")
+            for alias in values:
+                a = player_core(str(alias))
+                if a and a.casefold() not in {"nan", "none"}:
+                    k = f"{a}|{cmap.get(str(clubs.loc[i]), team_core(str(clubs.loc[i])))}"
+                    out["q"][k], out["p"][k] = qv.loc[i], pv.loc[i]
     # rodada 27: nome ÚNICO no universo (sem homônimo) também vale sem o clube — o Rankings mostra o clube da
     # competição (Salah no Liverpool) e o Scout o clube atual; antes a qualidade ficava vazia
     core = u["_core"].astype(str)

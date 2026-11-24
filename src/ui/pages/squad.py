@@ -121,6 +121,37 @@ def _picker(label: str, key: str, default: str = "") -> Optional[str]:
 
 
 # ------------------------------------------------------------------------------------------------ dados do time
+def apply_scout_overall(squad: pd.DataFrame, team: str) -> pd.DataFrame:
+    """Substitui a nota paralela do elenco pelo overall oficial do universo do Scout quando houver correspondência segura."""
+    if squad is None or squad.empty:
+        return squad
+    try:
+        from src.data_lake.ids import player_core
+        from src.scout import snapshot as S
+    except Exception:
+        return squad
+    out = squad.copy()
+    for i, player in out.iterrows():
+        name = str(player.get("nome") or "").strip()
+        if not name or name.casefold() in {"nan", "none"}:
+            continue
+        tm_id = player.get("transfermarkt_id")
+        pid = f"tm{str(tm_id).strip()}" if pd.notna(tm_id) else ""
+        row = S.find_player(player_core(name), [name], str(team or ""), pid=pid)
+        if not row:
+            continue
+        quality = pd.to_numeric(pd.Series([row.get("qualidade")]), errors="coerce").iloc[0]
+        if pd.notna(quality):
+            out.at[i, "nota"] = round(float(quality))
+            out.at[i, "qualidade"] = round(float(quality))
+            out.at[i, "nota_base"] = "Overall do Scout"
+            out.at[i, "nota_fonte"] = "Scout"
+        potential = pd.to_numeric(pd.Series([row.get("potencial")]), errors="coerce").iloc[0]
+        if pd.notna(potential):
+            out.at[i, "potencial"] = round(float(potential))
+    return out
+
+
 @_perf_timed("squad._squad")
 @st.cache_data(show_spinner=False, max_entries=48, persist="disk")  # rodada 14: sobrevive ao fechar o app
 def _squad(team: str, version: str) -> Dict[str, Any]:
@@ -221,6 +252,7 @@ def _squad(team: str, version: str) -> Dict[str, Any]:
             performance = pd.DataFrame()
     rated = lab_rating(sq, D.tm_reference(), usage, D.external_ratings(), player_performance=performance) \
         if not sq.empty else sq
+    rated = apply_scout_overall(rated, team)
     return {"squad": rated, "club": club, "names": names, "fonte": source or "—", "mudancas": changes,
             "nao_confirmados": unconfirmed[[c for c in ("nome", "posicao", "ultima_temporada") if c in unconfirmed]]
             if not unconfirmed.empty else unconfirmed}
@@ -990,7 +1022,9 @@ def render(_ctx=None) -> None:
                        "análise segue sem adversário.")
             rival = None
     with st.spinner("Montando elenco e perfis..."):
-        sq = _squad(team, version)
+        from src.scout import snapshot as _scout_snapshot
+
+        sq = _squad(team, f"{version}|{_scout_snapshot.version()}")
         mine = _profile(team, n, version)
         theirs = _profile(rival, n, version) if rival else None
     squad = sq["squad"]
@@ -1197,16 +1231,16 @@ def render(_ctx=None) -> None:
                 show = squad.assign(posicao_pt=squad["papel"].map(ROLE_PT).fillna("—"),
                                     valor=(pd.to_numeric(squad["valor_mercado_eur"], errors="coerce") / 1e6).round(1))
                 cols = {"nome": "Atleta", "posicao_pt": "Posição", "idade": "Idade", "altura_cm": "Altura (cm)", "pe": "Pé",
-                        "valor": "Valor (€ mi)", "nota": "Nota", "nota_base": "Base da nota",
+                        "valor": "Valor (€ mi)", "nota": "Overall", "potencial": "Potencial", "nota_base": "Fonte do overall",
                         "minutos_temporada": "Min. (12 meses)", "gols_temporada": "Gols", "assist_temporada": "Assist.",
                         "origem": "Origem"}
                 from src.ui.components import clickable_table
 
                 clickable_table(show[[c for c in cols if c in show.columns]].rename(columns=cols)
-                                .sort_values("Nota", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador", club=str(team or ""), caption=
-                                 "Nota do laboratório (0–100): valor de mercado comparado com a mesma posição + minutos e "
-                                 "participação em gols nos últimos 12 meses + nota externa quando houver. É uma estimativa: "
-                                 "a base de cada nota aparece ao lado.")
+                                .sort_values("Overall", ascending=False, na_position="last"), "sq_click", "Atleta", "jogador", club=str(team or ""), caption=
+                                 "Overall 0–100: usa a mesma nota calculada pelo Scout e exibida nos perfis de jogadores. "
+                                 "Quando o atleta ainda não tem registro correspondente no Scout, a estimativa local é mantida "
+                                 "e identificada na fonte do overall.")
                 pick = st.selectbox("Ver a carreira de", squad["nome"].tolist(), key="sq_career")
                 from src.ui import nav
 

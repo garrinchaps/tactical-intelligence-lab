@@ -432,8 +432,26 @@ def _money(value):
     return f"€ {x/1e6:.1f} mi" if abs(x) >= 1e6 else f"€ {x/1e3:.0f} mil" if abs(x) >= 1e3 else f"€ {x:.0f}"
 
 
+def _missing_value(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().casefold() in {"", "nan", "none", "null", "nat"}
+    try:
+        missing = pd.isna(value)
+        return bool(missing) if np.isscalar(missing) else False
+    except Exception:
+        return False
+
+
+def _display_text(value, fallback: str) -> str:
+    return fallback if _missing_value(value) else str(value).strip()
+
+
 def _role(role):
-    return E.ROLE_LABELS.get(str(role), str(role or "Não identificado"))
+    if _missing_value(role):
+        return "Posição não identificada"
+    return E.ROLE_LABELS.get(str(role).strip(), "Posição não identificada")
 
 
 @_perf_timed("scout._merge_roster")
@@ -647,7 +665,7 @@ def _dossier(player, roster):
         from src.scout import attributes as AT
         from src.ui import fm, player_fm
 
-        role = str(player.get("papel_alvo") or player.get("papel") or "")
+        role = _display_text(player.get("papel_alvo"), _display_text(player.get("papel"), ""))
         v, txt = AT.verdict(AT.contract_score(player, _starter_quality(roster).get(role)))
         fm.verdict_card(v, txt)
         player_fm.overview(player, key=f"dos_{_slug(player.get('nome'))}_{_slug(player.get('papel_alvo'))}")
@@ -888,15 +906,38 @@ def _apply_ai_filters(df: pd.DataFrame, f: Dict[str, Any]) -> pd.DataFrame:
 
 
 def _player_card(player, roster, team, idx, plan_key, rejected_key):
-    name = str(player.get("nome") or "Jogador")
+    name = _display_text(player.get("nome"), "Jogador")
     r = _d(player.get("realismo"))
-    score = int(r.get("score") or 0)
-    tag = "viable" if score >= 76 else "loan" if r.get("oportunidade_emprestimo") else "dream"
-    quality = player.get("qualidade")
-    quality = "sem nota" if quality is None or pd.isna(quality) else f"{float(quality):.0f}/100"
-    position = player.get("papel_alvo_label") or _role(player.get("papel"))
-    club = str(player.get("clube") or "Clube não identificado")
-    nationality = str(player.get("nacionalidade") or "")
+    score_raw = pd.to_numeric(pd.Series([r.get("score")]), errors="coerce").iloc[0]
+    label = _display_text(r.get("rotulo"), "Estimativa indisponível")
+    has_estimate = pd.notna(score_raw) and float(score_raw) > 0 and label.casefold() != "sem estimativa"
+    score = int(round(float(score_raw))) if has_estimate else None
+    tag = "viable" if has_estimate and score >= 76 else "loan" if has_estimate and r.get("oportunidade_emprestimo") else "dream"
+    quality_raw = pd.to_numeric(pd.Series([player.get("qualidade")]), errors="coerce").iloc[0]
+    quality = f"{float(quality_raw):.0f}/100" if pd.notna(quality_raw) else "sem nota"
+    position = player.get("papel_alvo_label")
+    if _missing_value(position):
+        position = _role(player.get("papel"))
+    if _missing_value(position):
+        position = "Posição não identificada"
+    club = _display_text(player.get("clube"), "Clube não identificado")
+    nationality = _display_text(player.get("nacionalidade"), "")
+    age = pd.to_numeric(pd.Series([player.get("idade")]), errors="coerce").iloc[0]
+    age_text = f"{int(float(age))}" if pd.notna(age) else "idade n/d"
+    compatibility = pd.to_numeric(pd.Series([_d(player.get("compatibilidade")).get("score")]),
+                                   errors="coerce").iloc[0]
+    compatibility_text = f"{float(compatibility):.0f}%" if pd.notna(compatibility) else "—"
+    potential_value = player.get("potencial")
+    if _missing_value(potential_value):
+        potential_value = player.get("potencial_teto")
+    potential = pd.to_numeric(pd.Series([potential_value]), errors="coerce").iloc[0]
+    potential_html = ""
+    if pd.notna(potential):
+        why = _display_text(player.get("potencial_porque"), "")
+        potential_html = (f'<span class="scout-tag neutral" title="{html.escape(why)}">'
+                          f'Potencial {float(potential):.0f}</span>')
+    realism_text = (f"{html.escape(label)} · {score}%" if has_estimate
+                    else "Estimativa indisponível")
     from src.ui.crests import crest_img
 
     club_crest = crest_img(club, "xs") if club and club != "Clube não identificado" else ""
@@ -905,24 +946,18 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
         f'<div class="scout-player"><div class="scout-avatar">{html.escape(_initials(name))}</div>'
         f'<div class="scout-main"><div class="scout-name">{html.escape(name)}</div>'
         f'<div class="scout-sub">{html.escape(str(position))} · {club_crest} {html.escape(club)} · '
-        f'{html.escape(str(int(float(player.get("idade")))) if pd.notna(player.get("idade")) else "idade n/d")} anos · '
-        f'{flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
-        f'<div class="scout-tags"><span class="scout-tag {tag}">{html.escape(str(r.get("rotulo","Sem estimativa")))} · {score}%</span>'
-        f'<span class="scout-tag neutral">Compatibilidade {_d(player.get("compatibilidade")).get("score","—")}%</span>'
+        f'{age_text} anos · {flag} {html.escape(nationality or "nacionalidade n/d")}</div>'
+        f'<div class="scout-tags"><span class="scout-tag {tag}">{realism_text}</span>'
+        f'<span class="scout-tag neutral">Compatibilidade {compatibility_text}</span>'
         f'<span class="scout-tag neutral">Overall {quality}</span>'
-        + (f'<span class="scout-tag neutral" title="{html.escape(str(player.get("potencial_porque") or ""))}">'
-           f'Potencial {float(player.get("potencial") if pd.notna(player.get("potencial")) else player.get("potencial_teto")):.0f}</span>'
-           if pd.notna(player.get("potencial", player.get("potencial_teto"))) else "") + '</div>'
+        + potential_html + '</div>'
         f'<div style="margin-top:4px">{_traits_short(player)}</div></div>'
         f'<div class="scout-value">{_money(player.get("valor_mercado_eur"))}<small>valor de referência</small></div></div>'
     )
     st.markdown(player_html, unsafe_allow_html=True)
-    # rodada 27: ações num FRAGMENTO — adicionar ao plano / descartar refazem só este cartão (antes o Scout inteiro)
     _card_actions(player, plan_key, team, name, idx, rejected_key)
-    # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
-    # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
     _vote_box(team, name, idx, player.get("votos_scout"),
-              str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
+              _display_text(player.get("papel_alvo"), _display_text(player.get("papel"), "sugestao")))
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
 

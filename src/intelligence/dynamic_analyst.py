@@ -1256,8 +1256,7 @@ class LocalScopedWriter:
         from src.intelligence import player_line as PL
 
         teams_here = [meta.get("home_team_name") or "", meta.get("away_team_name") or ""]
-        if (not sc.players and not sc.metrics and not sc.ask and sc.category == "match_tactical"
-                and PL.is_match_intro(sc.raw, teams_here)):
+        if not sc.players and not sc.metrics and not sc.ask and PL.is_match_intro(sc.raw, teams_here):
             gl = [e for e in (b.get("linha_do_tempo_no_recorte") or []) if str(e.get("tipo", "")).lower() == "goal"]
             return PL.match_intro(b.get("estatisticas_dos_times", {}), meta, gl)
         # rodada 27: pergunta de JOGADOR ("como jogou o Igor Gomes?") → parágrafo em linguagem de futebol, sem a

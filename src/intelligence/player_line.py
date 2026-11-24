@@ -151,28 +151,16 @@ def is_match_intro(raw: str, teams: List[str]) -> bool:
     team_words = set()
     for tm in teams:
         team_words |= {w for w in re.split(r"[^a-z0-9]+", norm(tm)) if w}
-    rest = [w for w in words if w not in team_words and w not in _FILLER and not re.fullmatch(r"(19|20)\d\d", w)
+    # Placar (0 x 2, 1-0) e ano fazem parte da identificação, não de uma pergunta tática.
+    rest = [w for w in words if w not in team_words and w not in _FILLER
+            and not re.fullmatch(r"(19|20)\d\d", w) and not w.isdigit()
             and not any(w and tw.startswith(w) and len(w) >= 4 for tw in team_words)]
     return len(words) <= 9 and not rest
 
 
 def match_intro(stats: Dict[str, Dict[str, Any]], meta: Dict[str, Any], goals: List[Dict[str, Any]]) -> str:
-    """Placar + números principais + gols + o que dá para perguntar."""
+    """Recepção curta: confirma a partida e deixa a conversa seguir por perguntas."""
     home, away = meta.get("home_team_name", ""), meta.get("away_team_name", "")
-    out = [f"⚽ **{home} {meta.get('home_score', '')} x {meta.get('away_score', '')} {away}**"
-           + (f" · {meta.get('competition_name')}" if meta.get("competition_name") else "")
-           + (f" · {str(meta.get('match_date'))[:10]}" if meta.get("match_date") else ""),
-           "Achei o jogo. **O que você quer saber dele?** Antes, os números principais:"]
-    rows = [(lab, stats[lab]) for lab in INTRO_STATS if lab in stats]
-    if rows:
-        teams = list(rows[0][1].keys())
-        out.append("| Estatística | " + " | ".join(teams) + " |\n|---|" + "---|" * len(teams) + "\n"
-                   + "\n".join(f"| {lab} | " + " | ".join(_i(v.get(t)) for t in teams) + " |" for lab, v in rows))
-    if goals:
-        out.append("**Gols:** " + "; ".join(f"{g.get('minuto')}' {g.get('jogador') or 'autor não informado'} "
-                                            f"({g.get('equipe')})" for g in goals) + ".")
-    out.append("**Você pode perguntar, por exemplo:**\n"
-               f"- por que o {away if (meta.get('away_score') or 0) > (meta.get('home_score') or 0) else home} venceu?\n"
-               "- quem jogou melhor?\n- como jogou [nome do jogador]?\n"
-               f"- o que o {home} deveria ter feito de diferente?\n- quais substituições você faria?")
-    return "\n\n".join(out)
+    score = f"{meta.get('home_score', '')}–{meta.get('away_score', '')}"
+    match = f"{home} {score} {away}".strip()
+    return f"⚽ **Jogo identificado: {match}.** Pode perguntar sobre a partida."

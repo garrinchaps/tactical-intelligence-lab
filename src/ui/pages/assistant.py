@@ -8,13 +8,13 @@ Cada resposta passa pelo guard de números; o modelo de perigo campeão é usado
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 import streamlit as st
 
-from src.ui.components import styled_dataframe
-
-from src.data_hub.registry import BADGES
 from src.intelligence.dynamic_analyst import DynamicTacticalAnalyst
-from src.ui.components import hero, note, result_card_html
+from src.ui.components import hero
 from src.ui.context import chosen_levels
 
 EXAMPLES = [
@@ -35,35 +35,9 @@ def _index(version: str, levels="EVENTS|BOXSCORE", only_real: bool = True):
     return build_index(cached_catalog() if isinstance(levels, str) else cached_catalog(include_score_only=not levels))
 
 
-def _meta_line(res) -> str:
-    n = res.get("number_tags") or {}
-    tot = n.get("exato", 0) + n.get("derivado", 0)
-    e = str(res.get("engine_used", ""))
-    eng = "Gemini" if e.upper().startswith("GEMINI") else (
-        e.replace("IA DO LABORATÓRIO", "pela IA do laboratório").replace(" + analista clássico", " + analista clássico")
-        if e.startswith("IA DO LABORATÓRIO") else "analista local")
-    if "lab_ai" in res:
-        eng += f" ({res['lab_ai'].get('n_facts', 0)} fatos lidos)"
-    hidden = f" · {n['ocultadas']} trecho(s) cortado(s) por falta de origem" if n.get("ocultadas") else ""
-    lat = res.get("latency_s")
-    speed = f" · respondido em {lat:.1f} s" if isinstance(lat, (int, float)) else ""
-    who = eng if eng.startswith("pela") else f"pelo {eng}"
-    return f"✔ {tot} números conferidos com os dados da partida · redigido {who}{hidden}{speed}"
-
-
-def _audit_panel(h) -> None:
-    rows = h.get("audit") or []
-    if not rows and not h.get("llm_error"):
-        return
-    with st.expander("🔎 Conferência dos números", expanded=False):
-        if rows:
-            import pandas as pd
-
-            st.caption("EXATO = o número está nos dados · DERIVADO = calculado a partir deles. "
-                       "Frases com número sem origem nos dados são cortadas antes de aparecer.")
-            styled_dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
-        if h.get("llm_error"):
-            st.caption(f"Gemini indisponível nesta resposta: {h['llm_error']}")
+def _chat_text(value: Any) -> str:
+    """Remove apenas marcação HTML de subscrito; o texto útil permanece legível."""
+    return re.sub(r"</?sub\b[^>]*>", "", str(value or ""), flags=re.I)
 
 
 @st.fragment
@@ -73,9 +47,7 @@ def _feedback_box(learning_id: str, kind: str, question: str) -> None:
 
     flag = f"_as_voted_{learning_id}"
     if st.session_state.get(flag):
-        st.caption("✅ Avaliação registrada — vira exemplo de treino da IA (Bastidores › 🎓 Treinar a IA).")
         return
-    st.caption("Avalie: o 👍/👎 vira exemplo de treino da IA do laboratório (Bastidores › 🎓 Treinar a IA).")
     vote = st.feedback("thumbs", key=f"as_feedback_{learning_id}")
     if vote is not None:
         record_feedback(learning_id, vote)
@@ -149,11 +121,18 @@ def _answer(question: str, current_context, use_llm: bool):
     from src.guard.present import present
 
     present(res)                                        # confere os números; trechos sem origem saem do texto
-    if st.session_state.get("lab_ai_on", True):          # rodada 11: a NOSSA IA responde direto ou não acrescenta nada
+    from src.intelligence import player_line as PL
+
+    intro_teams = [meta.get("home_team_name") or "", meta.get("away_team_name") or ""]
+    match_only = PL.is_match_intro(question, intro_teams)
+    if match_only:
+        # A frase só seleciona o contexto. Não antecipa estatísticas, gols ou sugestões.
+        res["report_markdown"] = PL.match_intro({}, meta, [])
+        res["engine_used"] = "confirmação da partida"
+    if not match_only and st.session_state.get("lab_ai_on", True):          # rodada 11: a NOSSA IA responde direto ou não acrescenta nada
         try:
             from src.intelligence.lab_ai import direct as DIRECT
             from src.intelligence.lab_ai import engine as LAB
-            from src.intelligence.lab_ai.availability import data_map, summary_line
             from src.ui.names import pt as _pt
 
             from src.intelligence.lab_ai import reasoning as REASON
@@ -162,7 +141,7 @@ def _answer(question: str, current_context, use_llm: bool):
             off_topic = engine.startswith("LOCAL_SCOPE_GUARD")       # o motor normal é LOCAL_SCOPED_ENGINE
             ask = (res.get("scope") or {}).get("ask")
             generic = (not ask) or ask in ("overview", "panorama")
-            foot = "\n\n_" + summary_line(data_map(meta, ctx.df, ctx.bundle.boxscore)) + "_"
+
             # rodada 12: a NOSSA IA decide primeiro (roteador de intenções). O analista clássico só fica com o que ele faz
             # melhor (presença, autores dos gols, linha do tempo) ou quando a nossa IA não reconhece a pergunta.
             from src.intelligence.lab_ai import router as ROUTER
@@ -177,14 +156,14 @@ def _answer(question: str, current_context, use_llm: bool):
                 reasoned = REASON.answer(question, meta, ctx.df, ctx.bundle.boxscore, ctx.target_team,
                                          db=get_service().db, pt=_pt)
             if reasoned is not None:
-                res["report_markdown"] = reasoned["markdown"] + foot
+                res["report_markdown"] = reasoned["markdown"]
                 res["engine_used"] = f"IA DO LABORATÓRIO ({reasoned['intent']})"
                 res["lab_ai"] = {"direct": reasoned["intent"], "n_facts": 0}
                 off_topic, keep_classic = True, True      # já respondido: o roteador não substitui
             routed = None if (off_topic or keep_classic) else ROUTER.route(question, meta, ctx.df, ctx.bundle.boxscore,
                                                                             ctx.target_team, get_service().db, pt=_pt)
             if routed is not None:
-                res["report_markdown"] = routed["markdown"] + foot
+                res["report_markdown"] = routed["markdown"]
                 res["engine_used"] = f"IA DO LABORATÓRIO ({routed['intent']})"
                 res["lab_ai"] = {"direct": routed["intent"], "n_facts": 0}
             elif off_topic or keep_classic:
@@ -209,7 +188,8 @@ def _answer(question: str, current_context, use_llm: bool):
                     fh.write(traceback.format_exc()[-2000:] + "\n")
             except Exception:
                 pass
-    res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
+    # Tags HTML de subscrito não fazem parte do texto conversacional do assistente.
+    res["report_markdown"] = _chat_text(res.get("report_markdown"))
     return res, loc, switched
 
 
@@ -261,7 +241,6 @@ def render(current_context, match_bar) -> None:
     hero("Assistente tático", "Pergunte qualquer coisa sobre futebol",
          "Cite o jogo na própria pergunta (times e ano) ou abra o jogo pelo 🔎 Buscar. Cada número da resposta é "
          "conferido contra os dados antes de aparecer.")
-    _db_status()
     match_bar()
     analyst = DynamicTacticalAnalyst()
     def _go_train():
@@ -306,30 +285,14 @@ def render(current_context, match_bar) -> None:
         with st.chat_message("user", avatar="🧑‍💼"):
             st.markdown(h["q"])
         with st.chat_message("assistant", avatar="⚽"):
-            if h.get("card"):
-                st.markdown(h["card"], unsafe_allow_html=True)
-            if h.get("note"):
-                st.caption(h["note"])
-            st.markdown(h["a"])
-            st.caption(h["meta"])
-            if h.get("chips_p") or h.get("chips_t"):
-                from src.ui.components import entity_chips
-
-                entity_chips(h.get("chips_p") or [], h.get("chips_t") or [], key=f"as_chip_{hi}")
-            _audit_panel(h)
+            st.markdown(_chat_text(h.get("a")))
             learning_id = h.get("learning_id")
-            if learning_id:
-                if learning_id not in reviewed:
-                    _feedback_box(learning_id, str(h.get("engine") or h.get("intent") or "resposta")[:60],
-                                  str(h.get("question") or h.get("q") or "")[:200])
-                else:
-                    st.caption("Feedback registrado para revisão.")
+            if learning_id and learning_id not in reviewed:
+                _feedback_box(learning_id, str(h.get("engine") or h.get("intent") or "resposta")[:60],
+                              str(h.get("question") or h.get("q") or "")[:200])
     question = st.chat_input("Pergunte sobre um jogo, um jogador ou uma tática — ex.: “Real Madrid x Barcelona 2018: "
                              "quem mais criou perigo?”") or clicked or st.session_state.pop("_ask_from_trainer", None)
     if not question:
-        if history:
-            note("Dica", "A conversa fica neste jogo. Para mudar, cite os dois times com “x” e o ano (ex.: “Flamengo x "
-                         "Palmeiras 2025”), escreva “trocar de jogo” ou use 🔄 em Opções do assistente.")
         return
     with st.spinner("Encontrando o jogo, recortando os dados e redigindo..."):
         try:
@@ -342,11 +305,6 @@ def render(current_context, match_bar) -> None:
             st.info("Não identifiquei o jogo na pergunta. Cite os dois times (e o ano), por exemplo: "
                     "“Flamengo x Palmeiras 2025: quem mais criou perigo?”, ou abra o jogo pelo 🔎 Buscar.")
         return
-    nt = ""
-    if loc is not None:
-        nt = (f"📌 Jogo identificado na pergunta: {loc.label}" if switched else f"📌 Jogo da pergunta: {loc.label}")
-        if len(loc.candidates) > 1:
-            nt += f" · outros confrontos encontrados: {len(loc.candidates) - 1} (troque pelo topo, se quiser outro)"
     try:                                                 # rodada 20: guarda a resposta para o treino guiado
         from src.intelligence.learning_hub import record_answer
 
@@ -354,8 +312,8 @@ def render(current_context, match_bar) -> None:
                       str(res.get("engine_used") or ""), (res.get("scope") or {}).get("ask"))
     except Exception:
         pass
-    history.append({"q": question, "a": res["report_markdown"], "meta": _meta_line(res), "card": res.get("_match_card"),
-                    "note": nt, "match_id": int(st.session_state.get("match_id") or 0), "llm_error": res.get("llm_error"),
-                    "audit": (res.get("number_tags") or {}).get("linhas", []), "learning_id": res.get("interaction_id"),
-                    **_mentioned(res), "players_q": list((res.get("scope") or {}).get("players") or [])})
+    history.append({"q": question, "a": res["report_markdown"],
+                    "match_id": int(st.session_state.get("match_id") or 0),
+                    "learning_id": res.get("interaction_id"), "engine": res.get("engine_used"),
+                    "intent": (res.get("scope") or {}).get("ask")})
     st.rerun()
