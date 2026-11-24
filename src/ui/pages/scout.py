@@ -476,8 +476,9 @@ def _resolve_roster_name_cores(roster_names, scout_names, roster_ages=None, scou
             out[name] = candidates[0]
             continue
         from src.squad.matchday import canonical_names
-        canonical = canonical_names([name], targets).get(name)
-        if canonical and player_core(canonical) != core and age_ok(name, canonical):
+        age_candidates = [candidate for candidate in targets if age_ok(name, candidate)]
+        canonical = canonical_names([name], age_candidates).get(name)
+        if canonical and player_core(canonical) != core:
             out[name] = canonical
     return out
 
