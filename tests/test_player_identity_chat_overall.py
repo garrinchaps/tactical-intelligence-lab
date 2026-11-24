@@ -284,3 +284,85 @@ def test_kaiki_como_cruzeiro_merge_rejects_conflicting_stable_ids():
     merged = E.merge_cross_source_duplicates(players)
 
     assert len(merged) == 2
+
+
+def test_cross_source_duplicate_reconciliation_is_generic():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Alpha", "_core": "player alpha", "clube": "Club A", "papel": "RW",
+         "idade": 24.0, "nacionalidade": "Brazil", "fotmob_id": 100, "transfermarkt_id": None,
+         "clube_observado": True, "ultimo_jogo": "2026-10-05", "minutos_12m": 1500,
+         "qualidade": 81, "potencial": 88},
+        {"nome": "Player Alpha", "_core": "player alpha", "clube": "Club B", "papel": "RW",
+         "idade": 24.5, "nacionalidade": "Brasil", "fotmob_id": np.nan, "transfermarkt_id": 200,
+         "clube_observado": False, "ultimo_jogo": "2026-09-01", "minutos_12m": 900,
+         "qualidade": np.nan, "potencial": np.nan},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 1
+    assert merged.iloc[0]["clube"] == "Club A"
+    assert merged.iloc[0]["qualidade"] == 81
+    assert merged.iloc[0]["potencial"] == 88
+    assert str(merged.iloc[0]["transfermarkt_id"]) == "200"
+
+
+def test_cross_source_reconciliation_rejects_homonyms_and_biographical_conflicts():
+    from src.scout import engine as E
+
+    rows = [
+        {"nome": "Player Country", "_core": "player country", "clube": "Club A", "papel": "ST",
+         "idade": 24, "nacionalidade": "Brazil", "fotmob_id": 1, "transfermarkt_id": None},
+        {"nome": "Player Country", "_core": "player country", "clube": "Club B", "papel": "ST",
+         "idade": 24, "nacionalidade": "Argentina", "fotmob_id": None, "transfermarkt_id": 2},
+        {"nome": "Player Age", "_core": "player age", "clube": "Club C", "papel": "CM",
+         "idade": 19, "nacionalidade": "Brazil", "fotmob_id": 3, "transfermarkt_id": None},
+        {"nome": "Player Age", "_core": "player age", "clube": "Club D", "papel": "CM",
+         "idade": 28, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 4},
+        {"nome": "Player Role", "_core": "player role", "clube": "Club E", "papel": "RW",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": 5, "transfermarkt_id": None},
+        {"nome": "Player Role", "_core": "player role", "clube": "Club F", "papel": "CB",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 6},
+    ]
+    merged = E.merge_cross_source_duplicates(pd.DataFrame(rows))
+
+    assert len(merged) == 6
+
+
+def test_cross_source_reconciliation_leaves_ambiguous_three_way_match_separate():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club A", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": 10, "transfermarkt_id": None},
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club B", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 20},
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club C", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 30},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 3
+
+
+def test_verified_identity_rejects_transitive_cluster_with_conflicting_provider_ids():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club A", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": 100, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club B", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": None, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club C", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": 300, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+    ])
+
+    merged = E.merge_verified_player_duplicates(players)
+
+    assert len(merged) == 2
