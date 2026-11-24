@@ -151,7 +151,9 @@ def is_match_intro(raw: str, teams: List[str]) -> bool:
     team_words = set()
     for tm in teams:
         team_words |= {w for w in re.split(r"[^a-z0-9]+", norm(tm)) if w}
-    rest = [w for w in words if w not in team_words and w not in _FILLER and not re.fullmatch(r"(19|20)\d\d", w)
+    # Placar (0 x 2, 1-0) e ano fazem parte da identificação, não de uma pergunta tática.
+    rest = [w for w in words if w not in team_words and w not in _FILLER
+            and not re.fullmatch(r"(19|20)\d\d", w) and not w.isdigit()
             and not any(w and tw.startswith(w) and len(w) >= 4 for tw in team_words)]
     return len(words) <= 9 and not rest
 
