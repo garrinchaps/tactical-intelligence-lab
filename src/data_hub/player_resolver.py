@@ -88,15 +88,21 @@ def score(a: Dict, b: Dict, name_score: float) -> Tuple[float, List[str]]:
         return -1.0, ["jogaram juntos no mesmo jogo"]
 
     # IDs do mesmo provedor são prova forte; IDs de provedores diferentes não são comparáveis.
-    id_match = False
+    id_match, id_conflict = False, False
     for field, label in (("fotmob_ids", "ID FotMob"), ("transfermarkt_ids", "ID Transfermarkt")):
         ids_a, ids_b = set(a.get(field) or ()), set(b.get(field) or ())
         if ids_a and ids_b:
-            if not (ids_a & ids_b):
-                return -1.0, [f"{label} diferente"]
-            id_match = True
+            if ids_a & ids_b:
+                id_match = True
+            else:
+                id_conflict = True
     if id_match:
         return 1.0, why + ["ID externo igual"]
+    if id_conflict:
+        # Dois IDs do mesmo provedor são um alerta, não veto absoluto: duplicatas do próprio catálogo
+        # podem ter IDs diferentes; só a biografia concordante pode superar essa divergência.
+        s -= 0.20
+        why.append("IDs do provedor divergentes; exige confirmação biográfica")
 
     # Compartilhar um clube histórico é apenas um indício fraco, nunca confundir país/nacionalidade com clube.
     clubs_a, clubs_b = set(a.get("clubes") or ()), set(b.get("clubes") or ())
