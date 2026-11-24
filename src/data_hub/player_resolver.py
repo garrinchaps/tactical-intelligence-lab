@@ -57,10 +57,25 @@ def profiles(idx: pd.DataFrame) -> pd.DataFrame:
     def identifiers(s):
         return {str(x).strip() for x in s if x is not None and str(x).strip().casefold() not in {"", "nan", "none"}}
 
+    def split_teams(s):
+        clubs, selections = set(), set()
+        from src.squad.planner import national_team_key
+        for value in s:
+            if not isinstance(value, str) or not value.strip():
+                continue
+            selection = national_team_key(value)
+            if selection:
+                selections.add(selection)
+            else:
+                clubs.add(team_core(value))
+        return clubs, selections
+
     g = d.groupby("core")
+    team_sets = g["clube"].agg(split_teams)
     return pd.DataFrame({
         "nomes": g["nome"].agg(lambda s: sorted(set(map(str, s)))),
-        "clubes": g["clube"].agg(lambda s: {team_core(x) for x in s if isinstance(x, str) and x}),
+        "clubes": team_sets.map(lambda x: x[0]),
+        "selecoes": team_sets.map(lambda x: x[1]),
         "nascimento": g["nascimento"].agg(lambda s: first([str(x)[:10] for x in s if isinstance(x, str) and len(str(x)) >= 8])),
         "nacionalidade": g["nacionalidade"].agg(lambda s: first([norm(x) for x in s if isinstance(x, str)])),
         "primeiro_clube": g["primeiro_clube"].agg(lambda s: first([team_core(x) for x in s if isinstance(x, str)])),
@@ -109,6 +124,10 @@ def score(a: Dict, b: Dict, name_score: float) -> Tuple[float, List[str]]:
     if clubs_a & clubs_b:
         s += 0.30
         why.append("clube em comum")
+    selections_a, selections_b = set(a.get("selecoes") or ()), set(b.get("selecoes") or ())
+    if selections_a & selections_b:
+        s += 0.30
+        why.append("seleção em comum")
     return round(s, 2), why
 
 
