@@ -8,12 +8,12 @@ def test_merge_verificado_junta_transferencia_e_preserva_clube_observado():
     players = pd.DataFrame([
         {
             "nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB",
-            "nascimento": "2003-03-23", "nacionalidade": "Brazil", "clube_observado": False,
+            "fotmob_id": 12345, "nascimento": "2003-03-23", "nacionalidade": "Brazil", "clube_observado": False,
             "ultimo_jogo": "2026-02-01", "minutos_12m": 3176, "qualidade": 77, "potencial": 77,
         },
         {
             "nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB",
-            "nascimento": "2003-03-23", "nacionalidade": "Brazil", "clube_observado": True,
+            "fotmob_id": 12345, "nascimento": None, "nacionalidade": None, "clube_observado": True,
             "ultimo_jogo": "2026-10-01", "minutos_12m": 3828, "qualidade": 75, "potencial": 86,
         },
     ])
