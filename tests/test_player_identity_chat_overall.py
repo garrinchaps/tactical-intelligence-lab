@@ -116,9 +116,17 @@ def test_merge_roster_prioriza_alias_canonico_quando_chave_curta_colide(monkeypa
         "nome": "Otávio", "papel": "GK", "idade": 20, "qualidade": 65, "potencial": 71,
         "minutos_12m": 3150, "rating_12m": 7.15, "valor_mercado_eur": 500000,
     }])
-    monkeypatch.setattr(scout_page, "_fill_from_club_games", lambda frame, _universe, _team: frame)
+    def fill_with_stale_club_values(frame, _universe, _team):
+        frame = frame.copy()
+        frame.loc[0, "qualidade"] = 65
+        frame.loc[0, "potencial"] = 71
+        frame.loc[0, "minutos_12m"] = 3150
+        frame.loc[0, "rating_12m"] = 7.15
+        return frame
 
-    result = scout_page._merge_roster(roster, universe, "Cruzeiro", "test-alias-precedence-v2")
+    monkeypatch.setattr(scout_page, "_fill_from_club_games", fill_with_stale_club_values)
+
+    result = scout_page._merge_roster(roster, universe, "Cruzeiro", "test-alias-precedence-v3")
 
     assert result.loc[0, "qualidade"] == 64
     assert result.loc[0, "potencial"] == 86
