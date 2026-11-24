@@ -9,12 +9,12 @@ def test_merge_verificado_junta_transferencia_e_preserva_clube_observado():
         {
             "nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB",
             "fotmob_id": 12345, "nascimento": "2003-03-23", "nacionalidade": "Brazil", "clube_observado": False,
-            "ultimo_jogo": "2026-02-01", "minutos_12m": 3176, "qualidade": 77, "potencial": 77,
+            "ultimo_jogo": "2026-02-01", "minutos_12m": 3176, "qualidade": np.nan, "potencial": np.nan,
         },
         {
             "nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB",
             "fotmob_id": 12345, "nascimento": None, "nacionalidade": None, "clube_observado": True,
-            "ultimo_jogo": "2026-10-01", "minutos_12m": 3828, "qualidade": 75, "potencial": 86,
+            "ultimo_jogo": "2026-10-01", "minutos_12m": 3828, "qualidade": 77, "potencial": 77,
         },
     ])
 
@@ -23,7 +23,7 @@ def test_merge_verificado_junta_transferencia_e_preserva_clube_observado():
     assert len(merged) == 1
     assert merged.iloc[0]["clube"] == "Como"
     assert merged.iloc[0]["qualidade"] == 77
-    assert merged.iloc[0]["potencial"] == 86
+    assert merged.iloc[0]["potencial"] == 77
 
 
 def test_merge_verificado_nao_confunde_homonimos_com_nascimentos_diferentes():
