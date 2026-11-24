@@ -242,3 +242,45 @@ def test_player_index_rebuilds_when_persisted_cache_version_is_stale(tmp_path, m
     assert built == ["current-db"]
     assert saved and saved[0][1] == "database-v2"
     P.player_index.clear()
+
+
+def test_kaiki_como_cruzeiro_duplicate_is_unified_and_david_kaiki_stays_separate():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB", "posicao": "LB",
+         "idade": np.nan, "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": None,
+         "minutos_12m": 3828, "rating_12m": 7.38, "qualidade": 77, "potencial": 86},
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB", "posicao": "LB",
+         "idade": 23, "nacionalidade": "Brazil", "fotmob_id": np.nan, "transfermarkt_id": 456,
+         "minutos_12m": 3176, "rating_12m": 7.23, "qualidade": np.nan, "potencial": np.nan},
+        {"nome": "David Kaiki", "_core": "david kaiki", "clube": "Batman Petrolspor", "papel": "RW", "posicao": "RW",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": 789, "transfermarkt_id": 999,
+         "minutos_12m": 334, "rating_12m": 6.53, "qualidade": 55, "potencial": 60},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 2
+    kaiki = merged.loc[merged["_core"] == "kaiki"].iloc[0]
+    assert kaiki["clube"] == "Como"
+    assert kaiki["qualidade"] == 77
+    assert kaiki["potencial"] == 86
+    assert kaiki["idade"] == 23
+    assert kaiki["transfermarkt_id"] == 456
+    assert "David Kaiki" in merged["nome"].tolist()
+
+
+def test_kaiki_como_cruzeiro_merge_rejects_conflicting_stable_ids():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB", "idade": 23,
+         "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": 111, "minutos_12m": 3828},
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB", "idade": 23,
+         "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": 222, "minutos_12m": 3176},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 2
