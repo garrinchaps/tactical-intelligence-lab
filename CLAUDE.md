@@ -881,6 +881,20 @@ Rodada 27i (24/11/2026, 558 testes verdes):
 - ✅ `docs/DOCUMENTACAO_TECNICA.md` — documentação técnica completa (resumo, stack, arquitetura, funções, lacunas).
 - Fotografia v21 (`scout_v21`); elencos de todas as ligas de novo no script (`elencos_todas_r27i`).
 
+Rodada 27j (24/11/2026, 573 testes verdes) — sobre os commits do Codex no mesmo branch (77d7e88 votos do Scout;
+c2a4058 identidade/overall/chat: campinho com o overall do Scout sem desconto de encaixe, apelidos no índice e no
+`quality_map`, `merge_verified_player_duplicates` por id/nascimento):
+- ✅ Sugestões por perfil vindas do mercado inteiro agora com viabilidade e compatibilidade calculadas (`_enrich` →
+  `transfer_realism`/`tactical_compatibility`) e estrela fora do patamar fora (Bowen, Kim Min-jae no Cruzeiro);
+  posição preenchida (acabou o "nan").
+- ✅ Mesmo atleta em duas fontes, até depois de transferência (`engine.merge_cross_source_duplicates`: linha sem id da
+  FotMob × uma única linha com id, nome contido, mesma família, idade/país compatíveis e ≥ 50% dos MESMOS jogos — data
+  ±1 dia pelo mesmo clube): Kaiki (Cruzeiro, ESPN) → Kaiki Bruno (Como, FotMob), Arthur. Dois candidatos = separado.
+- ✅ Otávio: datas das fontes com ±1 dia (fuso) e goleiro do mesmo clube com a mesma idade e nome contido = mesma pessoa.
+- ✅ Identidade aplicada UMA vez: a fotografia unificada volta ao disco (`snapshot.IDENTITY_VERSION`); junção entre
+  fontes em 1,2 s para 67 mil jogadores (dicionários + datas sem pandas; antes 47 s).
+- ✅ Assistente: "<sub>em 90 min</sub>" aparecia cru no ranking — agora "(em 90 min)".
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

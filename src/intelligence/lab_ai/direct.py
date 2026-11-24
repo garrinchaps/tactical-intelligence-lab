@@ -175,7 +175,7 @@ def answer(question: str, meta: Dict[str, Any], df: Optional[pd.DataFrame], box:
         lead = (f"**{top['player']}** ({pt(top['team'])}), com {_n(top[key])}" if len(tie) == 1 else
                 "empate entre " + ", ".join(f"**{r.player}** ({pt(r.team)})" for r in tie.itertuples()) + f", com {_n(top[key])}")
         rank = "\n".join(f"{i}. {r.player} ({pt(r.team)}) — {_n(getattr(r, key))}"
-                         + (f" <sub>em {int(r.mins_sort)} min</sub>" if r.mins_sort == r.mins_sort else "") for i, r in
+                         + (f" (em {int(r.mins_sort)} min)" if r.mins_sort == r.mins_sort else "") for i, r in
                          enumerate(t.head(5).itertuples(), 1))
         by_team = t.groupby("team")[key].sum()
         md = (f"Quem teve mais {label}: {lead}.\n\n**Os números que embasam** (top 5):\n\n{rank}\n\n"

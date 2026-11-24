@@ -3424,13 +3424,15 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
             p = by_name[0]
             if pd.notna(age[e]) and pd.notna(age[p]) and abs(age[e] - age[p]) > 1.2:
                 continue
-            de, dp = _game_dates(d.at[e, "ultimos_jogos"] if "ultimos_jogos" in d else None), \
-                _game_dates(d.at[p, "ultimos_jogos"] if "ultimos_jogos" in d else None)
-            if not de or not dp or len(de & dp) < .6 * min(len(de), len(dp)):
-                continue
+            ge_, gp_ = _games(d.at[e, "ultimos_jogos"] if "ultimos_jogos" in d else None), \
+                _games(d.at[p, "ultimos_jogos"] if "ultimos_jogos" in d else None)
+            shared = _shared_games(ge_, gp_)                 # rodada 27j: mesma data ±1 dia (fuso das fontes)
             fid = d.get("fotmob_id")
             one_id = fid is not None and (pd.notna(fid[e]) != pd.notna(fid[p]))
-            if fam[e] == "GK" or one_id:
+            same_games = bool(ge_) and bool(gp_) and shared >= .6 * min(len(ge_), len(gp_))
+            # goleiro: dois do mesmo clube, mesma idade e um nome dentro do outro = a mesma pessoa (só um joga)
+            gk_same_age = fam[e] == "GK" and pd.notna(age[e]) and pd.notna(age[p]) and abs(age[e] - age[p]) <= 1
+            if (same_games and (fam[e] == "GK" or one_id)) or gk_same_age:
                 keep, gone = (p, e) if mins[p] >= mins[e] else (e, p)
                 both.append((gone, keep))
         for gone, keep in both:
@@ -3601,3 +3603,112 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
         for i, vals in aliases_by_keep.items():
             d.at[i, "apelidos_core"] = "|".join(vals) if vals else None
     return d.drop(index=list(drop)).reset_index(drop=True)
+
+
+def _games(v) -> List[Tuple[pd.Timestamp, str]]:
+    try:
+        g = json.loads(v) if isinstance(v, str) else v
+    except Exception:
+        return []
+    out = []
+    for x in g if isinstance(g, list) else []:
+        if isinstance(x, dict) and x.get("match_date"):
+            try:
+                t = date.fromisoformat(str(x.get("match_date"))[:10]).toordinal()
+            except ValueError:
+                continue
+            out.append((t, _tc_memo(_safe_str(x.get("team_name")))))
+    return out
+
+
+_TC: Dict[str, str] = {}
+
+
+def _tc_memo(name: str) -> str:
+    v = _TC.get(name)
+    if v is None:
+        v = _TC[name] = team_core(name)
+    return v
+
+
+def _shared_games(a, b) -> int:
+    """Jogos em comum (mesma data ±1 dia e mesmo clube) entre duas listas de últimos jogos."""
+    if not a or not b:
+        return 0
+    bset = {}
+    for t, c in b:
+        bset.setdefault(c, []).append(t)
+    n = 0
+    for t, c in a:
+        if any(abs(t - u) <= 1 for u in bset.get(c, [])):
+            n += 1
+    return n
+
+
+def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 27j — o MESMO atleta visto por duas fontes em linhas diferentes, inclusive depois de trocar de clube:
+    "Kaiki" (ESPN, sem id da FotMob, ainda no Cruzeiro) × "Kaiki Bruno" (FotMob, com id, já no Como); Arthur no Palmeiras.
+    Junta só quando TUDO confere: a linha sem id tem jogos, uma única linha COM id tem o nome contido/continente, mesma
+    família (goleiro × linha), idade ±1 e país iguais quando conhecidos, e as duas jogaram os MESMOS jogos (mesma data
+    ±1 dia pelo mesmo clube) em pelo menos metade dos jogos da linha sem id. Teammates de nome parecido não juntam:
+    dois candidatos com id = ambíguo, fica separado. A linha com id (clube mais atual) fica; a outra vira apelido."""
+    if u is None or u.empty or "fotmob_id" not in u or "ultimos_jogos" not in u:
+        return u
+    d = u.copy()
+    core = d["_core"].astype(str) if "_core" in d else d["nome"].map(player_core)
+    d["_core"] = core
+    fid = pd.to_numeric(d["fotmob_id"], errors="coerce")
+    mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce").fillna(0)
+    fam = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str).map(lambda r: "GK" if r == "GK" else "OUT")
+    age = pd.to_numeric(d.get("idade"), errors="coerce")
+    nat = d.get("nacionalidade", pd.Series("", index=d.index)).fillna("").astype(str).str.strip().str.casefold()
+    core, fam, age, nat = core.to_dict(), fam.to_dict(), age.to_dict(), nat.to_dict()   # dicionários: 10× mais rápido
+    age = {k: (v if v == v else None) for k, v in age.items()}
+    with_id = d.index[fid.notna()]
+    tok: Dict[str, List[Any]] = {}
+    by_core: Dict[str, List[Any]] = {}
+    for i in with_id:
+        by_core.setdefault(core[i], []).append(i)
+    for i in with_id:
+        for w in set(core[i].split()):
+            if len(w) >= 3:
+                tok.setdefault(w, []).append(i)
+    drop, aliases = set(), {}
+    gcache: Dict[Any, Any] = {}
+    uj = d["ultimos_jogos"].to_dict()
+    for e in d.index[fid.isna() & (mins > 0)]:
+        te = set(core[e].split())
+        if not te:
+            continue
+        lists = sorted((tok.get(w, []) for w in te if len(w) >= 3), key=len)
+        pool = set(lists[0]).intersection(*map(set, lists[1:])) if lists and all(lists) and len(lists) == len(
+            [w for w in te if len(w) >= 3]) else set()
+        words = core[e].split()                          # nome com id CONTIDO no nome sem id ("Kaiki Bruno" × "Kaiki")
+        for k in range(1, len(words)):
+            for comb in __import__("itertools").combinations(words, k):
+                pool |= set(by_core.get(" ".join(comb), []))
+        cands = [p for p in pool if p not in drop and fam[p] == fam[e]
+                 and (te <= set(core[p].split()) or set(core[p].split()) <= te)
+                 and not (age[e] is not None and age[p] is not None and abs(age[e] - age[p]) > 1.2)
+                 and not (nat[e] and nat[p] and nat[e] != nat[p])]
+        if len(cands) != 1:
+            continue
+        p = cands[0]
+        if e not in gcache:
+            gcache[e] = _games(uj.get(e))
+        if p not in gcache:
+            gcache[p] = _games(uj.get(p))
+        ge, gp = gcache[e], gcache[p]
+        if not ge or _shared_games(ge, gp) < max(2, .5 * len(ge)):
+            continue
+        _absorb(d, p, e)
+        aliases.setdefault(p, []).append(core[e])
+        drop.add(e)
+    if not drop:
+        return u
+    prior = {i: [x for x in str(v).split("|") if x] for i, v in d.get("apelidos_core", pd.Series(dtype=object)).items()
+             if _safe_str(v)} if "apelidos_core" in d else {}
+    for i, v in aliases.items():
+        prior.setdefault(i, []).extend(v)
+    d["apelidos_core"] = pd.Series({i: "|".join(dict.fromkeys(v)) for i, v in prior.items()}).reindex(d.index)
+    return d.drop(index=list(drop))

@@ -285,3 +285,23 @@ def test_card_survives_nan_fields():
     from src.ui.pages import scout as SC
 
     assert SC._d(float("nan")) == {} and SC._d({"score": 3}) == {"score": 3}
+
+
+def test_same_player_two_sources_after_transfer():
+    import json
+
+    from src.scout.engine import merge_cross_source_duplicates
+
+    old = json.dumps([{"match_date": f"2026-0{m}-15", "team_name": "Cruzeiro"} for m in range(3, 8)])
+    new = json.dumps([{"match_date": f"2026-0{m}-16", "team_name": "Cruzeiro"} for m in range(3, 8)]
+                     + [{"match_date": "2026-09-20", "team_name": "Como"}])
+    mate = json.dumps([{"match_date": f"2026-0{m}-15", "team_name": "Cruzeiro"} for m in range(3, 8)])
+    u = pd.DataFrame({"nome": ["Kaiki", "Kaiki Bruno", "Matheus", "Matheus Pereira", "Matheus Henrique"],
+                      "clube": ["Cruzeiro", "Como", "Cruzeiro", "Cruzeiro", "Cruzeiro"],
+                      "papel": ["LB", "LB", "AM", "AM", "CM"], "idade": [22, 22, 28, 28, 27],
+                      "nacionalidade": ["Brazil"] * 5, "minutos_12m": [1500, 2000, 900, 2500, 2400],
+                      "fotmob_id": [np.nan, 123.0, np.nan, 456.0, 789.0],
+                      "ultimos_jogos": [old, new, mate, mate, mate], "valor_mercado_eur": [3e6, 8e6, 1e6, 5e6, 4e6]})
+    out = merge_cross_source_duplicates(u)
+    assert "Kaiki" not in set(out["nome"]) and out.loc[out["nome"] == "Kaiki Bruno", "clube"].iloc[0] == "Como"
+    assert "Matheus" in set(out["nome"])         # dois "Matheus …" com id: ambíguo, não junta

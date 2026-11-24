@@ -825,7 +825,7 @@ def _starter_quality(roster: pd.DataFrame) -> Dict[str, float]:
 
 
 def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float, pool: Optional[pd.DataFrame] = None,
-                    exclude: Optional[set] = None):
+                    exclude: Optional[set] = None, enrich=None):
     """Rodada 27 — três perfis de contratação, cada um com 3 nomes:
       🌱 jovens promessas (≤ 21, potencial acima do titular, custo até 60% da verba);
       📈 para investir (22–26, já perto do titular e crescendo, custo até a verba);
@@ -842,7 +842,13 @@ def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float, p
         if exclude:
             extra = extra[~extra["nome"].astype(str).isin(exclude)]
         extra["papel_alvo"] = extra["papel"]
+        extra["papel_alvo_label"] = extra["papel"].map(E.ROLE_LABELS).fillna(extra["papel"].astype(str))
         extra = extra[pd.to_numeric(extra.get("qualidade"), errors="coerce").fillna(0) >= 55]
+        if enrich is not None and not extra.empty:
+            # rodada 27j: viabilidade e compatibilidade também para quem veio do mercado inteiro (antes "Sem estimativa
+            # · 0%" e estrela fora do patamar — Bowen, Kim Min-jae — entrando no Cruzeiro). Só os 300 melhores da posição.
+            extra = extra.loc[pd.to_numeric(extra["qualidade"], errors="coerce").sort_values(ascending=False).index[:300]]
+            extra = enrich(extra)
         extra = extra[~extra["nome"].isin(d["nome"])]
         extra.index = [10_000_000 + int(i) if isinstance(i, (int, np.integer)) else 10_000_000 + k
                        for k, i in enumerate(extra.index)]
@@ -1307,7 +1313,23 @@ def render(_ctx=None):
                         _pool5 = _pool5[_pool5["clube"].map(lambda c: _tcp(str(c))) != _tcp(team)]
                 except Exception:
                     _pool5 = None
-                groups = _profile_groups(top5, roster, budget_m * 1e6, pool=_pool5,
+                def _enrich(df_, _fin=financial, _c=country, _comp=competition, _stars=bool(f5.get("stars"))):
+                    keep_idx, recs = [], []
+                    for idx_, rec in zip(df_.index, df_.to_dict("records")):
+                        try:
+                            rec["realismo"] = E.transfer_realism(rec, _fin, _c, _comp, None,
+                                                                 foreign_count=int(_fin.get("estrangeiros_atual", 0) or 0))
+                            rec["compatibilidade"] = E.tactical_compatibility(rec, _fin.get("estilo") or {"tracos": []})
+                        except Exception:
+                            pass
+                        r_ = rec.get("realismo") if isinstance(rec.get("realismo"), dict) else {}
+                        if not _stars and r_.get("teto_patamar") is not None and r_["teto_patamar"] <= 20:
+                            continue                       # estrela fora do patamar do clube
+                        keep_idx.append(idx_)
+                        recs.append(rec)
+                    return pd.DataFrame(recs, index=keep_idx) if recs else df_.iloc[0:0]
+
+                groups = _profile_groups(top5, roster, budget_m * 1e6, pool=_pool5, enrich=_enrich,
                                          exclude=set(st.session_state.get(rejected_key, []) or [])
                                          if "rejected_key" in locals() else None)
                 shown = set()

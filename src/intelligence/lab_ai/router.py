@@ -144,7 +144,7 @@ def _best_player(q, c: Ctx):
     lead = top.iloc[0]
     craque = (c.extra.get("craque") or {}).get("jogador")
     lines = "\n".join(f"{i}. {x.jogador} ({c.pt(x.equipe)}) — nota {x.nota:.1f}"
-                      + (f" <sub>em {int(x.minutos)} min</sub>" if x.minutos == x.minutos else "")
+                      + (f" (em {int(x.minutos)} min)" if x.minutos == x.minutos else "")
                       for i, x in enumerate(top.itertuples(), 1))
     head = f"{'Pior' if worst else 'Melhor'} atuação: **{lead.jogador}** ({c.pt(lead.equipe)}), nota {lead.nota:.1f}."
     if craque and not worst:

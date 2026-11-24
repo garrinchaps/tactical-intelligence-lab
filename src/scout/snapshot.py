@@ -98,13 +98,13 @@ def build_universe(db) -> Dict[str, Any]:
 
     try:                                                 # identidade de atleta: aliases locais + duplicatas verificadas entre clubes
         universe = E.merge_club_aliases(universe)
-        universe = E.merge_verified_player_duplicates(universe)
+        universe = E.merge_verified_player_duplicates(E.merge_cross_source_duplicates(universe))
     except Exception:
         pass
     universe = add_traits(finalize_overall(universe))   # rodada 20: overall 0–100 calibrado com craques de referência
     universe = with_attributes(universe)                # rodada 23: atributos 1–20 estilo FM (medidos)
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
-    return {"universe": universe, "clubs": clubs, "status": "carregado",
+    return {"universe": universe, "clubs": clubs, "status": "carregado", "identidade": IDENTITY_VERSION,
             "atualizacao": str(stamp) if stamp is not None and pd.notna(stamp) else "sem carimbo"}
 
 
@@ -183,6 +183,9 @@ def newest_old() -> Optional[Path]:
     return None
 
 
+IDENTITY_VERSION = "r27j"          # muda quando as regras de "mesmo atleta" mudam
+
+
 def load() -> Optional[Dict[str, Any]]:
     if not SNAP_PATH.exists():
         # rodada 27f (LENTIDÃO): antes a tela recalculava as notas de TODO o mercado aqui dentro (calibração completa,
@@ -204,7 +207,7 @@ def load() -> Optional[Dict[str, Any]]:
                     from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
 
                     u = merge_club_aliases(u)
-                    data["universe"] = merge_verified_player_duplicates(u)
+                    data["universe"] = merge_verified_player_duplicates(u)   # a junção entre fontes fica para a nova
             except Exception:
                 pass
         return data
@@ -222,13 +225,22 @@ def load() -> Optional[Dict[str, Any]]:
             os.replace(tmp, SNAP_PATH)
     except Exception:
         pass
-    try:                                   # normaliza aliases e IDs em fotografias antigas (só em memória)
+    try:                                   # normaliza aliases e IDs — UMA vez; a fotografia unificada volta ao disco
         u = data.get("universe") if isinstance(data, dict) else None
-        if isinstance(u, pd.DataFrame):
+        if isinstance(u, pd.DataFrame) and data.get("identidade") != IDENTITY_VERSION:
             from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
 
             u = merge_club_aliases(u)
-            data["universe"] = merge_verified_player_duplicates(u)
+            from src.scout.engine import merge_cross_source_duplicates
+
+            data["universe"] = merge_verified_player_duplicates(merge_cross_source_duplicates(u))
+            data["identidade"] = IDENTITY_VERSION
+            try:                           # rodada 27j: grava a fotografia já unificada (próximas aberturas: 0 s)
+                tmp = SNAP_PATH.with_suffix(".tmp")
+                pd.to_pickle(data, tmp)
+                os.replace(tmp, SNAP_PATH)
+            except Exception:
+                pass
     except Exception:
         pass
     try:                                   # rodada 27: um nome por liga também na fotografia já pronta (só em memória)
@@ -290,7 +302,7 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
             except Exception:
                 pass
             u2 = E.merge_club_aliases(u2)
-            u2 = E.merge_verified_player_duplicates(u2)
+            u2 = E.merge_verified_player_duplicates(E.merge_cross_source_duplicates(u2))
             data["universe"] = with_attributes(add_traits(finalize_overall(u2)))
             data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
             save(data)
