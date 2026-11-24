@@ -536,10 +536,16 @@ def _merge_roster(roster, _universe, team=None, version=""):
             if "own" in locals() and "apelidos_core" in own:
                 own_cores |= {a for v in own["apelidos_core"].dropna() for a in str(v).split("|") if a}
             hit = r["_core"].isin(own_cores)
-            for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque"):
+            # Para atletas deste elenco (incluindo apelidos resolvidos), os dados do perfil canônico
+            # prevalecem sobre métricas antigas da ficha curta. Isso inclui minutos e nota média:
+            # manter 3.150/7,15 da linha legada anulava a consolidação 3.465/7,16 do Otávio Costa.
+            for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque",
+                        "qualidade", "confianca_pct", "minutos_12m", "jogos_12m", "rating_12m",
+                        "estilo", "caracteristicas_top"):
                 if col in lookup and hit.any():
-                    r.loc[hit, col] = r.loc[hit, "_core"].map(lookup[col]).combine_first(
-                        r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object))
+                    mapped = r.loc[hit, "_core"].map(lookup[col])
+                    current = r.loc[hit, col] if col in r else pd.Series(index=r.index[hit], dtype=object)
+                    r.loc[hit, col] = mapped.combine_first(current)
     r = _fill_from_club_games(r, universe, team)
     if "qualidade" not in r:
         r["qualidade"] = pd.to_numeric(r.get("nota"), errors="coerce")

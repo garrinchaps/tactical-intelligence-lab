@@ -114,7 +114,7 @@ def test_merge_roster_prioriza_alias_canonico_quando_chave_curta_colide(monkeypa
     ])
     roster = pd.DataFrame([{
         "nome": "Otávio", "papel": "GK", "idade": 20, "qualidade": 65, "potencial": 71,
-        "valor_mercado_eur": 500000,
+        "minutos_12m": 3150, "rating_12m": 7.15, "valor_mercado_eur": 500000,
     }])
     monkeypatch.setattr(scout_page, "_fill_from_club_games", lambda frame, _universe, _team: frame)
 
