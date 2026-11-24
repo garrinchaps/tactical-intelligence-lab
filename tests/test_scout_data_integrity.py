@@ -78,3 +78,16 @@ def test_find_player_resolves_unique_short_name_only_with_matching_club(monkeypa
     assert found["clube"] == "Cruzeiro"
 
     assert S.find_player("otavio", ["Otávio"], "Flamengo") is None
+
+
+def test_scout_roster_name_resolution_handles_short_names_and_ambiguity():
+    from src.ui.pages.scout import _resolve_roster_name_cores
+
+    resolved = _resolve_roster_name_cores(
+        ["Otávio", "Leonardo", "M. Henrique", "João"],
+        ["Otávio Costa", "Leonardo Nascimento", "Matheus Henrique", "João Pedro", "João Victor"],
+    )
+    assert resolved["Otávio"] == "Otávio Costa"
+    assert resolved["Leonardo"] == "Leonardo Nascimento"
+    assert resolved["M. Henrique"] == "Matheus Henrique"
+    assert "João" not in resolved  # nome ambíguo não é associado por chute
