@@ -207,3 +207,43 @@ def test_scout_roster_short_name_uses_age_to_disambiguate_same_club_candidates()
         roster_ages={"Otávio": 20}, scout_ages={"Otávio Costa": [20], "Otávio Silva": [31]},
     )
     assert resolved["Otávio"] == "Otávio Costa"
+
+
+
+def test_player_resolver_merges_single_token_alias_only_with_shared_source_id():
+    from src.data_hub.player_resolver import resolve
+
+    confirmed = pd.DataFrame([
+        {"nome": "Kaiki", "core": "kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "fotmob_id": "fm-123", "nascimento": "", "nacionalidade": "Brazil"},
+        {"nome": "David Kaiki", "core": "david kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "fotmob_id": "fm-123", "nascimento": "", "nacionalidade": "Brazil"},
+    ])
+    people, _ = resolve(confirmed)
+    assert people.nunique() == 1
+
+
+def test_player_resolver_keeps_same_surname_profiles_separate_without_identity_evidence():
+    from src.data_hub.player_resolver import resolve
+
+    uncertain = pd.DataFrame([
+        {"nome": "Kaiki", "core": "kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "fotmob_id": "fm-123", "nascimento": "", "nacionalidade": "Brazil"},
+        {"nome": "David Kaiki", "core": "david kaiki", "clube": "Batman Petrolspor", "fonte": "FotMob",
+         "fotmob_id": "fm-456", "nascimento": "", "nacionalidade": "Brazil"},
+    ])
+    people, _ = resolve(uncertain)
+    assert people.nunique() == 2
+
+
+def test_player_resolver_can_confirm_single_token_alias_with_same_birth_date():
+    from src.data_hub.player_resolver import resolve
+
+    rows = pd.DataFrame([
+        {"nome": "Kaiki", "core": "kaiki", "clube": "Cruzeiro", "fonte": "FotMob",
+         "nascimento": "2003-03-01", "nacionalidade": "Brazil"},
+        {"nome": "David Kaiki", "core": "david kaiki", "clube": "Cruzeiro", "fonte": "Transfermarkt",
+         "nascimento": "2003-03-01", "nacionalidade": "Brazil"},
+    ])
+    people, _ = resolve(rows)
+    assert people.nunique() == 1
