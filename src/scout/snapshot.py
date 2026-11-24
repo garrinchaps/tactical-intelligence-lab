@@ -440,6 +440,25 @@ def find_player(core: str, names: Optional[list] = None, club: str = "", pid: st
 
     cores = {core} | {player_core(n) for n in (names or [])}
     rows = [i for c in cores for i in idx.get("core", {}).get(str(c), [])]
+    if not rows and club and "_core" in u:
+        # Nome curto (ex.: Otávio) pode não estar cadastrado como alias, embora o atleta
+        # exista com nome completo (ex.: Otávio Costa). Só aceita prefixo se o clube
+        # corresponder e houver um único atleta candidato — evita associar homônimos.
+        from src.data_lake.ids import team_core
+        requested = player_core(str(core or ""))
+        all_cores = u["_core"].astype(str)
+        prefix_rows = u.index[all_cores.str.startswith(requested, na=False) & (all_cores != requested)].tolist()
+        if requested and prefix_rows:
+            candidates = u.loc[prefix_rows]
+            tc = team_core(club)
+            club_cols = [c for c in ("clube", "clube_tm") if c in candidates]
+            matched = pd.Series(False, index=candidates.index)
+            for col in club_cols:
+                matched |= candidates[col].fillna("").map(lambda value: team_core(str(value)) == tc)
+            candidates = candidates[matched]
+            unique_cores = candidates["_core"].astype(str).unique()
+            if len(unique_cores) == 1:
+                rows = candidates.index.tolist()
     if not rows:
         return None
     hit = u.loc[sorted(set(rows))]

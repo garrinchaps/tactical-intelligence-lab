@@ -448,6 +448,38 @@ def _display_text(value, fallback: str) -> str:
     return fallback if _missing_value(value) else str(value).strip()
 
 
+
+
+def _resolve_roster_name_cores(roster_names, scout_names):
+    """Resolve short roster names to a unique full Scout name within the current club.
+
+    Only a strict token-subset match is allowed (e.g. 'Otavio' -> 'Otavio Costa').
+    It is applied even when the short name already exists as a separate Scout row,
+    because that row may be stale/incomplete. Ambiguous matches are left untouched.
+    """
+    from src.data_lake.ids import player_core
+
+    targets = list(dict.fromkeys(str(n).strip() for n in scout_names if n and str(n).strip()))
+    target_cores = {n: player_core(n) for n in targets}
+    out = {}
+    for raw in roster_names:
+        name = str(raw or "").strip()
+        core = player_core(name)
+        tokens = set(core.split())
+        if not name or not tokens:
+            continue
+        candidates = [n for n in targets if tokens < set(target_cores[n].split())]
+        if len(candidates) == 1:
+            out[name] = candidates[0]
+            continue
+        # Complementa nomes abreviados por inicial + sobrenome (ex.: M. Henrique).
+        if name:
+            from src.squad.matchday import canonical_names
+            canonical = canonical_names([name], targets).get(name)
+            if canonical and player_core(canonical) != core:
+                out[name] = canonical
+    return out
+
 def _role(role):
     if _missing_value(role):
         return "Posição não identificada"
@@ -480,6 +512,11 @@ def _merge_roster(roster, _universe, team=None, version=""):
             others = universe.loc[~own_mask]
             if not own.empty:
                 own = E.merge_club_aliases(own)
+                # Corrige nomes abreviados do elenco mesmo quando já existe uma linha
+                # com esse nome curto no universo (ela pode ser um perfil legado).
+                if "nome" in own:
+                    resolved_names = _resolve_roster_name_cores(r["nome"].astype(str).tolist(), own["nome"].astype(str).tolist())
+                    r["_core"] = [player_core(resolved_names.get(n, n)) for n in r["nome"].astype(str)]
             alias_source = own
             lookup_source = pd.concat([own, others], axis=0)
         lookup = lookup_source.drop_duplicates("_core").set_index("_core")
@@ -665,14 +702,15 @@ def _club_squad(team, version, universe):
     try:
         from src.ui.pages.squad import _squad
         data = _squad(team, version)
-        sq = _merge_roster(data.get("squad"), universe, team, version)
+        # Invalida o cache antigo que mantinha nomes curtos ligados à ficha incompleta.
+        sq = _merge_roster(data.get("squad"), universe, team, f"{version}|roster-name-resolution-v2")
         return {**data, "squad": drop_women_players(sq, _gs().db, _stn(team))}     # rodada 20
     except Exception:
         from src.ui.context import get_service
         from src.ui.pages.clubs import same_team_names
         club = E.market_club(D.table("tm_clubes"), team)
         roster = E.current_roster(get_service().db, club, same_team_names(team), D.table("tm_jogadores"), universe)
-        return {"squad": _merge_roster(roster, universe, team, version), "club": club, "fonte": "Transfermarkt + escalações"}
+        return {"squad": _merge_roster(roster, universe, team, f"{version}|roster-name-resolution-v2"), "club": club, "fonte": "Transfermarkt + escalações"}
 
 
 def _d(v):
