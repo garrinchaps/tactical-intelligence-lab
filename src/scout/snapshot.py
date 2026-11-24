@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v19.pkl")   # v19: seleção principal, Brasil +1–3, Otávio, Yamal 1º
+SNAP_PATH = Path("data/processed/scout_universe_v20.pkl")   # v20: goleiros (idade), mesmo atleta com 2 nomes no clube
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -96,6 +96,10 @@ def build_universe(db) -> Dict[str, Any]:
     from src.scout.overall import finalize_overall
     from src.scout.traits import add_traits
 
+    try:                                                 # rodada 27g: mesmo atleta com 2 nomes no mesmo clube
+        universe = E.merge_club_aliases(universe)
+    except Exception:
+        pass
     universe = add_traits(finalize_overall(universe))   # rodada 20: overall 0–100 calibrado com craques de referência
     universe = with_attributes(universe)                # rodada 23: atributos 1–20 estilo FM (medidos)
     stamp = pd.to_datetime(players.get("ingestao_utc"), errors="coerce").max() if "ingestao_utc" in players else None
@@ -206,6 +210,14 @@ def load() -> Optional[Dict[str, Any]]:
             tmp = SNAP_PATH.with_suffix(".tmp")
             pd.to_pickle(data, tmp)
             os.replace(tmp, SNAP_PATH)
+    except Exception:
+        pass
+    try:                                   # rodada 27g: junta o mesmo atleta com 2 nomes no clube (só em memória)
+        u = data.get("universe") if isinstance(data, dict) else None
+        if isinstance(u, pd.DataFrame) and "apelidos_core" not in u:
+            from src.scout.engine import merge_club_aliases
+
+            data["universe"] = merge_club_aliases(u)
     except Exception:
         pass
     try:                                   # rodada 27: um nome por liga também na fotografia já pronta (só em memória)

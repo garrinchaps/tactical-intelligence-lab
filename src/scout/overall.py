@@ -381,17 +381,23 @@ def standardize(z: pd.Series, comps: pd.DataFrame, fam_stats: Optional[Dict[str,
     prior = (1.5 * (lv - .62)).clip(-.6, .5) if not isinstance(lv, float) else 1.5 * (lv - .62)
     s = a * s + (1 - a) * prior                          # quem jogou pouco no ano não chega ao topo
     if "_age" in comps:
-        s = s + age_prior(comps["_age"], comps["_avail"], comps.get("L"))
+        s = s + age_prior(comps["_age"], comps["_avail"], comps.get("L"), comps["_fam"])
     return s, fam_stats
 
 
-def age_prior(age: pd.Series, avail: pd.Series, level: Optional[pd.Series] = None) -> pd.Series:
+def age_prior(age: pd.Series, avail: pd.Series, level: Optional[pd.Series] = None,
+              fam: Optional[pd.Series] = None) -> pd.Series:
     """Rodada 26 — o que os números por jogo não medem (velocidade, explosão, recuperação): depois dos 31 o corpo cai
     mesmo quando a produção ainda aparece (−0,08 na régua por ano depois dos 31, até −0,48); um jovem de até 22 anos
     TITULAR num clube/liga forte já prova nível acima do que os números de um ano mostram (+0,035 por ano abaixo de 23).
     É uma estimativa assumida — está descrita na explicação da nota."""
     a = pd.to_numeric(age, errors="coerce")
     old = -(.08 * (a - 31).clip(lower=0, upper=6))
+    if fam is not None:
+        # rodada 27g: goleiro envelhece bem (Fábio, Rafael, Walter, Everson, Cássio levavam o desconto inteiro de
+        # linha): começa aos 35 e é metade, no máximo −0,2
+        gk = fam.astype(str).eq("GK").reindex(a.index, fill_value=False)
+        old = old.where(~gk, -(.04 * (a - 34).clip(lower=0, upper=5)))
     lv = level.fillna(45) if level is not None else pd.Series(45.0, index=a.index)
     young = .035 * (23 - a).clip(lower=0, upper=5) * (avail.fillna(0) >= .75) * (lv >= 60)
     # rodada 27: jovem TITULAR fora das ligas de elite (Melk e Lorenzo na Série B, titulares aos 19–20) também prova
@@ -624,7 +630,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         ovr = ladder(s)
     cap = comps["_fam"].map(FAMILY_CAP).fillna(92)
     out["qualidade"] = ovr.clip(upper=cap).clip(upper=minutes_cap(out)).round(0)
-    out["qualidade"] = brazil_bump(out, out["qualidade"])
+    out["qualidade"] = brazil_bump(out.assign(_fam=comps["_fam"]), out["qualidade"])
     if "so_base" in out:                     # rodada 22: só jogos de base → fica a ESTIMADA pelo nível de base
         base_only = out["so_base"].fillna(False).astype(bool)
         out.loc[base_only, "qualidade"] = pd.to_numeric(out.loc[base_only, "qualidade_base"], errors="coerce")
@@ -677,6 +683,13 @@ def brazil_bump(u: pd.DataFrame, q: pd.Series) -> pd.Series:
     a, b = div == "A", div == "B"
     bump[a] = 1 + 2 * ((q[a] - 65) / 15).clip(0, 1)
     bump[b] = 1 + ((q[b] - 62) / 12).clip(0, 1)
+    # rodada 27g: goleiro TITULAR (1.800+ min no ano) na Série A/B ganha +2 a mais — a régua de goleiro é estreita e
+    # os titulares do Brasil ficavam todos entre 60 e 69 (Rafael 61 com 4.950 min)
+    if "_fam" in u or "papel" in u:
+        fam = (u["_fam"] if "_fam" in u else u["papel"]).astype(str)
+        m12 = pd.to_numeric(u.get("minutos_12m"), errors="coerce").fillna(0)
+        gk_starter = fam.eq("GK") & (m12 >= 1800) & (a | b)
+        bump[gk_starter] += 2
     bump[(q < 55) | q.isna()] = 0.0
     out = pd.Series(np.where(q > BR_BUMP_CAP, q, np.minimum(q + bump, np.maximum(q, BR_BUMP_CAP))), index=q.index)
     return out.round(0)

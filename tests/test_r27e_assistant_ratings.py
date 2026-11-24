@@ -216,3 +216,42 @@ def test_bg_fetch_runs_once_and_off_the_click():
     bg_fetch.schedule("t:x", lambda: calls.append(2))  # repetido: ignorado
     time.sleep(.8)
     assert calls == [1] and not bg_fetch.running("t:x")
+
+
+def test_same_player_two_names_same_club_merged():
+    from src.scout.engine import merge_club_aliases
+
+    u = pd.DataFrame({"nome": ["Otávio", "Otavio Costa", "Gabriel", "Gabriel Barbosa", "Gabriel Veron"],
+                      "clube": ["Cruzeiro", "Cruzeiro", "Cruzeiro", "Cruzeiro", "Cruzeiro"],
+                      "papel": ["GK", "GK", "ST", "ST", "ST"], "idade": [20, 20.4, 28, 28, 22],
+                      "minutos_12m": [0, 3465, 0, 900, 800], "valor_mercado_eur": [22.5e6, 5e5, 1e6, 2e6, 3e6],
+                      "potencial": [71, 86, 70, 75, 80]})
+    out = merge_club_aliases(u)
+    o = out[out["nome"] == "Otavio Costa"].iloc[0]
+    assert "Otávio" not in set(out["nome"]) and o["valor_mercado_eur"] == 22.5e6 and o["potencial"] == 86
+    assert "Gabriel" in set(out["nome"])              # ambíguo (dois "Gabriel …" com jogos): fica separado
+
+
+def test_goalkeepers_age_kindly():
+    from src.scout.overall import age_prior
+
+    age = pd.Series([37.0, 37.0])
+    fam = pd.Series(["GK", "CB"])
+    p = age_prior(age, pd.Series([1.0, 1.0]), None, fam)
+    assert p[0] > p[1] and p[0] >= -.2
+
+
+def test_profile_groups_never_empty_with_market():
+    import numpy as np
+
+    from src.ui.pages import scout as SC
+
+    ranked = pd.DataFrame({"nome": ["A"], "papel_alvo": ["AM"], "qualidade": [74], "potencial": [78], "idade": [24],
+                           "valor_mercado_eur": [3.8e6], "score_scout": [40]})
+    roster = pd.DataFrame({"papel": ["AM"], "qualidade": [80]})
+    rng = np.random.default_rng(1)
+    pool = pd.DataFrame({"nome": [f"P{i}" for i in range(60)], "papel": ["AM"] * 60,
+                         "qualidade": rng.integers(60, 82, 60), "potencial": rng.integers(70, 90, 60),
+                         "idade": rng.integers(17, 31, 60), "valor_mercado_eur": rng.integers(1, 30, 60) * 1e6})
+    groups = SC._profile_groups(ranked, roster, 22.9e6, pool=pool)
+    assert all(len(df) == 3 for _, _, df in groups)

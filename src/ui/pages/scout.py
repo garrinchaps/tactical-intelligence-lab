@@ -455,6 +455,18 @@ def _merge_roster(roster, _universe, team=None, version=""):
             lookup = pd.concat([own, universe]).drop_duplicates("_core").set_index("_core")
         else:
             lookup = universe.drop_duplicates("_core").set_index("_core")
+        if "apelidos_core" in universe:            # rodada 27g: "Otávio" (elenco) → linha "Otavio Costa" do mercado
+            al = universe.dropna(subset=["apelidos_core"])
+            if team and "clube" in al:
+                al = al[al["clube"].map(lambda c: team_core(str(c)) == team_core(team))]
+            extra = []
+            for _, row in al.iterrows():
+                for a in str(row["apelidos_core"]).split("|"):
+                    if a and a not in lookup.index:
+                        extra.append(row.rename(a))
+            if extra:
+                lookup = pd.concat([lookup, pd.DataFrame(extra)])
+                lookup = lookup[~lookup.index.duplicated(keep="first")]
         # rodada 11: nome do elenco ≠ nome do mercado ("Lucas Romero" × "Lucas Daniel Romero") — liga pela mesma regra
         # da Escalação, só entre atletas do PRÓPRIO clube (nunca junta dois jogadores diferentes por palpite)
         miss = ~r["_core"].isin(lookup.index)
@@ -487,6 +499,8 @@ def _merge_roster(roster, _universe, team=None, version=""):
         # trazia o valor de um homônimo: Otávio goleiro do Cruzeiro com € 500 mil de outro Otávio)
         if team and "clube" in universe:
             own_cores = set(own["_core"].astype(str)) if "own" in locals() else set()
+            if "own" in locals() and "apelidos_core" in own:
+                own_cores |= {a for v in own["apelidos_core"].dropna() for a in str(v).split("|") if a}
             hit = r["_core"].isin(own_cores)
             for col in ("valor_mercado_eur", "idade", "nacionalidade", "potencial", "potencial_porque"):
                 if col in lookup and hit.any():
@@ -786,7 +800,8 @@ def _starter_quality(roster: pd.DataFrame) -> Dict[str, float]:
     return {str(k): float(v) for k, v in q.groupby(roster["papel"]).max().items() if pd.notna(v)}
 
 
-def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float):
+def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float, pool: Optional[pd.DataFrame] = None,
+                    exclude: Optional[set] = None):
     """Rodada 27 — três perfis de contratação, cada um com 3 nomes:
       🌱 jovens promessas (≤ 21, potencial acima do titular, custo até 60% da verba);
       📈 para investir (22–26, já perto do titular e crescendo, custo até a verba);
@@ -795,6 +810,20 @@ def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float):
     if ranked is None or ranked.empty:
         return []
     d = ranked.copy()
+    if pool is not None and not pool.empty and "papel" in pool:
+        # rodada 27g: os perfis procuravam só entre os ~5 nomes já sugeridos — "ninguém atende" para o Cruzeiro.
+        # Agora entram TODOS do mercado nas posições pedidas (fora o próprio clube e os já descartados)
+        roles = set(d.get("papel_alvo", d.get("papel")).astype(str))
+        extra = pool[pool["papel"].astype(str).isin(roles)].copy()
+        if exclude:
+            extra = extra[~extra["nome"].astype(str).isin(exclude)]
+        extra["papel_alvo"] = extra["papel"]
+        extra = extra[pd.to_numeric(extra.get("qualidade"), errors="coerce").fillna(0) >= 55]
+        extra = extra[~extra["nome"].isin(d["nome"])]
+        extra.index = [10_000_000 + int(i) if isinstance(i, (int, np.integer)) else 10_000_000 + k
+                       for k, i in enumerate(extra.index)]
+        d = pd.concat([d, extra], sort=False)
+        d = d[~d.index.duplicated(keep="first")]
     role = d.get("papel_alvo", d.get("papel")).astype(str)
     tq = _starter_quality(roster)
     starter = role.map(tq).astype(float)
@@ -805,14 +834,25 @@ def _profile_groups(ranked: pd.DataFrame, roster: pd.DataFrame, budget: float):
     b = budget if budget and budget > 0 else np.inf
     ref = starter.fillna(q.quantile(.6) if q.notna().any() else 70)
     order = pd.to_numeric(d.get("score_scout"), errors="coerce").fillna(0)
-    young = d[(age <= 21) & (pot >= ref + 2) & (val.isna() | (val <= .6 * b))]
-    young = young.loc[(pot[young.index] * 2 + order[young.index] / 10).sort_values(ascending=False).index].head(3)
-    invest = d[age.between(22, 26) & (q >= ref - 3) & (pot >= ref + 2) & (val.isna() | (val <= b))
-               & ~d.index.isin(young.index)]
-    invest = invest.loc[((pot - q)[invest.index] + q[invest.index] + order[invest.index] / 20).sort_values(ascending=False).index].head(3)
-    ready = d[(q >= ref + 1) & (age <= 31) & (val.isna() | (val <= 1.2 * b))
-              & ~d.index.isin(young.index) & ~d.index.isin(invest.index)]
-    ready = ready.loc[(q[ready.index] * 2 + order[ready.index] / 10).sort_values(ascending=False).index].head(3)
+    fits = lambda cap: val.isna() | (val <= cap * b)
+
+    def pick(mask_strict, mask_loose, score, taken):
+        """3 nomes: primeiro quem cumpre o perfil inteiro; faltando, completa com os mais próximos (mesma faixa de
+        idade e dentro da verba) — nunca a lista vazia quando o mercado tem gente na faixa."""
+        a_ = d[mask_strict & ~d.index.isin(taken)]
+        a_ = a_.loc[score[a_.index].sort_values(ascending=False).index].head(3)
+        if len(a_) < 3:
+            b_ = d[mask_loose & ~d.index.isin(taken) & ~d.index.isin(a_.index)]
+            b_ = b_.loc[score[b_.index].sort_values(ascending=False).index].head(3 - len(a_))
+            a_ = pd.concat([a_, b_.assign(_perfil_aproximado=True)])
+        return a_
+
+    young = pick((age <= 21) & (pot >= ref) & fits(.8), (age <= 21) & (pot >= ref - 6) & fits(1.0),
+                 pot * 2 + order / 10, set())
+    invest = pick(age.between(22, 26) & (q >= ref - 5) & (pot >= ref) & fits(1.0),
+                  age.between(22, 26) & (q >= ref - 9) & fits(1.0), (pot - q) + q + order / 20, set(young.index))
+    ready = pick((q >= ref + 1) & (age <= 31) & fits(1.5), (q >= ref - 2) & (age <= 31) & fits(1.5),
+                 q * 2 + order / 10, set(young.index) | set(invest.index))
     return [("🌱 Jovens promessas", "até 21 anos, potencial acima do titular atual da posição e preço até 60% da verba", young),
             ("📈 Para investir", "22 a 26 anos, já perto do titular e com espaço para crescer, dentro da verba", invest),
             ("⭐ Para chegar e jogar", "melhores que o titular atual HOJE, até 31 anos — os mais caros, até 120% da verba", ready)]
@@ -1217,7 +1257,17 @@ def render(_ctx=None):
                                                  "do time titular. Ajuste se souber a verba real.")
                 bc2.caption(f"Estimativa do laboratório: € {budget0:.1f} mi por contratação grande "
                             f"(o que o clube já provou que paga). Não é orçamento oficial nem inclui salários.")
-                groups = _profile_groups(top5, roster, budget_m * 1e6)
+                try:
+                    _pool5 = _apply_ai_filters(pool, f5)
+                    if team and "clube" in _pool5:
+                        from src.data_lake.ids import team_core as _tcp
+
+                        _pool5 = _pool5[_pool5["clube"].map(lambda c: _tcp(str(c))) != _tcp(team)]
+                except Exception:
+                    _pool5 = None
+                groups = _profile_groups(top5, roster, budget_m * 1e6, pool=_pool5,
+                                         exclude=set(st.session_state.get(rejected_key, []) or [])
+                                         if "rejected_key" in locals() else None)
                 shown = set()
                 for title, sub, df in groups:
                     st.markdown(f"##### {title}")
@@ -1225,8 +1275,13 @@ def render(_ctx=None):
                     if df.empty:
                         st.caption("Ninguém na base atende a este perfil com os filtros e a verba atuais.")
                         continue
+                    if "_perfil_aproximado" in df and df["_perfil_aproximado"].fillna(False).astype(bool).any():
+                        st.caption("Sem nomes que cumpram o perfil inteiro com a verba atual: os marcados ≈ são os mais "
+                                   "próximos (mesma faixa de idade, dentro da verba).")
                     for idx, row in df.iterrows():
                         shown.add(idx)
+                        if bool(row.get("_perfil_aproximado") is True):
+                            st.caption("≈ mais próximo do perfil")
                         _player_card(row.to_dict(), roster, team, int(idx), plan_key, rejected_key)
                 st.markdown("##### 🎯 Outras opções da IA")
                 rest = top5[~top5.index.isin(shown)]

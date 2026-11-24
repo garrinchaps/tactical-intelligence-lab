@@ -850,6 +850,19 @@ Rodada 27g (24/11/2026, 552 testes verdes) — diagnóstico real do PC (banco 19
 - Catálogo frio (10,8 s) acontece uma vez por abertura do app (na tela de carregamento); a cópia em parquet é gravada
   depois da 1ª leitura completa.
 
+Rodada 27h (24/11/2026, 555 testes verdes) — Scout do Cruzeiro (prints do usuário):
+- ✅ Sugestões por perfil vazias ("ninguém atende" em 🌱/📈/⭐): procuravam só entre os ~5 nomes da IA. Agora usam TODO o
+  mercado nas posições pedidas (filtros aplicados, sem o próprio clube e os descartados), regras um pouco mais largas
+  (promessa: potencial ≥ titular, até 80% da verba; investir: ≥ titular −5; pronto: até 150% da verba) e, faltando
+  nomes, completa com os mais próximos do perfil marcados "≈" (`scout._profile_groups(pool=)`).
+- ✅ Otávio: o MESMO atleta tinha 2 linhas no mercado do Cruzeiro ("Otávio" do cadastro sem minutos × "Otavio Costa" dos
+  jogos, potencial 86) e o elenco pegava a errada. `engine.merge_club_aliases`: mesmo clube + mesma família + um nome
+  contido no outro + idade ±1 + UMA linha sem minutos + só um candidato com jogos → junta (valor e potencial maiores
+  ficam; apelido em `apelidos_core`, usado no elenco). Aplicado ao abrir a fotografia e ao montá-la.
+- ✅ Goleiros: desconto de idade próprio (começa aos 35, metade, no máximo −0,2 — Rafael, Walter, Everson, Cássio, Fábio
+  levavam o de linha, −0,48) e goleiro titular (1.800+ min) da Série A/B ganha +2 no ajuste do Brasil (teto 84).
+- Fotografia v20 (passo `scout_v20`); a v19 é usada até a nova ficar pronta (processo de fundo com a tela parada).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

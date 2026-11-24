@@ -3325,3 +3325,60 @@ def youth_profile(db, names: List[str]) -> Dict[str, Any]:
                for lab, _ in YOUTH_STAT_KEYS if seen[lab]]
     return {"jogos": int(d["match_id"].nunique()), "minutos": int(mins), "por_competicao": by, "numeros": numbers,
             "nota": float(pd.to_numeric(d["rating"], errors="coerce").mean()) if d["rating"].notna().any() else None}
+
+
+def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 27g — o MESMO atleta em duas linhas do mercado no mesmo clube: uma só do cadastro (sem minutos: "Otávio",
+    Transfermarkt) e outra dos jogos ("Otavio Costa", FotMob, 3.465 min, potencial 86). O elenco pegava a do cadastro
+    (65/71, € 500 mil). Junta só quando é seguro: mesmo clube, mesma família (goleiro × linha), um nome contido no
+    outro (palavras), idade igual ±1 quando as duas existem e UMA das linhas sem minutos no ano. A linha com jogos fica;
+    da outra vêm o que falta (valor, contrato, nascimento) e o nome curto vira apelido (`apelidos_core`)."""
+    if u is None or u.empty or not {"nome", "clube"} <= set(u.columns):
+        return u
+    d = u.copy()
+    core = d["_core"].astype(str) if "_core" in d else d["nome"].map(player_core)
+    d["_core"] = core
+    club = d["clube"].fillna("").astype(str).map(lambda c: team_core(c) if c else "")
+    fam = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str).map(lambda r: "GK" if r == "GK" else "OUT")
+    mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce").fillna(0)
+    age = pd.to_numeric(d.get("idade"), errors="coerce")
+    drop, aliases = set(), {}
+    key = club + "|" + fam
+    for _k, idx in d[club != ""].groupby(key[club != ""]).groups.items():
+        if len(idx) < 2:
+            continue
+        idx = list(idx)
+        empty = [i for i in idx if mins[i] <= 0]
+        played = [i for i in idx if mins[i] > 0]
+        if not empty or not played:
+            continue
+        for e in empty:
+            te = set(core[e].split())
+            if not te:
+                continue
+            by_name = [p for p in played if (te < set(core[p].split()) or set(core[p].split()) < te)]
+            if len(by_name) != 1:
+                continue                                   # nenhum ou dois "Gabriel …" com jogos: fica separado
+            cands = [p for p in by_name if p not in drop
+                     and not (pd.notna(age[e]) and pd.notna(age[p]) and abs(age[e] - age[p]) > 1.2)]
+            if len(cands) != 1:
+                continue                                   # nenhum ou ambíguo (dois "Gabriel …"): fica separado
+            p = cands[0]
+            for col in d.columns:
+                if col.startswith("_"):
+                    continue
+                if pd.isna(d.at[p, col]) if not isinstance(d.at[p, col], (list, dict, tuple)) else False:
+                    v = d.at[e, col]
+                    if not (isinstance(v, float) and np.isnan(v)):
+                        d.at[p, col] = v
+            for col in ("valor_mercado_eur", "potencial", "potencial_teto"):
+                if col in d:
+                    a_, b_ = pd.to_numeric(pd.Series([d.at[p, col], d.at[e, col]]), errors="coerce")
+                    if pd.notna(b_) and (pd.isna(a_) or b_ > a_):
+                        d.at[p, col] = b_
+            aliases.setdefault(p, []).append(core[e])
+            drop.add(e)
+    if not drop:
+        return u
+    d["apelidos_core"] = pd.Series({i: "|".join(v) for i, v in aliases.items()}).reindex(d.index)
+    return d.drop(index=list(drop))
