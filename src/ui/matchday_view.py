@@ -61,9 +61,7 @@ def _dot(s: Dict[str, Any], top: float, left: float, color: str, flag: Optional[
 
 
 def unified_quality(xi: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]:
-    """Rodada 24: o número no círculo é a MESMA qualidade do Scout/elenco/página do jogador (universo, pelo clube),
-    ajustada à FUNÇÃO que ele faz neste desenho: fora da posição perde até 8 pontos pelo encaixe (0–1).
-    Sem nota no universo, fica a nota da escalação marcada como estimativa."""
+    """Mostra no campinho o overall do Scout sem recalcular ou descontar encaixe tático."""
     try:
         from src.data_lake.ids import player_core
         from src.scout import snapshot as S
@@ -76,21 +74,18 @@ def unified_quality(xi: List[Dict[str, Any]], team: str) -> List[Dict[str, Any]]
         row = S.find_player(player_core(str(name)), [str(name)], team) if name else None
         q = pd.to_numeric(row.get("qualidade"), errors="coerce") if row else np.nan
         if pd.notna(q):
-            fit = pd.to_numeric(s.get("encaixe"), errors="coerce")
-            fit = 1.0 if pd.isna(fit) else float(np.clip(fit, 0, 1))
-            s["qualidade"] = round(float(q) - 8 * (1 - fit))
-            s["qualidade_fonte"] = "Scout" + ("" if fit >= .99 else f" ajustada à função (encaixe {fit:.0%})")
+            s["qualidade"] = round(float(q))
+            s["qualidade_fonte"] = "Overall do Scout"
+            s["qualidade_estimada"] = False
         elif pd.notna(pd.to_numeric(s.get("nota"), errors="coerce")):
-            # rodada 27: sem nota no Scout (homônimo sem clube conferido, recém-chegado) — em vez de "—", a nota da
-            # escalação (0–10, desempenho recente) levada à escala 0–100, MARCADA como estimativa (*)
             n = float(pd.to_numeric(s.get("nota"), errors="coerce"))
             n = n * 10 if n <= 10 else n
             s["qualidade"] = round(float(np.clip(n, 40, 85)))
             s["qualidade_estimada"] = True
-            s["qualidade_fonte"] = "estimada pela nota recente na escalação (sem nota no Scout)"
+            s["qualidade_fonte"] = "estimativa pela nota recente (sem overall no Scout)"
         else:
             s["qualidade"] = None
-            s["qualidade_fonte"] = "sem nota no Scout"
+            s["qualidade_fonte"] = "overall indisponível no Scout"
         out.append(s)
     return out
 
