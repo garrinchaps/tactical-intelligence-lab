@@ -208,7 +208,7 @@ def _answer(question: str, current_context, use_llm: bool):
             except Exception:
                 pass
     # Tags HTML de subscrito não fazem parte do texto conversacional do assistente.
-    res["report_markdown"] = re.sub(r"</?sub\\b[^>]*>", "", str(res.get("report_markdown") or ""), flags=re.I)
+    res["report_markdown"] = re.sub(r"</?sub\b[^>]*>", "", str(res.get("report_markdown") or ""), flags=re.I)
     res["_match_card"] = result_card_html(ctx.bundle.meta or {}, BADGES.get(ctx.bundle.level, ctx.bundle.level))
     return res, loc, switched
 
@@ -305,7 +305,7 @@ def render(current_context, match_bar) -> None:
         with st.chat_message("user", avatar="🧑‍💼"):
             st.markdown(h["q"])
         with st.chat_message("assistant", avatar="⚽"):
-            answer = re.sub(r"</?sub\\b[^>]*>", "", str(h.get("a") or ""), flags=re.I)
+            answer = re.sub(r"</?sub\b[^>]*>", "", str(h.get("a") or ""), flags=re.I)
             st.markdown(answer)
             learning_id = h.get("learning_id")
             if learning_id and learning_id not in reviewed:
