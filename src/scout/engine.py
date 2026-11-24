@@ -3456,3 +3456,132 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
         return u
     d["apelidos_core"] = pd.Series({i: "|".join(v) for i, v in aliases.items()}).reindex(d.index)
     return d.drop(index=list(drop))
+
+
+def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
+    """Une perfis duplicados entre clubes somente com identidade forte.
+
+    Critérios aceitos: ID estável compartilhado da FotMob/Transfermarkt; ou nome
+    idêntico/abreviado + nascimento exato + nacionalidade e família de posição
+    compatíveis. Nome parecido, sozinho, nunca une atletas.
+    """
+    if u is None or u.empty or "nome" not in u:
+        return u
+    from src.data_lake.ids import player_core
+
+    d = u.copy()
+    core = d["_core"].astype(str) if "_core" in d else d["nome"].map(player_core)
+    d["_core"] = core
+    if len(d) < 2:
+        return d
+
+    def clean_id(value: Any) -> str:
+        s = _safe_str(value)
+        return "" if s.casefold() in {"nan", "none", "null", "0"} else s
+
+    role = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str)
+    family = role.map(_role_family)
+    birth = pd.to_datetime(d.get("nascimento", pd.Series(None, index=d.index)), errors="coerce").dt.strftime("%Y-%m-%d")
+    nat = d.get("nacionalidade", pd.Series("", index=d.index)).fillna("").astype(str).str.strip().str.casefold()
+    last = pd.to_datetime(d.get("ultimo_jogo", pd.Series(None, index=d.index)), errors="coerce")
+    minutes = pd.to_numeric(d.get("minutos_12m", pd.Series(0, index=d.index)), errors="coerce").fillna(0)
+    observed = _boolean_mask(d.get("clube_observado", pd.Series(False, index=d.index)))
+
+    parent = {i: i for i in d.index}
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def compatible(i, j):
+        fi, fj = family.get(i, "OTHER"), family.get(j, "OTHER")
+        if fi == "OTHER" or fj == "OTHER" or fi != fj:
+            return False
+        bi, bj = birth.get(i), birth.get(j)
+        if bi and bj and bi != bj:
+            return False
+        ni, nj = nat.get(i, ""), nat.get(j, "")
+        if ni and nj and ni != nj:
+            return False
+        return True
+
+    def unite(i, j):
+        ri, rj = root(i), root(j)
+        if ri != rj:
+            parent[rj] = ri
+
+    # IDs de fonte são a evidência mais forte, desde que função/nascimento/país não conflitem.
+    id_columns = [c for c in ("fotmob_id", "transfermarkt_id") if c in d]
+    if "pid" in d:
+        id_columns.append("pid")
+    for col in id_columns:
+        groups: Dict[str, List[int]] = {}
+        for i, value in d[col].items():
+            value = clean_id(value)
+            if not value or (col == "pid" and not value.startswith(("fm", "tm"))):
+                continue
+            groups.setdefault(value, []).append(i)
+        for indices in groups.values():
+            if len(indices) > 1:
+                for pos, i in enumerate(indices):
+                    for j in indices[pos + 1:]:
+                        if compatible(i, j):
+                            unite(i, j)
+
+    # Sem ID comum: nascimento exato + nome igual/abreviado + país e função compatíveis.
+    dob_groups: Dict[Tuple[str, str], List[int]] = {}
+    for i in d.index:
+        b, fam = birth.get(i), family.get(i, "OTHER")
+        if b and fam != "OTHER":
+            dob_groups.setdefault((b, fam), []).append(i)
+    for indices in dob_groups.values():
+        if len(indices) < 2:
+            continue
+        for pos, i in enumerate(indices):
+            wi = set(str(core.get(i, "")).split())
+            for j in indices[pos + 1:]:
+                if root(i) == root(j) or not compatible(i, j):
+                    continue
+                wj = set(str(core.get(j, "")).split())
+                if wi and wj and (wi <= wj or wj <= wi):
+                    unite(i, j)
+
+    groups: Dict[int, List[int]] = {}
+    for i in d.index:
+        groups.setdefault(root(i), []).append(i)
+    groups = {k: v for k, v in groups.items() if len(v) > 1}
+    if not groups:
+        return d
+
+    aliases_by_keep: Dict[int, List[str]] = {}
+    drop = set()
+    for indices in groups.values():
+        # Clube observado mais recentemente vence; desempate por data e amostra.
+        keep = max(indices, key=lambda i: (
+            bool(observed.get(i, False)),
+            last.get(i).value if pd.notna(last.get(i)) else -1,
+            float(minutes.get(i, 0) or 0),
+        ))
+        aliases: List[str] = []
+        for i in indices:
+            if i == keep:
+                continue
+            _absorb(d, keep, i)
+            if "apelidos_core" in d and _safe_str(d.at[i, "apelidos_core"]):
+                aliases.extend(str(d.at[i, "apelidos_core"]).split("|"))
+            other_core = str(core.get(i, "")).strip()
+            if other_core and other_core != str(core.get(keep, "")):
+                aliases.append(other_core)
+            drop.add(i)
+        if "apelidos_core" in d and _safe_str(d.at[keep, "apelidos_core"]):
+            aliases.extend(str(d.at[keep, "apelidos_core"]).split("|"))
+        aliases_by_keep[keep] = list(dict.fromkeys(a for a in aliases if a))
+
+    if aliases_by_keep:
+        if "apelidos_core" not in d:
+            d["apelidos_core"] = None
+        for i, vals in aliases_by_keep.items():
+            d.at[i, "apelidos_core"] = "|".join(vals) if vals else None
+    return d.drop(index=list(drop)).reset_index(drop=True)
