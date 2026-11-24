@@ -198,6 +198,15 @@ def load() -> Optional[Dict[str, Any]]:
         if isinstance(data, dict):
             data["parcial"] = True
             data["fotografia_antiga"] = old.name
+            try:
+                u = data.get("universe")
+                if isinstance(u, pd.DataFrame):
+                    from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
+
+                    u = merge_club_aliases(u)
+                    data["universe"] = merge_verified_player_duplicates(u)
+            except Exception:
+                pass
         return data
     try:
         data = pd.read_pickle(SNAP_PATH)
@@ -218,8 +227,7 @@ def load() -> Optional[Dict[str, Any]]:
         if isinstance(u, pd.DataFrame):
             from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
 
-            if "apelidos_core" not in u:
-                u = merge_club_aliases(u)
+            u = merge_club_aliases(u)
             data["universe"] = merge_verified_player_duplicates(u)
     except Exception:
         pass
