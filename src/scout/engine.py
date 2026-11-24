@@ -3697,12 +3697,12 @@ def _shared_games(a, b) -> int:
 
 
 def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
-    """Rodada 27j — o MESMO atleta visto por duas fontes em linhas diferentes, inclusive depois de trocar de clube:
-    "Kaiki" (ESPN, sem id da FotMob, ainda no Cruzeiro) × "Kaiki Bruno" (FotMob, com id, já no Como); Arthur no Palmeiras.
-    Junta só quando TUDO confere: a linha sem id tem jogos, uma única linha COM id tem o nome contido/continente, mesma
-    família (goleiro × linha), idade ±1 e país iguais quando conhecidos, e as duas jogaram os MESMOS jogos (mesma data
-    ±1 dia pelo mesmo clube) em pelo menos metade dos jogos da linha sem id. Teammates de nome parecido não juntam:
-    dois candidatos com id = ambíguo, fica separado. A linha com id (clube mais atual) fica; a outra vira apelido."""
+    """Reconcilia perfis repetidos entre fontes com evidência biográfica e de proveniência.
+
+    Primeiro procura pares com nome normalizado idêntico, IDs complementares de FotMob/Transfermarkt,
+    mesma posição detalhada, nacionalidade compatível, idade coerente e correspondência um-para-um.
+    Depois preserva a reconciliação histórica por partidas compartilhadas para grafias alternativas.
+    Nomes parecidos, IDs conflitantes ou grupos ambíguos nunca são fundidos por palpite."""
     if u is None or u.empty or "nome" not in u:
         return u
     d = u.copy()
