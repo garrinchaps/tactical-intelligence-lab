@@ -426,57 +426,105 @@ def quality_map() -> Dict[str, Dict[str, float]]:
     return out
 
 
-def find_player(core: str, names: Optional[list] = None, club: str = "", pid: str = "") -> Optional[Dict[str, Any]]:
-    """Linha do universo do atleta. Rodada 24: pelo identificador único (pid) quando vier; senão núcleo de nome e,
-    havendo homônimo, SÓ o do clube informado (sem clube que confira → nenhum, para não mostrar a nota de outro)."""
+def _club_scoped_rows(frame: pd.DataFrame, club: str) -> pd.DataFrame:
+    """Keep only rows explicitly associated with the requested club; never accept an unverified homonym."""
+    if frame is None or frame.empty or not club:
+        return frame.iloc[0:0] if frame is not None else pd.DataFrame()
+    from src.data_lake.ids import team_core
+
+    requested = team_core(club)
+    if not requested:
+        return frame.iloc[0:0]
+    matched = pd.Series(False, index=frame.index)
+    found_column = False
+    for column in ("clube", "clube_tm"):
+        if column not in frame:
+            continue
+        found_column = True
+        def same(value):
+            current = team_core(str(value)) if pd.notna(value) else ""
+            return bool(current) and (current == requested or current.startswith(requested) or requested.startswith(current))
+        matched |= frame[column].map(same)
+    return frame[matched] if found_column else frame.iloc[0:0]
+
+
+def _age_scoped_rows(frame: pd.DataFrame, age: Optional[float]) -> pd.DataFrame:
+    if frame is None or frame.empty or age is None or pd.isna(age) or "idade" not in frame:
+        return frame
+    known = pd.to_numeric(frame["idade"], errors="coerce")
+    if known.notna().any():
+        return frame[known.isna() | ((known - float(age)).abs() <= 1)]
+    return frame
+
+
+def find_player(core: str, names: Optional[list] = None, club: str = "", pid: str = "",
+                age: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """Resolve um atleta sem misturar homônimos: PID, nome e idade nunca dispensam a validação do clube."""
     u = cached_universe()
     if u is None or u.empty:
         return None
     from src.data_lake.ids import player_core
 
+    requested_names = [str(n).strip() for n in (names or []) if n and str(n).strip()]
+    requested_cores = {player_core(core)} | {player_core(n) for n in requested_names}
+    requested_cores.discard("")
     idx = _index()
+
+    # PID é apenas uma pista: se apontar para outro nome, clube ou idade, é descartado e a busca continua.
     if pid and pid in idx.get("pid", {}):
-        return u.loc[idx["pid"][pid]].to_dict()
+        candidate = u.loc[[idx["pid"][pid]]]
+        pid_name = player_core(str(candidate.iloc[0].get("nome") or candidate.iloc[0].get("_core") or ""))
+        name_ok = (not requested_cores or pid_name in requested_cores or any(
+            set(q.split()) < set(pid_name.split()) or set(pid_name.split()) < set(q.split())
+            for q in requested_cores if q and pid_name))
+        club_ok = (not club) or not _club_scoped_rows(candidate, club).empty
+        age_ok = not _age_scoped_rows(candidate, age).empty
+        if name_ok and club_ok and age_ok:
+            return candidate.iloc[0].to_dict()
 
-    cores = {core} | {player_core(n) for n in (names or [])}
-    rows = [i for c in cores for i in idx.get("core", {}).get(str(c), [])]
-    if not rows and club and "_core" in u:
-        # Nome curto (ex.: Otávio) pode não estar cadastrado como alias, embora o atleta
-        # exista com nome completo (ex.: Otávio Costa). Só aceita prefixo se o clube
-        # corresponder e houver um único atleta candidato — evita associar homônimos.
-        from src.data_lake.ids import team_core
-        requested = player_core(str(core or ""))
-        all_cores = u["_core"].astype(str)
-        prefix_rows = u.index[all_cores.str.startswith(requested, na=False) & (all_cores != requested)].tolist()
-        if requested and prefix_rows:
-            candidates = u.loc[prefix_rows]
-            tc = team_core(club)
-            club_cols = [c for c in ("clube", "clube_tm") if c in candidates]
-            matched = pd.Series(False, index=candidates.index)
-            for col in club_cols:
-                matched |= candidates[col].fillna("").map(lambda value: team_core(str(value)) == tc)
-            candidates = candidates[matched]
-            unique_cores = candidates["_core"].astype(str).unique()
+    rows = [i for c in requested_cores for i in idx.get("core", {}).get(str(c), [])]
+    hit = u.loc[sorted(set(rows))] if rows else u.iloc[0:0]
+    if club:
+        hit = _club_scoped_rows(hit, club)
+    if age is not None:
+        hit = _age_scoped_rows(hit, age)
+
+    # Apelido curto não indexado (ou índice exato apontando para um clube diferente):
+    # procura um nome completo SOMENTE dentro do clube, com correspondência única.
+    if hit.empty and club and "_core" in u:
+        scoped = _club_scoped_rows(u, club)
+        candidates = []
+        for requested in requested_cores:
+            tokens = set(requested.split())
+            if not tokens:
+                continue
+            for row_index, candidate_core in scoped["_core"].astype(str).items():
+                candidate_tokens = set(candidate_core.split())
+                if tokens < candidate_tokens:
+                    candidates.append(row_index)
+        if candidates:
+            possible = _age_scoped_rows(scoped.loc[sorted(set(candidates))], age)
+            unique_cores = possible["_core"].astype(str).unique()
             if len(unique_cores) == 1:
-                rows = candidates.index.tolist()
-    if not rows:
-        return None
-    hit = u.loc[sorted(set(rows))]
-    if len(hit) > 1 and club and "clube" in hit:
-        from src.data_lake.ids import team_core
+                hit = possible
 
-        same = hit[hit["clube"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
-        if same.empty and "clube_tm" in hit:
-            same = hit[hit["clube_tm"].fillna("").map(lambda c: team_core(str(c))) == team_core(club)]
-        if same.empty:
-            # rodada 27: clube com outro nome nas fontes ("Fluminense" × "Fluminense FC") — tenta pelo começo do nome
-            tc = team_core(club)
-            same = hit[hit["clube"].fillna("").map(lambda c: bool(tc) and (team_core(str(c)).startswith(tc)
-                                                                            or tc.startswith(team_core(str(c)) or "#")))]
-        if same.empty:
+    if hit.empty:
+        return None
+
+    # Mais de um cadastro distinto com o mesmo nome/clube/idade é ambíguo: não escolhe pelo maior volume.
+    if "_core" in hit and hit["_core"].astype(str).nunique() > 1:
+        return None
+    for id_column in ("pid", "transfermarkt_id"):
+        if id_column in hit:
+            ids = hit[id_column].dropna().astype(str).unique()
+            if len(ids) > 1:
+                return None
+    if "nascimento" in hit:
+        dates = pd.to_datetime(hit["nascimento"], errors="coerce").dropna().dt.strftime("%Y-%m-%d").unique()
+        if len(dates) > 1:
             return None
-        hit = same
-    if "qualidade" in hit and len(hit) > 1:        # rodada 27: entre as linhas certas, a que tem nota
+
+    if "qualidade" in hit and len(hit) > 1:
         withq = hit[pd.to_numeric(hit["qualidade"], errors="coerce").notna()]
         if not withq.empty:
             hit = withq
