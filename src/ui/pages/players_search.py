@@ -355,7 +355,7 @@ def render(_ctx=None) -> None:
             else:
                 st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
                            "minutos medidos pela FotMob/ESPN no último ano).")
-            _youth_panel(tuple(names), get_service().db.stable_version())
+            _youth_panel(tuple(source_names), get_service().db.stable_version(), expected_age)
     with t5:
         if t5.open is not False:
             _scout_tab(names, want_club or p["clube"] or "")
@@ -805,19 +805,19 @@ def _player_card(nome: str, names: tuple, club: str = "", row: Optional[dict] = 
 
 
 @st.cache_data(show_spinner=False, ttl=6 * 3600, max_entries=200)
-def _youth_data(names: tuple, version: str):
+def _youth_data(names: tuple, version: str, expected_age=None):
     from src.scout.engine import youth_profile
     from src.ui.context import get_service
 
-    d = youth_profile(get_service().db, list(names))
+    d = youth_profile(get_service().db, list(names), expected_age=expected_age)
     if d and isinstance(d.get("por_competicao"), pd.DataFrame):
         d["por_competicao"] = d["por_competicao"].to_dict("records")
     return d
 
 
-def _youth_panel(names: tuple, version: str) -> None:
+def _youth_panel(names: tuple, version: str, expected_age=None) -> None:
     """Rodada 27: os números da seleção de base ficam no perfil do atleta (separados dos números de clube)."""
-    d = _youth_data(names, version)
+    d = _youth_data(names, version, expected_age)
     if not d or not d.get("jogos"):
         return
     from src.ui import fm
