@@ -264,6 +264,11 @@ def render(_ctx=None) -> None:
     nav.back_button(key="player_back")
     core, given = nav.param("core"), nav.param("name")
     want_club, want_pid = str(nav.param("club") or ""), str(nav.param("pid") or "")
+    expected_age = nav.param("age")
+    try:
+        expected_age = float(expected_age) if expected_age is not None and pd.notna(expected_age) else None
+    except (TypeError, ValueError):
+        expected_age = None
     if not (core or given):
         empty_state("Nenhum jogador escolhido", "Use o 🔎 Buscar e clique no jogador.", "👤")
         return
@@ -304,6 +309,17 @@ def render(_ctx=None) -> None:
                                                  + list(hit["clube"]) if _club_ok(x)), ""),
          "fontes": ", ".join(sorted(set(hit["fonte"])))}
     names = hit["nome"].unique().tolist()
+    # Perfil do Scout validado pelo clube (e idade, quando veio do elenco); não reutiliza um PID sem conferência.
+    profile_scout = None
+    try:
+        from src.scout import snapshot as _S
+        profile_scout = _S.find_player(core, names, p["clube"], pid=want_pid, age=expected_age)
+    except Exception:
+        profile_scout = None
+    if expected_age is None and profile_scout:
+        age_value = pd.to_numeric(pd.Series([profile_scout.get("idade")]), errors="coerce").iloc[0]
+        expected_age = float(age_value) if pd.notna(age_value) else None
+    source_names = list(dict.fromkeys(names + ([str(profile_scout.get("nome"))] if profile_scout and profile_scout.get("nome") else [])))
     st.markdown(f'<div class="til-profile">{crest_img(p["clube"] or "?", "lg")}<div><div class="n">{p["nome"]}</div>'
                 f'<div class="d">{p["nome_longo"] if p["nome_longo"] != p["nome"] else ""} · {p["clube"]} · fontes: {p["fontes"]}</div>'
                 f'</div></div>', unsafe_allow_html=True)
@@ -327,7 +343,7 @@ def render(_ctx=None) -> None:
             from src.scout import snapshot as S
             from src.ui import player_fm
 
-            row = S.find_player(p["core"], names, p["clube"], pid=want_pid)
+            row = profile_scout
             # rodada 27e: o cartão usa a MESMA qualidade, potencial e posição do Scout (antes: média da nota por jogo,
             # "67 ponta" para o Bontempo e "75 centroavante" para o Mbappé)
             _player_card(p["nome"], tuple(names), p["clube"], row=row)
@@ -345,7 +361,7 @@ def render(_ctx=None) -> None:
             _scout_tab(names, want_club or p["clube"] or "")
     with t4:
         if t4.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
-            _career_tab(p["core"])
+            _career_tab(p["core"], source_names, p["clube"], expected_age)
     with t1:
         if t1.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
             frames = [player_matches(n) for n in names]
@@ -396,9 +412,7 @@ def render(_ctx=None) -> None:
                 tm = lake.read("tm_jogadores") if lake.exists("tm_jogadores") else pd.DataFrame()
             except Exception:
                 tm = pd.DataFrame()
-            r = tm[tm["nome"].map(_norm) == p["core"]] if not tm.empty else tm
-            if want_club and len(r) > 1 and "clube" in r:           # rodada 24: homônimo → só o cadastro do clube certo
-                r = _same_club_rows(r, want_club)
+            r = _source_rows_for_player(tm, source_names, p["clube"], "transfermarkt_id", expected_age)
             if r.empty:
                 empty_state("Sem perfil do Transfermarkt", "", "💶", "python -m src.data_hub.sync --only transfermarkt lake")
             else:
@@ -428,7 +442,7 @@ def render(_ctx=None) -> None:
                 us = lake.read("us_jogadores") if lake.exists("us_jogadores") else pd.DataFrame()
             except Exception:
                 us = pd.DataFrame()
-            r = us[us["nome"].map(_norm) == p["core"]] if not us.empty else us
+            r = _source_rows_for_player(us, source_names, p["clube"], expected_age=expected_age)
             if r.empty:
                 empty_state("Sem dados do Understat", "O Understat cobre as 5 grandes ligas europeias e a Rússia.", "📈")
             else:
@@ -469,7 +483,7 @@ SELECT e.match_id, MIN(e.minute) AS m0, MAX(e.minute) AS m1, COUNT(*) AS acoes,
   SUM(e.type_name = 'Foul Committed') AS faltas_cometidas, SUM(e.type_name = 'Foul Won') AS faltas_sofridas,
   SUM(e.type_name = 'Error') AS erros,
   SUM(e.foul_committed_card_name LIKE '%Yellow%') AS amarelos, SUM(e.foul_committed_card_name LIKE '%Red%') AS vermelhos
-FROM events e WHERE e.player_name IN ({ph}) AND e.period <= 4 GROUP BY e.match_id
+FROM events e WHERE e.player_name IN ({ph}){team_filter} AND e.period <= 4 GROUP BY e.match_id
 """
 
 SCOUT_GROUPS = {
@@ -491,13 +505,21 @@ SCOUT_GROUPS = {
 
 
 @st.cache_data(show_spinner=False, ttl=900, max_entries=32)
-def player_scout(names: tuple) -> pd.DataFrame:
+def player_scout(names: tuple, teams: tuple = ()) -> pd.DataFrame:
     from src.ui.context import get_service
 
+    if not names:
+        return pd.DataFrame()
     ph = ",".join("?" * len(names))
+    team_filter = ""
+    params = list(names)
+    if teams:
+        th = ",".join("?" * len(teams))
+        team_filter = f" AND e.team_name IN ({th})"
+        params.extend(teams)
     with get_service().db.connect() as conn:
         try:
-            return pd.read_sql_query(SCOUT_SQL.format(ph=ph), conn, params=list(names))
+            return pd.read_sql_query(SCOUT_SQL.format(ph=ph, team_filter=team_filter), conn, params=params)
         except Exception:
             return pd.DataFrame()
 
@@ -596,7 +618,14 @@ def _box_per90_view(bg: pd.DataFrame) -> None:
 
 
 def _scout_tab(names: List[str], club: str = "") -> None:
-    sc = player_scout(tuple(names))
+    teams = ()
+    if club:
+        try:
+            from src.ui.pages.clubs import same_team_names
+            teams = tuple(dict.fromkeys([club, *same_team_names(club)]))
+        except Exception:
+            teams = (club,)
+    sc = player_scout(tuple(names), teams)
     if sc.empty:
         from src.ui.context import get_service
 
