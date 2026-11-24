@@ -175,7 +175,7 @@ def test_gk_overall_weights_do_not_let_distribution_dominate():
     from src.scout import rating_engine as RE
 
     weights = RE.POS_WEIGHTS["GK"]
-    assert weights == {"GKS": .75, "GKD": .10, "GKE": .15}
+    assert weights == {"GKS": .72, "GKD": .10, "GKE": .18}
     assert weights["GKS"] > weights["GKD"]
 
 
