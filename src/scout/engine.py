@@ -3509,7 +3509,8 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
     role = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str)
     family = role.map(_role_family)
     birth = pd.to_datetime(d.get("nascimento", pd.Series(None, index=d.index)), errors="coerce").dt.strftime("%Y-%m-%d").fillna("")
-    nat = d.get("nacionalidade", pd.Series("", index=d.index)).fillna("").astype(str).str.strip().str.casefold()
+    nat = d.get("nacionalidade", pd.Series("", index=d.index)).map(_country_core)
+    age = pd.to_numeric(d.get("idade", pd.Series(np.nan, index=d.index)), errors="coerce")
     last = pd.to_datetime(d.get("ultimo_jogo", pd.Series(None, index=d.index)), errors="coerce")
     minutes = pd.to_numeric(d.get("minutos_12m", pd.Series(0, index=d.index)), errors="coerce").fillna(0)
     observed = _boolean_mask(d.get("clube_observado", pd.Series(False, index=d.index)))
@@ -3534,12 +3535,51 @@ def merge_verified_player_duplicates(u: pd.DataFrame) -> pd.DataFrame:
         ni, nj = nat.get(i, ""), nat.get(j, "")
         if ni and nj and ni != nj:
             return False
+        ai, aj = age.get(i), age.get(j)
+        if pd.notna(ai) and pd.notna(aj) and abs(float(ai) - float(aj)) > 1.2:
+            return False
+        for col in ("fotmob_id", "transfermarkt_id"):
+            if col in d:
+                vi, vj = clean_id(d.at[i, col]), clean_id(d.at[j, col])
+                if vi and vj and vi != vj:
+                    return False
+        if "pid" in d:
+            pi, pj = clean_id(d.at[i, "pid"]), clean_id(d.at[j, "pid"])
+            if pi.startswith(("fm", "tm")) and pj.startswith(("fm", "tm")):
+                if pi[:2] == pj[:2] and pi != pj:
+                    return False
+        return True
+
+    members = {i: {i} for i in d.index}
+
+    def cluster_compatible(left, right):
+        combined = members[left] | members[right]
+        for col in ("fotmob_id", "transfermarkt_id"):
+            if col in d:
+                values = {clean_id(d.at[i, col]) for i in combined}
+                values.discard("")
+                if len(values) > 1:
+                    return False
+        if "pid" in d:
+            for prefix in ("fm", "tm"):
+                values = {clean_id(d.at[i, "pid"]) for i in combined}
+                values = {v for v in values if v.startswith(prefix)}
+                if len(values) > 1:
+                    return False
+        births = {birth.get(i, "") for i in combined if birth.get(i, "")}
+        countries = {nat.get(i, "") for i in combined if nat.get(i, "")}
+        known_ages = [float(age.get(i)) for i in combined if pd.notna(age.get(i))]
+        if len(births) > 1 or len(countries) > 1:
+            return False
+        if len(known_ages) > 1 and max(known_ages) - min(known_ages) > 1.2:
+            return False
         return True
 
     def unite(i, j):
         ri, rj = root(i), root(j)
-        if ri != rj:
+        if ri != rj and cluster_compatible(ri, rj):
             parent[rj] = ri
+            members[ri].update(members.pop(rj))
 
     # IDs estáveis são a evidência mais forte; data de nascimento ou nacionalidade conflitantes ainda bloqueiam a fusão.
     id_columns = [c for c in ("fotmob_id", "transfermarkt_id") if c in d]
@@ -3657,22 +3697,139 @@ def _shared_games(a, b) -> int:
 
 
 def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
-    """Rodada 27j — o MESMO atleta visto por duas fontes em linhas diferentes, inclusive depois de trocar de clube:
-    "Kaiki" (ESPN, sem id da FotMob, ainda no Cruzeiro) × "Kaiki Bruno" (FotMob, com id, já no Como); Arthur no Palmeiras.
-    Junta só quando TUDO confere: a linha sem id tem jogos, uma única linha COM id tem o nome contido/continente, mesma
-    família (goleiro × linha), idade ±1 e país iguais quando conhecidos, e as duas jogaram os MESMOS jogos (mesma data
-    ±1 dia pelo mesmo clube) em pelo menos metade dos jogos da linha sem id. Teammates de nome parecido não juntam:
-    dois candidatos com id = ambíguo, fica separado. A linha com id (clube mais atual) fica; a outra vira apelido."""
-    if u is None or u.empty or "fotmob_id" not in u or "ultimos_jogos" not in u:
+    """Reconcilia perfis repetidos entre fontes com evidência biográfica e de proveniência.
+
+    Primeiro procura pares com nome normalizado idêntico, IDs complementares de FotMob/Transfermarkt,
+    mesma posição detalhada, nacionalidade compatível, idade coerente e correspondência um-para-um.
+    Depois preserva a reconciliação histórica por partidas compartilhadas para grafias alternativas.
+    Nomes parecidos, IDs conflitantes ou grupos ambíguos nunca são fundidos por palpite."""
+    if u is None or u.empty or "nome" not in u:
         return u
     d = u.copy()
     core = d["_core"].astype(str) if "_core" in d else d["nome"].map(player_core)
     d["_core"] = core
-    fid = pd.to_numeric(d["fotmob_id"], errors="coerce")
-    mins = pd.to_numeric(d.get("minutos_12m"), errors="coerce").fillna(0)
+
+    # Reconciliação genérica entre fontes: nomes exatos em clubes diferentes, sem
+    # exigir que os recortes das fontes tenham partidas em comum. A fusão só ocorre
+    # com IDs complementares (FotMob em uma ficha e Transfermarkt na outra), mesma
+    # posição detalhada, nacionalidade confirmada, idade compatível e par inequívoco.
+    # IDs diferentes do mesmo provedor, biografias conflitantes ou homônimos ambíguos
+    # bloqueiam a união. Nomes isolados nunca são suficientes.
+    generic_changed = False
+    if {"clube", "papel", "nacionalidade"} <= set(d.columns):
+        role_code = d["papel"].fillna("").astype(str).str.strip().str.upper()
+        country_code = d["nacionalidade"].map(_country_core)
+        club_code = d["clube"].fillna("").astype(str).map(lambda x: team_core(x) if x.strip() else "")
+        ages_generic = pd.to_numeric(d.get("idade", pd.Series(np.nan, index=d.index)), errors="coerce")
+        births_generic = pd.to_datetime(
+            d.get("nascimento", pd.Series(None, index=d.index)), errors="coerce"
+        )
+
+        def _identity_id(value):
+            raw = _safe_str(value)
+            if raw.casefold() in {"", "nan", "none", "null", "0"}:
+                return ""
+            number = _num(raw)
+            if number is not None and float(number).is_integer():
+                return str(int(number))
+            return raw.casefold()
+
+        def _cross_provider_pair_ok(i, j):
+            if str(core.get(i, "")) != str(core.get(j, "")):
+                return False
+            if not club_code.get(i, "") or not club_code.get(j, "") or club_code[i] == club_code[j]:
+                return False
+            if not role_code.get(i, "") or role_code[i] != role_code[j]:
+                return False
+            if not country_code.get(i, "") or country_code[i] != country_code[j]:
+                return False
+
+            bi, bj = births_generic.get(i), births_generic.get(j)
+            if pd.notna(bi) and pd.notna(bj) and bi.normalize() != bj.normalize():
+                return False
+            ai, aj = ages_generic.get(i), ages_generic.get(j)
+            age_i, age_j = pd.notna(ai), pd.notna(aj)
+            if age_i and age_j and abs(float(ai) - float(aj)) > 1.2:
+                return False
+            if not age_i and not age_j and not (pd.notna(bi) and pd.notna(bj)):
+                return False
+
+            for col in ("fotmob_id", "transfermarkt_id"):
+                if col in d:
+                    vi, vj = _identity_id(d.at[i, col]), _identity_id(d.at[j, col])
+                    if vi and vj and vi != vj:
+                        return False
+            if "pid" in d:
+                pi, pj = _identity_id(d.at[i, "pid"]), _identity_id(d.at[j, "pid"])
+                if pi.startswith(("fm", "tm")) and pj.startswith(("fm", "tm")):
+                    if pi[:2] == pj[:2] and pi != pj:
+                        return False
+
+            fmi = _identity_id(d.at[i, "fotmob_id"]) if "fotmob_id" in d else ""
+            fmj = _identity_id(d.at[j, "fotmob_id"]) if "fotmob_id" in d else ""
+            tmi = _identity_id(d.at[i, "transfermarkt_id"]) if "transfermarkt_id" in d else ""
+            tmj = _identity_id(d.at[j, "transfermarkt_id"]) if "transfermarkt_id" in d else ""
+            return bool((fmi and tmj) or (fmj and tmi))
+
+        possible = {}
+        for _, group_indices in d.groupby("_core", sort=False).groups.items():
+            group_indices = list(group_indices)
+            if len(group_indices) < 2:
+                continue
+            for pos, i in enumerate(group_indices):
+                for j in group_indices[pos + 1:]:
+                    if _cross_provider_pair_ok(i, j):
+                        possible.setdefault(i, set()).add(j)
+                        possible.setdefault(j, set()).add(i)
+
+        accepted, seen_pairs = [], set()
+        for i, candidates in possible.items():
+            if len(candidates) != 1:
+                continue
+            j = next(iter(candidates))
+            reverse = possible.get(j, set())
+            if len(reverse) != 1 or next(iter(reverse)) != i:
+                continue
+            pair_key = frozenset((i, j))
+            if pair_key not in seen_pairs:
+                accepted.append((i, j))
+                seen_pairs.add(pair_key)
+
+        observed_generic = _boolean_mask(d.get("clube_observado", pd.Series(False, index=d.index)))
+        last_generic = pd.to_datetime(d.get("ultimo_jogo", pd.Series(None, index=d.index)), errors="coerce")
+        minutes_generic = pd.to_numeric(d.get("minutos_12m", pd.Series(0, index=d.index)), errors="coerce").fillna(0)
+        quality_generic = pd.to_numeric(d.get("qualidade", pd.Series(np.nan, index=d.index)), errors="coerce")
+        for i, j in accepted:
+            def _keep_key(row):
+                last_value = last_generic.get(row)
+                last_num = last_value.value if pd.notna(last_value) else -1
+                return (
+                    bool(observed_generic.get(row, False)),
+                    last_num,
+                    bool(_identity_id(d.at[row, "fotmob_id"])) if "fotmob_id" in d else False,
+                    float(minutes_generic.get(row, 0) or 0),
+                    pd.notna(quality_generic.get(row)),
+                    float(quality_generic.get(row)) if pd.notna(quality_generic.get(row)) else -1.0,
+                )
+
+            keep, gone = (i, j) if _keep_key(i) >= _keep_key(j) else (j, i)
+            _absorb(d, keep, gone)
+            if "apelidos_core" in d:
+                aliases = []
+                for row in (keep, gone):
+                    aliases.extend(x for x in _safe_str(d.at[row, "apelidos_core"]).split("|") if x)
+                if str(core.get(gone, "")) != str(core.get(keep, "")):
+                    aliases.append(str(core.get(gone, "")))
+                if aliases:
+                    d.at[keep, "apelidos_core"] = "|".join(dict.fromkeys(aliases))
+            d = d.drop(index=[gone])
+            generic_changed = True
+
+    fid = pd.to_numeric(d.get("fotmob_id", pd.Series(np.nan, index=d.index)), errors="coerce")
+    mins = pd.to_numeric(d.get("minutos_12m", pd.Series(0, index=d.index)), errors="coerce").fillna(0)
     fam = d.get("papel", pd.Series("", index=d.index)).fillna("").astype(str).map(lambda r: "GK" if r == "GK" else "OUT")
-    age = pd.to_numeric(d.get("idade"), errors="coerce")
-    nat = d.get("nacionalidade", pd.Series("", index=d.index)).fillna("").astype(str).str.strip().str.casefold()
+    age = pd.to_numeric(d.get("idade", pd.Series(np.nan, index=d.index)), errors="coerce")
+    nat = d.get("nacionalidade", pd.Series("", index=d.index)).map(_country_core)
     core, fam, age, nat = core.to_dict(), fam.to_dict(), age.to_dict(), nat.to_dict()   # dicionários: 10× mais rápido
     age = {k: (v if v == v else None) for k, v in age.items()}
     with_id = d.index[fid.notna()]
@@ -3686,7 +3843,7 @@ def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
                 tok.setdefault(w, []).append(i)
     drop, aliases = set(), {}
     gcache: Dict[Any, Any] = {}
-    uj = d["ultimos_jogos"].to_dict()
+    uj = d.get("ultimos_jogos", pd.Series(None, index=d.index)).to_dict()
     for e in d.index[fid.isna() & (mins > 0)]:
         te = set(core[e].split())
         if not te:
@@ -3716,7 +3873,7 @@ def merge_cross_source_duplicates(u: pd.DataFrame) -> pd.DataFrame:
         aliases.setdefault(p, []).append(core[e])
         drop.add(e)
     if not drop:
-        return u
+        return d if generic_changed else u
     prior = {i: [x for x in str(v).split("|") if x] for i, v in d.get("apelidos_core", pd.Series(dtype=object)).items()
              if _safe_str(v)} if "apelidos_core" in d else {}
     for i, v in aliases.items():

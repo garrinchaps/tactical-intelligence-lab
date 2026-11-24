@@ -195,3 +195,78 @@ def test_veteran_regular_goalkeeper_market_reputation_is_heavily_discounted():
     z = O.zscore(comps, {"wR": .5, "wP": .2, "wT": .2, "wL": .1})
     # A low market valuation must move a high-minute 46-year-old goalkeeper less than an outfield player.
     assert abs(float(z.iloc[1] - z.iloc[0])) < abs(float(z.iloc[3] - z.iloc[2]))
+
+
+def test_snapshot_loader_recalculates_old_cached_model_once(monkeypatch, tmp_path):
+    from src.scout import snapshot as S
+
+    current = tmp_path / "scout_universe_v22.pkl"
+    previous = tmp_path / "scout_universe_v21.pkl"
+    previous.touch()
+    migrated = {"universe": pd.DataFrame({"nome": ["Otávio"]})}
+    calls = []
+
+    monkeypatch.setattr(S, "SNAP_PATH", current)
+    monkeypatch.setattr(S, "OLD_SNAPS", [previous])
+    monkeypatch.setattr(S, "_upgrade_old", lambda: calls.append("upgrade") or migrated)
+
+    assert S.load() is migrated
+    assert calls == ["upgrade"]
+
+
+def test_overall_migration_can_recalculate_quality_without_changing_potential(monkeypatch):
+    from src.scout import overall as O
+    from src.scout import rating_engine as RE
+
+    index = pd.RangeIndex(1)
+    u = pd.DataFrame({
+        "nome": ["Otávio"], "papel": ["GK"], "idade": [20],
+        "qualidade": [64.0], "qualidade_base": [64.0], "potencial": [86.0],
+        "minutos_12m": [3465], "minutos_temporada_anterior": [0],
+        "fonte_qualidade": ["histórico"],
+    }, index=index)
+    comps = pd.DataFrame({
+        "_fam": ["GK"], "_avail": [0.9], "R": [50.0], "P": [72.0],
+        "T": [70.0], "L": [60.0], "_rep_val": [50.0], "_perf_adj": [72.0],
+        "_rank_nota": [70.0], "_ext": [np.nan], "_rating_adj": [6.9],
+    }, index=index)
+
+    monkeypatch.setattr(O, "components", lambda *_args, **_kwargs: comps.copy())
+    monkeypatch.setattr(RE, "compute", lambda _players: pd.DataFrame(index=index))
+    monkeypatch.setattr(O, "zscore", lambda _comps, _weights: pd.Series([0.5], index=index))
+    monkeypatch.setattr(O, "standardize", lambda _z, _comps, _stats=None: (pd.Series([70.0], index=index), None))
+    monkeypatch.setattr(O, "apply_correction", lambda scores, *_args: scores)
+    monkeypatch.setattr(O, "ladder", lambda _scores, *_args: pd.Series([72.0], index=index))
+    monkeypatch.setattr(O, "minutes_cap", lambda _players: pd.Series([100.0], index=index))
+    monkeypatch.setattr(O, "brazil_bump", lambda _players, scores: scores)
+    monkeypatch.setattr(O, "youth_quality", lambda players: players)
+    monkeypatch.setattr(O, "_recompute_potential", lambda _players: (_ for _ in ()).throw(AssertionError("potential recalculated")))
+
+    result = O.finalize_overall(
+        u, calibrate_now=False, weights=O.DEFAULT_WEIGHTS, recompute_potential=False
+    )
+
+    assert result.loc[0, "qualidade"] == 72.0
+    assert result.loc[0, "potencial"] == 86.0
+
+
+def test_snapshot_migration_preserves_existing_potential_fields():
+    from src.scout.snapshot import _preserve_existing_potential
+
+    old = pd.DataFrame({
+        "potencial": [86.0], "potencial_teto": [90.0],
+        "potencial_revenda": [75.0], "precocidade": [82.0],
+    })
+    recalculated = pd.DataFrame({
+        "potencial": [78.0], "potencial_teto": [83.0],
+        "potencial_revenda": [61.0], "precocidade": [55.0],
+        "qualidade": [72.0],
+    })
+
+    out = _preserve_existing_potential(old, recalculated)
+
+    assert out.loc[0, "qualidade"] == 72.0
+    assert out.loc[0, "potencial"] == 86.0
+    assert out.loc[0, "potencial_teto"] == 90.0
+    assert out.loc[0, "potencial_revenda"] == 75.0
+    assert out.loc[0, "precocidade"] == 82.0

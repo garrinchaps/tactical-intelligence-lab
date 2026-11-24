@@ -626,8 +626,8 @@ def _blend_goalkeeper_attribute_performance(comps: pd.DataFrame, engine: Optiona
 
 
 def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Optional[pd.DataFrame] = None,
-                     weights: Optional[Dict[str, float]] = None) -> pd.DataFrame:
-    """Recalcula `qualidade` como OVERALL 0–100. Guarda a nota antiga em `qualidade_base` e os componentes."""
+                     weights: Optional[Dict[str, float]] = None, recompute_potential: bool = True) -> pd.DataFrame:
+    """Recalcula `qualidade` como OVERALL 0–100. Pode preservar o potencial ao migrar só o OVR."""
     if u is None or u.empty:
         return u
     out = u.copy()
@@ -694,7 +694,8 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
         f"({weights.get('wP', 0):.0%}) + nota FotMob ajustada pela liga ({weights.get('wT', 0):.0%}) + nível "
         f"({weights.get('wL', 0):.0%}), padronizado por posição e pelos minutos do ano; teto pela minutagem", src)
     out = youth_quality(out)
-    out = _recompute_potential(out)
+    if recompute_potential:
+        out = _recompute_potential(out)
     if report:
         save_report(out, report)
     return out

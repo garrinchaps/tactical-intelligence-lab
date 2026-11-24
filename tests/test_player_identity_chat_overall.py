@@ -242,3 +242,134 @@ def test_player_index_rebuilds_when_persisted_cache_version_is_stale(tmp_path, m
     assert built == ["current-db"]
     assert saved and saved[0][1] == "database-v2"
     P.player_index.clear()
+
+
+def test_kaiki_como_cruzeiro_duplicate_is_unified_and_david_kaiki_stays_separate():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB", "posicao": "LB",
+         "idade": np.nan, "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": None,
+         "minutos_12m": 3828, "rating_12m": 7.38, "qualidade": 77, "potencial": 86, "ultimos_jogos": "[]"},
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB", "posicao": "LB",
+         "idade": 23, "nacionalidade": "Brazil", "fotmob_id": np.nan, "transfermarkt_id": 456,
+         "minutos_12m": 3176, "rating_12m": 7.23, "qualidade": np.nan, "potencial": np.nan, "ultimos_jogos": "[]"},
+        {"nome": "David Kaiki", "_core": "david kaiki", "clube": "Batman Petrolspor", "papel": "RW", "posicao": "RW",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": 789, "transfermarkt_id": 999,
+         "minutos_12m": 334, "rating_12m": 6.53, "qualidade": 55, "potencial": 60, "ultimos_jogos": "[]"},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 2
+    kaiki = merged.loc[merged["_core"] == "kaiki"].iloc[0]
+    assert kaiki["clube"] == "Como"
+    assert kaiki["qualidade"] == 77
+    assert kaiki["potencial"] == 86
+    assert kaiki["idade"] == 23
+    assert kaiki["transfermarkt_id"] == 456
+    assert "David Kaiki" in merged["nome"].tolist()
+
+
+def test_kaiki_como_cruzeiro_merge_rejects_conflicting_stable_ids():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Como", "papel": "LB", "idade": 23,
+         "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": 111, "minutos_12m": 3828, "ultimos_jogos": "[]"},
+        {"nome": "Kaiki", "_core": "kaiki", "clube": "Cruzeiro", "papel": "LB", "idade": 23,
+         "nacionalidade": "Brazil", "fotmob_id": 123, "transfermarkt_id": 222, "minutos_12m": 3176, "ultimos_jogos": "[]"},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 2
+
+
+def test_cross_source_duplicate_reconciliation_is_generic():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Alpha", "_core": "player alpha", "clube": "Club A", "papel": "RW",
+         "idade": 24.0, "nacionalidade": "Brazil", "fotmob_id": 100, "transfermarkt_id": None,
+         "clube_observado": True, "ultimo_jogo": "2026-10-05", "minutos_12m": 1500,
+         "qualidade": 81, "potencial": 88},
+        {"nome": "Player Alpha", "_core": "player alpha", "clube": "Club B", "papel": "RW",
+         "idade": 24.5, "nacionalidade": "Brasil", "fotmob_id": np.nan, "transfermarkt_id": 200,
+         "clube_observado": False, "ultimo_jogo": "2026-09-01", "minutos_12m": 900,
+         "qualidade": np.nan, "potencial": np.nan},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 1
+    assert merged.iloc[0]["clube"] == "Club A"
+    assert merged.iloc[0]["qualidade"] == 81
+    assert merged.iloc[0]["potencial"] == 88
+    assert pd.to_numeric(merged.iloc[0]["transfermarkt_id"]) == 200
+
+
+def test_cross_source_reconciliation_rejects_homonyms_and_biographical_conflicts():
+    from src.scout import engine as E
+
+    rows = [
+        {"nome": "Player Country", "_core": "player country", "clube": "Club A", "papel": "ST",
+         "idade": 24, "nacionalidade": "Brazil", "fotmob_id": 1, "transfermarkt_id": None},
+        {"nome": "Player Country", "_core": "player country", "clube": "Club B", "papel": "ST",
+         "idade": 24, "nacionalidade": "Argentina", "fotmob_id": None, "transfermarkt_id": 2},
+        {"nome": "Player Age", "_core": "player age", "clube": "Club C", "papel": "CM",
+         "idade": 19, "nacionalidade": "Brazil", "fotmob_id": 3, "transfermarkt_id": None},
+        {"nome": "Player Age", "_core": "player age", "clube": "Club D", "papel": "CM",
+         "idade": 28, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 4},
+        {"nome": "Player Role", "_core": "player role", "clube": "Club E", "papel": "RW",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": 5, "transfermarkt_id": None},
+        {"nome": "Player Role", "_core": "player role", "clube": "Club F", "papel": "CB",
+         "idade": 22, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 6},
+        # Sem idade, datas de nascimento incompatíveis também bloqueiam a fusão.
+        {"nome": "Player Birth", "_core": "player birth", "clube": "Club G", "papel": "DM",
+         "idade": np.nan, "nascimento": "2001-01-01", "nacionalidade": "Brazil",
+         "fotmob_id": 7, "transfermarkt_id": None},
+        {"nome": "Player Birth", "_core": "player birth", "clube": "Club H", "papel": "DM",
+         "idade": np.nan, "nascimento": "2002-01-01", "nacionalidade": "Brazil",
+         "fotmob_id": None, "transfermarkt_id": 8},
+    ]
+    merged = E.merge_cross_source_duplicates(pd.DataFrame(rows))
+
+    assert len(merged) == 8
+
+
+def test_cross_source_reconciliation_leaves_ambiguous_three_way_match_separate():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club A", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": 10, "transfermarkt_id": None},
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club B", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 20},
+        {"nome": "Player Ambiguous", "_core": "player ambiguous", "clube": "Club C", "papel": "AM",
+         "idade": 25, "nacionalidade": "Brazil", "fotmob_id": None, "transfermarkt_id": 30},
+    ])
+
+    merged = E.merge_cross_source_duplicates(players)
+
+    assert len(merged) == 3
+
+
+def test_verified_identity_rejects_transitive_cluster_with_conflicting_provider_ids():
+    from src.scout import engine as E
+
+    players = pd.DataFrame([
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club A", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": 100, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club B", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": None, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+        {"nome": "Player Stable", "_core": "player stable", "clube": "Club C", "papel": "ST",
+         "fotmob_id": 555, "transfermarkt_id": 300, "nascimento": "2001-01-01",
+         "nacionalidade": "Brazil"},
+    ])
+
+    merged = E.merge_verified_player_duplicates(players)
+
+    assert len(merged) == 2

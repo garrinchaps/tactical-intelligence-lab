@@ -21,9 +21,9 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v21.pkl")   # v21: Otávio (2 fontes), goleiros veteranos, reputação estimada
+SNAP_PATH = Path("data/processed/scout_universe_v22.pkl")   # v22: recalcula OVR ao atualizar o motor, preservando potencial
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v20.pkl"), Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [Path("data/processed/scout_universe_v21.pkl"), Path("data/processed/scout_universe_v20.pkl"), Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -183,14 +183,17 @@ def newest_old() -> Optional[Path]:
     return None
 
 
-IDENTITY_VERSION = "r27j"          # muda quando as regras de "mesmo atleta" mudam
+IDENTITY_VERSION = "r27k"          # muda quando as regras de "mesmo atleta" mudam
 
 
 def load() -> Optional[Dict[str, Any]]:
     if not SNAP_PATH.exists():
-        # rodada 27f (LENTIDÃO): antes a tela recalculava as notas de TODO o mercado aqui dentro (calibração completa,
-        # minutos) sempre que a versão do código mudava. Agora usa a fotografia anterior como está, na hora, marcada
-        # como parcial; o processo de fundo (ou o passo 12 do atualizar_tudo) monta a nova.
+        # A mudança do motor exige recalcular as notas da fotografia anterior. A migração é feita uma única vez,
+        # salva em SNAP_PATH e evita que a interface continue servindo OVR antigo indefinidamente.
+        upgraded = _upgrade_old()
+        if upgraded is not None:
+            return upgraded
+        # Se a migração falhar, preserva a disponibilidade da tela com o instantâneo anterior, marcado como parcial.
         old = newest_old()
         if old is None:
             return None
@@ -257,6 +260,29 @@ def load() -> Optional[Dict[str, Any]]:
     return data
 
 
+POTENTIAL_COLUMNS = (
+    "potencial", "potencial_teto", "potencial_crescimento", "potencial_revenda",
+    "projecao_valorizacao_24m_pct", "potencial_natureza", "potencial_piso_base",
+    "potencial_porque", "potencial_confianca_pct", "precocidade",
+)
+
+
+def _preserve_existing_potential(source: pd.DataFrame, recalculated: pd.DataFrame) -> pd.DataFrame:
+    """Preserva as projeções que já estavam na fotografia ao recalcular somente o OVR."""
+    if source is None or recalculated is None or recalculated.empty:
+        return recalculated
+    out = recalculated.copy()
+    for column in POTENTIAL_COLUMNS:
+        if column not in source:
+            continue
+        previous = source[column].reindex(out.index)
+        if column in out:
+            out[column] = previous.combine_first(out[column])
+        else:
+            out[column] = previous
+    return out
+
+
 def _upgrade_old() -> Optional[Dict[str, Any]]:
     """
     Rodada 11: a fotografia nova ainda não existe — aproveita a anterior e só RECALCULA as notas (segundos), em vez de
@@ -279,6 +305,7 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                     u = add_peak(u, D.table("tm_valores", ["transfermarkt_id", "data", "valor_mercado_eur"]))
                 except Exception:
                     pass
+            saved_potential = u[[c for c in POTENTIAL_COLUMNS if c in u]].copy()
             for c in ("caracteristicas", "caracteristicas_top", "precocidade", "qualidade", "qualidade_base", "confianca_pct", "potencial_revenda", "projecao_valorizacao_24m_pct", "potencial_teto",
                       "qualidade_estatistica", "nota_externa", "fontes_nota_externa", "fonte_qualidade"):
                 if c in u:
@@ -292,7 +319,8 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
             from src.scout.overall import finalize_overall
             from src.scout.traits import add_traits
 
-            u2 = E.merge_rankings(E.merge_external_ratings(E.add_quality_scores(u), ext), _evaluations())
+            recalculated = _preserve_existing_potential(saved_potential, E.add_quality_scores(u))
+            u2 = E.merge_rankings(E.merge_external_ratings(recalculated, ext), _evaluations())
             u2 = E.canonical_clubs(u2)
             try:
                 from src.data_hub.gender import drop_women_players
@@ -303,8 +331,9 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
                 pass
             u2 = E.merge_club_aliases(u2)
             u2 = E.merge_verified_player_duplicates(E.merge_cross_source_duplicates(u2))
-            data["universe"] = with_attributes(add_traits(finalize_overall(u2)))
-            data["parcial"] = True          # fotografia antiga reaproveitada: faltam os jogadores novos (refazer)
+            data["universe"] = with_attributes(add_traits(finalize_overall(u2, recompute_potential=False)))
+            data["identidade"] = IDENTITY_VERSION
+            data["parcial"] = True          # OVR recalculado sobre fotografia antiga; refazer ingestão completa depois
             save(data)
             return data
         except Exception:
