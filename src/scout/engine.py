@@ -2632,18 +2632,51 @@ def player_votes(db) -> Dict[str, Tuple[int, int]]:
     return {r[0]: (int(r[1] or 0), int(r[2] or 0)) for r in rows}
 
 
+def normalize_vote_counts(value: Any) -> Tuple[int, int]:
+    """Normaliza votos do Scout para (👍, 👎); valores escalares/NaN viram zero.
+
+    A coluna passa por DataFrames, junções e caches. Um valor legado ou mal tipado
+    não pode derrubar a renderização de toda a página.
+    """
+    if isinstance(value, dict):
+        up = value.get("up", value.get("positive", 0))
+        down = value.get("down", value.get("negative", 0))
+    elif isinstance(value, (tuple, list)) and len(value) == 2:
+        up, down = value
+    else:
+        return (0, 0)
+
+    def count(raw: Any) -> int:
+        try:
+            number = float(raw)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        return max(0, int(number)) if math.isfinite(number) else 0
+
+    return count(up), count(down)
+
+
 def apply_votes(ranked: pd.DataFrame, votes: Dict[str, Tuple[int, int]], col: str = "score_scout") -> pd.DataFrame:
-    """Cada 👍 líquido vale +3 no índice da sugestão (teto ±9) — ajusta a ordem sem apagar ninguém."""
-    if ranked is None or ranked.empty or not votes:
+    """Cada 👍 líquido vale +3 no índice da sugestão (teto ±9) — ajusta a ordem sem apagar ninguém.
+
+    A coluna votos_scout é sempre materializada como um par de inteiros, mesmo quando não há
+    feedback ainda. Isso impede que valores antigos/escalares sobrevivam na coluna.
+    """
+    if ranked is None or ranked.empty:
         return ranked
+
     r = ranked.copy()
     core = r["_core"].astype(str) if "_core" in r else r["nome"].map(player_core)
-    net = core.map(lambda c: votes.get(c, (0, 0))[0] - votes.get(c, (0, 0))[1]).astype(float)
-    r["votos_scout"] = core.map(lambda c: votes.get(c, (0, 0)))
-    if col in r:
-        r[col] = pd.to_numeric(r[col], errors="coerce").fillna(0) + (3 * net).clip(-9, 9)
-        r = r.sort_values(col, ascending=False)
-    return r
+    vote_map = votes if isinstance(votes, dict) else {}
+    pairs = [normalize_vote_counts(vote_map.get(str(key), (0, 0))) for key in core.tolist()]
+    r["votos_scout"] = pd.Series(pairs, index=r.index, dtype=object)
+
+    if not vote_map or col not in r:
+        return r
+
+    net = pd.Series([up - down for up, down in pairs], index=r.index, dtype=float)
+    r[col] = pd.to_numeric(r[col], errors="coerce").fillna(0) + (3 * net).clip(-9, 9)
+    return r.sort_values(col, ascending=False)
 
 
 def record_rejection(db, club: str, player: str, role: str, reason: str, score: Optional[float] = None) -> None:

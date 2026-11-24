@@ -921,7 +921,7 @@ def _player_card(player, roster, team, idx, plan_key, rejected_key):
     _card_actions(player, plan_key, team, name, idx, rejected_key)
     # rodada 20: 👍/👎 = "esse jogador é bom / não é" — não adiciona nem descarta; reordena as próximas sugestões.
     # rodada 21: dentro de um FRAGMENTO — o clique refaz só este pedaço (antes recarregava o Scout inteiro)
-    _vote_box(team, name, idx, player.get("votos_scout") or (0, 0),
+    _vote_box(team, name, idx, player.get("votos_scout"),
               str(player.get("papel_alvo") or player.get("papel") or "sugestao"))
     with st.expander("Ver dossiê completo da IA"):
         _dossier(player, roster)
@@ -959,7 +959,8 @@ def _card_actions(player, plan_key, team, name, idx, rejected_key):
 
 @st.fragment
 def _vote_box(team, name, idx, votes, role):
-    up, down = votes
+    # Protege a UI contra NaN, floats e formatos legados da coluna do DataFrame.
+    up, down = E.normalize_vote_counts(votes)
     v1, v2 = st.columns([1, 3])
     with v1:
         vote = st.feedback("thumbs", key=f"scout_vote_{_slug(team)}_{_slug(name)}_{idx}")
