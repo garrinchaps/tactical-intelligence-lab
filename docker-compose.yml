@@ -1,0 +1,27 @@
+services:
+  tactical-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tactical-intelligence-lab:latest
+    container_name: tactical-intelligence-lab
+    restart: unless-stopped
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      DATABASE_PATH: /app/database/tactical_lab.db
+      AUTO_SYNC: ${AUTO_SYNC:-1}
+      AUTO_SYNC_HOURS: ${AUTO_SYNC_HOURS:-3}
+    volumes:
+      - ./database:/app/database
+      - ./data/processed:/app/data/processed
+      - ./data/lake:/app/data/lake
+      - ./backups:/app/backups
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 120s
+      retries: 3
