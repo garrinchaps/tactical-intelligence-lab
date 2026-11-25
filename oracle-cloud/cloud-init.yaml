@@ -1,0 +1,15 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+packages:
+  - git
+  - curl
+  - ca-certificates
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - mkdir -p /opt/tactical-intelligence-lab
+  - git clone --branch main --depth 1 https://github.com/garrinchaps/tactical-intelligence-lab.git /opt/tactical-intelligence-lab
+  - cd /opt/tactical-intelligence-lab && cp .env.example .env
+  - cd /opt/tactical-intelligence-lab && docker compose up -d --build
