@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.env
+database/*.db
+database/*.db-wal
+database/*.db-shm
+data/raw
+data/lake
+data/processed/sim_uncertainty
+data/processed/empirical_pool.csv.gz
+data/processed/danger_rows_db.csv.gz
+data/processed/danger_full.csv.gz
+backups
