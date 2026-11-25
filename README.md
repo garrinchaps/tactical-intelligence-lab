@@ -192,3 +192,8 @@ $env:TIL_STRICT_PROVENANCE="1"; streamlit run app.py   # PowerShell: qualquer n�
 
 - **Wyscout Public Dataset**: Pappalardo, L. et al. *A public data set of spatio-temporal match events in soccer competitions*. Scientific Data 6, 236 (2019). Licença CC BY 4.0. Conversão a partir do repositório processado por koenvo.
 - **API-Football**, **football-data.org** e **ESPN**: dados sujeitos aos termos de cada provedor.
+
+
+## ☁️ Deploy na Oracle Cloud
+
+A aplicação já possui arquivos de deploy com Docker para Oracle Cloud (Ubuntu ARM64/Ampere A1), persistência local do servidor, reinício automático e guia passo a passo. Consulte [`docs/ORACLE_DEPLOY.md`](docs/ORACLE_DEPLOY.md).
