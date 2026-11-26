@@ -170,20 +170,33 @@ def ensure_database(
                 with open(temp_db, "wb") as destination:
                     shutil.copyfileobj(source, destination, length=8 * 1024 * 1024)
 
-        print("Verificando integridade SQLite...")
-        # O context manager controla a transação, mas não garante o
-        # fechamento do handle em todas as versões do SQLite no Windows.
-        # Fechar explicitamente antes do replace evita bloquear o .partial.
+        print("Validando estrutura SQLite...")
+        # A leitura até o fim do GzipFile já valida o CRC do arquivo transferido.
+        # O quick_check completo faria outra leitura sequencial de todo o banco de 18+ GB
+        # no arranque do Streamlit. A cópia foi criada pela SQLite Backup API e validada
+        # localmente por consultas às tabelas principais; aqui verificamos o esquema.
         conn = sqlite3.connect(str(temp_db))
         try:
-            result = conn.execute("PRAGMA quick_check").fetchone()
+            tables = {
+                str(row[0])
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                ).fetchall()
+            }
         finally:
             conn.close()
             del conn
             gc.collect()
-        if not result or result[0] != "ok":
+
+        required_tables = {
+            "matches", "events", "fixtures", "match_lineups", "match_player_stats",
+            "match_team_stats", "match_shots", "lake_dim_players", "lake_dim_teams",
+            "lake_player_ids", "lake_team_ids", "player_merge_candidates", "frozen_matches",
+        }
+        missing = required_tables - tables
+        if missing:
             raise RuntimeError(
-                f"Banco remoto inválido: {result[0] if result else 'sem resultado'}"
+                "Banco remoto incompleto; faltam tabelas: " + ", ".join(sorted(missing))
             )
 
         os.replace(temp_db, target)
