@@ -152,7 +152,7 @@ def ensure_database(
     import requests  # já faz parte de requirements.txt
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    url = f"https://huggingface.co/datasets/{selected_repo}/resolve/main/tactical_lab_cloud_snapshot.db.gz"
+    url = f"https://huggingface.co/datasets/{selected_repo}/resolve/main/tactical_lab.db.gz"
     headers = {
         "Authorization": f"Bearer {selected_token}",
         "User-Agent": "tactical-intelligence-lab",
