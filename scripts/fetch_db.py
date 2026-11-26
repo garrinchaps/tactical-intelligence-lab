@@ -39,6 +39,19 @@ def configured_db_path() -> Path:
     )
 
 
+def _setting(name: str, default: str = "") -> str:
+    """Lê configuração do ambiente ou dos Secrets do Streamlit Cloud."""
+    value = os.getenv(name, "")
+    if value:
+        return value
+    try:
+        import streamlit as st
+
+        return str(st.secrets.get(name, default) or default)
+    except Exception:
+        return default
+
+
 def _truthy(value: str | None) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "sim", "on"}
 
@@ -99,8 +112,8 @@ def ensure_database(
 ) -> str:
     """Garante a existência do banco sem substituir dados locais sem autorização explícita."""
     target = Path(db_path) if db_path is not None else configured_db_path()
-    selected_token = token if token is not None else os.getenv("HF_TOKEN")
-    selected_repo = repo_id or os.getenv("HF_DATASET_REPO", "garrinchaps/tactical-intelligence-db")
+    selected_token = token if token is not None else _setting("HF_TOKEN")
+    selected_repo = repo_id or _setting("HF_DATASET_REPO", "garrinchaps/tactical-intelligence-db")
     allow_replace = _truthy(os.getenv(DB_REPLACE_ENV))
 
     if target.exists():
@@ -136,28 +149,26 @@ def ensure_database(
             "Configure HF_TOKEN ou forneça DATABASE_PATH/TACTICAL_DB_PATH."
         )
 
-    try:
-        from huggingface_hub import hf_hub_download
-    except ImportError as exc:                      # dependência opcional (não está no requirements.txt)
-        raise RuntimeError("Para baixar o banco da nuvem instale à parte: pip install huggingface_hub. "
-                           "No PC com o banco local, este script não é necessário.") from exc
+    import requests  # já faz parte de requirements.txt
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    print(f"Baixando banco de {selected_repo}...")
-
-    gz_path = hf_hub_download(
-        repo_id=selected_repo,
-        filename="tactical_lab.db.gz",
-        repo_type="dataset",
-        token=selected_token,
-    )
+    url = f"https://huggingface.co/datasets/{selected_repo}/resolve/main/tactical_lab.db.gz"
+    headers = {
+        "Authorization": f"Bearer {selected_token}",
+        "User-Agent": "tactical-intelligence-lab",
+    }
 
     temp_db = target.with_name(target.name + ".partial")
     try:
-        print("Descompactando banco...")
-        with gzip.open(gz_path, "rb") as source:
-            with open(temp_db, "wb") as destination:
-                shutil.copyfileobj(source, destination)
+        print(f"Baixando e descompactando banco de {selected_repo}...")
+        # Descompacta durante o download para não precisar guardar mais uma cópia de 4,5 GB no disco.
+        with requests.get(url, headers=headers, stream=True, allow_redirects=True,
+                          timeout=(30, 600)) as response:
+            response.raise_for_status()
+            response.raw.decode_content = False
+            with gzip.GzipFile(fileobj=response.raw, mode="rb") as source:
+                with open(temp_db, "wb") as destination:
+                    shutil.copyfileobj(source, destination, length=8 * 1024 * 1024)
 
         print("Verificando integridade SQLite...")
         # O context manager controla a transação, mas não garante o
