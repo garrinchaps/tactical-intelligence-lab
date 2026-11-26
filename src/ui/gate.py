@@ -21,7 +21,15 @@ LOCAL_HOSTS = ("localhost", "127.0.0.1", "[::1]", "::1", "0.0.0.0")
 
 
 def public_mode() -> bool:
-    return os.getenv("TIL_MODO_PUBLICO", "0").strip().lower() in ("1", "true", "sim", "yes")
+    value = os.getenv("TIL_MODO_PUBLICO", "")
+    if not value:
+        try:
+            import streamlit as st
+
+            value = str(st.secrets.get("TIL_MODO_PUBLICO", "0") or "0")
+        except Exception:
+            value = "0"
+    return value.strip().lower() in ("1", "true", "sim", "yes")
 
 
 PROXY_HEADERS = ("cf-connecting-ip", "cf-ray", "x-forwarded-for", "x-forwarded-host", "x-real-ip", "forwarded",
