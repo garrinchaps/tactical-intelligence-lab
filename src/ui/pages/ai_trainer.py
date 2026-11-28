@@ -93,7 +93,7 @@ def render_trainer() -> None:
             cols = st.columns(2)
             for i, (kind, tpl) in enumerate(QUESTION_TEMPLATES):
                 q = tpl.format(m=m, t=team)
-                if cols[i % 2].button(f"💬 {q}", key=f"tr_q_{i}", use_container_width=True):
+                if cols[i % 2].button(f"💬 {q}", key=f"tr_q_{i}", width="stretch"):
                     _ask(q)
         else:
             st.info("Abra um jogo pelo 🔎 Buscar para receber perguntas sugeridas.")
@@ -166,7 +166,7 @@ def render_trainer() -> None:
                        f"{sg_.get('batch', '—')} · paciência {sg_.get('patience', '—')} · semente {sg_.get('seed', '—')}")
             if nxt.get("evolucao"):
                 st.caption("Evolução dos últimos treinos: " + " → ".join(nxt["evolucao"]))
-            go_simple = st.button("🧠 Treinar agora com a sugestão da IA", type="primary", use_container_width=True,
+            go_simple = st.button("🧠 Treinar agora com a sugestão da IA", type="primary", width="stretch",
                                   key="tr_go")
         with technical:
             st.caption("Cada controle tem um (i): o que é, o que muda quando está alto ou baixo e a recomendação para o "
@@ -236,13 +236,13 @@ def render_trainer() -> None:
             st.markdown("##### Motivos mais citados nos 👎")
             if rep["motivos"]:
                 styled_dataframe(pd.DataFrame(rep["motivos"], columns=["Motivo", "Vezes"]), hide_index=True,
-                                 use_container_width=True)
+                                 width="stretch")
         with b:
             st.markdown("##### Tipos de pergunta com mais 👎")
             if rep["piores_tipos"]:
                 styled_dataframe(pd.DataFrame([{"Tipo": t, "👎": n, "Avaliadas": tot, "% ruim": round(100 * n / tot)}
                                                for t, n, tot in rep["piores_tipos"]]), hide_index=True,
-                                 use_container_width=True)
+                                 width="stretch")
         st.markdown("##### O que fazer agora")
         for tip in _tips(rep):
             st.markdown(f"- {tip}")
@@ -250,7 +250,7 @@ def render_trainer() -> None:
             st.markdown("##### Comentários recentes")
             styled_dataframe(pd.DataFrame(rep["comentarios"]).rename(columns={
                 "quando": "Quando", "voto": "Voto", "pergunta": "Pergunta", "comentario": "Comentário", "quem": "Quem"}),
-                hide_index=True, use_container_width=True)
+                hide_index=True, width="stretch")
 
 
 def _tips(rep) -> list:

@@ -139,7 +139,7 @@ def render(ctx) -> None:
 
         fig.update_yaxes(range=[-110, 110], title=f"↑ {teams[0]} · ↓ {teams[1] if len(teams) > 1 else ''}")
         fig.update_xaxes(title="minuto")
-        render_chart(charts._layout(fig, "Momentum: quem estava por cima em cada minuto (⚽ = gol)", 300), use_container_width=True)
+        render_chart(charts._layout(fig, "Momentum: quem estava por cima em cada minuto (⚽ = gol)", 300), width="stretch")
         h1 = m[m["minuto"] <= 45]["valor"].mean()
         h2 = m[m["minuto"] > 45]["valor"].mean()
         st.caption(f"Média do momentum — 1º tempo: {h1:+.0f}, 2º tempo: {h2:+.0f} (positivo = {teams[0]} por cima). "
@@ -183,7 +183,7 @@ def render(ctx) -> None:
                                          name=f"gols {tm}", hovertext=g["player_name"], hoverinfo="text"))
         from src.ui import charts
 
-        render_chart(charts._layout(fig, "Chances acumuladas (xG da FotMob) ao longo do jogo", 320), use_container_width=True)
+        render_chart(charts._layout(fig, "Chances acumuladas (xG da FotMob) ao longo do jogo", 320), width="stretch")
     if not ps.empty:
         st.markdown("#### 👤 Quem decidiu nos números")
         rows = []

@@ -415,7 +415,17 @@ def _index() -> Dict[str, Any]:
                     by_core.setdefault(alias_core, []).append(i)
     by_core = {k: list(dict.fromkeys(v)) for k, v in by_core.items()}
     by_pid = dict(zip(u["pid"].astype(str), u.index)) if "pid" in u else {}
-    _MEMO["idx"] = {"core": by_core, "pid": by_pid}
+    # rodada 27l (velocidade): núcleo do clube de cada linha calculado UMA vez — o filtro por clube refazia a
+    # normalização dos 67 mil jogadores a cada atleta procurado (1,2 s por jogador; elenco de 30 = 35 s)
+    from src.data_lake.ids import team_core as _tc
+
+    club_core = {}
+    for col in ("clube", "clube_tm"):
+        if col in u:
+            vals = u[col]
+            uniq = {x: (_tc(str(x)) if isinstance(x, str) and x.strip() else "") for x in vals.dropna().unique()}
+            club_core[col] = vals.map(uniq).fillna("").astype(str)
+    _MEMO["idx"] = {"core": by_core, "pid": by_pid, "club_core": club_core}
     _MEMO["idx_for"] = u
     return _MEMO["idx"]
 
@@ -469,6 +479,37 @@ def _club_scoped_rows(frame: pd.DataFrame, club: str) -> pd.DataFrame:
     def same(value):
         current = team_core(str(value)) if pd.notna(value) else ""
         return bool(current) and (current == requested or current.startswith(requested) or requested.startswith(current))
+
+    def same_core(cores: pd.Series) -> pd.Series:
+        # decide por NOME DE CLUBE distinto (poucos milhares), não por linha (67 mil)
+        good = {c for c in cores.unique() if c and (c == requested or c.startswith(requested) or requested.startswith(c))}
+        return cores.isin(good)
+
+    # caminho rápido: linhas do mercado (índice da fotografia) já têm o núcleo do clube calculado
+    pre = (_MEMO.get("idx") or {}).get("club_core") if _MEMO.get("idx_for") is not None else None
+    base = _MEMO.get("idx_for")
+    if pre and "clube" in pre and "clube" in frame and base is not None and len(base) == len(pre["clube"]) and \
+            frame.index.isin(base.index).all() and \
+            frame["clube"].fillna("").astype(str).equals(base["clube"].reindex(frame.index).fillna("").astype(str)):
+        if len(frame) == len(base) and frame.index.equals(base.index):     # mercado inteiro: memoriza por clube
+            memo = _MEMO.setdefault("club_rows", {})
+            if memo.get("_for") is not base:
+                memo.clear()
+                memo["_for"] = base
+            if requested not in memo:
+                current_names = frame["clube"].fillna("").astype(str).str.strip()
+                m = same_core(pre["clube"])
+                if "clube_tm" in pre and "clube_tm" in frame:
+                    m |= current_names.eq("") & same_core(pre["clube_tm"])
+                memo[requested] = frame.index[m]
+            return frame.loc[memo[requested]]
+        cc = pre["clube"].reindex(frame.index)
+        current_names = frame["clube"].fillna("").astype(str).str.strip() if "clube" in frame else pd.Series("", index=frame.index)
+        has_current = current_names.ne("")
+        matched = same_core(cc)
+        if "clube_tm" in pre and "clube_tm" in frame:
+            matched |= (~has_current) & same_core(pre["clube_tm"].reindex(frame.index))
+        return frame[matched]
 
     if "clube" in frame:
         current_names = frame["clube"].fillna("").astype(str).str.strip()

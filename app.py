@@ -86,7 +86,7 @@ def match_bar() -> None:
                 st.session_state["team_focus"] = st.radio("Equipe em foco", teams, index=teams.index(cur) if cur in teams else 0,
                                                           horizontal=True, key="team_focus_radio", label_visibility="collapsed")
     with c:
-        if st.button(t("🏟️ Abrir o jogo"), use_container_width=True, key="bar_open_game",
+        if st.button(t("🏟️ Abrir o jogo"), width="stretch", key="bar_open_game",
                      help="Tela do jogo com todas as seções. Para trocar de jogo, cite-o na pergunta ou use a busca."):
             nav.open_view("jogo", match_id=int(st.session_state["match_id"]))
 
@@ -164,7 +164,7 @@ BACKSTAGE = [
 
 def _logo(col) -> None:
     if col.button("⚽ Tactical Intelligence Lab", key="til_logo_home", help="Voltar ao início",
-                  use_container_width=True):
+                  width="stretch"):
         st.session_state[nav.STACK] = []
         nav.open_view("assistente")
 
@@ -178,7 +178,7 @@ def top_bar(focused: bool = False) -> None:
     if st.session_state.get("til_focus_mode"):
         a, b = st.columns([8, 1])
         _logo(a)
-        if b.button("✕ Sair do foco", use_container_width=True, key="til_focus_exit"):
+        if b.button("✕ Sair do foco", width="stretch", key="til_focus_exit"):
             st.session_state["til_focus_mode"] = False
             st.rerun()
         st.markdown('<div class="til-glow"></div>', unsafe_allow_html=True)
@@ -194,8 +194,8 @@ def top_bar(focused: bool = False) -> None:
     cols = st.columns([2.3] + [1.15] * len(MAIN) + [1.35])
     _logo(cols[0])
     for col, page in zip(cols[1:], MAIN):
-        col.page_link(page, label=t(page.title), icon=page.icon, use_container_width=True)
-    with cols[-1].popover(t("⚙️ Bastidores"), use_container_width=True):
+        col.page_link(page, label=t(page.title), icon=page.icon, width="stretch")
+    with cols[-1].popover(t("⚙️ Bastidores"), width="stretch"):
         st.caption(t("Como tudo foi feito — separado do programa."))
         for page in BACKSTAGE:
             st.page_link(page, label=t(page.title), icon=page.icon)

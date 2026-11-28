@@ -189,7 +189,7 @@ def _window_cards(roster, decisions, loans=None):
                                 f' até {html.escape(str(x.get("to_date") or "?"))}</div></div>', unsafe_allow_html=True)
                     picks[f"out::{name}"] = (st.radio("Decisão", out_opts, index=out_opts.index(cur),
                                                       key=f"scout_out_{_slug(name)}", label_visibility="collapsed"), {})
-        done = st.form_submit_button("✅ Finalizar planejamento", type="primary", use_container_width=True)
+        done = st.form_submit_button("✅ Finalizar planejamento", type="primary", width="stretch")
     if done:
         for name, (choice, _) in picks.items():
             decisions[name] = choice
@@ -327,7 +327,7 @@ def _club_averages_chart(diagnosis, team):
     fig.add_vline(x=0, line_color="#98A6BF", line_width=1)
     fig.update_layout(height=max(260, 34 * len(rows)), margin=dict(l=10, r=10, t=10, b=10),
                       xaxis_title="% acima (+) ou abaixo (−) da média da competição")
-    render_chart(fig, use_container_width=True, key=f"scout_avg_{_slug(team)}")
+    render_chart(fig, width="stretch", key=f"scout_avg_{_slug(team)}")
     st.caption("🟢 melhor que a média · 🔴 pior que a média · cinza = estilo (nem bom nem ruim por si só). "
                f"Base: {diagnosis.get('partidas_analisadas', 0)} jogos do clube com estatísticas e as mesmas competições "
                "nos últimos 12 meses como referência.")
@@ -350,7 +350,7 @@ def _sim_radar(deltas, team):
                                       line_color=color, opacity=.75,
                                       hovertext=[f"{d['indicador']}: {d[key]}" for d in deltas] + [""], hoverinfo="text"))
     fig.update_layout(height=380, polar=dict(radialaxis=dict(visible=False, range=[0, 100])), margin=dict(l=40, r=40, t=20, b=20))
-    render_chart(fig, use_container_width=True, key=f"scout_radar_{_slug(team)}")
+    render_chart(fig, width="stretch", key=f"scout_radar_{_slug(team)}")
     ups = [f"{d['indicador']} {d['variacao_pct']:+.0f}%" for d in deltas if d.get("variacao_pct") not in (None, 0)]
     if ups:
         st.caption("Variação do XI: " + " · ".join(ups) + ". Projeção pela composição do time, não resultado de jogo.")
@@ -392,7 +392,7 @@ def _overall_explainer():
             ta = ta.sort_values("Diferença", key=lambda x: -x.abs(), na_position="last")
             st.markdown("**Nossa nota × referência (maiores diferenças primeiro)**")
             styled_dataframe(ta[[c for c in ("Jogador", "Posição", "Nossa nota", "Referência", "Diferença", "Min. 12 meses")
-                                 if c in ta]].head(40), hide_index=True, use_container_width=True)
+                                 if c in ta]].head(40), hide_index=True, width="stretch")
         if rep and rep.get("distribuicao"):
             d = rep["distribuicao"]
             st.caption(f"No universo atual: {d.get('90+')} jogadores com 90+ · {d.get('87+')} com 87+ · {d.get('85+')} com "
@@ -402,13 +402,13 @@ def _overall_explainer():
                                                              "minutos_12m": "Min. 12 meses"})
             st.markdown("**Tetos de referência**")
             styled_dataframe(tt[[c for c in ("Jogador", "Overall", "Teto", "Min. 12 meses") if c in tt]],
-                             hide_index=True, use_container_width=True)
+                             hide_index=True, width="stretch")
         if rep and rep.get("craques"):
             t = pd.DataFrame(rep["craques"]).rename(columns={"craque": "Craque", "posicao": "Posição", "overall": "Overall",
                                                               "minutos_12m": "Min. 12 meses"})
             st.markdown("**Craques de referência**")
             styled_dataframe(t[[c for c in ("Craque", "Posição", "Overall", "Min. 12 meses") if c in t]], hide_index=True,
-                             use_container_width=True)
+                             width="stretch")
             if rep.get("nao_encontrados"):
                 st.caption("Fora do universo agora (sem cadastro ou sem jogos recentes na base): "
                            + ", ".join(rep["nao_encontrados"]))
@@ -1052,9 +1052,9 @@ def _card_actions(player, plan_key, team, name, idx, rejected_key):
     a, b = st.columns([1.1, 1.1])
     in_plan = any(x.get("nome") == name for x in st.session_state.get(plan_key) or [])
     a.button("✓ No plano" if in_plan else "＋ Adicionar ao plano", key=f"scout_add_{_slug(name)}_{idx}",
-             type="secondary" if in_plan else "primary", use_container_width=True, disabled=in_plan,
+             type="secondary" if in_plan else "primary", width="stretch", disabled=in_plan,
              on_click=_add_player, args=(player, plan_key))
-    if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", use_container_width=True):
+    if b.button("Abrir perfil ↗", key=f"scout_open_{_slug(name)}_{idx}", width="stretch"):
         open_view("jogador", name=name, core=player.get("_core"), club=str(player.get("clube") or ""),
                   pid=str(player.get("pid") or ""))
     with st.expander("Descartar e recalcular"):
@@ -1216,7 +1216,7 @@ def render(_ctx=None):
         fq, fb = st.columns([5, 1])
         q = fq.text_input("Pesquisar clube", value=prefill, placeholder="Ex.: Cruzeiro, Flamengo, Como 1907 — Enter para buscar")
         fb.markdown("<div style='height:1.75rem'></div>", unsafe_allow_html=True)
-        fb.form_submit_button("🔎 Buscar", use_container_width=True)
+        fb.form_submit_button("🔎 Buscar", width="stretch")
     options = _team_options(q, 30) if q.strip() else _team_options("", 30)
     if not options and not clubs.empty:
         options = clubs["nome"].astype(str).tolist()[:30]
@@ -1350,7 +1350,7 @@ def render(_ctx=None):
         pa.markdown('<div class="fm-card" style="border-left:4px solid #22D3EE;border-radius:12px;padding:.5rem .9rem">'
                     f'🧾 <b>Plano da janela: {len(plan_now)} reforço(s)</b> — '
                     + html.escape(", ".join(str(p.get("nome")) for p in plan_now)) + '</div>', unsafe_allow_html=True)
-        pb.button("Ver planejamento →", key="scout_go_plan", use_container_width=True,
+        pb.button("Ver planejamento →", key="scout_go_plan", width="stretch",
                   on_click=lambda: st.session_state.__setitem__("scout_tabs", "Planejamento"))
     tabs = st.tabs(tab_names, key="scout_tabs", default="IA · Top 5", on_change="rerun")
     with tabs[0]:
@@ -1592,7 +1592,7 @@ def render(_ctx=None):
                     upper_market = float(max(1,max_market/1e6 if pd.notna(max_market) else 300))
                     vmin = e1.number_input("Valor mínimo (€ mi)", 0.0, upper_market, 0.0, key="scout_mf_vmin")
                     vmax = e2.number_input("Valor máximo (€ mi)", 0.0, upper_market, upper_market, key="scout_mf_vmax")
-                    go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", use_container_width=True)
+                    go_search = st.form_submit_button("🔎 Buscar com estes filtros", type="primary", width="stretch")
                 st.button("↺ Redefinir critérios", key="scout_mfreset", on_click=_reset_keys, args=("scout_mf_",),
                           help="Volta todos os filtros desta busca ao padrão.")
                 if go_search:
@@ -1751,7 +1751,7 @@ def render(_ctx=None):
                 table=table[keep].copy()
                 if "Posição" in table: table["Posição"]=table["Posição"].map(E.ROLE_LABELS).fillna(table["Posição"])
                 if "Valor (€)" in table: table["Valor (€)"]=table["Valor (€)"].map(_money)
-                styled_dataframe(table,use_container_width=True,hide_index=True)
+                styled_dataframe(table,width="stretch",hide_index=True)
                 name=st.selectbox("Escolher joia",gems["nome"].astype(str).tolist(),key="scout_gem_pick")
                 if st.button("Adicionar joia ao plano",key="scout_gem_add"):
                     p=gems[gems["nome"].astype(str)==name].iloc[0].to_dict()
@@ -1798,20 +1798,20 @@ def render(_ctx=None):
                 a,b=st.columns(2)
                 with a:
                     st.markdown("**XI atual**")
-                    st.plotly_chart(_pitch_figure(simulation["xi_antes"], "Antes"), use_container_width=True,
+                    st.plotly_chart(_pitch_figure(simulation["xi_antes"], "Antes"), width="stretch",
                                     config={"displayModeBar": False})
                     comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                    for p in simulation["xi_antes"]]))
                 with b:
                     st.markdown("**XI simulado**")
-                    st.plotly_chart(_pitch_figure(simulation["xi_depois"], "Depois"), use_container_width=True,
+                    st.plotly_chart(_pitch_figure(simulation["xi_depois"], "Depois"), width="stretch",
                                     config={"displayModeBar": False})
                     comparison_table(pd.DataFrame([{"Vaga":p.get("papel_pt"),"Jogador":p.get("jogador"),"Nota":p.get("nota")}
                                                    for p in simulation["xi_depois"]]))
                 if simulation.get("deltas"):
                     _sim_radar(simulation["deltas"], team)
                     styled_dataframe(pd.DataFrame(simulation["deltas"]).rename(columns={"indicador":"Indicador","antes":"Antes",
-                        "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),use_container_width=True,hide_index=True)
+                        "depois":"Depois","variacao":"Variação","variacao_pct":"Variação (%)"}),width="stretch",hide_index=True)
                 st.caption(simulation.get("limite",""))
             incoming=sum(float(_d(p.get("realismo")).get("taxa_estimada_eur") or 0) for p in plan)
             sales=0.0
@@ -1830,7 +1830,7 @@ def render(_ctx=None):
             markdown=E.export_markdown(team,financial,decisions_clean,plan,simulation)
             a,b=st.columns(2)
             a.download_button("⇩ Dossiê Markdown",markdown,file_name=f"scout_{_slug(team)}.md",
-                              mime="text/markdown",use_container_width=True)
+                              mime="text/markdown",width="stretch")
             # rodada 11: dossiê visual — campinho com o XI planejado, um cartão por chegada (porquê + viabilidade), saídas
             from src.scout import dossier_pdf as DP
 
@@ -1843,7 +1843,7 @@ def render(_ctx=None):
             pdf=DP.build(team, formation, xi_plan, plan, decisions, sales-incoming, next_season) or _pdf_bytes(markdown)
             if pdf:
                 b.download_button("⇩ Dossiê PDF (campinho + decisões)",pdf,file_name=f"scout_{_slug(team)}.pdf",
-                                  mime="application/pdf",use_container_width=True)
+                                  mime="application/pdf",width="stretch")
             else:
                 b.caption("Para PDF, instale a dependência reportlab.")
             if st.button("💾 Salvar planejamento",key="scout_save"):

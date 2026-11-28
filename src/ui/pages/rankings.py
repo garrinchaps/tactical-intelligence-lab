@@ -174,7 +174,7 @@ def render(_ctx=None) -> None:
         if not niv.empty:
             styled_dataframe(niv.rename(columns={"comp": "Competição", "nivel": "Nível usado", "nivel_previo": "Estimativa prévia",
                                                  "pares": "Jogadores em 2 competições", "base": "Base"}),
-                             hide_index=True, use_container_width=True)
+                             hide_index=True, width="stretch")
         val = res.get("validacao") or {}
         st.markdown(f"- **Estabilidade entre turnos** (nota nos jogos ímpares × pares, correlação de postos): "
                     f"{val.get('estabilidade_turnos', '—')} em {val.get('estabilidade_n', 0)} jogadores — quanto mais "
@@ -222,4 +222,4 @@ def _profile(row, ev) -> None:
         styled_dataframe(top[["player_name", "team_name", "comp", "minutes", "desempenho_90", "geral_entre_ligas"]].rename(
             columns={"player_name": "Jogador", "team_name": "Time", "comp": "Competição", "minutes": "Minutos",
                      "desempenho_90": "Desempenho/90", "geral_entre_ligas": "Geral entre ligas"}),
-            hide_index=True, use_container_width=True)
+            hide_index=True, width="stretch")

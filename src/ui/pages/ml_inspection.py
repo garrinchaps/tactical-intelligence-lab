@@ -83,7 +83,7 @@ def _baselines(ctx: MatchContext, report) -> None:
               "pressão — tem efeito pequeno aqui." if g["sobre_logistica"] < 0.03 else ""), kind)
     folds = pd.DataFrame(d["folds"])
     with st.expander("AUC por fold"):
-        styled_dataframe(folds, use_container_width=True, hide_index=True)
+        styled_dataframe(folds, width="stretch", hide_index=True)
     g = report.get("grafo_de_passes", {})
     if g.get("equipes_partidas"):
         st.markdown("### Protocolo de avaliação — grafo de passes")
@@ -119,18 +119,18 @@ def _xgb(ctx: MatchContext, report) -> None:
     st.markdown("**Hiperparâmetros:** " + " · ".join(f"`{k} = {v}`" for k, v in p.items()) + f" · implementação: `{x['impl']}`")
     a, b = st.columns(2)
     a.plotly_chart(charts.bar_h(x["importancia"], "participacao_pct", "variavel", "Importância por ganho (% do ganho total)",
-                                "% do ganho total"), use_container_width=True)
+                                "% do ganho total"), width="stretch")
     if report:
         cm = report["perigo_de_posse"]["matriz_confusao_xgboost_oof"]
         b.plotly_chart(charts.confusion(cm["matriz"], f"Matriz de confusão (validação out-of-fold, limiar = prevalência {cm['limiar']:.3f})"),
-                       use_container_width=True)
+                       width="stretch")
     c, d = st.columns(2)
     if x["profundidades"]:
         c.plotly_chart(charts.histogram(x["profundidades"], "Profundidade real das árvores", "profundidade", nbins=10),
-                       use_container_width=True)
+                       width="stretch")
     if len(x["ganho_por_split"]):
         d.plotly_chart(charts.histogram(x["ganho_por_split"], "Ganho de informação por split", "ganho (redução da perda)", nbins=40),
-                       use_container_width=True)
+                       width="stretch")
 
 
 def _clusters(ctx: MatchContext) -> None:
@@ -142,12 +142,12 @@ def _clusters(ctx: MatchContext) -> None:
         ctx.prov("kmeans", "K-Means", f"k={km['k']}", "K-Means em (x, y) das perdas; k pelo maior silhouette")
         st.markdown("**Hiperparâmetros:** " + " · ".join(f"`{k} = {v}`" for k, v in km["params"].items()))
         a, b = st.columns([1.4, 1])
-        a.plotly_chart(charts.kmeans_scatter(km, f"Clusters de perdas (k = {km['k']}) com centróides"), use_container_width=True)
+        a.plotly_chart(charts.kmeans_scatter(km, f"Clusters de perdas (k = {km['k']}) com centróides"), width="stretch")
         with b:
             styled_dataframe(km["centroides"].rename(columns={"x": "centróide x (jd)", "y": "centróide y (jd)", "n": "perdas"}),
-                         use_container_width=True, hide_index=True)
+                         width="stretch", hide_index=True)
             styled_dataframe(pd.DataFrame({"k": list(km["silhouette"]), "silhouette": list(km["silhouette"].values())}),
-                         use_container_width=True, hide_index=True)
+                         width="stretch", hide_index=True)
 
     st.markdown(f"### DBSCAN — armadilhas de pressing (recuperações de {ctx.target_team})")
     a, b = st.columns(2)
@@ -159,13 +159,13 @@ def _clusters(ctx: MatchContext) -> None:
     else:
         ctx.prov("dbscan", "DBSCAN", f"{db['n_clusters']} núcleos", f"DBSCAN em (x, y) das recuperações, eps={eps}, min_samples={mins}")
         render_chart(charts.dbscan_scatter(db, f"DBSCAN: {db['n_clusters']} armadilhas · {db['n_ruido']} pontos de ruído "
-                                                  f"(eps = {eps} jd, min_samples = {mins})"), use_container_width=True)
+                                                  f"(eps = {eps} jd, min_samples = {mins})"), width="stretch")
 
     st.markdown("### NetworkX — grau × betweenness ponderada por xT")
     comp = centrality_comparison(ctx.df, ctx.target_team)
     if not comp.empty:
         ctx.prov("centr_insp", "Centralidades", len(comp), "grau ponderado e betweenness com distância 1/(passes·(1+10·xT))")
-        render_chart(charts.centrality_compare(comp, "Lado a lado, normalizado pelo máximo da equipe"), use_container_width=True)
+        render_chart(charts.centrality_compare(comp, "Lado a lado, normalizado pelo máximo da equipe"), width="stretch")
 
 
 def render(ctx: MatchContext) -> None:

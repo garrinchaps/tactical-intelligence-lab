@@ -168,7 +168,7 @@ def splash_gate(state: Dict[str, Any]) -> bool:
         return True
     st.markdown(splash_html(state), unsafe_allow_html=True)
     _, mid, _ = st.columns([2, 1, 2])
-    if mid.button("Entrar agora", use_container_width=True, key="til_warm_skip"):
+    if mid.button("Entrar agora", width="stretch", key="til_warm_skip"):
         st.session_state["_warm_skip"] = True
         st.rerun()
     time.sleep(0.8)

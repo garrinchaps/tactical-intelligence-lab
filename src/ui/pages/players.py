@@ -80,7 +80,7 @@ def _scout(ctx: MatchContext, players_df: pd.DataFrame) -> None:
     a, b = st.columns([2.2, 1.0])
     player = a.selectbox("Atleta (qualquer equipe)", ctx.players)
     b.write("")
-    if b.button("Gerar dossiê do atleta", type="primary", use_container_width=True) and player:
+    if b.button("Gerar dossiê do atleta", type="primary", width="stretch") and player:
         md = TacticalReportBuilder.prepend_simulation_badge(
             TacticalReportBuilder.build_dedicated_player_scouting_report(ctx.df, player), ctx.is_sim)
         st.markdown(md)
@@ -93,7 +93,7 @@ def _scout(ctx: MatchContext, players_df: pd.DataFrame) -> None:
         pa = c1.selectbox("Atleta A", names, index=0)
         pb = c2.selectbox("Atleta B", names, index=1)
         ctx.prov("radar", "Radar comparativo", f"{pa} x {pb}", "percentual do máximo da equipe na partida")
-        render_chart(_radar(players_df, pa, pb), use_container_width=True)
+        render_chart(_radar(players_df, pa, pb), width="stretch")
         if ctx.is_sim:
             note("Partida simulada", "Os valores individuais vêm do gerador por perfis: comparação ilustrativa.", "warn")
 
@@ -231,7 +231,7 @@ def _rating_report(ctx: MatchContext) -> None:
                                         hovertemplate="%{theta}: %{r:.1f}<extra></extra>"))
         fig.update_layout(**PLOTLY_LAYOUT, height=380, title=f"Dimensões — {pick} ({ev['funcao']})",
                           polar=dict(bgcolor=PALETTE["surface"], radialaxis=dict(range=[0, 10], color=PALETTE["muted"])))
-        a.plotly_chart(fig, use_container_width=True)
+        a.plotly_chart(fig, width="stretch")
     with b:
         st.markdown(report(ev))
         w = ev["pesos"]

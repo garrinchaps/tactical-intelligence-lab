@@ -147,7 +147,7 @@ def _speed_panel() -> None:
             st.caption("Calculado em segundo plano assim que o app liga: catálogo, Scout, Rankings, índice de jogadores e "
                        "os jogos/times abertos por último (data/recent_views.json). Quem entra depois encontra pronto.")
             styled_dataframe(pd.DataFrame([{"Passo": x["nome"], "Situação": x["status"], "Segundos": x.get("s")}
-                                           for x in ws["steps"]]), hide_index=True, use_container_width=True)
+                                           for x in ws["steps"]]), hide_index=True, width="stretch")
     rows = P.read()
     if not rows:
         st.info("Ainda sem medições — navegue pelo app e volte aqui.")
@@ -170,11 +170,11 @@ def _speed_panel() -> None:
         fig.add_hline(y=P.GOAL_PAGE_S, line_dash="dot", line_color="#EF4444", annotation_text="meta da tela")
         fig.update_layout(height=260, paper_bgcolor="#090D16", plot_bgcolor="#0B1120", font=dict(color="#F5F7FB"),
                           margin=dict(l=40, r=10, t=20, b=30), yaxis_title="segundos")
-        st.plotly_chart(fig, use_container_width=True, key="perf_scatter")
+        st.plotly_chart(fig, width="stretch", key="perf_scatter")
     st.markdown("#### Telas")
-    styled_dataframe(telas.drop(columns="tipo").rename(columns={"nome": "tela"}), hide_index=True, use_container_width=True)
+    styled_dataframe(telas.drop(columns="tipo").rename(columns={"nome": "tela"}), hide_index=True, width="stretch")
     st.markdown("#### Análises pesadas")
-    styled_dataframe(funcs.drop(columns="tipo").rename(columns={"nome": "análise"}), hide_index=True, use_container_width=True)
+    styled_dataframe(funcs.drop(columns="tipo").rename(columns={"nome": "análise"}), hide_index=True, width="stretch")
     slow = sm[sm["situação"].str.startswith("🔴")]
     if len(slow):
         st.warning("Lentas: " + ", ".join(slow["nome"].head(6)) + ". Se uma delas for sempre lenta (não só na 1ª vez), "
@@ -210,20 +210,20 @@ def _brain_panel() -> None:
         {"módulo": "Escalação contra o rival", "como aprende": "algoritmo genético (busca, não treino)",
          "o que o treino faz": "usa a régua nova automaticamente"},
     ])
-    styled_dataframe(mods, hide_index=True, use_container_width=True)
-    if st.button("🧠 Treinar tudo agora", type="primary", use_container_width=True, key="brain_train_all") and not _vb("O treino"):
+    styled_dataframe(mods, hide_index=True, width="stretch")
+    if st.button("🧠 Treinar tudo agora", type="primary", width="stretch", key="brain_train_all") and not _vb("O treino"):
         from src.ui.context import get_service
 
         box = st.empty()
         res = LB.train_all(get_service().db, progress=lambda m: box.info(f"Treinando: {m}"))
         box.empty()
-        styled_dataframe(pd.DataFrame(res), hide_index=True, use_container_width=True)
+        styled_dataframe(pd.DataFrame(res), hide_index=True, width="stretch")
         st.success("Treino geral concluído. Cada módulo mostra o resultado acima (rejeitar uma versão também é resultado: "
                    "o app só troca o que ficou melhor).")
     rows = LB.table()
     with st.expander(f"O que a IA já aprendeu com seus votos ({len(rows)} tipos de análise)"):
         if rows:
-            styled_dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+            styled_dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
             st.caption("Peso 1,00 = neutro. Acima de 1 sobe na lista; abaixo de 1 desce. Começa neutro e muda devagar.")
         else:
             st.caption("Ainda sem votos. Dê 👍/👎 nas respostas do Assistente e nos confrontos do pré-jogo.")
@@ -248,7 +248,7 @@ def _assistant_train_status() -> None:
         styled_dataframe(res.rename(columns={"experimento": "Experimento", "tentativa": "Tentativa", "version": "Versão",
                                              "promoted": "Promovida", "acerto_1o_fato": "Acerto do 1º fato",
                                              "perda_validacao": "Perda (prova)", "reason": "Resultado"}),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")
 
 
 def _lab_ai_panel() -> None:
@@ -321,7 +321,7 @@ def _lab_ai_panel() -> None:
     except Exception:
         custom = None
         st.warning("Neurônios: números inteiros de 1 a 128 separados por vírgula (ex.: 16, 8).")
-    if st.button("🧪 Rodar experimentos (em segundo plano)", use_container_width=True, key="as_exp_go") and not _vb("O treino"):
+    if st.button("🧪 Rodar experimentos (em segundo plano)", width="stretch", key="as_exp_go") and not _vb("O treino"):
         ok = TR.start_background(names=exps, attempts=int(tries), learning_rate=float(lr), epochs=int(ep), l2=float(l2),
                                  batch=int(batch), custom_hidden=custom, use_weak=weak)
         st.toast("Treino iniciado em segundo plano — pode continuar usando o app." if ok else
@@ -331,7 +331,7 @@ def _lab_ai_panel() -> None:
                "fato. Vazio em 'Neurônios' = 1 neurônio (regressão logística, o modelo de hoje).")
     _assistant_train_status()
     b1, b2 = st.columns(2)
-    if b1.button("🧠 Treinar a IA do Assistente", type="primary", use_container_width=True) and not _vb("O treino"):
+    if b1.button("🧠 Treinar a IA do Assistente", type="primary", width="stretch") and not _vb("O treino"):
         with st.spinner("Treinando (descida do gradiente com parada antecipada)…"):
             r = TR.train(learning_rate=lr, l2=l2, epochs=ep, use_weak=weak)
         (st.success if r.get("promoted") else st.info)(
@@ -351,13 +351,13 @@ def _lab_ai_panel() -> None:
             st.caption("Acerto do 1º fato = nas perguntas de validação, o número que a IA põe em primeiro é o que a pergunta "
                        "pedia? É a métrica que mais se parece com 'a resposta veio certa'.")
         sel = Selector()
-    if b2.button("🎲 Busca automática de parâmetros (validação cruzada, 5 dobras)", use_container_width=True, key="as_auto") and not _vb("A busca de parâmetros"):
+    if b2.button("🎲 Busca automática de parâmetros (validação cruzada, 5 dobras)", width="stretch", key="as_auto") and not _vb("A busca de parâmetros"):
         with st.spinner("Testando 9 combinações de η e λ, cada uma em 5 dobras por pergunta…"):
             grid = TR.auto_search(use_weak=weak)
         if grid:
             styled_dataframe(pd.DataFrame(grid).rename(columns={"acerto_medio": "acerto do 1º fato (média)",
                              "acerto_desvio": "desvio", "perda_media": "perda (média)", "perda_desvio": "desvio da perda"}),
-                             hide_index=True, use_container_width=True)
+                             hide_index=True, width="stretch")
             st.success(f"Melhor combinação: η {grid[0]['η']} · λ {grid[0]['λ']} — use nos controles acima e clique em Treinar.")
         else:
             st.info("Poucas perguntas com rótulo para 5 dobras (são precisas pelo menos 10). Faça perguntas que pedem um "
@@ -372,9 +372,9 @@ def _lab_ai_panel() -> None:
         fig.add_scatter(y=hv["history"]["val_loss"], name="validação", line=dict(color="#EF4444"))
         fig.update_layout(height=260, paper_bgcolor="#090D16", plot_bgcolor="#0B1120", font=dict(color="#F5F7FB"),
                           title=f"Curva do último treino (v{hv['version']:03d})", margin=dict(l=40, r=10, t=40, b=30))
-        st.plotly_chart(fig, use_container_width=True, key="as_curve")
+        st.plotly_chart(fig, width="stretch", key="as_curve")
         st.caption(f"Diagnóstico: {TR.suggest(hv)['diagnostico']['texto']}")
-    if st.button("📏 Refazer a régua da base (milhares de jogos)", use_container_width=True) and not _vb("Refazer a régua"):
+    if st.button("📏 Refazer a régua da base (milhares de jogos)", width="stretch") and not _vb("Refazer a régua"):
         from src.ui.context import get_service
 
         with st.spinner("Lendo as estatísticas dos jogos mais recentes…"):
@@ -499,7 +499,7 @@ def _danger_section(ctx=None) -> None:
     styled_dataframe(__import__("pandas").DataFrame([
         {"experimento": k, "arquitetura": " → ".join(map(str, [len(v.get("features") or FEATURES), *v["hidden"], 1])),
          "variáveis": ", ".join(v["features"]) if v.get("features") else f"todas as {len(FEATURES)}",
-         "η": v["learning_rate"], "λ": v["l2"]} for k, v in EXPERIMENTS.items()]), hide_index=True, use_container_width=True)
+         "η": v["learning_rate"], "λ": v["l2"]} for k, v in EXPERIMENTS.items()]), hide_index=True, width="stretch")
     st.caption("E, F e G (novos) usam só as variáveis que realmente separam lance perigoso de lance comum — o teste "
                "comparativo mostrou que as 9 zonas repetem distância e ângulo e só atrapalham. Comece por eles.")
     x1, x2 = st.columns([2, 1])
@@ -508,9 +508,9 @@ def _danger_section(ctx=None) -> None:
                                help="Quantas sementes diferentes treinar de uma vez (vale para todos os botões). "
                                     "Cada tentativa é registrada e julgada sozinha.")
     c1, c2, c3 = st.columns([1, 1, 1])
-    exp_now = c1.button("🧪 Rodar experimentos", type="primary", use_container_width=True, disabled=not exp_pick) and not _vb("O treino")
-    train_now = c2.button("▶ Treinar com os hiperparâmetros acima", use_container_width=True) and not _vb("O treino")
-    search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", use_container_width=True) and not _vb("O treino")
+    exp_now = c1.button("🧪 Rodar experimentos", type="primary", width="stretch", disabled=not exp_pick) and not _vb("O treino")
+    train_now = c2.button("▶ Treinar com os hiperparâmetros acima", width="stretch") and not _vb("O treino")
+    search_now = c3.button(f"🎲 Busca automática ({int(attempts)} tentativa{'s' if attempts > 1 else ''})", width="stretch") and not _vb("O treino")
     st.caption("O treino roda em segundo plano (processo separado): a tela não trava e você pode continuar usando o app. "
                "Pelo terminal também funciona: `python -m src.machine_learning.model_registry --treinar --experimentos B,A,C,D`")
     from src.machine_learning import train_job
@@ -537,8 +537,8 @@ def _danger_section(ctx=None) -> None:
             c1, c2, c3 = st.columns([3, 1, 1])
             c1.markdown(f"**Treino:** {status} · {job.get('etapa', '')[:120]}")
             if job.get("status") == "rodando":
-                c2.button("🔄 Atualizar", key="nn_refresh", use_container_width=True)
-                if c3.button("⏹ Parar", key="nn_stop", use_container_width=True) and not _vb("Parar o treino"):
+                c2.button("🔄 Atualizar", key="nn_refresh", width="stretch")
+                if c3.button("⏹ Parar", key="nn_stop", width="stretch") and not _vb("Parar o treino"):
                     train_job.stop()
                     st.rerun()
             for r in job.get("resultados") or []:
@@ -559,7 +559,7 @@ def _danger_section(ctx=None) -> None:
                         f"({b.get('partidas')} partidas). Ponderar as classes (peso ≈ {b.get('peso_que_equilibraria')}) "
                         "deixaria a rede descalibrada e pioraria a log-loss, que é o critério de promoção — por isso fica "
                         "desligado; a AUC já não depende do desequilíbrio.".replace(",", "."))
-            styled_dataframe(diag["feat"], hide_index=True, use_container_width=True)
+            styled_dataframe(diag["feat"], hide_index=True, width="stretch")
             st.caption("AUC sozinha: 0,5 = a variável sozinha não separa jogadas perigosas; longe de 0,5 (para cima ou para baixo) = tem sinal. "
                        "Alerta “redundante” = quase igual a outra variável (|r| > 0,95).")
     net = live["net"] if live else reg.champion()
@@ -591,12 +591,12 @@ def _danger_section(ctx=None) -> None:
     st.caption(f"Validação fixa: {len(reg.meta['validation_matches'])} partidas que não entram no treino. Ela é reutilizada para "
                "comparar/promover versões; por isso não é um teste final externo independente.")
     l, r = st.columns([1, 1.3])
-    l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), use_container_width=True)
+    l.plotly_chart(charts.loss_curve(net.history, "Curva de perda por época"), width="stretch")
     with r:
         mw = st.slider("Esconder conexões com |peso| menor que", 0.0, 1.0, 0.0, 0.05)
         render_chart(charts.nn_architecture(net, max_per_layer=12, min_abs_weight=mw,
                                                title="Arquitetura e conexões pai → filho (espessura ∝ |peso|; verde +, vermelho −)"),
-                        use_container_width=True)
+                        width="stretch")
 
     st.markdown("### Inspecionar um neurônio (pais e filhos)")
     neurons = [n for n in net.neurons() if n.layer > 0]
@@ -629,7 +629,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
     if not v.empty:
         v["versão"] = v["version"].map(lambda x: f"v{x:03d}")
         render_chart(charts.lines(v, "versão", ["val_logloss"], "Perda na validação fixa por versão (menor = melhor)",
-                                     "log-loss"), use_container_width=True)
+                                     "log-loss"), width="stretch")
         for c in ("cv_logloss_std", "test_gain", "gain_ci_low", "gain_ci_high"):
             if c not in v:
                 v[c] = None                                   # versões antigas, antes da validação agrupada
@@ -650,7 +650,7 @@ def _versions_and_usage(ctx, reg, live) -> None:
         if lc is not None:
             render_chart(charts.lines(lc, "acoes_de_treino", ["perda_validacao"],
                                          "Perda na validação fixa × quantidade de ações de treino", "log-loss"),
-                            use_container_width=True)
+                            width="stretch")
             comparison_table(lc, "Mesma arquitetura, mesma validação: a perda cai à medida que entram mais partidas.")
 
     st.markdown("### 🔗 Como este treino muda as respostas do Analista IA")
@@ -716,7 +716,7 @@ def _assistant_misses() -> None:
             st.caption("Nenhuma até agora. Quando uma pergunta com alvo cair no resumo geral, ela aparece aqui para "
                        "virar caso de teste.")
             return
-        styled_dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, use_container_width=True)
+        styled_dataframe(pd.DataFrame(rows)[["quando", "pergunta"]], hide_index=True, width="stretch")
         st.caption("Arquivo local data/assistente_sem_alvo.jsonl (não vai para o GitHub). Mande essas perguntas na "
                    "próxima sessão para eu ensinar o Assistente a respondê-las.")
 
@@ -749,11 +749,11 @@ def _benchmark() -> None:
     df = pd.DataFrame(res["resultados"])
     show = df.rename(columns={"modelo": "Modelo", "auc": "AUC", "brier": "Brier", "log_loss": "Log loss", "ece": "Calibração (ECE)",
                               "dif_auc_vs_logistica": "Δ AUC vs logística", "ic95": "IC 95%", "veredito": "Veredito"})
-    styled_dataframe(show, hide_index=True, use_container_width=True)
+    styled_dataframe(show, hide_index=True, width="stretch")
     note("O que isso quer dizer", res["conclusao"] + " AUC 0,5 = moeda; 1,0 = perfeito. Brier/log loss/ECE menores = "
          "probabilidades melhores. A rede continua como componente didático; o critério de promoção não foi afrouxado.", "info")
     imp = res.get("importancia_permutacao") or {}
     if imp:
         with st.expander("Quais variáveis realmente ajudam (importância por permutação)"):
             styled_dataframe(pd.DataFrame([{"Variável": k, "Queda de AUC sem ela": v} for k, v in imp.items()]),
-                         hide_index=True, use_container_width=True)
+                         hide_index=True, width="stretch")

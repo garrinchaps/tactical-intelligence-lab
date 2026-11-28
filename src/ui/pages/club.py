@@ -21,7 +21,7 @@ def render(ctx: MatchContext) -> None:
     team_q = a.text_input("Clube ou seleção", value=ctx.target_team)
     n = int(b.number_input("Jogos", min_value=2, max_value=20, value=6))
     c.write("")
-    run = c.button("Analisar histórico", type="primary", use_container_width=True)
+    run = c.button("Analisar histórico", type="primary", width="stretch")
     from src.ui.context import cached_catalog, filter_by_team
 
     cat = cached_catalog("data_level = 'EVENTS' AND data_source IN ('statsbomb','wyscout')")

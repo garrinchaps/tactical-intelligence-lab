@@ -160,7 +160,7 @@ def render_strengths_weaknesses_page(ctx, load_events_fn: Callable, competition_
             metric_bars(an["weaknesses"], "fraco", "Nada muito abaixo do normal neste jogo.")
     with tab2:
         r, t = st.columns([1.1, 1.0])
-        r.plotly_chart(radar(an), use_container_width=True, key=f"sw_radar_{kp}_{entity}")
+        r.plotly_chart(radar(an), width="stretch", key=f"sw_radar_{kp}_{entity}")
         with t:
             st.markdown("#### 🧠 Interpretação")
             res = GenerativeTacticalAnalyst().interpret_strengths_weaknesses(an, is_simulation=ctx.is_sim, prefer_llm=use_llm)

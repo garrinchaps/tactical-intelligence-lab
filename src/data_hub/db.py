@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -155,6 +156,8 @@ SPEED_INDEXES = [
     ("idx_pstats_team", "match_player_stats(team_name, match_id)"),
     ("idx_lineups_match", "match_lineups(match_id)"),
     ("idx_team_stats_team", "match_team_stats(team_name, match_id)"),
+    # rodada 27l: a atualização do catálogo (jogos novos desde a última leitura) varria os 450 mil jogos
+    ("idx_matches_synced", "matches(last_synced)"),
 ]
 
 
@@ -171,15 +174,60 @@ def _reuse_enabled(path: Path) -> bool:
         return False
 
 
+# rodada 27l (velocidade): o Streamlit cria uma THREAD NOVA a cada clique — a conexão "por thread" morria a cada
+# clique, levando junto os 64 MB de páginas do banco já lidas (e reabrir custa 10–30 ms no Windows). Agora as
+# conexões livres ficam num pequeno estoque compartilhado; cada uma é usada por UMA thread de cada vez. Dentro da
+# mesma thread, `with db.connect()` aninhado continua usando a MESMA conexão (mesmo comportamento de antes).
+_POOL_LOCK = __import__("threading").Lock()
+_POOL: dict = {}
+POOL_MAX = 6
+
+
 def _thread_conn(db: "DataHubDB") -> sqlite3.Connection:
     key = str(Path(db.db_path).resolve())
-    pool = getattr(_TLS, "pool", None)
-    if pool is None:
-        pool = _TLS.pool = {}
-    conn = pool.get(key)
+    held = getattr(_TLS, "held", None)
+    if held is None:
+        held = _TLS.held = {}
+    cur = held.get(key)
+    if cur is not None:
+        cur[1] += 1
+        return cur[0]
+    conn = None
+    with _POOL_LOCK:
+        free = _POOL.get(key)
+        if free:
+            conn = free.pop()
     if conn is None:
-        conn = pool[key] = db._open()
+        conn = db._open(shared=True)
+    held[key] = [conn, 1]
     return conn
+
+
+def _release_conn(db: "DataHubDB") -> None:
+    key = str(Path(db.db_path).resolve())
+    held = getattr(_TLS, "held", None) or {}
+    cur = held.get(key)
+    if cur is None:
+        return
+    cur[1] -= 1
+    if cur[1] > 0:
+        return
+    held.pop(key, None)
+    conn = cur[0]
+    if conn.in_transaction:                    # nunca devolve conexão no meio de uma transação
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+    with _POOL_LOCK:
+        free = _POOL.setdefault(key, [])
+        if len(free) < POOL_MAX:
+            free.append(conn)
+            return
+    try:
+        conn.close()
+    except sqlite3.Error:
+        pass
 
 
 FROZEN_SETTLE_S = 3 * 3600
@@ -214,6 +262,51 @@ def _migration_key(path: Path):
     except sqlite3.Error:
         uv = -1
     return (str(p), st_.st_ino, st_.st_dev, uv)
+
+
+SLOW_SQL_S = 0.5
+
+
+def _log_slow(sql: str, seconds: float) -> None:
+    """Rodada 27l: consulta que passou de 0,5 s vai para data/perf.jsonl (tipo "sql"); o diagnóstico lista as piores."""
+    if seconds < SLOW_SQL_S or os.getenv("TIL_IN_WORKER") == "1":
+        return
+    try:
+        import re as _re
+        import threading as _th
+
+        from src.ui import perf as _perf
+
+        _perf.record("sql", _re.sub(r"\s+", " ", str(sql)).strip()[:300], seconds, thread=_th.current_thread().name)
+    except Exception:
+        pass
+
+
+class _TimedCursor(sqlite3.Cursor):
+    def execute(self, sql, parameters=()):                    # noqa: D401
+        t0 = time.perf_counter()
+        self._til_sql = sql
+        try:
+            return super().execute(sql, parameters)
+        finally:
+            _log_slow(sql, time.perf_counter() - t0)
+
+    def fetchall(self):
+        t0 = time.perf_counter()
+        try:
+            return super().fetchall()
+        finally:
+            dt = time.perf_counter() - t0
+            if dt >= SLOW_SQL_S:
+                _log_slow("(lendo linhas) " + str(getattr(self, "_til_sql", "")), dt)
+
+
+class _TimedConnection(sqlite3.Connection):
+    def cursor(self, factory=None):
+        return super().cursor(factory or _TimedCursor)
+
+    def execute(self, sql, parameters=()):
+        return self.cursor().execute(sql, parameters)
 
 
 class DataHubDB:
@@ -299,6 +392,8 @@ class DataHubDB:
                 except sqlite3.Error:
                     pass
                 raise
+            finally:
+                _release_conn(self)
             return
         conn = self._open()
         try:
@@ -307,8 +402,9 @@ class DataHubDB:
         finally:
             conn.close()
 
-    def _open(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=60)
+    def _open(self, shared: bool = False) -> sqlite3.Connection:
+        conn = sqlite3.connect(str(self.db_path), timeout=60, check_same_thread=not shared,
+                               factory=_TimedConnection)
         conn.execute("PRAGMA busy_timeout = 60000;")
         # leitura e escrita ao mesmo tempo (a atualização automática grava enquanto a interface lê). Rodada 25c: um
         # ajuste que falha por banco ocupado não derruba mais a conexão inteira.

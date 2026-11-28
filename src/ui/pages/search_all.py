@@ -272,7 +272,7 @@ def match_cards(df: pd.DataFrame, key: str, limit: int = 25) -> None:
         a, b = st.columns([8, 1.3])
         a.markdown(result_card_html(m, BADGES.get(m.get("data_level"), m.get("data_level", ""))), unsafe_allow_html=True)
         b.write("")
-        if b.button("Analisar →", key=f"{key}_{m['match_id']}_{i}", use_container_width=True, type="primary"):
+        if b.button("Analisar →", key=f"{key}_{m['match_id']}_{i}", width="stretch", type="primary"):
             nav.open_view("jogo", match_id=int(m["match_id"]))
 
 
@@ -297,7 +297,7 @@ def search_box() -> str:
         b.multiselect(t("Nível de dado"), list(LEVEL_CHOICES), key="w_levels", format_func=t,
                       label_visibility="collapsed", placeholder=t("Nível de dado"),
                       help="Que jogos aparecem: 🟢 com lances e coordenadas, 📊 com estatísticas, 📄 só com o placar.")
-        go = c.form_submit_button(t("Buscar"), type="primary", use_container_width=True)
+        go = c.form_submit_button(t("Buscar"), type="primary", width="stretch")
     if go:
         picked = [LEVEL_CHOICES[k] for k in st.session_state.get("w_levels") or []]
         st.session_state["_levels"] = tuple(picked) or DEFAULT_LEVELS
@@ -325,7 +325,7 @@ def _recent_matches() -> None:
         ra, rb = st.columns([5, 1])
         label = ra.selectbox("Partidas recentes", list(labels), key="til_recent_match", label_visibility="collapsed",
                              help="Últimas partidas abertas nesta sessão.")
-        if rb.button("Reabrir", key="til_recent_open", use_container_width=True):
+        if rb.button("Reabrir", key="til_recent_open", width="stretch"):
             nav.open_view("jogo", match_id=labels[label])
 
 

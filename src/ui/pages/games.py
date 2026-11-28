@@ -72,7 +72,7 @@ def render(current_context, match_bar=None) -> None:
     with top[2]:
         from src.ui.i18n import t as _t
 
-        if st.button(_t("💬 Perguntar sobre este jogo"), key="game_ask", use_container_width=True, type="primary"):
+        if st.button(_t("💬 Perguntar sobre este jogo"), key="game_ask", width="stretch", type="primary"):
             st.session_state["goto"] = "assistente"
             st.rerun()
     try:                                              # B6: profundidade do dado desta partida (0 a 4)

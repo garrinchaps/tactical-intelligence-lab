@@ -312,7 +312,9 @@ def styled_dataframe(data, *args, **kwargs):
         if config:
             kwargs["column_config"] = config
         data = zebra(data)
-    kwargs.setdefault("use_container_width", True)
+    if "use_container_width" in kwargs:                 # API antiga → nova (sem o aviso a cada tela)
+        kwargs["width"] = "stretch" if kwargs.pop("use_container_width") else "content"
+    kwargs.setdefault("width", "stretch")
     kwargs.setdefault("hide_index", True)
     return st.dataframe(data, *args, **kwargs)
 
@@ -518,7 +520,7 @@ def provenance_panel(registry: ProvenanceRegistry) -> None:
                                         "connector": "conector", "method": "método", "license": "licença",
                                         "ingestion_timestamp": "ingestão", "generator": "gerador",
                                         "ci_low": "IC 2,5%", "ci_high": "IC 97,5%"}),
-                     use_container_width=True, hide_index=True)
+                     width="stretch", hide_index=True)
 
 
 def hero(kicker: str, title: str, subtitle: str = "") -> None:

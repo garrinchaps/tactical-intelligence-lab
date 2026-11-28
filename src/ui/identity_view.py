@@ -98,19 +98,19 @@ def render(team: str, names: Sequence[str], version: str, key: str = "club") -> 
         a, b = st.columns(2)
         if ps.get("com_bola"):
             a.plotly_chart(_pitch(ps["com_bola"]["posicoes"], f"Com bola (posições médias) · ~{ps['com_bola']['desenho']}"),
-                           use_container_width=True, key=f"ti_on_{key}")
+                           width="stretch", key=f"ti_on_{key}")
         if ps.get("sem_bola"):
             b.plotly_chart(_pitch(ps["sem_bola"]["posicoes"], f"Sem bola (ações defensivas) · ~{ps['sem_bola']['desenho']}"),
-                           use_container_width=True, key=f"ti_off_{key}")
+                           width="stretch", key=f"ti_off_{key}")
         st.caption("Campinho do jogo com lances mais recente: posição média de cada titular nas ações com bola e nas ações "
                    "defensivas (ataque para a direita). É média do jogo inteiro — não é foto de um instante.")
     elif d.get("fases_estimadas"):
         ps = d["fases_estimadas"]
         a, b = st.columns(2)
         a.plotly_chart(_pitch(ps["com_bola"]["posicoes"], f"Atacando (estimado) · {ps['com_bola']['desenho']}"),
-                       use_container_width=True, key=f"ti_on_est_{key}")
+                       width="stretch", key=f"ti_on_est_{key}")
         b.plotly_chart(_pitch(ps["sem_bola"]["posicoes"], f"Defendendo (estimado) · {ps['sem_bola']['desenho']}"),
-                       use_container_width=True, key=f"ti_off_est_{key}")
+                       width="stretch", key=f"ti_off_est_{key}")
         st.caption("Sem jogos com lances deste time: desenho ESTIMADO pela " + ps.get("base", "escalação") +
                    " (ataque para a direita). Laterais sobem mais quando o time cruza muito; o bloco sobe com posse e "
                    "pressão alta e recua quando marca atrás. Não é posição medida em campo.")

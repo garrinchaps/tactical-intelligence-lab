@@ -82,7 +82,22 @@ ALIASES: Dict[str, str] = {
 }
 
 
+from functools import lru_cache as _lru_cache
+
+
 def norm(text: object) -> str:
+    # rodada 27l (velocidade): o mesmo nome é normalizado milhões de vezes (elenco × 67 mil jogadores do mercado)
+    if isinstance(text, str):
+        return _norm_str(text)
+    return _norm_uncached(text)
+
+
+@_lru_cache(maxsize=400_000)
+def _norm_str(text: str) -> str:
+    return _norm_uncached(text)
+
+
+def _norm_uncached(text: object) -> str:
     t = unicodedata.normalize("NFKD", str(text or ""))
     t = "".join(c for c in t if not unicodedata.combining(c)).lower().replace("&", " ")
     return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9' \-]", " ", t)).strip()
@@ -90,6 +105,17 @@ def norm(text: object) -> str:
 
 def team_core(name: object) -> str:
     """Nome normalizado sem sufixos institucionais, já com apelidos resolvidos."""
+    if isinstance(name, str):
+        return _team_core_str(name)
+    return _team_core_uncached(name)
+
+
+@_lru_cache(maxsize=200_000)
+def _team_core_str(name: str) -> str:
+    return _team_core_uncached(name)
+
+
+def _team_core_uncached(name: object) -> str:
     n = norm(name)
     n = ALIASES.get(n, n)
     toks = [t for t in re.split(r"[\s\-]+", n) if t and t not in SUFFIXES]
@@ -174,6 +200,17 @@ def team_key_lookup(team_ids: pd.DataFrame) -> Dict[Tuple[str, str], str]:
 
 # ------------------------------------------------------------------------ atletas
 def player_core(name: object) -> str:
+    if isinstance(name, str):
+        return _player_core_str(name)
+    return _player_core_uncached(name)
+
+
+@_lru_cache(maxsize=400_000)
+def _player_core_str(name: str) -> str:
+    return _player_core_uncached(name)
+
+
+def _player_core_uncached(name: object) -> str:
     return " ".join(t for t in re.split(r"[\s\-\.]+", norm(name)) if len(t) > 1)
 
 

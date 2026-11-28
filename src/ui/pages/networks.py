@@ -100,7 +100,7 @@ def render(ctx: MatchContext) -> None:
     subs_set = set(came_in) if view == "all" else set()
     l, r = st.columns(2)
     with l:
-        render_chart(charts.pass_network(net, f"Troca de passes — {team}", subs=subs_set), use_container_width=True)
+        render_chart(charts.pass_network(net, f"Troca de passes — {team}", subs=subs_set), width="stretch")
         st.caption("Bolinha maior = mais passes; verde mais forte = mais importante para ligar o time; linha mais grossa "
                    "= mais passes entre os dois.")
         if view == "all" and came_in:
@@ -111,7 +111,7 @@ def render(ctx: MatchContext) -> None:
                        + ", ".join(came_in) + ".")
     with r:
         render_chart(charts.xt_progression(d_scope, team, f"Jogadas que mais aproximaram a bola do gol — {team}"),
-                        use_container_width=True)
+                        width="stretch")
         st.caption("As 60 ações com maior ganho de ameaça (xT). Verde: passe · amarelo: condução.")
 
     st.markdown("##### Quem mais toca na bola × quem mais leva o time ao ataque")
@@ -125,7 +125,7 @@ def render(ctx: MatchContext) -> None:
                  "volume = passes dados+recebidos; importância = caminhos de passe que passam pelo jogador, pesando "
                  "mais os que levam a bola para zonas de ameaça (xT)")
         x, y = st.columns([1.2, 1])
-        x.plotly_chart(charts.centrality_compare(comp, "Volume × importância para chegar ao ataque"), use_container_width=True)
+        x.plotly_chart(charts.centrality_compare(comp, "Volume × importância para chegar ao ataque"), width="stretch")
         with y:
             nice = comp.rename(columns={"atleta": "Jogador", "grau_ponderado": "Passes dados + recebidos",
                                         "betweenness_xt": "Importância para ligar ao ataque", "rank_grau": "Posição no volume",

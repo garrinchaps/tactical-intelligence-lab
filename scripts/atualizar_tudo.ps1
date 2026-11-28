@@ -54,7 +54,7 @@ try {
     Step "1. Código novo do GitHub" { git pull --ff-only }
     Step "2. Dependências (só quando o requirements.txt muda)" { & $py -m src.tools.passos --mudou requirements.txt; if ($LASTEXITCODE -eq 0 -or $Tudo) { & $py -m pip install -q -r requirements.txt } else { Write-Host "    pulado: requirements.txt igual"; $global:LASTEXITCODE = 0 } }
     Step "3. Limpeza (caches, fotografias antigas, registros grandes, temporários; banco otimizado sem apagar dados)" { & $py -m src.tools.limpeza } "limpeza" 24
-    Step "4. Índices de velocidade do banco (só cria os que faltam)" { & $py -m src.tools.criar_indices } "indices" 168
+    Step "4. Índices de velocidade do banco (só cria os que faltam)" { & $py -m src.tools.criar_indices } "indices_r27l" 168
     Step "5. Resultados dos dias que faltam + detalhes desses jogos" { & $py -c "from src.tools.sync_silencioso import catch_up; print(catch_up())" }
     if (-not $Rapido) {
         Step "6. Elencos (idade, país, valor) do Brasil (com estaduais e Série D) e da América do Sul" { & $py -m src.data_hub.sync --only fotmob_elencos --ligas brasil estaduais sulamericanas } "elencos_r27e" 168

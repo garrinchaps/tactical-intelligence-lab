@@ -107,7 +107,7 @@ def _two_teams(ctx: MatchContext) -> None:
     l, r = st.columns([1.25, 1])
     with l:
         render_chart(charts.grouped_bars(rows[~rows["indicador"].isin(["Passes", "Perdas de posse"])], "indicador", [a, b],
-                                            "Indicadores das duas equipes", height=620), use_container_width=True)
+                                            "Indicadores das duas equipes", height=620), width="stretch")
     with r:
         comparison_table(rows, "PPDA menor = pressão mais intensa. Posse = proporção dos passes da partida.")
     st.markdown("#### Destaques de cada equipe")
@@ -126,7 +126,7 @@ def _two_teams(ctx: MatchContext) -> None:
     for col, t in zip(cols, (a, b)):
         try:
             net = PassingNetworkAnalyzer.build_pass_network(df, t, until_first_sub=True, min_pass_count=2)
-            col.plotly_chart(charts.pass_network(net, f"{t} (até a 1ª substituição)"), use_container_width=True)
+            col.plotly_chart(charts.pass_network(net, f"{t} (até a 1ª substituição)"), width="stretch")
         except Exception as exc:
             with col:
                 error_state(f"Rede de {t} indisponível", exc)
@@ -177,7 +177,7 @@ def _team_over_time(ctx: MatchContext) -> None:
         render_chart(charts.grouped_bars(tab.melt(id_vars="partida", value_vars=pick).pivot(index="variable", columns="partida",
                                                                                             values="value").reset_index(),
                                             "variable", tab["partida"].tolist(), f"{team}: indicadores por partida",
-                                            height=120 + 70 * len(pick)), use_container_width=True)
+                                            height=120 + 70 * len(pick)), width="stretch")
     comparison_table(tab.set_index("partida").T.reset_index().rename(columns={"index": "indicador"}),
                      "Cada coluna é uma partida. Mesmo cálculo para todas, o que torna a comparação justa.")
     if len(rows) < 3:
@@ -285,7 +285,7 @@ def _players(ctx: MatchContext) -> None:
                                       pb: [round(100 * float(p90b.iloc[0][c]) / mx[c], 1) for c in RADAR_KEYS]},
                                      [PLAYER_STAT_LABELS[c] for c in RADAR_KEYS],
                                      f"Por 90 min (100 = o maior dos dois) · {int(tot_a['minutos'])} e {int(tot_b['minutos'])} min"),
-                        use_container_width=True)
+                        width="stretch")
     with r:
         comparison_table(tab, "Minutos estimados pelas substituições. Assistência = último passe certo para o autor do gol.")
     if scope != "Só nesta partida":

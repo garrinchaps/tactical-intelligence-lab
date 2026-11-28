@@ -279,7 +279,7 @@ def render(current_context, match_bar) -> None:
         st.markdown("##### Experimente")
         cols = st.columns(3)
         for i, e in enumerate(EXAMPLES):
-            if cols[i % 3].button(e, key=f"as_ex_{i}", use_container_width=True):
+            if cols[i % 3].button(e, key=f"as_ex_{i}", width="stretch"):
                 clicked = e
     for hi, h in enumerate(history):
         if not isinstance(h, dict):

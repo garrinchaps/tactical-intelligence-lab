@@ -281,7 +281,7 @@ def render(_ctx=None) -> None:
                 + (f" · fontes: {', '.join(fontes)}" if fontes else "") + f'</div>{form_html(r.get("forma", []))}</div></div>',
                 unsafe_allow_html=True)
     scout_a, scout_b = st.columns([1.8, 6])
-    if scout_a.button("🎯 Planejar elenco", key=f"team_scout_{name}", type="primary", use_container_width=True):
+    if scout_a.button("🎯 Planejar elenco", key=f"team_scout_{name}", type="primary", width="stretch"):
         nav.open_view("scout", club=name)
     scout_b.caption("Diagnóstico de necessidades, alvos realistas e simulação de transferências.")
     from src.ui.components import kpi_cards           # rodada 22: indicadores com ícone e barra (estilo painel)
@@ -363,12 +363,12 @@ def render(_ctx=None) -> None:
                     a, b = st.columns([8, 1.3])
                     a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
                     b.write("")
-                    if b.button("Analisar →", key=f"team_open_{row['match_id']}_{i}", use_container_width=True, type="primary"):
+                    if b.button("Analisar →", key=f"team_open_{row['match_id']}_{i}", width="stretch", type="primary"):
                         st.session_state["team_focus"] = next((n for n in names if n in (row["home_team_name"],
                                                                                           row["away_team_name"])), None)
                         nav.open_view("jogo", match_id=int(row["match_id"]))
                 if shown < len(mm) and st.button(f"Mostrar mais {min(PAGE, len(mm) - shown)}", key=f"more_{pk}",
-                                                 use_container_width=True):
+                                                 width="stretch"):
                     st.session_state[pk] = shown + PAGE
                     st.rerun()
     with t2:
@@ -423,7 +423,7 @@ def render(_ctx=None) -> None:
                     last = u.sort_values("data").tail(20)
                     render_chart(charts.lines(last.assign(jogo=last["data"] + " " + last["adversario"]), "jogo",
                                                  ["xg_pro", "xg_contra"], f"xG por jogo — últimos {len(last)}", "xG"),
-                                    use_container_width=True)
+                                    width="stretch")
 
 
 @_perf_timed("clubs._style_data")
@@ -499,7 +499,7 @@ def _style_tab(name: str, names: List[str]) -> None:
             fig.add_trace(go.Scatter(x=list(range(len(ser))), y=xg_c, mode="lines+markers", name="xG contra",
                                      line=dict(color="#EF4444", width=3), hovertext=lab, hoverinfo="text+y"))
             fig.update_xaxes(showticklabels=False, title="jogos (do mais antigo ao mais recente)")
-            render_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), use_container_width=True)
+            render_chart(charts._layout(fig, "Evolução: chances criadas × cedidas (xG por jogo)", 320), width="stretch")
     a, b = st.columns(2)
     with a:
         st.markdown("#### 🧬 Como joga")

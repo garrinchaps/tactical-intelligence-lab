@@ -212,4 +212,4 @@ def render_dashboard(team: str, names: Sequence[str], version: str, key: str) ->
                           yaxis=dict(autorange="reversed", gridcolor="#1E2A44", color="#94A3B8", dtick=2,
                                      range=[int(h["times"].max()) + .5, .5]),
                           xaxis=dict(gridcolor="#1E2A44", color="#94A3B8"))
-        st.plotly_chart(fig, use_container_width=True, key=f"{key}_pos")
+        st.plotly_chart(fig, width="stretch", key=f"{key}_pos")

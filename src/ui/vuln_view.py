@@ -191,7 +191,7 @@ def render(rival: str, rival_names: Sequence[str], our_names: Sequence[str], ver
                "jogadores da mesma função; só entra o que foge da referência com amostra mínima.")
     a, b = st.columns([1, 1.25])
     with a:
-        st.plotly_chart(pitch_figure(found, f"{rival}: onde estão as fragilidades", r.get("xi")), use_container_width=True,
+        st.plotly_chart(pitch_figure(found, f"{rival}: onde estão as fragilidades", r.get("xi")), width="stretch",
                         key=f"vuln_pitch_{where}_{rival}_{mine}")   # a mesma tela aparece em 2 abas
     with b:
         st.markdown(cards_html(found, "#F59E0B" if mine else "#EF4444"), unsafe_allow_html=True)

@@ -20,6 +20,45 @@ from typing import List
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def _memory() -> str:
+    try:
+        if os.name == "nt":
+            import ctypes
+
+            class MS(ctypes.Structure):
+                _fields_ = [("l", ctypes.c_ulong), ("load", ctypes.c_ulong), ("tot", ctypes.c_ulonglong),
+                            ("avail", ctypes.c_ulonglong), ("tp", ctypes.c_ulonglong), ("ap", ctypes.c_ulonglong),
+                            ("tv", ctypes.c_ulonglong), ("av", ctypes.c_ulonglong), ("ext", ctypes.c_ulonglong)]
+            m = MS()
+            m.l = ctypes.sizeof(MS)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(m))
+            tot, avail = m.tot / 1e9, m.avail / 1e9
+        else:
+            info = dict(l.split(":", 1) for l in Path("/proc/meminfo").read_text().splitlines() if ":" in l)
+            tot = int(info["MemTotal"].split()[0]) / 1e6
+            avail = int(info["MemAvailable"].split()[0]) / 1e6
+        warn = "  ⚠️ POUCA MEMÓRIA LIVRE — o Windows passa a usar o disco e tudo fica lento" if avail < 2.5 else ""
+        return f"memória: {avail:.1f} GB livres de {tot:.1f} GB{warn}"
+    except Exception:
+        return "memória: não consegui medir"
+
+
+def _disk_kind() -> str:
+    if os.name != "nt":
+        return "disco: (só medido no Windows)"
+    try:
+        import subprocess
+
+        r = subprocess.run(["powershell", "-NoProfile", "-Command",
+                            "Get-PhysicalDisk | ForEach-Object { $_.FriendlyName + ' = ' + $_.MediaType }"],
+                           capture_output=True, text=True, timeout=20, creationflags=0x08000000)
+        txt = " · ".join(x.strip() for x in r.stdout.splitlines() if x.strip())
+        warn = "  ⚠️ HD mecânico: leituras aleatórias do banco são MUITO lentas" if "HDD" in txt else ""
+        return f"discos: {txt or 'não informado'}{warn}"
+    except Exception:
+        return "discos: não consegui medir"
+
+
 def main() -> int:
     os.chdir(ROOT)
     sys.path.insert(0, str(ROOT))
@@ -116,26 +155,46 @@ def main() -> int:
     try:
         from src.scout import snapshot as S
 
-        say(f"  fotografia do Scout: {'v19 pronta' if S.SNAP_PATH.exists() else 'v19 AINDA NÃO existe (usa a anterior)'}"
+        say(f"  fotografia do Scout: {S.SNAP_PATH.name + (' pronta' if S.SNAP_PATH.exists() else ' AINDA NÃO existe (usa a anterior)')}"
             + (f", {mb(S.SNAP_PATH):,.0f} MB" if S.SNAP_PATH.exists() else ""))
         u = timed("carregar o mercado do Scout", S.cached_universe, 15)
         if u is not None:
             say(f"  mercado: {len(u):,} jogadores")
     except Exception as exc:                            # noqa: BLE001
         say(f"  Scout: não deu para medir ({exc})")
+    say("\n-- computador --")
+    say("  " + _memory())
+    say("  " + _disk_kind())
+    try:
+        from src.data_hub.worker import read_status
+
+        st_ = read_status(max_age_s=300) or {}
+        if st_:
+            fases = {k: (v.get("fase") if isinstance(v, dict) else v) for k, v in st_.items()
+                     if isinstance(v, dict) and v.get("fase")}
+            say("  processo de fundo: " + (", ".join(f"{k}: {v}" for k, v in fases.items()) or "parado"))
+    except Exception:
+        pass
     try:
         from src.ui import perf
 
-        rows = perf.read(2000)
+        rows = perf.read(5000)
         if rows:
             import pandas as pd
 
             d = pd.DataFrame(rows)
             col = "s" if "s" in d else d.columns[-1]
-            top = d.groupby("nome")[col].agg(["median", "max", "count"]).sort_values("max", ascending=False).head(10)
-            say("\n-- telas mais lentas registradas no seu uso (data/perf.jsonl) --")
-            for n, r in top.iterrows():
-                say(f"  {str(n)[:40]:40s} mediana {r['median']:6.1f} s · pior {r['max']:6.1f} s · {int(r['count'])} vezes")
+            tipo = d["tipo"] if "tipo" in d else pd.Series("", index=d.index)
+            for kind, title, n in (("tela", "telas mais lentas no seu uso", 12),
+                                   ("funcao", "partes das telas mais lentas", 15),
+                                   ("sql", "consultas ao banco mais lentas (≥ 0,5 s)", 15)):
+                part = d[tipo.eq(kind)] if kind != "tela" else d[~tipo.isin(["funcao", "sql"])]
+                if part.empty:
+                    continue
+                top = part.groupby("nome")[col].agg(["median", "max", "count"]).sort_values("max", ascending=False).head(n)
+                say(f"\n-- {title} (data/perf.jsonl) --")
+                for nm, r in top.iterrows():
+                    say(f"  {str(nm)[:110]:110s} mediana {r['median']:6.1f} s · pior {r['max']:6.1f} s · {int(r['count'])}x")
     except Exception:
         pass
     rep = ROOT / "data" / "diagnostico_lentidao.txt"

@@ -212,7 +212,7 @@ def _accounts_gate() -> None:
     _, mid, _ = st.columns([1, 2, 1])
     with mid:
         if A.google_ready():
-            if st.button("Entrar com Google", type="primary", use_container_width=True, key="til_google"):
+            if st.button("Entrar com Google", type="primary", width="stretch", key="til_google"):
                 st.login("google")
             st.caption("ou use e-mail e senha:")
         t_in, t_new = st.tabs(["Entrar", "Criar conta"])
@@ -221,7 +221,7 @@ def _accounts_gate() -> None:
             with st.form("til_login"):
                 em = st.text_input("E-mail")
                 pw = st.text_input("Senha", type="password")
-                ok = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+                ok = st.form_submit_button("Entrar", type="primary", width="stretch")
             if ok:
                 if fails >= 5:
                     time.sleep(min(10, fails))
@@ -240,7 +240,7 @@ def _accounts_gate() -> None:
                 p1 = st.text_input("Senha (8+ caracteres)", type="password", key="til_su_p1")
                 p2 = st.text_input("Repita a senha", type="password", key="til_su_p2")
                 code = st.text_input("Código de convite", type="password", key="til_su_code") if A.invite_required() else ""
-                go = st.form_submit_button("Criar conta", type="primary", use_container_width=True)
+                go = st.form_submit_button("Criar conta", type="primary", width="stretch")
             if go:
                 if p1 != p2:
                     st.error("As senhas não conferem.")
@@ -286,7 +286,7 @@ def require() -> None:
     with mid:
         with st.form("til_gate"):
             typed = st.text_input("Senha de acesso", type="password")
-            ok = st.form_submit_button("Entrar", type="primary", use_container_width=True)
+            ok = st.form_submit_button("Entrar", type="primary", width="stretch")
         if ok:
             if fails >= 5:
                 time.sleep(min(10, fails))               # tentativa repetida fica lenta (sem bloquear o servidor todo)

@@ -70,7 +70,7 @@ def _scenarios(reg: ProvenanceRegistry) -> None:
             empty_state("Todas as zonas com amostra insuficiente neste recorte (n < 30).", icon="🧮")
         else:
             render_chart(charts.ci_bars(grid, f"{METRICS[metric]['label']} por zona — {CI_TEXT}", METRICS[metric]["unit"]),
-                            use_container_width=True)
+                            width="stretch")
     comparison_table(grid[["zone", "value", "ci_low", "ci_high", "n", "status"]].rename(
         columns={"zone": "zona", "value": "valor", "ci_low": "IC 2,5%", "ci_high": "IC 97,5%"}),
         f"Gerador {GENERATOR}; {n_matches} partidas de referência; zonas com n < 30 ficam sem valor.")

@@ -108,10 +108,10 @@ def render_events(ctx: MatchContext) -> None:
 
     left, right = st.columns([1.35, 1.0])
     with left:
-        render_chart(momentum_figure(df, team, opp), use_container_width=True)
+        render_chart(momentum_figure(df, team, opp), width="stretch")
         ctx.prov("momento", "Momento da partida", "série", "Σ ΔxT positivo×100 + ações progressivas×1,5 + xG×25 por 5 min")
         try:
-            render_chart(TacticalVisualizer.create_corridor_vulnerability_plotly(d_org, team), use_container_width=True)
+            render_chart(TacticalVisualizer.create_corridor_vulnerability_plotly(d_org, team), width="stretch")
         except Exception as exc:
             st.caption(f"Gráfico de corredores indisponível: {exc}")
     with right:
@@ -188,7 +188,7 @@ def _understat_shots(ctx: MatchContext, home: str) -> None:
                                  "soma do xG das finalizações (modelo do Understat)", tier="DERIVED"),
                         f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
     render_chart(charts.shot_map(shots, m.get("home_team_name", home), "Finalizações (tamanho = xG, ★ = gol) — fonte: Understat"),
-                    use_container_width=True)
+                    width="stretch")
     pl = (shots.groupby(["equipe", "jogador"]).agg(chutes=("xg", "size"), xg=("xg", "sum"),
                                                    gols=("resultado", lambda r: int((r == "gol").sum())))
           .reset_index().sort_values("xg", ascending=False))
@@ -252,7 +252,7 @@ def _fotmob_shots(ctx: MatchContext, home: str) -> None:
                         ctx.prov(f"fm_xg_{team}", f"xG {team}", round(float(r["xg"]), 2),
                                  "soma do xG das finalizações (modelo da FotMob/Opta)", tier="DERIVED"),
                         f"{int(r['chutes'])} chutes · {int(r['gols'])} gols")
-    render_chart(charts.shot_map(shots, hn, "Finalizações (tamanho = xG, ★ = gol) — fonte: FotMob"), use_container_width=True)
+    render_chart(charts.shot_map(shots, hn, "Finalizações (tamanho = xG, ★ = gol) — fonte: FotMob"), width="stretch")
 
 
 def _box_ratings(ctx: MatchContext) -> None:
@@ -419,7 +419,7 @@ def render_boxscore(ctx: MatchContext) -> None:
             cols[i].markdown(f"**{t}** {('· ' + form) if form else ''}")
             cols[i].dataframe(lt[["shirt_number", "player_name", "position", "is_starter"]].rename(columns={
                 "shirt_number": "Nº", "player_name": "Atleta", "position": "Posição", "is_starter": "Titular"}),
-                use_container_width=True, hide_index=True)
+                width="stretch", hide_index=True)
     _box_ratings(ctx)
 
 

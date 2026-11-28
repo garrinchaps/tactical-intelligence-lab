@@ -97,7 +97,7 @@ def radar(groups: Dict[str, Optional[float]], key: str, title: str = "Análise d
                       margin=dict(l=30, r=30, t=40, b=20), paper_bgcolor="#090D16",
                       polar=dict(bgcolor="#0F1626", radialaxis=dict(range=[0, 100], showticklabels=False, gridcolor="#1E2A44"),
                                  angularaxis=dict(gridcolor="#1E2A44", tickfont=dict(color="#CBD5E1", size=11))))
-    st.plotly_chart(fig, use_container_width=True, key=key)
+    st.plotly_chart(fig, width="stretch", key=key)
 
 
 def stars_line(label: str, s: Optional[float], text: str, value: Any = None) -> None:

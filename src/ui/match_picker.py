@@ -62,7 +62,7 @@ def render_match_picker(service: MatchDataService, box=None) -> None:
         )
         allow_remote = st.checkbox("Buscar também nas fontes online", value=True,
                                    help="Usa API-Football, ESPN e football-data.org quando habilitadas no .env.")
-        if st.button("Buscar partida", type="primary", use_container_width=True) and query.strip():
+        if st.button("Buscar partida", type="primary", width="stretch") and query.strip():
             with st.spinner("Procurando em todas as fontes..."):
                 st.session_state["last_query"] = query
                 st.session_state["search_result"] = service.finder.find(query, allow_remote=allow_remote)
@@ -80,7 +80,7 @@ def render_match_picker(service: MatchDataService, box=None) -> None:
             if cands is not None and not cands.empty:
                 options = {match_label(r): int(r["match_id"]) for _, r in cands.iterrows()}
                 choice = st.radio("Resultados", list(options.keys()), key="search_choice")
-                if st.button("Abrir esta partida", use_container_width=True):
+                if st.button("Abrir esta partida", width="stretch"):
                     _select(service, options[choice])
                     st.rerun()
 
@@ -118,13 +118,13 @@ def render_match_picker(service: MatchDataService, box=None) -> None:
             if not f.empty:
                 options = {match_label(r): int(r["match_id"]) for _, r in f.iterrows()}
                 choice = st.selectbox("Partida", list(options.keys()), key="catalog_choice")
-                if st.button("Abrir partida do catálogo", use_container_width=True):
+                if st.button("Abrir partida do catálogo", width="stretch"):
                     _select(service, options[choice])
                     st.rerun()
 
     with tab_upload:
         uploaded = st.file_uploader("Eventos (.csv ou .json, formato StatsBomb)", type=["csv", "json"])
-        if uploaded is not None and st.button("Carregar arquivo", use_container_width=True):
+        if uploaded is not None and st.button("Carregar arquivo", width="stretch"):
             try:
                 from src.ingestion.statsbomb_loader import StatsBombDataLoader
 

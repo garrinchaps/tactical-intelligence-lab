@@ -31,7 +31,7 @@ def render_accounts() -> None:
         return
     df = pd.DataFrame(rows).rename(columns={"nome": "Nome", "email": "E-mail", "metodo": "Como entra", "criado_em": "Criou em",
                                             "ultimo_acesso": "Último acesso", "acessos": "Acessos", "situacao": "Situação"})
-    styled_dataframe(df, hide_index=True, use_container_width=True)
+    styled_dataframe(df, hide_index=True, width="stretch")
     with st.form("acc_admin", border=False):
         a, b = st.columns([3, 2])
         who = a.selectbox("Conta", [r["email"] for r in rows])

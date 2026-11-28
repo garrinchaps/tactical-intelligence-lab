@@ -112,10 +112,10 @@ def render(_ctx=None) -> None:
                 a, b = st.columns([8, 1.3])
                 a.markdown(result_card_html(row, BADGES.get(row["data_level"], row["data_level"])), unsafe_allow_html=True)
                 b.write("")
-                if b.button("Analisar →", key=f"comp_open_{row['match_id']}_{i}", use_container_width=True, type="primary"):
+                if b.button("Analisar →", key=f"comp_open_{row['match_id']}_{i}", width="stretch", type="primary"):
                     nav.open_view("jogo", match_id=int(row["match_id"]))
             if shown < len(rich) and st.button(f"Mostrar mais {min(PAGE, len(rich) - shown)}", key=f"more_{pk}",
-                                               use_container_width=True):
+                                               width="stretch"):
                 st.session_state[pk] = shown + PAGE
                 st.rerun()
     with t2:
@@ -138,6 +138,6 @@ def render(_ctx=None) -> None:
                     styled_dataframe(pr.rename(columns={"time": "Time", "forca_pagerank": "Força (0–100)", "jogos": "Jogos",
                                                         "pontos": "Pontos", "posicao_pagerank": "Pos. PageRank",
                                                         "posicao_pontos": "Pos. pontos", "diferença": "Diferença"}),
-                                     hide_index=True, use_container_width=True)
+                                     hide_index=True, width="stretch")
             pick = st.selectbox("Abrir o time", tab["time"].tolist(), format_func=pt, key=f"comp_team_{name}_{sea}")
             nav.link(f"🛡️ Ver {pt(pick)}", "time", key=f"comp_team_open_{name}", name=pick)

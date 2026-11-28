@@ -108,7 +108,7 @@ def _picker(label: str, key: str, default: str = "") -> Optional[str]:
     with c1.form(f"{key}_form", border=False):
         q = st.text_input(label, value=st.session_state.get(f"{key}_q", default), key=f"{key}_q",
                           placeholder="digite o nome e aperte Enter")
-        st.form_submit_button("🔎 Buscar", use_container_width=True)
+        st.form_submit_button("🔎 Buscar", width="stretch")
     opts = _team_options(q)
     if not opts:
         c2.caption("Nenhum time com esse nome na base.")
@@ -643,7 +643,7 @@ def _probabilities(team, rival, my_names, rv_names, f, version, w) -> None:
                           margin=dict(l=50, r=10, t=30, b=40), title=dict(text="Probabilidade de cada placar", font=dict(size=13)),
                           xaxis=dict(title=f"gols {away}"), yaxis=dict(title=f"gols {home}", autorange="reversed"))
         a, b = st.columns([1.5, 1])
-        a.plotly_chart(fig, use_container_width=True, key=f"{w}_probmap_{team}")
+        a.plotly_chart(fig, width="stretch", key=f"{w}_probmap_{team}")
         b.markdown("**Placares mais prováveis**")
         b.markdown("\n".join(f"- {home} {p['placar'].split(' x ')[0]} x {p['placar'].split(' x ')[1]} {away}: "
                               f"**{100 * p['prob']:.1f}%**" for p in r["placares"][:6]))
@@ -913,7 +913,7 @@ def _next_match_tab(team: str, version: str, n: int, kind: str = "prox") -> None
                 st.caption("Arraste, troque com o banco e mude a formação. As mudanças ficam neste navegador (não alteram a base).")
             with c2:
                 render_chart(_pitch(xr, None, {}, f"{rival} — provável ({fr})", team_color="#EF4444", vertical=True),
-                             use_container_width=True, key=f"{w}_pitch_r")
+                             width="stretch", key=f"{w}_pitch_r")
                 st.caption("Dentro do círculo: qualidade (0–100). Anel: 🟢 posição dele · 🟠 adaptado · 🔴 improvisado.")
     if pv.get("noticias"):
         with tabs[5]:
@@ -1106,7 +1106,7 @@ def render(_ctx=None) -> None:
                     st.caption("Passe o mouse nas marcas: E = explorar · N = neutralizar · F = nossa força · C = cuidado. "
                                "O que você arrasta fica salvo neste navegador; a nota média abaixo é da escalação calculada.")
                 else:
-                    render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), use_container_width=True)
+                    render_chart(_pitch(xi, plan, corr, f"{team} — {formation} ({mode.lower()})"), width="stretch")
                     if any(p.get("porque") for p in xi):
                         with st.expander("🧠 Por que cada jogador foi escolhido", expanded=True):
                             _xi_cards(xi, "#22D3EE")
@@ -1223,7 +1223,7 @@ def render(_ctx=None) -> None:
                 if corr.get("ataca_por"):
                     st.markdown(f"**Por onde {rival} chega ao último terço** ({corr['jogos']} jogo(s) com lances, "
                                 f"{corr['acoes_ataque']} ações)")
-                    render_chart(_corridor_bars(corr), use_container_width=True)
+                    render_chart(_corridor_bars(corr), width="stretch")
                 st.markdown("**Jogos considerados**")
                 comparison_table(pd.DataFrame(theirs["jogos"]).drop(columns=["match_id"]), "")
     with t3:
@@ -1317,7 +1317,7 @@ def _bars(mine: Dict[str, Any], theirs: Dict[str, Any], team: str, rival: str) -
                              marker=dict(symbol="line-ew-open", size=28, color=P["warning"], line=dict(width=3))))
     from src.ui.charts import _layout
 
-    render_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), use_container_width=True)
+    render_chart(_layout(fig, "Média por jogo — a favor", 380, barmode="group"), width="stretch")
 
 
 def _corridor_bars(corr: Dict[str, Any]) -> go.Figure:

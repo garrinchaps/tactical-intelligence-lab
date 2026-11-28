@@ -68,7 +68,7 @@ def render(ctx: MatchContext) -> None:
     analyst = DynamicTacticalAnalyst()
     c1, c2 = st.columns([3, 1])
     use_llm = c1.toggle("Redigir com Gemini (precisa de GEMINI_API_KEY no .env)", value=analyst.api_key is not None)
-    if c2.button("Limpar conversa", use_container_width=True):
+    if c2.button("Limpar conversa", width="stretch"):
         st.session_state["chat_history"] = []
     if not use_llm:
         st.caption("Sem Gemini, o redator local monta o texto direto das evidências (os números saem direto das evidências do recorte).")
@@ -77,7 +77,7 @@ def render(ctx: MatchContext) -> None:
                 f"Onde {ctx.opponent} mais nos atacou no primeiro tempo?",
                 "Como foi a transição defensiva depois do minuto 60?", "Relatório completo da partida"]
     cols = st.columns(len(examples))
-    clicked = next((e for i, e in enumerate(examples) if cols[i].button(e, key=f"ex_{i}", use_container_width=True)), None)
+    clicked = next((e for i, e in enumerate(examples) if cols[i].button(e, key=f"ex_{i}", width="stretch")), None)
 
     history = st.session_state.setdefault("chat_history", [])
     from src.intelligence.learning_hub import feedback_ids, record_feedback

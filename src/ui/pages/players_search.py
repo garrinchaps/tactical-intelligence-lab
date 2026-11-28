@@ -19,6 +19,23 @@ def _norm(s: str) -> str:
     return player_core(s)
 
 
+def _pv(club) -> str:
+    """Rodada 27l: versão do cache da página do jogador = versão do CLUBE dele (muda só com jogo novo do clube ou na
+    virada do dia). A versão geral mudava a cada atualização (~10 min) e refazia forma/jogos sem nada novo."""
+    from src.ui.context import get_service
+
+    db = get_service().db
+    club = str(club or "").strip()
+    try:
+        if club:
+            from src.ui.pages.clubs import same_team_names
+
+            return "pv:" + db.team_version(same_team_names(club) or [club])
+    except Exception:
+        pass
+    return db.stable_version()
+
+
 INDEX_PATH = __import__("pathlib").Path("data/processed/player_index.parquet")
 INDEX_META_PATH = INDEX_PATH.with_suffix(".meta.json")
 
@@ -56,7 +73,10 @@ def player_index(version: str) -> pd.DataFrame:
             # rodada 27k: a versão do banco muda a cada atualização (10 min) e o processo de fundo salvava o índice
             # sem versão — a busca e o perfil REFAZIAM o índice inteiro quase sempre (dezenas de segundos na base
             # real). Índice com menos de 26 h vale como está; o novo é montado em segundo plano.
-            if _time.time() - INDEX_PATH.stat().st_mtime < 26 * 3600:
+            # rodada 27l: montar o índice lê as tabelas de lances e de números por jogador INTEIRAS (minutos no banco
+            # de 19 GB) — nunca dentro do app quando já existe um índice; quem refaz é o processo de fundo (1×/dia,
+            # com a tela parada). Só se o índice tiver mais de 7 dias o app refaz em segundo plano.
+            if _time.time() - INDEX_PATH.stat().st_mtime > 7 * 86400:
                 try:
                     from src.ui import bg_fetch
 
@@ -64,10 +84,10 @@ def player_index(version: str) -> pd.DataFrame:
                         from src.ui.context import get_service
 
                         save_player_index(build_player_index(get_service().db), v)
-                    bg_fetch.schedule("player_index", _rebuild, cooldown_s=6 * 3600)
+                    bg_fetch.schedule("player_index", _rebuild, cooldown_s=24 * 3600)
                 except Exception:
                     pass
-                return pd.read_parquet(INDEX_PATH)
+            return pd.read_parquet(INDEX_PATH)
     except Exception:
         pass
     from src.ui.context import get_service
@@ -409,7 +429,7 @@ def render(_ctx=None) -> None:
             if row:
                 from src.analytics.rating_v2 import RATING_ENGINE_VERSION
 
-                form = _form_data(tuple(source_names), get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, profile_club)
+                form = _form_data(tuple(source_names), _pv(profile_club) + ":" + RATING_ENGINE_VERSION, profile_club)
                 player_fm.overview(row, key=f"pfm_{p['core']}", form=form)
             else:
                 st.caption("Atributos, capacidade e potencial aparecem quando o atleta está no universo do Scout (jogou "
@@ -436,7 +456,7 @@ def render(_ctx=None) -> None:
             if pm.empty:
                 # rodada 27e: sem jogos com lances, mostra os jogos com ESTATÍSTICAS dele (FotMob/ESPN) — antes a aba ficava
                 # vazia para quase todo jogador do Brasil
-                bg = _box_games(tuple(source_names), profile_club, get_service().db.stable_version())
+                bg = _box_games(tuple(source_names), profile_club, _pv(profile_club))
                 if bg.empty:
                     empty_state("Nenhum jogo deste atleta com números na base", "", "🗓️",
                                 "Os jogos aparecem quando a FotMob/ESPN trazem os números por jogador da partida.")
@@ -461,7 +481,7 @@ def render(_ctx=None) -> None:
                                + (f' · 🏅 {nt:.1f}' if nt is not None else '') + '</div></div>',
                                unsafe_allow_html=True)
                     b.write("")
-                    if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", use_container_width=True, type="primary"):
+                    if b.button("Analisar →", key=f"pl_open_{r['match_id']}_{i}", width="stretch", type="primary"):
                         st.session_state["team_focus"] = r["team_name"]
                         nav.open_view("jogo", match_id=int(r["match_id"]))
     with t2:
@@ -493,7 +513,7 @@ def render(_ctx=None) -> None:
 
                         render_chart(charts.lines(v.assign(valor=v["valor_mercado_eur"] / 1e6), "data", ["valor"],
                                                      "Valor de mercado ao longo do tempo (€ mi, Transfermarkt)", "€ mi"),
-                                        use_container_width=True)
+                                        width="stretch")
     with t3:
         if t3.open is not False:          # rodada 27e: só monta a aba aberta (página mais rápida)
             try:
@@ -694,7 +714,7 @@ def _scout_tab(names: List[str], club: str = "") -> None:
     if sc.empty:
         from src.ui.context import get_service
 
-        bg = _box_games(tuple(names), club, get_service().db.stable_version())
+        bg = _box_games(tuple(names), club, _pv(club))
         if bg.empty:
             empty_state("Sem jogos com números deste atleta", "", "📊",
                         "O scout por 90 minutos usa os lances (StatsBomb, Wyscout, OpenPlay) ou os números por jogador "
@@ -807,7 +827,7 @@ def _player_card(nome: str, names: tuple, club: str = "", row: Optional[dict] = 
     from src.ui.context import get_service
 
     from src.analytics.rating_v2 import RATING_ENGINE_VERSION
-    f = _form_data(names, get_service().db.stable_version() + ":" + RATING_ENGINE_VERSION, club or "")
+    f = _form_data(names, _pv(club) + ":" + RATING_ENGINE_VERSION, club or "")
     if f is None or f.empty or len(f) < 2:
         return
     score_col = "nota" if "nota" in f and f["nota"].notna().any() else "desempenho"

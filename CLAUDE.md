@@ -927,6 +927,24 @@ Rodada 27k (28/11/2026, 610 testes verdes) — sobre os ~70 commits do Codex no 
   e descompactar 18 GB (memória/disco do plano grátis) — por isso 404/502/"Oh no". Caminho viável grátis: publicar o
   NÚCLEO reduzido (`python -m src.tools.publicar_nucleo`) no dataset do HF e apontar `TIL_NUCLEO_URL`.
 
+Rodada 27l (28/11/2026, 614 testes verdes) — "impossível de mexer de tão lento" (medido com volume do PC: mercado
+sintético de 67 mil jogadores × 202 colunas e base de 300 mil jogos):
+- ✅ Causa grande: `snapshot.find_player` → `_club_scoped_rows` normalizava o clube dos 67 mil jogadores a CADA atleta
+  procurado (1,2 s por jogador; elenco de 30 = 35 s; repetido no campinho, rival, elenco do Scout). Agora o núcleo do
+  clube de cada linha é calculado 1× por fotografia (`_index()["club_core"]`), a decisão é por nome de clube distinto
+  e o resultado fica memorizado por clube. `team_core`/`player_core`/`norm` memorizados (lru_cache). Mesmos resultados
+  em 900 buscas (antes × depois). Elenco da Escalação 17,9 s → 2,1 s; Scout com clube 19,6 s → 5,6 s (1ª vez; depois
+  cache); campinho 12 jogadores 0,3 s.
+- ✅ Conexões do banco compartilhadas entre cliques (`db._POOL`, até 6; o Streamlit cria uma thread por clique e a
+  conexão "por thread" morria com o cache de 64 MB de páginas); aninhado continua na mesma conexão.
+- ✅ Consultas ≥ 0,5 s gravadas em data/perf.jsonl (tipo "sql", `_TimedConnection`); `diagnostico_lentidao` mostra telas,
+  partes das telas e consultas mais lentas, memória livre, tipo de disco (HD/SSD) e o que o processo de fundo faz.
+- ✅ Índice de jogadores da busca nunca é remontado DENTRO do app se já existe (lia lances e números por jogador
+  inteiros); o processo de fundo refaz 1×/dia com a tela parada (o app só refaz se tiver 7+ dias).
+- ✅ Página do jogador: cache pela versão do CLUBE (`players_search._pv`), não pela versão geral que mudava a cada ~10 min.
+- ✅ Índice `idx_matches_synced` (atualização do catálogo varria todos os jogos; passo 4 do script `indices_r27l`).
+- ✅ `use_container_width` → `width` (139 chamadas; os avisos enchiam o terminal a cada tela).
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

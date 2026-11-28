@@ -138,7 +138,7 @@ def _form_chart(f: pd.DataFrame, key: str) -> None:
     fig.update_layout(title=dict(text="Forma (últimos jogos)", font=dict(size=13, color="#CBD5E1")), height=220,
                       margin=dict(l=30, r=10, t=36, b=20), paper_bgcolor="#090D16", plot_bgcolor="#0F1626",
                       xaxis=dict(visible=False), yaxis=dict(gridcolor="#1E2A44", color="#94A3B8"))
-    st.plotly_chart(fig, use_container_width=True, key=f"{key}_form")
+    st.plotly_chart(fig, width="stretch", key=f"{key}_form")
 
 
 def squad_compare(row: Dict[str, Any], roster: pd.DataFrame, key: str) -> None:

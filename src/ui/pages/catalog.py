@@ -170,7 +170,7 @@ def _scout_upload(reg: ProvenanceRegistry) -> None:
         if kind == "xt_zonas":
             for t in d["equipe"].unique():
                 render_chart(charts.heatmap_grid(ScoutFileParser.xt_grid(d, t), f"xT por zona — {t}", "xT"),
-                                use_container_width=True)
+                                width="stretch")
         elif kind == "matriz_passes":
             for t in d["equipe"].unique():
                 net = ScoutFileParser.pass_network(d, t)

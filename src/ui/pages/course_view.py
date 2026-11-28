@@ -36,7 +36,7 @@ def simple(q: str) -> None:
 
 
 def _table(rows, caption: str = "") -> None:
-    styled_dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+    styled_dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
     if caption:
         st.caption(caption)
 
@@ -73,7 +73,7 @@ def fuzzy_tab() -> None:
         f.add_scatter(x=u, y=C._tri(u, l, p, r), name=name, line=dict(color=col))
     f.add_vline(x=pp, line_dash="dot", line_color=TXT)
     f.update_layout(title="Pertinência de “passe”: baixo / médio / alto", yaxis_title="μ")
-    st.plotly_chart(f, use_container_width=True)
+    st.plotly_chart(f, width="stretch")
 
     st.markdown("#### Q3 · Mamdani passo a passo, com centroide numérico")
     simple("Q3")
@@ -91,7 +91,7 @@ def fuzzy_tab() -> None:
     if m["centroide"] is not None:
         f.add_vline(x=m["centroide"], line_color=RED, annotation_text=f"centroide {m['centroide']}")
     f.update_layout(title="3. Corte de cada saída · 4. Agregação · 5. Centroide", xaxis_title="contribuição tática")
-    st.plotly_chart(f, use_container_width=True)
+    st.plotly_chart(f, width="stretch")
     st.caption(f"{m['formula']}. Resultado: **{m['centroide']}** — um ÍNDICE fuzzy, não uma probabilidade.")
 
     st.markdown("#### Q4 · Mamdani × Takagi-Sugeno (as mesmas regras)")
@@ -187,7 +187,7 @@ def neural_tab() -> None:
             f.add_vline(x=d["melhor_epoca"], line_dash="dot", line_color=CYAN,
                         annotation_text=f"melhor época {d['melhor_epoca']} (parada antecipada)")
         f.update_layout(title="Perda por época", xaxis_title="época", yaxis_title="log-loss")
-        st.plotly_chart(f, use_container_width=True)
+        st.plotly_chart(f, width="stretch")
         note(f"Diagnóstico: {d['diagnostico']}", d["texto"], "info")
         sug = C.suggest_next_experiment(v)
         rows = [{"parâmetro": k, "último treino": str(sug["atual"].get(k)), "sugerido": str(sug["sugerido"].get(k))}
@@ -217,7 +217,7 @@ def neural_tab() -> None:
                                      y=["teve chute", "não teve"], text=[[cm["VP"], cm["FN"]], [cm["FP"], cm["VN"]]],
                                      texttemplate="%{text}", colorscale=[[0, CARD], [1, BLUE]], showscale=False))
             f.update_layout(height=260, paper_bgcolor=BG, font=dict(color=TXT), margin=dict(l=10, r=10, t=10, b=10))
-            st.plotly_chart(f, use_container_width=True)
+            st.plotly_chart(f, width="stretch")
         with b:
             k = st.columns(4)
             fmt = lambda v: "—" if v is None else f"{100 * v:.1f}%"
@@ -274,7 +274,7 @@ def genetic_tab() -> None:
     f.add_scatter(y=r["historico"], x=list(range(1, len(r["historico"]) + 1)), name="melhor aptidão", line=dict(color=CYAN))
     f.add_hline(y=r["aptidao_base"], line_dash="dot", line_color=RED, annotation_text="ótimo exato (húngaro)")
     f.update_layout(title="Convergência (elenco de exemplo, começando SEM a solução exata)", xaxis_title="geração")
-    st.plotly_chart(f, use_container_width=True)
+    st.plotly_chart(f, width="stretch")
     note("Leitura da convergência", r["convergencia"]["texto"] +
          f" Melhor do AG {r['aptidao']} × húngaro {r['aptidao_base']}.", "info")
     st.caption("Elenco de exemplo (atletas fictícios, um lesionado). Na Escalação → Plano de jogo o mesmo AG usa o seu "

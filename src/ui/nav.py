@@ -84,5 +84,5 @@ def back_button(label: str = "← Voltar", key: str = "nav_back") -> None:
 
 def link(label: str, kind: str, key: str, help: Optional[str] = None, primary: bool = False, **params) -> None:
     """Botão que abre a tela da entidade."""
-    if st.button(label, key=key, help=help, use_container_width=True, type="primary" if primary else "secondary"):
+    if st.button(label, key=key, help=help, width="stretch", type="primary" if primary else "secondary"):
         open_view(kind, **params)
