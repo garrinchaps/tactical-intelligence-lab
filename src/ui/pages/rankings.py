@@ -161,7 +161,9 @@ def render(_ctx=None) -> None:
         "player_name": "Jogador", "team_name": "Time", "comp": "Competição", "funcao": "Função", "idade": "Idade",
         "games": "Jogos", "minutes": "Minutos", "starts": "Titular", "subs": "Entrou", col: pick.split(" ", 1)[1],
         "desempenho_90": "Desempenho/90", "confianca_amostra": "Amostra"})
-    styled_dataframe(table.loc[:, ~table.columns.duplicated()], hide_index=True, use_container_width=True)
+    from src.ui.components import clickable_table      # rodada 27k: clique no nome abre o perfil
+    clickable_table(table.loc[:, ~table.columns.duplicated()], key="rank_tbl", name_col="Jogador", team_col="Time",
+                    age_col="Idade")
     st.markdown("### 🔎 Ficha do jogador")
     who = st.selectbox("Jogador", [f"{r.player_name} — {r.team_name} ({r.comp})" for r in v.head(100).itertuples()],
                        key="rk_who")

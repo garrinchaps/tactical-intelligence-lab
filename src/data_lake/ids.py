@@ -55,6 +55,28 @@ ALIASES: Dict[str, str] = {
     "cr flamengo": "flamengo", "botafogo-rj": "botafogo", "botafogo rj": "botafogo", "gremio fbpa": "gremio",
     "sc internacional": "internacional", "ec bahia": "bahia", "ec vitoria": "vitoria", "fortaleza ec": "fortaleza",
     "ceara sc": "ceara", "cuiaba ec": "cuiaba", "goias ec": "goias", "chapecoense-sc": "chapecoense",
+    # rodada 27k: nome OFICIAL (Transfermarkt) × nome curto (FotMob/ESPN) — o mesmo atleta aparecia duas vezes
+    # ("Tiaguinho" no Grêmio e no "Grêmio Foot-Ball Porto Alegrense"). Chaves = núcleo que o nome oficial gera.
+    "clube de regatas brasil": "crb", "cr brasil": "crb",
+    "sport corinthians paulista": "corinthians", "corinthians paulista": "corinthians",
+    "gremio porto alegrense": "gremio", "gremio foot-ball porto alegrense": "gremio",
+    "sport internacional": "internacional", "botafogo e": "botafogo", "botafogo e regatas": "botafogo",
+    "ceara sporting": "ceara", "paysandu sport": "paysandu", "nautico capibaribe": "nautico",
+    "atletica ponte preta": "ponte preta", "operario ferroviario": "operario", "operario pr": "operario",
+    "ferroviaria esportes": "ferroviaria", "associacao ferroviaria esportes": "ferroviaria",
+    "atletico boca juniors": "boca juniors", "atletico river plate": "river plate",
+    "atletico velez sarsfield": "velez sarsfield", "velez sarsfield": "velez sarsfield", "velez": "velez sarsfield",
+    "atletico independiente": "independiente", "atletico lanus": "lanus",
+    "atletico san lorenzo almagro": "san lorenzo", "san lorenzo almagro": "san lorenzo",
+    "estudiantes la plata": "estudiantes", "atletico talleres": "talleres", "talleres cordoba": "talleres",
+    "atletico rosario central": "rosario central", "atletico newell's old boys": "newell's old boys",
+    "newells old boys": "newell's old boys", "atletico tigre": "tigre", "atletico huracan": "huracan",
+    "atletico belgrano": "belgrano", "atletico platense": "platense", "atletico banfield": "banfield",
+    "asociacion atletica argentinos juniors": "argentinos juniors", "gimnasia y esgrima la plata": "gimnasia la plata",
+    "godoy cruz antonio tomba": "godoy cruz", "atletico penarol": "penarol",
+    "liga deportiva universitaria quito": "ldu quito", "liga quito": "ldu quito", "sport emelec": "emelec",
+    "barcelona sporting": "barcelona", "universitario deportes": "universitario",
+    "social y deportivo colo colo": "colo colo", "colo-colo": "colo colo",
     # seleções
     "korea republic": "south korea", "ir iran": "iran", "usa": "united states", "türkiye": "turkey", "turkiye": "turkey",
 }

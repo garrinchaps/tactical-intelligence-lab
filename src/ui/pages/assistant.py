@@ -282,8 +282,10 @@ def render(current_context, match_bar) -> None:
             if cols[i % 3].button(e, key=f"as_ex_{i}", use_container_width=True):
                 clicked = e
     for hi, h in enumerate(history):
+        if not isinstance(h, dict):
+            continue
         with st.chat_message("user", avatar="🧑‍💼"):
-            st.markdown(h["q"])
+            st.markdown(h.get("q") or h.get("question") or "")
         with st.chat_message("assistant", avatar="⚽"):
             st.markdown(_chat_text(h.get("a")))
             learning_id = h.get("learning_id")

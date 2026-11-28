@@ -46,10 +46,27 @@ def player_index(version: str) -> pd.DataFrame:
     """Índice pesado persistido, mas sempre vinculado à versão exata do banco para não servir aliases antigos."""
     import json
 
+    import time as _time
+
     try:
-        if INDEX_PATH.exists() and INDEX_META_PATH.exists():
-            meta = json.loads(INDEX_META_PATH.read_text(encoding="utf-8"))
+        if INDEX_PATH.exists():
+            meta = json.loads(INDEX_META_PATH.read_text(encoding="utf-8")) if INDEX_META_PATH.exists() else {}
             if str(meta.get("version", "")) == str(version):
+                return pd.read_parquet(INDEX_PATH)
+            # rodada 27k: a versão do banco muda a cada atualização (10 min) e o processo de fundo salvava o índice
+            # sem versão — a busca e o perfil REFAZIAM o índice inteiro quase sempre (dezenas de segundos na base
+            # real). Índice com menos de 26 h vale como está; o novo é montado em segundo plano.
+            if _time.time() - INDEX_PATH.stat().st_mtime < 26 * 3600:
+                try:
+                    from src.ui import bg_fetch
+
+                    def _rebuild(v=str(version)):
+                        from src.ui.context import get_service
+
+                        save_player_index(build_player_index(get_service().db), v)
+                    bg_fetch.schedule("player_index", _rebuild, cooldown_s=6 * 3600)
+                except Exception:
+                    pass
                 return pd.read_parquet(INDEX_PATH)
     except Exception:
         pass

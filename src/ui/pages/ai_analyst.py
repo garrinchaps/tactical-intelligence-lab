@@ -84,11 +84,19 @@ def render(ctx: MatchContext) -> None:
 
     reviewed = feedback_ids()
     for hi, h in enumerate(history):
+        if not isinstance(h, dict):
+            continue
+        # o Assistente grava nesta mesma chave com outro formato (question/answer) — ler sem quebrar
+        q = h.get("q") or h.get("question") or h.get("pergunta") or ""
+        a = h.get("a") or h.get("answer") or h.get("resposta") or ""
+        if not q and not a:
+            continue
         with st.chat_message("user"):
-            st.markdown(h["q"])
+            st.markdown(q)
         with st.chat_message("assistant"):
-            st.markdown(h["a"])
-            st.caption(h["meta"])
+            st.markdown(a)
+            if h.get("meta"):
+                st.caption(h["meta"])
             learning_id = h.get("learning_id")
             if learning_id:
                 if learning_id not in reviewed:

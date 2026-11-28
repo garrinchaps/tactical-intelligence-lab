@@ -895,6 +895,38 @@ c2a4058 identidade/overall/chat: campinho com o overall do Scout sem desconto de
   fontes em 1,2 s para 67 mil jogadores (dicionários + datas sem pandas; antes 47 s).
 - ✅ Assistente: "<sub>em 90 min</sub>" aparecia cru no ranking — agora "(em 90 min)".
 
+Rodada 27k (28/11/2026, 610 testes verdes) — sobre os ~70 commits do Codex no branch (identidade, goleiros, índice):
+- ✅ `KeyError: 'meta'` no Analista IA: Assistente e Analista guardam a conversa na mesma chave — leitura tolerante.
+- ✅ Duplicados por grafia do clube (Tiaguinho no "Grêmio" e no "Grêmio Foot-Ball Porto Alegrense", Raykkonen
+  Internacional × Sport Club Internacional): nomes oficiais BR/AR/UY/EC/PE/CL em `ids.ALIASES` (CRB ≠ seleção Brasil;
+  Botafogo-SP ≠ Botafogo); `merge_club_aliases` junta o MESMO nome no MESMO clube e família com idade compatível,
+  salvo dois ids da FotMob diferentes (homônimos reais ficam). `canonical_clubs` roda antes na abertura da fotografia.
+- ✅ Liga do clube (`engine.fix_club_leagues`): copa/torneio internacional/base nunca é a liga (Botafogo/Boca na
+  "Sul-Americana", Antony na "Champions"); vale a liga nacional da maioria do elenco; "Premier Liga" ganha o país
+  (Shakhtar estava na Rússia; o mapeamento fixo saiu de `LEAGUE_NAMES`).
+- ✅ Notas: goleiro veterano volta a ter 45% de reputação (com 10%, Batz € 350 mil = 85); sinal do motor de goleiro
+  encolhido pelo nível da liga (peso mínimo 70% do P antigo); goleiro do Brasil só metade do ajuste e sem o +2;
+  `anchor_to_references`: quem está na lista de referência e é achado sem ambiguidade (2+ palavras ou nome único com
+  minutos) = 40% números + 60% referência, tetos viram limite, marcado na explicação. Alvos novos (Courtois 90, Raya 86,
+  Batz 71, Bowen 81, Toney 79, Undav 79, Messi 84, Neymar 79, Paquetá 80, Rossi 79, Almada 82, Paredes 82, goleiros da
+  Série A/B…). Piso do potencial (titular jovem) não some mais na calibração do crescimento (Melk 52/65).
+  Fotografia v23 (passo `scout_v23`); a v22 é migrada (só OVR) até a nova ficar pronta.
+- ✅ Campinho: `find_player` com duas linhas do mesmo atleta (uma só do cadastro) usa a que tem minutos e nota
+  (Fred 40*/Everson 49* no Atlético-MG).
+- ✅ Clique no nome abre o perfil: elenco FotMob e Transfermarkt do clube, elenco e busca manual do Scout, Rankings
+  (`clickable_table(..., age_col=)`).
+- ✅ Rede de perigo: o "64 partidas" é o protocolo FIXO de comparação (Copa 2022, única com 360); o painel explica e
+  mostra as partidas do modelo em uso + comando para treinar com mais (`--partidas-novas 3000`).
+- ✅ Velocidade: índice de jogadores era refeito quase sempre (processo de fundo salvava sem versão; busca e perfil
+  usavam versões diferentes) — índice com < 26 h vale e o novo é montado em segundo plano. Base simulada (300 mil
+  jogos), telas com o app já aberto: time 0,5 s, jogador/Scout/Rankings/Escalação < 3 s na 1ª, < 0,5 s depois.
+- ✅ Disco (`src.tools.limpeza`): `--relatorio` (maiores arquivos/pastas e tabelas do banco), `--apagar-copias`
+  (cópias redundantes do banco — snapshot/deploy — só se o principal abrir com ≥ os mesmos jogos; pede SIM; nunca o
+  principal nem o .gz), `--respostas-velhas` (respostas ESPN/FotMob de 45+ dias já gravadas no banco).
+- Hospedagem (branch `deploy/til-novo-site-2026`, não alterado): Streamlit Community Cloud não comporta baixar 4,5 GB
+  e descompactar 18 GB (memória/disco do plano grátis) — por isso 404/502/"Oh no". Caminho viável grátis: publicar o
+  NÚCLEO reduzido (`python -m src.tools.publicar_nucleo`) no dataset do HF e apontar `TIL_NUCLEO_URL`.
+
 Pendente / limitações honestas:
 - Espanhol trava e páginas não traduzem inteiras (usuário pediu para deixar para depois).
 - "Prováveis escalações por notícia" não existe em fonte aberta acessível: a provável vem dos últimos jogos; a oficial

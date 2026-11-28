@@ -67,7 +67,7 @@ try {
         Step "10. Apelidos de times entre fontes" { & $py -m src.data_hub.team_alias } "apelidos" 24
         Step "11. Rankings (avaliação de jogadores)" { & $py -m src.scout.evaluation } "rankings_r27c" 20
     }
-    Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot } "scout_v21" 6
+    Step "12. Scout (overall, potencial, atributos)" { & $py -m src.scout.snapshot } "scout_v23" 6
     Step "13. Cobertura do Scout por liga (docs\COBERTURA_SCOUT.md)" { & $py -m src.tools.cobertura_scout } "cobertura" 168
     Step "14. Tamanho que a base núcleo teria (só informa)" { & $py -m src.tools.publicar_nucleo --tamanho } "nucleo" 168
     Step "15. Atualização automática sem janela (ao ligar, a cada 3 h e às 6h) — agendada no fim para não disputar o banco" { powershell -ExecutionPolicy Bypass -File .\scripts\agendar_atualizacao.ps1 } "agendar" 168

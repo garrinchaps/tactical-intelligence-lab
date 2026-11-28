@@ -49,6 +49,20 @@ def _baselines(ctx: MatchContext, report) -> None:
         kpi("prevalência da classe positiva", f"{100 * d['prevalencia_positiva']:.1f}%", report_prov)
     with c[3]:
         kpi("ações com densidade medida (360)", f"{d.get('densidade_360_pct')}%", report_prov)
+    # rodada 27k: "64 partidas não são poucas?" — são: este protocolo é a COMPARAÇÃO FIXA (Copa 2022, que tem 360).
+    # O modelo em uso treina com as partidas com lances do banco (cresce a cada treino).
+    try:
+        from src.machine_learning.model_registry import model_card
+
+        card = model_card() or {}
+    except Exception:
+        card = {}
+    st.info(f"Este quadro é o **protocolo fixo de comparação** ({d['partidas']} partidas da Copa 2022, as únicas com "
+            f"posição dos adversários medida por 360) — serve para comparar modelos sempre na mesma prova. "
+            f"O modelo em uso ({card.get('versao', '—')}) foi treinado com **{card.get('partidas_de_treino', '—')} "
+            f"partidas** com lances. Sim, 64 é pouco: para treinar com mais jogos do seu banco (~32 mil com lances), "
+            f"rode `python -m src.machine_learning.model_registry --treinar --partidas-novas 3000` com o app fechado "
+            f"(cada rodada prepara mais 3 mil jogos e guarda; dá para repetir).")
     tab = pd.DataFrame([
         {"modelo": "Baseline 0 — classe majoritária", "AUC média": a["baseline0"]["media"], "desvio": 0.0, "ganho s/ B0": None, "ganho s/ B1": None},
         {"modelo": "Baseline 1 — logística (distância, ângulo, passes)", "AUC média": a["logistica"]["media"], "desvio": a["logistica"]["desvio"],

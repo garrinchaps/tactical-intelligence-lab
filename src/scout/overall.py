@@ -165,6 +165,76 @@ POTENTIAL_TARGETS.update({
     "Kauã Prates": 87, "Vitão": 85, "Gustavo Henrique": 79, "Mauro Coronel": 84, "João Alencar": 82,
 })
 
+# rodada 27k: lista do usuário (prints de 24–28/11). Goleiros: Courtois o melhor; reservas e veteranos de times médios e
+# do Brasil estavam inflados. Outros supervalorizados e subvalorizados apontados nominalmente.
+REFERENCE_TARGETS.update({
+    "Thibaut Courtois": 90, "David Raya": 86, "Gregor Kobel": 84, "Daniel Batz": 71, "Caoimhín Kelleher": 80,
+    "James Trafford": 78, "Carlos Miguel": 76, "Hugo Souza": 76, "Léo Jardim": 77, "Tiago Volpi": 74, "Tadeu": 72,
+    "Helton Leite": 71, "Luan Polli": 70, "Alex Alves": 64, "Paulo Vítor": 69, "Agustín Rossi": 79,
+    "Jarrod Bowen": 81, "Ivan Toney": 79, "Deniz Undav": 79, "Lionel Messi": 84, "Neymar": 79, "Lucas Paquetá": 80,
+    "Manuel Locatelli": 81, "James Garner": 78, "Waldemar Anton": 79, "Christos Tzolis": 79,
+    "Thiago Almada": 82, "Leandro Paredes": 82,
+})
+POTENTIAL_TARGETS.update({"Melk": 84})
+REFERENCE_CEILINGS.update({"Daniel Batz": 73, "Alex Alves": 66})
+
+ANCHOR_WEIGHT = .6      # peso da referência de consenso na nota final de quem está na lista (o resto = números dele)
+
+
+def anchor_to_references(u: pd.DataFrame, potential: bool = True) -> pd.DataFrame:
+    """Rodada 27k — os alvos de consenso só corrigiam vieses de GRUPO; jogadores apontados nominalmente pelo usuário
+    continuavam longe (Courtois 84, Batz 85, Bowen 87). Agora, para quem está NA LISTA e foi achado sem ambiguidade
+    (nome com 2+ palavras ou nome único no mercado, com minutos), a nota final = 40% dos números + 60% da referência;
+    tetos do usuário viram limite. Marcado na explicação da nota — é ajuste por referência, não medição."""
+    if u is None or u.empty or "qualidade" not in u:
+        return u
+    from src.data_lake.ids import player_core
+
+    d = u.copy()
+    core = d["_core"].astype(str) if "_core" in d else d["nome"].astype(str).map(player_core)
+    counts = core.value_counts()
+    m12 = _col(d, "minutos_12m").fillna(0)
+    q = _col(d, "qualidade")
+    pot = _col(d, "potencial") if ("potencial" in d and potential) else None
+    src = d.get("fonte_qualidade", pd.Series("", index=d.index)).fillna("").astype(str).copy()
+
+    def rows_for(name: str):
+        c = player_core(name)
+        hit = core.index[core == c]
+        if len(hit) == 0:
+            return []
+        if len(c.split()) < 2 and counts.get(c, 0) > 1:
+            played = [i for i in hit if m12[i] > 0]
+            return played if len(played) == 1 else []
+        if len(hit) > 1:                      # homônimo de nome completo: o de mais minutos
+            return [max(hit, key=lambda i: m12[i])]
+        return list(hit)
+
+    for name, target in REFERENCE_TARGETS.items():
+        for i in rows_for(name):
+            if pd.isna(q[i]) or abs(float(q[i]) - target) <= 1:
+                continue
+            q[i] = round((1 - ANCHOR_WEIGHT) * float(q[i]) + ANCHOR_WEIGHT * target)
+            src[i] = (src[i] + " · ajustada pela referência de consenso (lista de calibração)").strip(" ·")
+    for name, cap in REFERENCE_CEILINGS.items():
+        for i in rows_for(name):
+            if pd.notna(q[i]) and q[i] > cap:
+                q[i] = float(cap)
+    d["qualidade"] = q
+    if pot is not None:
+        for name, target in POTENTIAL_TARGETS.items():
+            for i in rows_for(name):
+                if pd.isna(pot[i]):
+                    continue
+                pot[i] = round((1 - ANCHOR_WEIGHT) * float(pot[i]) + ANCHOR_WEIGHT * target)
+        pot = pd.concat([pot, q], axis=1).max(axis=1).where(pot.notna())
+        d["potencial"] = pot.round(0)
+        if "potencial_teto" in d:
+            d["potencial_teto"] = d["potencial"]
+    d["fonte_qualidade"] = src
+    return d
+
+
 FAMILY = {"GK": "GK", "CB": "CB", "LB": "FB", "RB": "FB", "LWB": "FB", "RWB": "FB", "DM": "MID", "CM": "MID",
           "AM": "AM", "LM": "WIDE", "RM": "WIDE", "LW": "WIDE", "RW": "WIDE", "ST": "ST"}
 
@@ -371,7 +441,8 @@ def zscore(c: pd.DataFrame, w: Dict[str, float]) -> pd.Series:
         # rodada 27i: goleiro de 33+ titular — o valor de mercado despenca com a idade (Fábio € 75 mil aos 46, titular
         # com 5.940 min); a reputação pesa 40% e os números em campo mandam
         vet_gk = c["_fam"].astype(str).eq("GK") & (pd.to_numeric(c["_age"], errors="coerce") >= 33) & (c["_avail"] >= .75)
-        wr = wr.where(~vet_gk, wr * .10)
+        # rodada 27k: com 10% a reputação sumia e goleiro reserva de € 350 mil (Batz) ia a 85 — volta a 45%
+        wr = wr.where(~vet_gk, wr * .45)
     wt = w.get("wT", 0) * has_t
     wp = w.get("wP", 0) * has_p
     num = wr * zr.fillna(0) + wt * zt.fillna(0) + wp * zp.fillna(0) + w.get("wL", 0) * zl
@@ -619,6 +690,12 @@ def _blend_goalkeeper_attribute_performance(comps: pd.DataFrame, engine: Optiona
     out = comps.copy()
     # Percentile keeps this signal on the same 0–100 scale as P and adapts to the current keeper population.
     gk_pct = raw.loc[valid].rank(pct=True, method="average") * 100
+    # rodada 27k: muitas defesas num time fraco/liga fraca inflavam o percentil (Batz, goleiros da Série B). O sinal
+    # do motor de goleiro é encolhido pelo nível da liga (liga de elite = inteiro; liga fraca = 30%)
+    if "L" in out:
+        lv = pd.to_numeric(out.loc[valid, "L"], errors="coerce").fillna(45)
+        gk_pct = 50 + (gk_pct - 50) * ((lv - 35) / 50).clip(.3, 1.0)
+    base_weight = max(base_weight, .7)
     base = pd.to_numeric(out.loc[valid, "P"], errors="coerce")
     blended = base_weight * base + (1.0 - base_weight) * gk_pct
     out.loc[valid, "P"] = blended.where(base.notna(), gk_pct)
@@ -696,6 +773,7 @@ def finalize_overall(u: pd.DataFrame, calibrate_now: bool = True, reference: Opt
     out = youth_quality(out)
     if recompute_potential:
         out = _recompute_potential(out)
+    out = anchor_to_references(out, potential=recompute_potential)
     if report:
         save_report(out, report)
     return out
@@ -732,8 +810,10 @@ def brazil_bump(u: pd.DataFrame, q: pd.Series) -> pd.Series:
     if "_fam" in u or "papel" in u:
         fam = (u["_fam"] if "_fam" in u else u["papel"]).astype(str)
         m12 = pd.to_numeric(u.get("minutos_12m"), errors="coerce").fillna(0)
-        gk_starter = fam.eq("GK") & (m12 >= 1800) & (a | b)
-        bump[gk_starter] += 2
+        # rodada 27k: o usuário apontou o contrário — goleiros da Série A/B INFLADOS (Carlos Miguel 83, Volpi 82,
+        # Tadeu 80). Goleiro agora recebe só metade do ajuste do Brasil, sem o +2.
+        gk = fam.eq("GK") & (a | b)
+        bump[gk] = bump[gk] * .5
     bump[(q < 55) | q.isna()] = 0.0
     out = pd.Series(np.where(q > BR_BUMP_CAP, q, np.minimum(q + bump, np.maximum(q, BR_BUMP_CAP))), index=q.index)
     return out.round(0)
@@ -832,7 +912,12 @@ def _recompute_potential(d: pd.DataFrame) -> pd.DataFrame:
                     best_k, best_e = float(k), e
         if best_k != 1.0:
             g = p["potencial_crescimento"] * best_k
-            p["potencial"] = (q + g).clip(upper=POT.POT_CAP).where(q.notna(), p["potencial"]).round(0)
+            orig = pd.to_numeric(p["potencial"], errors="coerce")
+            # rodada 27k: o potencial que veio de um PISO (titular jovem, seleção) não pode ser apagado pela calibração
+            # do crescimento (Melk 52/65: o piso de titular sumia aqui)
+            floor_driven = orig > (q + pd.to_numeric(p["potencial_crescimento"], errors="coerce").fillna(0) + .5)
+            newp = (q + g).clip(upper=POT.POT_CAP).where(q.notna(), orig)
+            p["potencial"] = newp.where(~floor_driven.fillna(False), pd.concat([newp, orig], axis=1).max(axis=1)).round(0)
             p["potencial_crescimento"] = g.round(1)
         d.attrs["potencial_k"] = best_k
         # rodada 27: o piso da seleção de base vale também depois da calibração do crescimento

@@ -2975,6 +2975,67 @@ def merge_rankings(universe: pd.DataFrame, evals: Optional[pd.DataFrame]) -> pd.
     return u
 
 
+_CUP_RE = re.compile(r"copa|cup|champions|libertadores|sudamericana|sul.?americana|europa league|conference|pokal|"
+                     r"coupe|coppa|ta[cç]a|supercopa|recopa|mundial|world|friendl|amistos|super ?cup|supertaca|"
+                     r"trophy|troph[ée]e|shield|playoff|play.?off|qualif|eliminat|concacaf|afc |caf |uefa|conmebol|"
+                     r"fifa|olymp|sub.?\d|u\d\d|youth|juvenil", re.I)
+
+
+def is_cup_competition(name: Any) -> bool:
+    """Copa, torneio internacional, amistoso ou base — nunca é a LIGA do clube."""
+    return bool(_CUP_RE.search(str(name or "")))
+
+
+def fix_club_leagues(universe: pd.DataFrame) -> pd.DataFrame:
+    """Rodada 27k — a liga do clube vinha da ÚLTIMA competição jogada: Botafogo/Boca em "CONMEBOL Sul-Americana",
+    Antony (Real Betis) em "UEFA Champions League", Grêmio em "Copa…". Agora: copa/torneio internacional nunca é a liga;
+    vale a liga nacional mais comum entre os jogadores do MESMO clube (núcleo do nome + país), e quem está numa liga
+    de outro país que a maioria do elenco (≥ 60%) recebe a liga da maioria."""
+    if universe is None or universe.empty or "clube" not in universe or "clube_liga" not in universe:
+        return universe
+    u = universe.copy()
+    liga = u["clube_liga"].fillna("").astype(str)
+    club = u["clube"].fillna("").astype(str)
+    key = club.map(lambda c: team_core(c) if c else "")
+    if "clube_pais" in u:
+        key = key + "|" + u["clube_pais"].fillna("").astype(str)
+    cup = liga.map(is_cup_competition) | liga.str.strip().eq("")
+    ok = ~cup & key.ne("") & ~key.str.startswith("|")
+    mode: Dict[str, str] = {}
+    share: Dict[str, float] = {}
+    if ok.any():
+        vc = pd.DataFrame({"k": key[ok], "l": liga[ok]}).value_counts().reset_index(name="n")
+        tot = vc.groupby("k")["n"].transform("sum")
+        vc["s"] = vc["n"] / tot
+        top = vc.sort_values(["k", "n"], ascending=[True, False]).drop_duplicates("k")
+        mode = dict(zip(top["k"], top["l"]))
+        share = dict(zip(top["k"], top["s"]))
+    new = liga.copy()
+    for i in u.index:
+        k = key[i]
+        m = mode.get(k)
+        if not m:
+            if cup[i] and liga[i]:
+                main = _safe_str(u.at[i, "competicao_principal"]) if "competicao_principal" in u else ""
+                new[i] = main if main and not is_cup_competition(main) else ""
+            continue
+        if cup[i]:
+            new[i] = m
+        elif liga[i] != m and share.get(k, 0) >= .6:
+            new[i] = m
+    # "Premier Liga" existe na Rússia E na Ucrânia (Shakhtar aparecia na Rússia): o país do clube desfaz
+    if "clube_pais" in u:
+        amb = new.str.strip().str.lower().isin({"premier liga", "premier-liga", "first league",
+                                                                           "super league", "superliga", "1. liga"})
+        pais = u["clube_pais"].fillna("").astype(str)
+        new = new.where(~(amb & pais.ne("")), pais + " — " + new)
+    u["clube_liga"] = new
+    if "origem" in u:
+        pais = u.get("clube_pais", pd.Series(None, index=u.index))
+        u["origem"] = [origin_group_full(l, c) for l, c in zip(u["clube_liga"], pais)]
+    return u
+
+
 # ------------------------------------------------------------------ rodada 20: clube com um nome só e homônimos pelo clube
 def canonical_clubs(universe: pd.DataFrame) -> pd.DataFrame:
     """O mesmo clube aparecia com dois nomes ("Cruzeiro" pela FotMob, "Cruzeiro Esporte Clube" pelo Transfermarkt) e o
@@ -3427,6 +3488,25 @@ def merge_club_aliases(u: pd.DataFrame) -> pd.DataFrame:
         # atleta quando os jogos coincidem (mesmas datas = os mesmos jogos vistos por duas fontes) e: é goleiro (só um
         # joga por partida) ou só uma das linhas tem o id da FotMob (fontes diferentes). A de menos minutos vira apelido.
         both = []
+        # rodada 27k: o MESMO nome no MESMO clube e na mesma família (goleiro × linha), idade compatível e sem dois ids
+        # da FotMob diferentes = a mesma pessoa vista por duas fontes ("Raykkonen" 300 min FotMob × 250 min ESPN).
+        fid_all = d.get("fotmob_id")
+        by_core: Dict[str, List[Any]] = {}
+        for i in idx:
+            if core[i]:
+                by_core.setdefault(core[i], []).append(i)
+        for same in by_core.values():
+            if len(same) < 2:
+                continue
+            same = sorted(same, key=lambda i: -mins[i])
+            keep = same[0]
+            for gone in same[1:]:
+                if pd.notna(age[keep]) and pd.notna(age[gone]) and abs(age[keep] - age[gone]) > 1.2:
+                    continue
+                if fid_all is not None and pd.notna(fid_all[keep]) and pd.notna(fid_all[gone]) and \
+                        str(fid_all[keep]) != str(fid_all[gone]):
+                    continue                                 # dois ids da FotMob = duas pessoas (homônimos reais)
+                both.append((gone, keep))
         for e in played:
             te = set(core[e].split())
             by_name = [p for p in played if p != e and (te < set(core[p].split()))]

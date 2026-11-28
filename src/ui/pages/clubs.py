@@ -252,8 +252,11 @@ def _official_roster(name: str, names: List[str]) -> None:
                          "valor (€ mi)": (pd.to_numeric(t["market_value"], errors="coerce") / 1e6).round(1),
                          "lesão": t["lesao"].replace("", "—")})
     st.markdown(f"##### 👥 Elenco atual — {len(view)} inscritos")
-    comparison_table(view, f"Fonte: FotMob (lista do clube hoje, atualizada a cada 24 h; valor estimado pela FotMob). "
-                           f"Atualizado em {str(t['fetched_at'].iloc[0])[:16].replace('T', ' ')} UTC.")
+    from src.ui.components import clickable_table      # rodada 27k: clicar no nome abre o perfil do jogador
+
+    clickable_table(view, key=f"roster_fm_{name}", name_col="jogador", club=name,
+                    caption=f"Fonte: FotMob (lista do clube hoje, atualizada a cada 24 h; valor estimado pela FotMob). "
+                            f"Atualizado em {str(t['fetched_at'].iloc[0])[:16].replace('T', ' ')} UTC.")
 
 
 def render(_ctx=None) -> None:
@@ -390,10 +393,13 @@ def render(_ctx=None) -> None:
                     sq = pl[pl["clube_id"].astype(str).isin(tm_id)].sort_values("valor_mercado_eur", ascending=False)
                     if not sq.empty:
                         st.metric("Valor somado do elenco (€ mi)", round(sq["valor_mercado_eur"].fillna(0).sum() / 1e6, 1))
-                        comparison_table(sq[["nome", "posicao", "funcao", "nascimento", "nacionalidade", "valor_mercado_eur"]]
-                                         .assign(valor_mercado_eur=lambda d: (d["valor_mercado_eur"] / 1e6).round(1))
-                                         .rename(columns={"valor_mercado_eur": "valor (€ mi)"}).head(40),
-                                         "Fonte: Transfermarkt (transfermarkt-datasets).")
+                        from src.ui.components import clickable_table
+
+                        clickable_table(sq[["nome", "posicao", "funcao", "nascimento", "nacionalidade", "valor_mercado_eur"]]
+                                        .assign(valor_mercado_eur=lambda d: (d["valor_mercado_eur"] / 1e6).round(1))
+                                        .rename(columns={"valor_mercado_eur": "valor (€ mi)"}).head(40),
+                                        key=f"roster_tm_{name}", name_col="nome", club=name,
+                                        caption="Fonte: Transfermarkt (transfermarkt-datasets).")
     with t3:
         if t3.open is not False:          # rodada 21: só a aba aberta é montada
             if lake is None or ids.empty or not lake.exists("us_partidas"):

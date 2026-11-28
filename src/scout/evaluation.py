@@ -119,7 +119,7 @@ LEAGUE_NAMES = {
     "bundesliga": "Bundesliga", "2 bundesliga": "2. Bundesliga", "serie a": "Serie A", "ligue 1": "Ligue 1",
     "ligue 2": "Ligue 2", "liga portugal": "Liga Portugal", "liga portugal bwin": "Liga Portugal",
     "eredivisie": "Eredivisie", "super lig": "Süper Lig", "saudi pro league": "Arábia Saudita — Saudi Pro League",
-    "major league soccer": "MLS", "mls": "MLS", "premier liga": "Rússia — Premier Liga", "liga mx": "Liga MX",
+    "major league soccer": "MLS", "mls": "MLS", "liga mx": "Liga MX",
     "jupiler pro league": "Bélgica — Pro League", "championship": "Championship",
     "torneo apertura": "Argentina — Liga Profesional", "liga profesional de futbol": "Argentina — Liga Profesional",
 }

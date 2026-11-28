@@ -1531,8 +1531,11 @@ def render(_ctx=None):
                            "da média da função (passe o mouse no perfil para ver o porquê).")
                 if "Valor de mercado" in display:
                     display["Valor de mercado"] = display["Valor de mercado"].map(_money)
-                styled_dataframe(display.sort_values("Qualidade", ascending=False, na_position="last"),
-                             use_container_width=True, hide_index=True)
+                from src.ui.components import clickable_table      # rodada 27k: clique no nome abre o perfil
+
+                clickable_table(display.sort_values("Qualidade", ascending=False, na_position="last"),
+                                key=f"scout_roster_tbl_{team}", name_col="Jogador", club=str(team or ""),
+                                age_col="Idade")
                 selected = st.selectbox("Abrir jogador do elenco", ["—"] + roster["nome"].astype(str).tolist(),
                                         key="scout_roster_select")
                 if selected != "—" and st.button("Abrir perfil ↗", key="scout_roster_link"):
@@ -1638,7 +1641,8 @@ def render(_ctx=None):
                     "nacionalidade":"Nacionalidade","valor_mercado_eur":"Valor (€)","qualidade":"Qualidade",
                     "confianca_pct":"Confiança (%)","minutos_12m":"Minutos (últimos 12 meses)","rating_12m":"Nota média (últimos 12 meses)"}).head(100)
                 if "Valor (€)" in display: display["Valor (€)"]=display["Valor (€)"].map(_money)
-                styled_dataframe(display,use_container_width=True,hide_index=True)
+                from src.ui.components import clickable_table
+                clickable_table(display, key="scout_manual_tbl", name_col="Jogador", team_col="Clube", age_col="Idade")
                 if not filt.empty:
                     chosen=st.selectbox("Selecionar jogador",filt["nome"].astype(str).tolist(),key="scout_manual_pick")
                     p=filt[filt["nome"].astype(str)==chosen].iloc[0].to_dict()

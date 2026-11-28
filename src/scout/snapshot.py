@@ -21,9 +21,10 @@ from typing import Any, Dict, Optional
 import numpy as np
 import pandas as pd
 
-SNAP_PATH = Path("data/processed/scout_universe_v22.pkl")   # v22: recalcula OVR ao atualizar o motor, preservando potencial
+SNAP_PATH = Path("data/processed/scout_universe_v23.pkl")   # v23 (r27k): goleiros, referências, liga do clube, duplicados
+V22 = Path("data/processed/scout_universe_v22.pkl")
 META_PATH = Path("data/processed/scout_universe_v9.json")
-OLD_SNAPS = [Path("data/processed/scout_universe_v21.pkl"), Path("data/processed/scout_universe_v20.pkl"), Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
+OLD_SNAPS = [V22, Path("data/processed/scout_universe_v21.pkl"), Path("data/processed/scout_universe_v20.pkl"), Path("data/processed/scout_universe_v19.pkl"), Path("data/processed/scout_universe_v18.pkl"), Path("data/processed/scout_universe_v17.pkl"), Path("data/processed/scout_universe_v16.pkl"), Path("data/processed/scout_universe_v15.pkl"), Path("data/processed/scout_universe_v14.pkl"), Path("data/processed/scout_universe_v13.pkl"), Path("data/processed/scout_universe_v12.pkl"), Path("data/processed/scout_universe_v11.pkl"), Path("data/processed/scout_universe_v10.pkl"), Path("data/processed/scout_universe_v9.pkl"), Path("data/processed/scout_universe_v8.pkl"), Path("data/processed/scout_universe_v7.pkl"), Path("data/processed/scout_universe_v6.pkl"), Path("data/processed/scout_universe_v5.pkl"), Path("data/processed/scout_universe_v4.pkl"), Path("data/processed/scout_universe_v3.pkl"), Path("data/processed/scout_universe_v2.pkl"),
              Path("data/processed/scout_universe.pkl")]
 
 
@@ -74,7 +75,7 @@ def build_universe(db) -> Dict[str, Any]:
     universe = E.add_quality_scores(universe)
     universe = E.merge_external_ratings(universe, D.external_ratings())
     universe = E.merge_rankings(universe, _evaluations())
-    universe = E.canonical_clubs(universe)               # rodada 20: um nome por clube ("Cruzeiro" × "Cruzeiro EC")
+    universe = E.fix_club_leagues(E.canonical_clubs(universe))   # r27k: liga nacional, nunca copa: um nome por clube ("Cruzeiro" × "Cruzeiro EC")
     caps = E.youth_caps(db)
     universe = E.merge_youth(universe, caps)  # rodada 20: seleções de base → potencial e característica
     try:                                       # rodada 27e: convocações para a seleção PRINCIPAL → potencial
@@ -183,7 +184,7 @@ def newest_old() -> Optional[Path]:
     return None
 
 
-IDENTITY_VERSION = "r27k"          # muda quando as regras de "mesmo atleta" mudam
+IDENTITY_VERSION = "r27k2"          # muda quando as regras de "mesmo atleta" mudam
 
 
 def load() -> Optional[Dict[str, Any]]:
@@ -207,9 +208,9 @@ def load() -> Optional[Dict[str, Any]]:
             try:
                 u = data.get("universe")
                 if isinstance(u, pd.DataFrame):
-                    from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
+                    from src.scout.engine import canonical_clubs, merge_club_aliases, merge_verified_player_duplicates
 
-                    u = merge_club_aliases(u)
+                    u = merge_club_aliases(canonical_clubs(u))
                     data["universe"] = merge_verified_player_duplicates(u)   # a junção entre fontes fica para a nova
             except Exception:
                 pass
@@ -231,9 +232,9 @@ def load() -> Optional[Dict[str, Any]]:
     try:                                   # normaliza aliases e IDs — UMA vez; a fotografia unificada volta ao disco
         u = data.get("universe") if isinstance(data, dict) else None
         if isinstance(u, pd.DataFrame) and data.get("identidade") != IDENTITY_VERSION:
-            from src.scout.engine import merge_club_aliases, merge_verified_player_duplicates
+            from src.scout.engine import canonical_clubs, fix_club_leagues, merge_club_aliases, merge_verified_player_duplicates
 
-            u = merge_club_aliases(u)
+            u = merge_club_aliases(fix_club_leagues(canonical_clubs(u)))   # r27k: grafias e liga do clube ANTES
             from src.scout.engine import merge_cross_source_duplicates
 
             data["universe"] = merge_verified_player_duplicates(merge_cross_source_duplicates(u))
@@ -321,7 +322,7 @@ def _upgrade_old() -> Optional[Dict[str, Any]]:
 
             recalculated = _preserve_existing_potential(saved_potential, E.add_quality_scores(u))
             u2 = E.merge_rankings(E.merge_external_ratings(recalculated, ext), _evaluations())
-            u2 = E.canonical_clubs(u2)
+            u2 = E.fix_club_leagues(E.canonical_clubs(u2))
             try:
                 from src.data_hub.gender import drop_women_players
                 from src.data_hub.db import DataHubDB
@@ -544,6 +545,14 @@ def find_player(core: str, names: Optional[list] = None, club: str = "", pid: st
     if hit.empty:
         return None
 
+    # rodada 27k: duas linhas do MESMO atleta (uma só do cadastro, sem minutos) deixavam o campinho com "*" (Fred 40*,
+    # Everson 49* no Atlético-MG, que no Scout têm nota). Se só UMA linha tem minutos no ano E nota, é ela.
+    if len(hit) > 1 and "minutos_12m" in hit:
+        mins_ = pd.to_numeric(hit["minutos_12m"], errors="coerce").fillna(0)
+        q_ = pd.to_numeric(hit.get("qualidade"), errors="coerce") if "qualidade" in hit else pd.Series(np.nan, index=hit.index)
+        live = hit[(mins_ > 0) & q_.notna()]
+        if len(live) == 1:
+            return live.iloc[0].to_dict()
     # Mais de um cadastro distinto com o mesmo nome/clube/idade é ambíguo: não escolhe pelo maior volume.
     if "_core" in hit and hit["_core"].astype(str).nunique() > 1:
         return None
