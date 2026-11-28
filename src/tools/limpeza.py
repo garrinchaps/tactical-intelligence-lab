@@ -149,12 +149,32 @@ def database(simulate: bool, vacuum: bool, log) -> None:
         c.execute("PRAGMA optimize")
         if vacuum:
             free = shutil.disk_usage(str(db.parent)).free
-            if free < _size(db) * 1.1:
-                print(f"  sem espaço para compactar (precisa de ~{_size(db) // MB} MB livres, há {free // MB} MB)")
+            # rodada 27l: o VACUUM monta uma cópia temporária inteira e depois a regrava pelo WAL — precisa de ~2× o banco
+            if free < _size(db) * 2.1:
+                print(f"  sem espaço para compactar (precisa de ~{2 * _size(db) // MB} MB livres, há {free // MB} MB)")
             else:
-                print("  compactando o banco (VACUUM) — pode levar de 10 a 40 minutos, não feche a janela…", flush=True)
-                c.execute("VACUUM")
-                c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                print("  compactando o banco (VACUUM) — com ~19 GB leva de 30 a 90 minutos e fica sem mostrar nada "
+                      "por longos trechos; não feche a janela. Andamento a cada minuto:", flush=True)
+                import threading
+
+                done = threading.Event()
+                t0 = time.time()
+
+                def _progress():
+                    while not done.wait(60):
+                        try:
+                            livre = shutil.disk_usage(str(db.parent)).free // MB
+                        except OSError:
+                            livre = -1
+                        print(f"    … {int((time.time() - t0) // 60)} min · arquivo de escrita {_size(wal) // MB} MB · "
+                              f"espaço livre {livre} MB (mudando = está trabalhando)", flush=True)
+                threading.Thread(target=_progress, daemon=True).start()
+                try:
+                    c.execute("VACUUM")
+                    c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                finally:
+                    done.set()
+                print(f"  compactação concluída em {int((time.time() - t0) // 60)} min", flush=True)
         c.close()
     except sqlite3.Error as exc:
         print(f"  banco ocupado ou indisponível ({exc}); feche o app e rode de novo")
